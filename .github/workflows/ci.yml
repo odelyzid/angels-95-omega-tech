@@ -16,17 +16,26 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            g++ make libraylib-dev libgl1-mesa-dev \
+            g++ make libgl1-mesa-dev \
             libx11-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxinerama-dev libxext-dev
+            libxi-dev libxinerama-dev libxext-dev \
+            libasound2-dev libpulse-dev cmake
+
+      - name: Build raylib from source
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib
+          cmake -S /tmp/raylib -B /tmp/raylib/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_GAMES=OFF
+          cmake --build /tmp/raylib/build --parallel
+          sudo cmake --install /tmp/raylib/build
 
       - name: Build server (oz_server)
-        run: |
-          make oz_server
+        run: make oz_server
 
       - name: Build client (OmegaTech)
-        run: |
-          make OTENGINE
+        run: make OTENGINE
 
       - name: Smoke test server
         run: |
@@ -37,6 +46,12 @@ jobs:
         with:
           name: oz_server-linux
           path: oz_server
+
+      - name: Upload client binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmegaTech-linux
+          path: OmegaTech
 
   windows:
     runs-on: windows-latest
@@ -55,10 +70,15 @@ jobs:
             mingw-w64-x86_64-make
             mingw-w64-x86_64-raylib
             mingw-w64-x86_64-pkg-config
+            make
 
       - name: Build server (oz_server)
         run: |
-          make oz_server SERVER_CXX=x86_64-w64-mingw32-g++ SERVER_LIBS="-lm -lws2_32"
+          make oz_server
+
+      - name: Build client (OmegaTech)
+        run: |
+          make OTENGINE
 
       - name: Smoke test server (syntax check only)
         run: |
@@ -70,3 +90,9 @@ jobs:
         with:
           name: oz_server-windows
           path: oz_server*
+
+      - name: Upload client binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmegaTech-windows
+          path: OmegaTech.exe
