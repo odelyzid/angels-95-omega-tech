@@ -11,6 +11,11 @@
 // Provides macros compatible with OzWorld's oz_log.h interface.
 // Also provides a log window that can be rendered with raygui.
 
+// Windows headers define ERROR as a macro; undefine before our enum.
+#ifdef ERROR
+#undef ERROR
+#endif
+
 enum class LogLevel {
     TRACE,
     DEBUG,

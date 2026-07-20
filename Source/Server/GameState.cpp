@@ -570,7 +570,11 @@ void GameState::save_world_state(const WorldState& ws, const std::string& gameda
                  gamedata_dir.c_str(), ws.name.c_str(), i);
         // Create directory if it doesn't exist
         std::string dir = gamedata_dir + "/Saves/World" + ws.name;
+        #ifdef _WIN32
+        mkdir(dir.c_str());
+#else
         mkdir(dir.c_str(), 0755);
+#endif
         std::ofstream out(path);
         if (!out) continue;
         // Serialize partition pickups and npcs in a simple CSV-like format
@@ -591,7 +595,11 @@ void GameState::save_world_state(const WorldState& ws, const std::string& gameda
         snprintf(path, sizeof(path), "%s/Saves/World%s/GlobalNPCs.dat",
                  gamedata_dir.c_str(), ws.name.c_str());
         std::string dir = gamedata_dir + "/Saves/World" + ws.name;
+        #ifdef _WIN32
+        mkdir(dir.c_str());
+#else
         mkdir(dir.c_str(), 0755);
+#endif
         std::ofstream out(path);
         if (!out) return;
         for (auto &n : ws.global_npcs) {
