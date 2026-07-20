@@ -3,6 +3,19 @@
 #include <cstring>
 #include <cstdio>
 #include <mutex>
+#include <cstdlib>
+#include <cmath>
+#include <chrono>
+
+static double now_seconds() {
+    using namespace std::chrono;
+    return duration_cast<duration<double>>(steady_clock::now().time_since_epoch()).count();
+}
+
+static uint32_t id_to_color_packed(uint32_t id) {
+    uint32_t c = id * 1234567u;
+    return (c & 0xFF) | ((c >> 8) & 0xFF00) | ((c >> 16) & 0xFF0000) | 0xFF000000u;
+}
 
 bool OmegaClient::connect(const char* ip, uint16_t port) {
     net::ClientCallbacks cbs;
@@ -32,6 +45,7 @@ void OmegaClient::update(float cam_x, float cam_y, float cam_z,
 
     // Send player position update (with full state data for server sync)
     net::PlayerUpdateData pud;
+    pud.player_id = 0;
     pud.position = {cam_x, cam_y, cam_z};
     pud.yaw = cam_yaw;
     pud.pitch = cam_pitch;
@@ -90,6 +104,29 @@ void OmegaClient::send_pickup_collect(int pickup_id, int world_index) {
     m_client.send_message(msg);
 }
 
+void OmegaClient::send_weapon_fire(float ox, float oy, float oz,
+                                   float dx, float dy, float dz,
+                                   int weapon_type, int power) {
+    if (!m_client.is_connected()) return;
+
+    net::WeaponFireData wfd;
+    wfd.player_id = 0;
+    wfd.origin_x = ox; wfd.origin_y = oy; wfd.origin_z = oz;
+    wfd.dir_x = dx; wfd.dir_y = dy; wfd.dir_z = dz;
+    wfd.weapon_type = weapon_type;
+    wfd.power = power;
+
+    net::NetworkMessage msg;
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::PLAYER_ACTION);
+    msg.size = sizeof(wfd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    std::memcpy(msg.payload, &wfd, sizeof(wfd));
+
+    m_client.send_message(msg);
+}
+
 void OmegaClient::handle_message(const net::NetworkMessage& msg) {
     auto type = static_cast<net::MessageType>(msg.type);
 
@@ -103,7 +140,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
         case net::MessageType::SCENE_UPDATE: {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             m_pending_scene.assign(reinterpret_cast<const char*>(msg.payload),
-                                   msg.size);
+                                    msg.size);
             if (m_on_scene_received) m_on_scene_received(m_pending_scene);
             break;
         }
@@ -112,7 +149,6 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::NpcStateUpdateData nsud;
             memcpy(&nsud, msg.payload, sizeof(nsud));
-            // Update or add NPC in local list
             bool found = false;
             for (auto& n : m_npcs) {
                 if (n.npc_index == nsud.npc_index &&
@@ -180,8 +216,61 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             break;
         }
         case net::MessageType::PLAYER_HURT: {
-            // Can trigger screen shake or damage flash
-            // (for now, just ignore)
+            break;
+        }
+        case net::MessageType::PLAYER_UPDATE: {
+            // Relayed player update from another player
+            if (msg.size < sizeof(net::PlayerUpdateData)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::PlayerUpdateData pud;
+            memcpy(&pud, msg.payload, sizeof(pud));
+            if (pud.player_id == 0) break; // skip own messages
+
+            bool found = false;
+            for (auto& rp : m_remote_players) {
+                if (rp.player_id == pud.player_id) {
+                    rp.position = pud.position;
+                    rp.yaw = pud.yaw;
+                    rp.pitch = pud.pitch;
+                    rp.health = pud.health;
+                    rp.active = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                RemotePlayer rp;
+                rp.player_id = pud.player_id;
+                rp.position = pud.position;
+                rp.yaw = pud.yaw;
+                rp.pitch = pud.pitch;
+                rp.health = pud.health;
+                rp.active = true;
+                    rp.color_packed = id_to_color_packed(pud.player_id);
+                m_remote_players.push_back(rp);
+            }
+            break;
+        }
+        case net::MessageType::PLAYER_ACTION: {
+            if (msg.size < sizeof(net::WeaponFireData)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::WeaponFireData wfd;
+            memcpy(&wfd, msg.payload, sizeof(wfd));
+            if (wfd.player_id == 0) break; // skip own actions
+
+            ClientProjectile proj;
+            proj.origin = {wfd.origin_x, wfd.origin_y, wfd.origin_z};
+            proj.direction = {wfd.dir_x, wfd.dir_y, wfd.dir_z};
+            proj.spawn_time = static_cast<float>(now_seconds());
+            proj.weapon_type = wfd.weapon_type;
+            proj.owner_id = wfd.player_id;
+            proj.color_packed = id_to_color_packed(wfd.player_id);
+            m_projectiles.push_back(proj);
+
+            // Keep last 64 projectiles
+            while (m_projectiles.size() > 64) {
+                m_projectiles.erase(m_projectiles.begin());
+            }
             break;
         }
         default:
@@ -195,6 +284,8 @@ void OmegaClient::on_connected() {
 
 void OmegaClient::on_disconnected() {
     OZ_INFO("OmegaClient: disconnected from server");
+    m_remote_players.clear();
+    m_projectiles.clear();
 }
 
 std::string OmegaClient::consume_pending_scene_data() {

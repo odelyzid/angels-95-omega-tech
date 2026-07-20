@@ -59,7 +59,8 @@ enum class MessageType : uint32_t {
     NPC_STATE_UPDATE = 13,
     XP_UPDATE = 14,
     PLAYER_HURT = 15,
-    PLAYER_KILL = 16
+    PLAYER_KILL = 16,
+    PLAYER_ACTION = 17
 };
 
 struct NetworkPlayer {
@@ -84,6 +85,7 @@ struct NetworkMessage {
 #pragma pack(pop)
 
 struct PlayerUpdateData {
+    uint32_t player_id;  // 0 for client→server; server fills when relaying
     NetVec3 position;
     float yaw;
     float pitch;
@@ -136,6 +138,14 @@ struct PlayerHurtData {
 struct PlayerKillData {
     uint32_t killer_id;
     uint32_t victim_id;
+};
+
+struct WeaponFireData {
+    uint32_t player_id;
+    float origin_x, origin_y, origin_z;
+    float dir_x, dir_y, dir_z;
+    int weapon_type; // 1 = wand/energy bolt
+    int power;       // damage multiplier
 };
 
 struct ChatData {

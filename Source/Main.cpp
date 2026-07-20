@@ -3,10 +3,24 @@
 #include "Client/Client.hpp"
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
+
+// Local projectiles (fired by this client)
+static struct LocalProjectile {
+    Vector3 origin;
+    Vector3 direction;
+    float spawn_time;
+    int weapon_type;
+} g_local_projectiles[32];
+static int g_local_proj_count = 0;
+
+static float now_f() {
+    return static_cast<float>(GetTime());
+}
 
 // ---------------------------------------------------------------------------
 // HUD: draw player stats bars (always visible)
@@ -63,14 +77,127 @@ static void DrawPlayerHUD() {
     DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
 }
 
+static Color unpack_color(uint32_t packed) {
+    return (Color){
+        (unsigned char)(packed & 0xFF),
+        (unsigned char)((packed >> 8) & 0xFF),
+        (unsigned char)((packed >> 16) & 0xFF),
+        (unsigned char)((packed >> 24) & 0xFF)
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Remote player rendering
+// ---------------------------------------------------------------------------
+static void DrawRemotePlayers() {
+    if (!g_network_enabled || !g_client.is_connected()) return;
+    const auto& players = g_client.remote_players();
+    for (const auto& rp : players) {
+        if (!rp.active) continue;
+        Vector3 pos = {rp.position.x, rp.position.y, rp.position.z};
+        float height = 8.0f;
+        float radius = 1.5f;
+        Color col = unpack_color(rp.color_packed);
+
+        // Body (cylinder)
+        DrawCylinder(pos, radius, radius, height, 8, col);
+        // Head (sphere on top)
+        Vector3 head_pos = {pos.x, pos.y + height + 1.0f, pos.z};
+        DrawSphere(head_pos, 1.2f, col);
+        // Direction indicator (small cone)
+        Vector3 dir_end = {
+            pos.x + sinf(rp.yaw) * 3.0f,
+            pos.y + height * 0.5f,
+            pos.z + cosf(rp.yaw) * 3.0f
+        };
+        DrawLine3D({pos.x, pos.y + height * 0.5f, pos.z}, dir_end, YELLOW);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Projectile rendering
+// ---------------------------------------------------------------------------
+static void DrawActiveProjectiles() {
+    float cur = now_f();
+    float proj_speed = 30.0f;
+    float lifetime = 1.5f;
+
+    // Draw client-received projectiles
+    if (g_network_enabled && g_client.is_connected()) {
+        for (const auto& p : g_client.projectiles()) {
+            float age = cur - p.spawn_time;
+            if (age < 0 || age > lifetime) continue;
+            float t = age / lifetime;
+            float dist = t * proj_speed;
+            Vector3 pos = {
+                p.origin.x + p.direction.x * dist,
+                p.origin.y + p.direction.y * dist,
+                p.origin.z + p.direction.z * dist
+            };
+            float alpha = 1.0f - t;
+            Color c = unpack_color(p.color_packed);
+            c.a = (unsigned char)(alpha * 255);
+            DrawSphere(pos, 0.8f + t * 0.5f, c);
+            DrawSphereWires(pos, 1.0f + t * 0.8f, 6, 6, (Color){c.r, c.g, c.b, (unsigned char)(alpha * 80)});
+        }
+    }
+
+    // Draw local projectiles
+    for (int i = 0; i < g_local_proj_count; i++) {
+        float age = cur - g_local_projectiles[i].spawn_time;
+        if (age < 0 || age > lifetime) continue;
+        float t = age / lifetime;
+        float dist = t * proj_speed;
+        Vector3 pos = {
+            g_local_projectiles[i].origin.x + g_local_projectiles[i].direction.x * dist,
+            g_local_projectiles[i].origin.y + g_local_projectiles[i].direction.y * dist,
+            g_local_projectiles[i].origin.z + g_local_projectiles[i].direction.z * dist
+        };
+        float alpha = 1.0f - t;
+        Color c = {0, 200, 255, (unsigned char)(alpha * 255)};
+        DrawSphere(pos, 0.8f + t * 0.5f, c);
+        DrawSphereWires(pos, 1.0f + t * 0.8f, 6, 6, (Color){0, 200, 255, (unsigned char)(alpha * 80)});
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fire weapon helper
+// ---------------------------------------------------------------------------
+static void FireWeapon() {
+    Camera3D& cam = OmegaTechData.MainCamera;
+
+    // Get camera forward direction
+    Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+
+    // Calculate origin slightly in front of camera
+    Vector3 origin = Vector3Add(cam.position, Vector3Scale(forward, 2.0f));
+
+    // Add local projectile
+    if (g_local_proj_count < 32) {
+        int idx = g_local_proj_count++;
+        g_local_projectiles[idx].origin = origin;
+        g_local_projectiles[idx].direction = forward;
+        g_local_projectiles[idx].spawn_time = now_f();
+        g_local_projectiles[idx].weapon_type = 1;
+    }
+
+    // Send to server
+    if (g_network_enabled && g_client.is_connected()) {
+        g_client.send_weapon_fire(
+            origin.x, origin.y, origin.z,
+            forward.x, forward.y, forward.z,
+            1, 10);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Inventory overlay (draw when Tab pressed)
 // ---------------------------------------------------------------------------
 static void DrawInventoryOverlay() {
     const int sw = GetScreenWidth();
     const int sh = GetScreenHeight();
-    const int panel_w = 500;
-    const int panel_h = 420;
+    const int panel_w = 640;
+    const int panel_h = 480;
     const int panel_x = (sw - panel_w) / 2;
     const int panel_y = (sh - panel_h) / 2;
 
@@ -84,39 +211,28 @@ static void DrawInventoryOverlay() {
     // Title
     DrawText("INVENTORY", panel_x + 10, panel_y + 10, 20, WHITE);
 
-    // Stats section (left side)
+    // Stats section (left column)
     int sx = panel_x + 20;
     int sy = panel_y + 45;
     DrawText("-- Player Stats --", sx, sy, 14, LIGHTGRAY);
     sy += 22;
 
-    // Level
     DrawText(TextFormat("Level: %d", OmegaPlayer.Level), sx, sy, 14, WHITE);
     sy += 18;
-
-    // XP
     DrawText(TextFormat("XP: %d / %d", OmegaPlayer.XP, OmegaPlayer.XPToNext), sx, sy, 14, WHITE);
     sy += 22;
-
-    // Health
     DrawText(TextFormat("Health: %d / %d", (int)OmegaPlayer.Health, (int)OmegaPlayer.MaxHealth), sx, sy, 14, RED);
     sy += 20;
-
-    // Mana
     DrawText(TextFormat("Mana: %d / %d", (int)OmegaPlayer.Mana, (int)OmegaPlayer.MaxMana), sx, sy, 14, BLUE);
     sy += 20;
-
-    // Psychic Energy
     DrawText(TextFormat("P.Energy: %d / %d", (int)OmegaPlayer.PsychicEnergy, (int)OmegaPlayer.MaxPsychicEnergy), sx, sy, 14, PURPLE);
-    sy += 30;
 
-    // Objects / Items section (right side)
-    int ox = panel_x + 260;
+    // Items section (middle column)
+    int ox = panel_x + 240;
     int oy = panel_y + 45;
-    DrawText("-- Items --", ox, oy, 14, LIGHTGRAY);
+    DrawText("-- Objects --", ox, oy, 14, LIGHTGRAY);
     oy += 22;
 
-    // Collect object names with own status
     struct ObjSlot {
         wstring name;
         bool owned;
@@ -133,44 +249,63 @@ static void DrawInventoryOverlay() {
         Color slot_color = slots[i].owned ? WHITE : (Color){80, 80, 80, 255};
         Color bg_color = slots[i].owned ? (Color){40, 40, 60, 255} : (Color){20, 20, 25, 255};
 
-        // Draw slot background
-        DrawRectangle(ox, oy, 200, 36, bg_color);
-        DrawRectangleLines(ox, oy, 200, 36, slot_color);
+        DrawRectangle(ox, oy, 180, 30, bg_color);
+        DrawRectangleLines(ox, oy, 180, 30, slot_color);
 
-        // Slot number
-        DrawText(TextFormat("[%d]", i + 1), ox + 6, oy + 8, 14, slot_color);
+        DrawText(TextFormat("[%d]", i + 1), ox + 6, oy + 6, 12, slot_color);
 
-        // Item name (or "Empty")
         if (slots[i].owned && !slots[i].name.empty()) {
             std::string narrow(slots[i].name.begin(), slots[i].name.end());
-            DrawText(narrow.c_str(), ox + 36, oy + 8, 14, slot_color);
+            DrawText(narrow.c_str(), ox + 30, oy + 6, 12, slot_color);
         } else if (slots[i].owned) {
-            DrawText("Item", ox + 36, oy + 8, 14, slot_color);
+            DrawText("Item", ox + 30, oy + 6, 12, slot_color);
         } else {
-            DrawText("Empty", ox + 36, oy + 8, 14, (Color){60, 60, 60, 255});
+            DrawText("Empty", ox + 30, oy + 6, 12, (Color){60, 60, 60, 255});
         }
+        oy += 34;
+    }
 
-        oy += 40;
+    // Armory section (right column)
+    int ax = panel_x + 440;
+    int ay = panel_y + 45;
+    DrawText("-- Equipment --", ax, ay, 14, LIGHTGRAY);
+    ay += 22;
+
+    struct EquipSlot {
+        wstring name;
+        bool owned;
+        const char* label;
+    };
+    EquipSlot equip[4] = {
+        {OmegaTechGameObjects.Armory1Name, OmegaTechGameObjects.Armory1Owned, "Armor"},
+        {OmegaTechGameObjects.Armory2Name, OmegaTechGameObjects.Armory2Owned, "Armor"},
+        {OmegaTechGameObjects.Jewelry1Name, OmegaTechGameObjects.Jewelry1Owned, "Jewel"},
+        {OmegaTechGameObjects.Jewelry2Name, OmegaTechGameObjects.Jewelry2Owned, "Jewel"},
+    };
+
+    for (int i = 0; i < 4; i++) {
+        Color slot_color = equip[i].owned ? WHITE : (Color){80, 80, 80, 255};
+        Color bg_color = equip[i].owned ? (Color){40, 50, 40, 255} : (Color){20, 25, 20, 255};
+
+        DrawRectangle(ax, ay, 180, 30, bg_color);
+        DrawRectangleLines(ax, ay, 180, 30, slot_color);
+
+        DrawText(TextFormat("%s", equip[i].label), ax + 6, ay + 6, 12, slot_color);
+
+        if (equip[i].owned && !equip[i].name.empty()) {
+            std::string narrow(equip[i].name.begin(), equip[i].name.end());
+            DrawText(narrow.c_str(), ax + 60, ay + 6, 12, slot_color);
+        } else if (equip[i].owned) {
+            DrawText("Equipped", ax + 60, ay + 6, 12, slot_color);
+        } else {
+            DrawText("Empty", ax + 60, ay + 6, 12, (Color){60, 60, 60, 255});
+        }
+        ay += 34;
     }
 
     // Controls hint
-    DrawText("ARROW KEYS / WHEEL: select  |  TAB: close",
+    DrawText("ARROW KEYS / WHEEL: select  |  E: pickup  |  LMB: fire  |  TAB: close",
              panel_x + 20, panel_y + panel_h - 30, 12, DARKGRAY);
-
-    // Handle slot selection via keyboard
-    if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_RIGHT)) {
-        if (SelectedObject < 5) SelectedObject++;
-    }
-    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_LEFT)) {
-        if (SelectedObject > 1) SelectedObject--;
-    }
-    // Mouse wheel
-    if (GetMouseWheelMove() < 0 && SelectedObject < 5) SelectedObject++;
-    if (GetMouseWheelMove() > 0 && SelectedObject > 1) SelectedObject--;
-
-    // Draw selection highlight
-    int sel_y = panel_y + 45 + 22 + (SelectedObject - 1) * 40;
-    DrawRectangleLines(panel_x + 260, sel_y, 200, 36, YELLOW);
 }
 
 int main(){
@@ -190,14 +325,22 @@ int main(){
     
     LoadWorld();
 
-    // Try connecting to dedicated server (hardcoded for now)
+    // Connect to server (if Join Game was selected, use custom IP)
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
 
-    g_network_enabled = g_client.connect("127.0.0.1", 27015);
-    if (g_network_enabled) {
-        OZ_INFO("Network: connected to 127.0.0.1:27015");
+    if (SetServerJoinFlag && SetServerJoinIP) {
+        g_network_enabled = g_client.connect(SetServerJoinIP, 27015);
+        if (g_network_enabled) {
+            OZ_INFO("Network: connected to %s:27015", SetServerJoinIP);
+        }
+        SetServerJoinFlag = false;
+    } else {
+        g_network_enabled = g_client.connect("127.0.0.1", 27015);
+        if (g_network_enabled) {
+            OZ_INFO("Network: connected to 127.0.0.1:27015");
+        }
     }
 
     HideCursor(); 
@@ -217,15 +360,30 @@ int main(){
             }
         }
 
+        // Capture left-mouse state before camera (handle after)
+        static bool left_click_was_down = false;
+        bool left_click_now = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        bool left_just_pressed = left_click_now && !left_click_was_down;
+
         OmegaPlayer.OldX = OmegaTechData.MainCamera.position.x;
         OmegaPlayer.OldY = OmegaTechData.MainCamera.position.y;
         OmegaPlayer.OldZ = OmegaTechData.MainCamera.position.z;
 
-        if (!OmegaInputController.InteractDown && !ShowSettings && !ShowInventory){
+        if (!ShowSettings && !ShowInventory){
             for (int i = 0 ; i <= OmegaTechData.CameraSpeed; i ++){
                 UpdateCamera(&OmegaTechData.MainCamera, CAMERA_FIRST_PERSON);
             }
         }
+
+        // Weapon fire AFTER camera so left-click does not disrupt movement
+        if (!ShowInventory && left_just_pressed) {
+            if (SelectedObject == 1 &&
+                OmegaTechGameObjects.Object1Owned) {
+                FireWeapon();
+            }
+        }
+
+        left_click_was_down = left_click_now;
 
         OmegaInputController.UpdateInputs();
         UpdateLightSources();
@@ -245,10 +403,8 @@ int main(){
 
         FadeColor = (Color){R, G, B, 255};
     
-
         DrawWorld();
         
-
         BeginDrawing();  
 
         ClearBackground(BLACK);
@@ -268,7 +424,6 @@ int main(){
 
         UpdateSettings();
 
-
         OmegaTechTextSystem.Update();
 
         // Network client update
@@ -278,12 +433,10 @@ int main(){
                            0.0f, 0.0f);
 
             if (g_client.is_connected()) {
-                // Sync XP/level from server to local player
                 OmegaPlayer.Level = g_client.get_level();
                 OmegaPlayer.XP = g_client.get_xp();
                 OmegaPlayer.XPToNext = g_client.get_xp_to_next();
 
-                // Copy server NPCs into OmegaEnemy array for rendering
                 const auto& npcs = g_client.npcs();
                 int limit = std::min((int)npcs.size(), EntityCount);
                 for (int i = 0; i < limit; i++) {
@@ -326,6 +479,12 @@ int main(){
             DrawText(TextFormat("Ping: %dms", g_client.get_ping_ms()),
                      10, GetScreenHeight() - 20, 12, GREEN);
         }
+
+        // Remote player models
+        DrawRemotePlayers();
+
+        // Active projectiles
+        DrawActiveProjectiles();
 
         // Inventory overlay
         if (ShowInventory) {

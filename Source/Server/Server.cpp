@@ -501,6 +501,21 @@ static void on_server_message(const net::NetworkMessage& msg,
             memcpy(&pud, msg.payload, sizeof(pud));
             g_game_state.update_player_position(
                 sender.id, pud.position.x, pud.position.y, pud.position.z, pud.yaw, pud.pitch);
+
+            // Relay to all other players
+            pud.player_id = sender.id;
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_UPDATE);
+            relay.size = sizeof(pud);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &pud, sizeof(pud));
+            for (const auto& p : g_game_server->players()) {
+                if (p.id != sender.id && p.connected) {
+                    g_game_server->send_message(p, relay);
+                }
+            }
             break;
         }
         case net::MessageType::PICKUP_COLLECT: {
@@ -531,6 +546,26 @@ static void on_server_message(const net::NetworkMessage& msg,
         }
         case net::MessageType::CHAT: {
             g_game_server->broadcast_message(msg);
+            break;
+        }
+        case net::MessageType::PLAYER_ACTION: {
+            if (msg.size < sizeof(net::WeaponFireData)) return;
+            net::WeaponFireData wfd;
+            memcpy(&wfd, msg.payload, sizeof(wfd));
+            wfd.player_id = sender.id;
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_ACTION);
+            relay.size = sizeof(wfd);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &wfd, sizeof(wfd));
+            // Broadcast to all other players
+            for (const auto& p : g_game_server->players()) {
+                if (p.id != sender.id && p.connected) {
+                    g_game_server->send_message(p, relay);
+                }
+            }
             break;
         }
         default:

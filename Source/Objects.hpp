@@ -36,6 +36,32 @@ class GameObject
         Texture2D Object5Icon;
         bool Object5Owned;
 
+        // Armory slots
+        Model Armory1;
+        wstring Armory1Name;
+        Texture2D Armory1Texture;
+        Texture2D Armory1Icon;
+        bool Armory1Owned;
+
+        Model Armory2;
+        wstring Armory2Name;
+        Texture2D Armory2Texture;
+        Texture2D Armory2Icon;
+        bool Armory2Owned;
+
+        // Jewelry slots
+        Model Jewelry1;
+        wstring Jewelry1Name;
+        Texture2D Jewelry1Texture;
+        Texture2D Jewelry1Icon;
+        bool Jewelry1Owned;
+
+        Model Jewelry2;
+        wstring Jewelry2Name;
+        Texture2D Jewelry2Texture;
+        Texture2D Jewelry2Icon;
+        bool Jewelry2Owned;
+
 };
 
 static GameObject OmegaTechGameObjects;
@@ -45,14 +71,14 @@ void InitObjects(){
     OmegaTechGameObjects.BarFont = LoadFont("GameData/Global/Font.ttf");
 
 
+    // Object1: Wand / Energy Weapon (always owned, always present)
     if (IsPathFile("GameData/Global/Objects/Object1.obj")){
         OmegaTechGameObjects.Object1 = LoadModel("GameData/Global/Objects/Object1.obj");
         OmegaTechGameObjects.Object1Texture = LoadTexture("GameData/Global/Objects/Object1Texture.png");
-        OmegaTechGameObjects.Object1Icon = LoadTexture("GameData/Global/Objects/Object1Icon.png");
-        OmegaTechGameObjects.Object1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Object1Texture; 
-        OmegaTechGameObjects.Object1Owned = false;
-        OmegaTechGameObjects.Object1Name = WSplitValue(LoadFile("GameData/Global/Objects/Object1.info") , 0);
     }
+    OmegaTechGameObjects.Object1Icon = LoadTexture("GameData/Global/Objects/Object1Icon.png");
+    OmegaTechGameObjects.Object1Owned = true;
+    OmegaTechGameObjects.Object1Name = WSplitValue(LoadFile("GameData/Global/Objects/Object1.info") , 0);
 
     if (IsPathFile("GameData/Global/Objects/Object2.obj")){
         OmegaTechGameObjects.Object2 = LoadModel("GameData/Global/Objects/Object2.obj");
@@ -88,6 +114,44 @@ void InitObjects(){
         OmegaTechGameObjects.Object5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Object5Texture; 
         OmegaTechGameObjects.Object5Owned = false;
         OmegaTechGameObjects.Object5Name = WSplitValue(LoadFile("GameData/Global/Objects/Object5.info") , 0);
+    }
+
+    // Armory slots
+    if (IsPathFile("GameData/Global/Objects/Armory1.obj")){
+        OmegaTechGameObjects.Armory1 = LoadModel("GameData/Global/Objects/Armory1.obj");
+        OmegaTechGameObjects.Armory1Texture = LoadTexture("GameData/Global/Objects/Armory1Texture.png");
+        OmegaTechGameObjects.Armory1Icon = LoadTexture("GameData/Global/Objects/Armory1Icon.png");
+        OmegaTechGameObjects.Armory1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Armory1Texture; 
+        OmegaTechGameObjects.Armory1Owned = false;
+        OmegaTechGameObjects.Armory1Name = WSplitValue(LoadFile("GameData/Global/Objects/Armory1.info") , 0);
+    }
+
+    if (IsPathFile("GameData/Global/Objects/Armory2.obj")){
+        OmegaTechGameObjects.Armory2 = LoadModel("GameData/Global/Objects/Armory2.obj");
+        OmegaTechGameObjects.Armory2Texture = LoadTexture("GameData/Global/Objects/Armory2Texture.png");
+        OmegaTechGameObjects.Armory2Icon = LoadTexture("GameData/Global/Objects/Armory2Icon.png");
+        OmegaTechGameObjects.Armory2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Armory2Texture; 
+        OmegaTechGameObjects.Armory2Owned = false;
+        OmegaTechGameObjects.Armory2Name = WSplitValue(LoadFile("GameData/Global/Objects/Armory2.info") , 0);
+    }
+
+    // Jewelry slots
+    if (IsPathFile("GameData/Global/Objects/Jewelry1.obj")){
+        OmegaTechGameObjects.Jewelry1 = LoadModel("GameData/Global/Objects/Jewelry1.obj");
+        OmegaTechGameObjects.Jewelry1Texture = LoadTexture("GameData/Global/Objects/Jewelry1Texture.png");
+        OmegaTechGameObjects.Jewelry1Icon = LoadTexture("GameData/Global/Objects/Jewelry1Icon.png");
+        OmegaTechGameObjects.Jewelry1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Jewelry1Texture; 
+        OmegaTechGameObjects.Jewelry1Owned = false;
+        OmegaTechGameObjects.Jewelry1Name = WSplitValue(LoadFile("GameData/Global/Objects/Jewelry1.info") , 0);
+    }
+
+    if (IsPathFile("GameData/Global/Objects/Jewelry2.obj")){
+        OmegaTechGameObjects.Jewelry2 = LoadModel("GameData/Global/Objects/Jewelry2.obj");
+        OmegaTechGameObjects.Jewelry2Texture = LoadTexture("GameData/Global/Objects/Jewelry2Texture.png");
+        OmegaTechGameObjects.Jewelry2Icon = LoadTexture("GameData/Global/Objects/Jewelry2Icon.png");
+        OmegaTechGameObjects.Jewelry2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Jewelry2Texture; 
+        OmegaTechGameObjects.Jewelry2Owned = false;
+        OmegaTechGameObjects.Jewelry2Name = WSplitValue(LoadFile("GameData/Global/Objects/Jewelry2.info") , 0);
     }
 }
 
@@ -130,6 +194,16 @@ void UpdateObjectBar(){
     if (IsKeyPressed(KEY_RIGHT)){ 
         if (SelectedObject != 8) SelectedObject ++;
     }
+
+    // Number keys 1-8 for direct slot selection
+    if (IsKeyPressed(KEY_ONE))   SelectedObject = 1;
+    if (IsKeyPressed(KEY_TWO))   SelectedObject = 2;
+    if (IsKeyPressed(KEY_THREE)) SelectedObject = 3;
+    if (IsKeyPressed(KEY_FOUR))  SelectedObject = 4;
+    if (IsKeyPressed(KEY_FIVE))  SelectedObject = 5;
+    if (IsKeyPressed(KEY_SIX))   SelectedObject = 6;
+    if (IsKeyPressed(KEY_SEVEN)) SelectedObject = 7;
+    if (IsKeyPressed(KEY_EIGHT)) SelectedObject = 8;
 
     if (GetMouseWheelMove() != 0){
         if (GetMouseWheelMove() < 0){

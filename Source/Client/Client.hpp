@@ -29,6 +29,27 @@ struct ClientPickup {
     bool active = true;
 };
 
+// Remote player representation (other players connected)
+struct RemotePlayer {
+    uint32_t player_id;
+    net::NetVec3 position{0,0,0};
+    float yaw = 0;
+    float pitch = 0;
+    float health = 100;
+    bool active = false;
+    uint32_t color_packed = 0xFFFFFFFF; // RGBA
+};
+
+// Projectile from weapon fire for rendering
+struct ClientProjectile {
+    net::NetVec3 origin{0,0,0};
+    net::NetVec3 direction{0,0,0};
+    float spawn_time = 0;
+    int weapon_type = 1;
+    uint32_t owner_id = 0;
+    uint32_t color_packed = 0xFFFFFFFF; // RGBA
+};
+
 // Game client networking module.
 // Connects to oz_server and syncs player position / receives updates.
 
@@ -55,6 +76,11 @@ public:
     // Send pickup collect request
     void send_pickup_collect(int pickup_id, int world_index);
 
+    // Send weapon fire action
+    void send_weapon_fire(float ox, float oy, float oz,
+                          float dx, float dy, float dz,
+                          int weapon_type, int power = 10);
+
     // Status
     bool is_connected() const { return m_client.is_connected(); }
     int get_ping_ms() const { return m_client.get_ping_ms(); }
@@ -69,6 +95,8 @@ public:
     // Access received NPC / pickup state
     const std::vector<ClientNPC>& npcs() const { return m_npcs; }
     const std::vector<ClientPickup>& pickups() const { return m_pickups; }
+    const std::vector<RemotePlayer>& remote_players() const { return m_remote_players; }
+    const std::vector<ClientProjectile>& projectiles() const { return m_projectiles; }
     int get_xp() const { return m_xp; }
     int get_level() const { return m_level; }
     int get_xp_to_next() const { return m_xp_to_next; }
@@ -89,6 +117,8 @@ private:
 
     std::vector<ClientNPC> m_npcs;
     std::vector<ClientPickup> m_pickups;
+    std::vector<RemotePlayer> m_remote_players;
+    std::vector<ClientProjectile> m_projectiles;
     int m_xp = 0;
     int m_level = 1;
     int m_xp_to_next = 100;

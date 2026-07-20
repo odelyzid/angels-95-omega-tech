@@ -7,6 +7,12 @@
 bool FloorCollision = true;
 bool ObjectCollision = false;
 
+const char* g_world_to_load = "EtheralTestRealm";
+
+// Set from PlayHomeScreen to request a server join
+bool SetServerJoinFlag = false;
+const char* SetServerJoinIP = nullptr;
+
 void LoadSave();
 void SaveGame();
 void UpdateCustom();
@@ -19,7 +25,7 @@ class ParticleSystem;
 class EngineData
 {
     public:
-        int LevelIndex = 1;
+        int LevelIndex = 2;
         Camera MainCamera = {0};
         Shader PixelShader;
         Shader FogShader;
@@ -696,12 +702,17 @@ void OmegaTechInit()
 
 void PlayHomeScreen()
 {
-    Rectangle LayoutRecs[5] = {
+    static char JoinIP[32] = "127.0.0.1";
+    static bool ShowJoinInput = false;
+    static bool StartServerMode = false;
+
+    Rectangle LayoutRecs[6] = {
+        (Rectangle){583, 320, 120, 24},
         (Rectangle){583, 355, 120, 24},
-        (Rectangle){583, 421, 120, 24},
-        (Rectangle){583, 387, 120, 24},
-        (Rectangle){583, 489, 120, 24},
-        (Rectangle){583, 454, 120, 24},
+        (Rectangle){583, 390, 120, 24},
+        (Rectangle){583, 425, 120, 24},
+        (Rectangle){583, 460, 120, 24},
+        (Rectangle){583, 495, 120, 24},
     };
 
     while (true && !WindowShouldClose())
@@ -721,47 +732,79 @@ void PlayHomeScreen()
             PlaySound(OmegaTechSoundData.UIClick);
         }
 
-        if (GuiButton(LayoutRecs[0], "Start New Game"))
-        {
-            UnloadRenderTexture(Target);
-            Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
-
-            break;
-        }
-
-        if (GuiButton(LayoutRecs[1], "Load Save"))
-        {
-            UnloadRenderTexture(Target);
-            Target = LoadRenderTexture(320 , 240);
-
-            if (IsPathFile("GameData/Saves/TF.sav"))
+        if (!ShowJoinInput && !StartServerMode) {
+            if (GuiButton(LayoutRecs[0], "Start New Game"))
             {
-                LoadSave();
-                LoadFlag = true;
+                UnloadRenderTexture(Target);
+                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
+                break;
             }
-            break;
-        }
-        
-        GuiLine(LayoutRecs[2], NULL);
 
-        if (GuiButton(LayoutRecs[3], "Settings"))
-        {
+            if (GuiButton(LayoutRecs[1], "Join Game"))
+            {
+                ShowJoinInput = true;
+            }
+
+            if (GuiButton(LayoutRecs[2], "Start Game"))
+            {
+                StartServerMode = true;
+            }
+
+            GuiLine(LayoutRecs[3], NULL);
+
+            if (GuiButton(LayoutRecs[4], "Load Game"))
+            {
+                UnloadRenderTexture(Target);
+                Target = LoadRenderTexture(320 , 240);
+
+                if (IsPathFile("GameData/Saves/TF.sav"))
+                {
+                    LoadSave();
+                    LoadFlag = true;
+                }
+                break;
+            }
+
+            if (GuiButton(LayoutRecs[5], "Settings"))
+            {
+                MenuSettings = !MenuSettings;
+            }
+
             if (MenuSettings)
             {
-                MenuSettings = false;
+                ShowMenuSetiings();
             }
-            else
-            {
-                MenuSettings = true;
+        } else if (ShowJoinInput) {
+            // Join Game: show IP input
+            DrawText("Enter Server IP:", 560, 280, 20, WHITE);
+            GuiTextBox((Rectangle){540, 310, 200, 30}, JoinIP, 32, true);
+
+            if (GuiButton((Rectangle){540, 350, 90, 24}, "Connect")) {
+                UnloadRenderTexture(Target);
+                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
+                SetServerJoinIP = JoinIP;
+                SetServerJoinFlag = true;
+                break;
+            }
+            if (GuiButton((Rectangle){640, 350, 90, 24}, "Cancel")) {
+                ShowJoinInput = false;
+            }
+        } else if (StartServerMode) {
+            DrawText("Starting Server...", 560, 280, 20, GREEN);
+            DrawText("Connect to 127.0.0.1:27015", 560, 310, 16, LIGHTGRAY);
+
+            if (GuiButton((Rectangle){540, 380, 120, 24}, "Launch Game")) {
+                UnloadRenderTexture(Target);
+                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
+                SetServerJoinIP = "127.0.0.1";
+                SetServerJoinFlag = true;
+                break;
+            }
+            if (GuiButton((Rectangle){540, 420, 120, 24}, "Cancel")) {
+                StartServerMode = false;
             }
         }
 
-        GuiLine(LayoutRecs[4], NULL);
-
-        if (MenuSettings)
-        {
-            ShowMenuSetiings();
-        }
         EndTextureMode();
         BeginDrawing();
 
@@ -1907,6 +1950,16 @@ void SaveGame()
     else {TFlags += L'0';}
     if (OmegaTechGameObjects.Object5Owned)TFlags += L'1';
     else {TFlags += L'0';}
+    // Armory slots (positions 106-107)
+    if (OmegaTechGameObjects.Armory1Owned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.Armory2Owned)TFlags += L'1';
+    else {TFlags += L'0';}
+    // Jewelry slots (positions 108-109)
+    if (OmegaTechGameObjects.Jewelry1Owned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.Jewelry2Owned)TFlags += L'1';
+    else {TFlags += L'0';}
 
     wofstream Outfile;
     Outfile.open("GameData/Saves/TF.sav");
@@ -1947,6 +2000,12 @@ void LoadSave()
     if (TFlags[103] == L'1')OmegaTechGameObjects.Object3Owned = true;
     if (TFlags[104] == L'1')OmegaTechGameObjects.Object4Owned = true;
     if (TFlags[105] == L'1')OmegaTechGameObjects.Object5Owned = true;
+    // Armory slots
+    if (TFlags.size() > 106 && TFlags[106] == L'1')OmegaTechGameObjects.Armory1Owned = true;
+    if (TFlags.size() > 107 && TFlags[107] == L'1')OmegaTechGameObjects.Armory2Owned = true;
+    // Jewelry slots
+    if (TFlags.size() > 108 && TFlags[108] == L'1')OmegaTechGameObjects.Jewelry1Owned = true;
+    if (TFlags.size() > 109 && TFlags[109] == L'1')OmegaTechGameObjects.Jewelry2Owned = true;
 
     wstring Position = LoadFile("GameData/Saves/POS.sav");
 
