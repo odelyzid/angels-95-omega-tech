@@ -1980,6 +1980,23 @@ void SaveGame()
     else {TFlags += L'0';}
     if (OmegaTechGameObjects.Jewelry2Owned)TFlags += L'1';
     else {TFlags += L'0';}
+    // RPG expansion equipment (positions 110-114)
+    if (OmegaTechGameObjects.HelmetOwned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.BootsOwned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.LegsOwned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.Accessory1Owned)TFlags += L'1';
+    else {TFlags += L'0';}
+    if (OmegaTechGameObjects.Accessory2Owned)TFlags += L'1';
+    else {TFlags += L'0';}
+    // Backpack data
+    TFlags += L':';
+    for (int i = 0; i < BACKPACK_SLOTS; i++) {
+        TFlags += to_wstring(gInventory.backpack[i].itemId) + L',' + to_wstring(gInventory.backpack[i].quantity) + L';';
+    }
+    TFlags += L':' + to_wstring(gInventory.coins);
 
     wofstream Outfile;
     Outfile.open("GameData/Saves/TF.sav");
@@ -2026,6 +2043,42 @@ void LoadSave()
     // Jewelry slots
     if (TFlags.size() > 108 && TFlags[108] == L'1')OmegaTechGameObjects.Jewelry1Owned = true;
     if (TFlags.size() > 109 && TFlags[109] == L'1')OmegaTechGameObjects.Jewelry2Owned = true;
+    // RPG expansion equipment
+    if (TFlags.size() > 110 && TFlags[110] == L'1')OmegaTechGameObjects.HelmetOwned = true;
+    if (TFlags.size() > 111 && TFlags[111] == L'1')OmegaTechGameObjects.BootsOwned = true;
+    if (TFlags.size() > 112 && TFlags[112] == L'1')OmegaTechGameObjects.LegsOwned = true;
+    if (TFlags.size() > 113 && TFlags[113] == L'1')OmegaTechGameObjects.Accessory1Owned = true;
+    if (TFlags.size() > 114 && TFlags[114] == L'1')OmegaTechGameObjects.Accessory2Owned = true;
+
+    // Load backpack data (after second ':')
+    size_t bpStart = TFlags.find(L':', 110);
+    if (bpStart != string::npos) {
+        wstring bpData = TFlags.substr(bpStart + 1);
+        size_t secondColon = bpData.find(L':');
+        wstring slotData = (secondColon != string::npos) ? bpData.substr(0, secondColon) : bpData;
+        // Parse slot data: "id,qty;id,qty;..."
+        size_t pos = 0;
+        int slotIdx = 0;
+        while (pos < slotData.size() && slotIdx < BACKPACK_SLOTS) {
+            size_t semi = slotData.find(L';', pos);
+            if (semi == string::npos) break;
+            wstring pair = slotData.substr(pos, semi - pos);
+            size_t comma = pair.find(L',');
+            if (comma != string::npos) {
+                int id = stoi(pair.substr(0, comma));
+                int qty = stoi(pair.substr(comma + 1));
+                gInventory.backpack[slotIdx].itemId = id;
+                gInventory.backpack[slotIdx].quantity = qty;
+            }
+            pos = semi + 1;
+            slotIdx++;
+        }
+        // Coins
+        if (secondColon != string::npos) {
+            wstring coinStr = bpData.substr(secondColon + 1);
+            if (!coinStr.empty()) gInventory.coins = stoi(coinStr);
+        }
+    }
 
     wstring Position = LoadFile("GameData/Saves/POS.sav");
 

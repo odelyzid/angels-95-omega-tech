@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include "Settings.hpp"
 #include "Player.hpp"
+#include "Items.hpp"
 #include "Editor.hpp"
 #include "Video.hpp"
 #include "ParticleDemon/ParticleDemon.hpp"

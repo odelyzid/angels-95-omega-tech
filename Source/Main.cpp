@@ -193,119 +193,335 @@ static void FireWeapon() {
 // ---------------------------------------------------------------------------
 // Inventory overlay (draw when Tab pressed)
 // ---------------------------------------------------------------------------
+// ---- Debug Console ----
+static bool g_consoleOpen = false;
+static char g_consoleBuf[256] = "";
+static int g_consoleCursor = 0;
+static wstring g_consoleHistory[16];
+static int g_consoleHistoryCount = 0;
+static int g_consoleHistoryPos = 0;
+
+static void ExecuteConsoleCommand(const char* cmd) {
+    if (!cmd || !cmd[0]) return;
+    // Store in history
+    if (g_consoleHistoryCount < 16) {
+        size_t len = strlen(cmd);
+        for (size_t i = 0; i < len; i++) g_consoleHistory[g_consoleHistoryCount] += (wchar_t)cmd[i];
+        g_consoleHistoryCount++;
+    }
+    g_consoleHistoryPos = g_consoleHistoryCount;
+
+    // Parse command
+    if (strncmp(cmd, "/summon ", 8) == 0) {
+        const char* arg = cmd + 8;
+        // Skip leading spaces
+        while (*arg == ' ') arg++;
+        if (!*arg) return;
+
+        // Try matching item name
+        int itemId = gInventory.SummonItem(arg);
+        if (itemId >= 0) {
+            gInventory.AddToBackpack(itemId, 1);
+            return;
+        }
+
+        // Try matching weapon name
+        struct { const char* name; int slot; } weapons[] = {
+            {"wand", 1}, {"weapon1", 1}, {"object1", 1},
+            {"weapon2", 2}, {"object2", 2},
+            {"weapon3", 3}, {"object3", 3},
+            {"weapon4", 4}, {"object4", 4},
+            {"weapon5", 5}, {"object5", 5},
+        };
+        for (auto& w : weapons) {
+            const char* a = arg;
+            const char* b = w.name;
+            bool match = true;
+            while (*a && *b) {
+                char ca = (*a >= 'A' && *a <= 'Z') ? *a + 32 : *a;
+                char cb = *b;
+                if (ca != cb) { match = false; break; }
+                a++; b++;
+            }
+            if (match && *a == *b) {
+                switch (w.slot) {
+                    case 1: OmegaTechGameObjects.Object1Owned = true; break;
+                    case 2: OmegaTechGameObjects.Object2Owned = true; break;
+                    case 3: OmegaTechGameObjects.Object3Owned = true; break;
+                    case 4: OmegaTechGameObjects.Object4Owned = true; break;
+                    case 5: OmegaTechGameObjects.Object5Owned = true; break;
+                }
+                return;
+            }
+        }
+    }
+}
+
+static void DrawConsole() {
+    if (!g_consoleOpen) return;
+    int sw = GetScreenWidth();
+    int ch = 200;
+    int cy = GetScreenHeight() - ch;
+
+    DrawRectangle(0, cy, sw, ch, (Color){0, 0, 0, 200});
+    DrawRectangleLines(0, cy, sw, ch, (Color){100, 100, 180, 200});
+
+    // History
+    int lineY = cy + ch - 40;
+    for (int i = g_consoleHistoryCount - 1; i >= 0 && lineY > cy + 5; i--) {
+        std::string hist(g_consoleHistory[i].begin(), g_consoleHistory[i].end());
+        DrawText(hist.c_str(), 10, lineY - 18, 14, LIGHTGRAY);
+        lineY -= 18;
+    }
+
+    // Input line
+    DrawText("> ", 10, cy + ch - 22, 14, GREEN);
+    DrawText(g_consoleBuf, 28, cy + ch - 22, 14, WHITE);
+    // Cursor blink
+    if ((int)(GetTime() * 4) % 2 == 0) {
+        int cx = 28 + MeasureText(g_consoleBuf, 14);
+        DrawText("_", cx, cy + ch - 22, 14, WHITE);
+    }
+}
+
+static void HandleConsoleInput() {
+    if (!g_consoleOpen) return;
+    int key = GetCharPressed();
+    while (key > 0) {
+        if (key >= 32 && key <= 126 && g_consoleCursor < 255) {
+            g_consoleBuf[g_consoleCursor++] = (char)key;
+            g_consoleBuf[g_consoleCursor] = '\0';
+        }
+        key = GetCharPressed();
+    }
+    if (IsKeyPressed(KEY_BACKSPACE) && g_consoleCursor > 0) {
+        g_consoleBuf[--g_consoleCursor] = '\0';
+    }
+    if (IsKeyPressed(KEY_ENTER)) {
+        ExecuteConsoleCommand(g_consoleBuf);
+        g_consoleBuf[0] = '\0';
+        g_consoleCursor = 0;
+    }
+    if (IsKeyPressed(KEY_UP) && g_consoleHistoryPos > 0) {
+        g_consoleHistoryPos--;
+        std::string hist(g_consoleHistory[g_consoleHistoryPos].begin(), g_consoleHistory[g_consoleHistoryPos].end());
+        strncpy(g_consoleBuf, hist.c_str(), 255);
+        g_consoleCursor = strlen(g_consoleBuf);
+    }
+    if (IsKeyPressed(KEY_DOWN) && g_consoleHistoryPos < g_consoleHistoryCount) {
+        g_consoleHistoryPos++;
+        if (g_consoleHistoryPos >= g_consoleHistoryCount) {
+            g_consoleBuf[0] = '\0';
+            g_consoleCursor = 0;
+        } else {
+            std::string hist(g_consoleHistory[g_consoleHistoryPos].begin(), g_consoleHistory[g_consoleHistoryPos].end());
+            strncpy(g_consoleBuf, hist.c_str(), 255);
+            g_consoleCursor = strlen(g_consoleBuf);
+        }
+    }
+}
+
+// ---- Pickup ground rendering ----
+// Server-side PickupType values: HEALTH=0, MANA=1, PSYCHIC=2, ARMOR=3, WEAPON=4, AMMO=5, KEY=6, COIN=7, POWERUP=8
+static void DrawGroundPickups() {
+    if (!g_network_enabled || !g_client.is_connected()) return;
+    const auto& pickups = g_client.pickups();
+    for (const auto& p : pickups) {
+        if (!p.active) continue;
+        Texture2D* icon = nullptr;
+        switch (p.type) {
+            case 0: icon = &OmegaTechGameObjects.HealthVialIcon; break;      // HEALTH
+            case 1: icon = &OmegaTechGameObjects.ManaVialIcon; break;        // MANA
+            case 2: icon = &OmegaTechGameObjects.EnergyCrystalIcon; break;   // PSYCHIC
+            case 7: icon = &OmegaTechGameObjects.CoinIcon; break;            // COIN
+            case 6: icon = &OmegaTechGameObjects.KeyIcon; break;             // KEY
+            case 8: icon = &OmegaTechGameObjects.PowerupIcon; break;         // POWERUP
+            default: break;
+        }
+        if (icon && icon->id > 0) {
+            Vector3 pos = {p.position.x, p.position.y + 0.8f, p.position.z};
+            float sz = 0.5f;
+            DrawBillboardPro(OmegaTechData.MainCamera, *icon,
+                (Rectangle){0,0,(float)icon->width,(float)icon->height},
+                pos, (Vector3){0,1,0}, (Vector2){sz, sz}, (Vector2){0,0}, 0, WHITE);
+        }
+    }
+}
+
+// ---- Inventory Overlay (Diablo I style) ----
+static int g_invSelectedBpSlot = -1;
+
 static void DrawInventoryOverlay() {
     const int sw = GetScreenWidth();
     const int sh = GetScreenHeight();
-    const int panel_w = 640;
-    const int panel_h = 480;
-    const int panel_x = (sw - panel_w) / 2;
-    const int panel_y = (sh - panel_h) / 2;
+    const int panel_w = 720;
+    const int panel_h = 520;
+    const int px = (sw - panel_w) / 2;
+    const int py = (sh - panel_h) / 2;
 
-    // Dim background
     DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 160});
+    DrawRectangle(px, py, panel_w, panel_h, (Color){25, 25, 35, 245});
+    DrawRectangleLines(px, py, panel_w, panel_h, (Color){180, 180, 200, 255});
 
-    // Panel background
-    DrawRectangle(panel_x, panel_y, panel_w, panel_h, (Color){30, 30, 40, 240});
-    DrawRectangleLines(panel_x, panel_y, panel_w, panel_h, WHITE);
+    DrawText("INVENTORY", px + 15, py + 10, 22, WHITE);
+    DrawText(TextFormat("Coins: %d", gInventory.coins), px + panel_w - 150, py + 14, 16, GOLD);
 
-    // Title
-    DrawText("INVENTORY", panel_x + 10, panel_y + 10, 20, WHITE);
+    int ex = px + 20;
+    int ey = py + 50;
+    int slotH = 38;
+    int slotW = 150;
 
-    // Stats section (left column)
-    int sx = panel_x + 20;
-    int sy = panel_y + 45;
-    DrawText("-- Player Stats --", sx, sy, 14, LIGHTGRAY);
-    sy += 22;
+    // === EQUIPMENT (left side) ===
+    DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
 
-    DrawText(TextFormat("Level: %d", OmegaPlayer.Level), sx, sy, 14, WHITE);
-    sy += 18;
-    DrawText(TextFormat("XP: %d / %d", OmegaPlayer.XP, OmegaPlayer.XPToNext), sx, sy, 14, WHITE);
-    sy += 22;
-    DrawText(TextFormat("Health: %d / %d", (int)OmegaPlayer.Health, (int)OmegaPlayer.MaxHealth), sx, sy, 14, RED);
-    sy += 20;
-    DrawText(TextFormat("Mana: %d / %d", (int)OmegaPlayer.Mana, (int)OmegaPlayer.MaxMana), sx, sy, 14, BLUE);
-    sy += 20;
-    DrawText(TextFormat("P.Energy: %d / %d", (int)OmegaPlayer.PsychicEnergy, (int)OmegaPlayer.MaxPsychicEnergy), sx, sy, 14, PURPLE);
-
-    // Items section (middle column)
-    int ox = panel_x + 240;
-    int oy = panel_y + 45;
-    DrawText("-- Objects --", ox, oy, 14, LIGHTGRAY);
-    oy += 22;
-
-    struct ObjSlot {
-        wstring name;
-        bool owned;
-    };
-    ObjSlot slots[5] = {
-        {OmegaTechGameObjects.Object1Name, OmegaTechGameObjects.Object1Owned},
-        {OmegaTechGameObjects.Object2Name, OmegaTechGameObjects.Object2Owned},
-        {OmegaTechGameObjects.Object3Name, OmegaTechGameObjects.Object3Owned},
-        {OmegaTechGameObjects.Object4Name, OmegaTechGameObjects.Object4Owned},
-        {OmegaTechGameObjects.Object5Name, OmegaTechGameObjects.Object5Owned},
+    struct EquipDraw {
+        const char* label;
+        bool* owned;
+        Texture2D* icon;
     };
 
-    for (int i = 0; i < 5; i++) {
-        Color slot_color = slots[i].owned ? WHITE : (Color){80, 80, 80, 255};
-        Color bg_color = slots[i].owned ? (Color){40, 40, 60, 255} : (Color){20, 20, 25, 255};
+    EquipDraw equipDraws[EQUIP_SLOT_COUNT] = {
+        {"Helmet",     &OmegaTechGameObjects.HelmetOwned,     &OmegaTechGameObjects.HelmetIcon},
+        {"Armor",      &OmegaTechGameObjects.Armory1Owned,    &OmegaTechGameObjects.Armory1Icon},
+        {"Legs",       &OmegaTechGameObjects.LegsOwned,       &OmegaTechGameObjects.LegsIcon},
+        {"Boots",      &OmegaTechGameObjects.BootsOwned,      &OmegaTechGameObjects.BootsIcon},
+        {"Jewelry 1",  &OmegaTechGameObjects.Jewelry1Owned,   &OmegaTechGameObjects.Jewelry1Icon},
+        {"Jewelry 2",  &OmegaTechGameObjects.Jewelry2Owned,   &OmegaTechGameObjects.Jewelry2Icon},
+        {"Accessory 1",&OmegaTechGameObjects.Accessory1Owned, &OmegaTechGameObjects.Accessory1Icon},
+        {"Accessory 2",&OmegaTechGameObjects.Accessory2Owned, &OmegaTechGameObjects.Accessory2Icon},
+    };
 
-        DrawRectangle(ox, oy, 180, 30, bg_color);
-        DrawRectangleLines(ox, oy, 180, 30, slot_color);
+    for (int i = 0; i < EQUIP_SLOT_COUNT; i++) {
+        bool owned = *equipDraws[i].owned;
+        Color c = owned ? WHITE : (Color){80, 80, 80, 255};
+        Color bg = owned ? (Color){40, 50, 45, 255} : (Color){20, 25, 20, 255};
 
-        DrawText(TextFormat("[%d]", i + 1), ox + 6, oy + 6, 12, slot_color);
+        DrawRectangle(ex, ey, slotW, slotH, bg);
+        DrawRectangleLines(ex, ey, slotW, slotH, c);
+        DrawText(equipDraws[i].label, ex + 6, ey + 12, 12, c);
 
-        if (slots[i].owned && !slots[i].name.empty()) {
-            std::string narrow(slots[i].name.begin(), slots[i].name.end());
-            DrawText(narrow.c_str(), ox + 30, oy + 6, 12, slot_color);
-        } else if (slots[i].owned) {
-            DrawText("Item", ox + 30, oy + 6, 12, slot_color);
-        } else {
-            DrawText("Empty", ox + 30, oy + 6, 12, (Color){60, 60, 60, 255});
+        if (owned && equipDraws[i].icon->id > 0) {
+            DrawTextureEx(*equipDraws[i].icon, (Vector2){(float)ex + slotW - 34, (float)ey + 2}, 0, 1.5f, WHITE);
         }
-        oy += 34;
+        ey += slotH + 4;
     }
 
-    // Armory section (right column)
-    int ax = panel_x + 440;
-    int ay = panel_y + 45;
-    DrawText("-- Equipment --", ax, ay, 14, LIGHTGRAY);
-    ay += 22;
+    // === BACKPACK (right side) ===
+    int bx = px + 190;
+    int by = py + 50;
+    int cellSize = 52;
+    int cellGap = 4;
 
-    struct EquipSlot {
-        wstring name;
-        bool owned;
-        const char* label;
-    };
-    EquipSlot equip[4] = {
-        {OmegaTechGameObjects.Armory1Name, OmegaTechGameObjects.Armory1Owned, "Armor"},
-        {OmegaTechGameObjects.Armory2Name, OmegaTechGameObjects.Armory2Owned, "Armor"},
-        {OmegaTechGameObjects.Jewelry1Name, OmegaTechGameObjects.Jewelry1Owned, "Jewel"},
-        {OmegaTechGameObjects.Jewelry2Name, OmegaTechGameObjects.Jewelry2Owned, "Jewel"},
-    };
+    DrawText("BACKPACK", bx, by - 18, 12, LIGHTGRAY);
 
-    for (int i = 0; i < 4; i++) {
-        Color slot_color = equip[i].owned ? WHITE : (Color){80, 80, 80, 255};
-        Color bg_color = equip[i].owned ? (Color){40, 50, 40, 255} : (Color){20, 25, 20, 255};
+    for (int row = 0; row < BACKPACK_ROWS; row++) {
+        for (int col = 0; col < BACKPACK_COLS; col++) {
+            int idx = row * BACKPACK_COLS + col;
+            int cx = bx + col * (cellSize + cellGap);
+            int cy = by + row * (cellSize + cellGap);
 
-        DrawRectangle(ax, ay, 180, 30, bg_color);
-        DrawRectangleLines(ax, ay, 180, 30, slot_color);
+            int itemId = gInventory.backpack[idx].itemId;
+            int qty = gInventory.backpack[idx].quantity;
+            bool hasItem = itemId >= 0 && qty > 0;
 
-        DrawText(TextFormat("%s", equip[i].label), ax + 6, ay + 6, 12, slot_color);
+            Color bgC = hasItem ? (Color){40, 40, 55, 255} : (Color){15, 15, 20, 255};
+            Color borderC = hasItem ? WHITE : (Color){50, 50, 50, 255};
 
-        if (equip[i].owned && !equip[i].name.empty()) {
-            std::string narrow(equip[i].name.begin(), equip[i].name.end());
-            DrawText(narrow.c_str(), ax + 60, ay + 6, 12, slot_color);
-        } else if (equip[i].owned) {
-            DrawText("Equipped", ax + 60, ay + 6, 12, slot_color);
-        } else {
-            DrawText("Empty", ax + 60, ay + 6, 12, (Color){60, 60, 60, 255});
+            if (g_invSelectedBpSlot == idx) {
+                borderC = (Color){255, 255, 0, 255};
+            }
+
+            DrawRectangle(cx, cy, cellSize, cellSize, bgC);
+            DrawRectangleLines(cx, cy, cellSize, cellSize, borderC);
+
+            if (hasItem) {
+                const ItemDBEntry* def = GetItemDef(itemId);
+                if (def) {
+                    Texture2D* icon = nullptr;
+                    switch (def->category) {
+                        case ItemCategory::HEALTH_VIAL:    icon = &OmegaTechGameObjects.HealthVialIcon; break;
+                        case ItemCategory::MANA_VIAL:      icon = &OmegaTechGameObjects.ManaVialIcon; break;
+                        case ItemCategory::ENERGY_CRYSTAL: icon = &OmegaTechGameObjects.EnergyCrystalIcon; break;
+                        case ItemCategory::KEY:            icon = &OmegaTechGameObjects.KeyIcon; break;
+                        case ItemCategory::COIN:           icon = &OmegaTechGameObjects.CoinIcon; break;
+                        case ItemCategory::POWERUP:        icon = &OmegaTechGameObjects.PowerupIcon; break;
+                        default: break;
+                    }
+                    if (icon && icon->id > 0) {
+                        float scale = (float)cellSize / (float)icon->width * 0.7f;
+                        DrawTextureEx(*icon, (Vector2){(float)cx + 6, (float)cy + 4}, 0, scale, WHITE);
+                    }
+                    // Quantity text
+                    if (qty > 1) {
+                        DrawText(TextFormat("%d", qty), cx + cellSize - 20, cy + cellSize - 16, 12, WHITE);
+                    }
+                }
+            }
         }
-        ay += 34;
+    }
+
+    // === STATS (between equipment and backpack) ===
+    int sx = px + 530;
+    int sy = py + 50;
+    DrawText("STATS", sx, sy - 18, 12, LIGHTGRAY);
+
+    sy += 4;
+    DrawText(TextFormat("Level: %d", OmegaPlayer.Level), sx, sy, 14, WHITE); sy += 22;
+    DrawText(TextFormat("XP: %d/%d", OmegaPlayer.XP, OmegaPlayer.XPToNext), sx, sy, 14, WHITE); sy += 22;
+
+    DrawRectangle(sx, sy, 150, 10, (Color){50, 0, 0, 255});
+    float hpPct = OmegaPlayer.MaxHealth > 0 ? OmegaPlayer.Health / OmegaPlayer.MaxHealth : 0;
+    DrawRectangle(sx, sy, (int)(150 * hpPct), 10, RED);
+    DrawText(TextFormat("HP: %.0f/%.0f", OmegaPlayer.Health, OmegaPlayer.MaxHealth), sx + 1, sy + 12, 12, RED); sy += 28;
+
+    DrawRectangle(sx, sy, 150, 10, (Color){0, 0, 50, 255});
+    float mpPct = OmegaPlayer.MaxMana > 0 ? OmegaPlayer.Mana / OmegaPlayer.MaxMana : 0;
+    DrawRectangle(sx, sy, (int)(150 * mpPct), 10, BLUE);
+    DrawText(TextFormat("MP: %.0f/%.0f", OmegaPlayer.Mana, OmegaPlayer.MaxMana), sx + 1, sy + 12, 12, BLUE); sy += 28;
+
+    DrawRectangle(sx, sy, 150, 10, (Color){30, 0, 30, 255});
+    float pePct = OmegaPlayer.MaxPsychicEnergy > 0 ? OmegaPlayer.PsychicEnergy / OmegaPlayer.MaxPsychicEnergy : 0;
+    DrawRectangle(sx, sy, (int)(150 * pePct), 10, PURPLE);
+    DrawText(TextFormat("PE: %.0f/%.0f", OmegaPlayer.PsychicEnergy, OmegaPlayer.MaxPsychicEnergy), sx + 1, sy + 12, 12, PURPLE);
+
+    // Selected item info
+    if (g_invSelectedBpSlot >= 0) {
+        int itemId = gInventory.backpack[g_invSelectedBpSlot].itemId;
+        if (itemId >= 0) {
+            const ItemDBEntry* def = GetItemDef(itemId);
+            if (def) {
+                DrawText(def->name, sx, sy + 40, 14, WHITE);
+                DrawText(def->description, sx, sy + 58, 12, LIGHTGRAY);
+            }
+        }
+    }
+
+    // Hotbar preview at bottom
+    int hx = px + 20;
+    int hy = py + panel_h - 48;
+    DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
+    hx += 60;
+    for (int i = 0; i < 5; i++) {
+        bool owned = false;
+        Texture2D* icon = nullptr;
+        switch (i) {
+            case 0: owned = OmegaTechGameObjects.Object1Owned; icon = &OmegaTechGameObjects.Object1Icon; break;
+            case 1: owned = OmegaTechGameObjects.Object2Owned; icon = &OmegaTechGameObjects.Object2Icon; break;
+            case 2: owned = OmegaTechGameObjects.Object3Owned; icon = &OmegaTechGameObjects.Object3Icon; break;
+            case 3: owned = OmegaTechGameObjects.Object4Owned; icon = &OmegaTechGameObjects.Object4Icon; break;
+            case 4: owned = OmegaTechGameObjects.Object5Owned; icon = &OmegaTechGameObjects.Object5Icon; break;
+        }
+        Color c = owned ? WHITE : (Color){50, 50, 50, 255};
+        DrawRectangle(hx, hy, 32, 32, (Color){20, 20, 30, 255});
+        DrawRectangleLines(hx, hy, 32, 32, c);
+        if (owned && icon && icon->id > 0)
+            DrawTextureEx(*icon, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
+        hx += 36;
     }
 
     // Controls hint
-    DrawText("ARROW KEYS / WHEEL: select  |  E: pickup  |  LMB: fire  |  TAB: close",
-             panel_x + 20, panel_y + panel_h - 30, 12, DARKGRAY);
+    DrawText("TAB: close  |  CLICK item to use  |  E: pickup  |  ^: console",
+             px + 20, py + panel_h - 22, 12, DARKGRAY);
 }
 
 int main(){
@@ -349,16 +565,35 @@ int main(){
     
     while (!WindowShouldClose())
     {
-        // Tab key toggles inventory
-        if (IsKeyPressed(KEY_TAB)) {
-            ShowInventory = !ShowInventory;
-            if (ShowInventory) {
+        // Console toggle with ^ (grave) key
+        if (IsKeyPressed(KEY_GRAVE)) {
+            g_consoleOpen = !g_consoleOpen;
+            if (g_consoleOpen) {
                 ShowCursor();
                 EnableCursor();
-            } else {
+            } else if (!ShowInventory) {
                 HideCursor();
                 DisableCursor();
             }
+        }
+
+        // Tab key toggles inventory
+        if (IsKeyPressed(KEY_TAB)) {
+            if (!g_consoleOpen) {
+                ShowInventory = !ShowInventory;
+                if (ShowInventory) {
+                    ShowCursor();
+                    EnableCursor();
+                } else {
+                    HideCursor();
+                    DisableCursor();
+                }
+            }
+        }
+
+        // Console input processing
+        if (g_consoleOpen) {
+            HandleConsoleInput();
         }
 
         // Capture left-mouse state before camera (handle after)
@@ -370,14 +605,14 @@ int main(){
         OmegaPlayer.OldY = OmegaTechData.MainCamera.position.y;
         OmegaPlayer.OldZ = OmegaTechData.MainCamera.position.z;
 
-        if (!ShowSettings && !ShowInventory){
+        if (!ShowSettings && !ShowInventory && !g_consoleOpen){
             for (int i = 0 ; i <= OmegaTechData.CameraSpeed; i ++){
                 UpdateCamera(&OmegaTechData.MainCamera, CAMERA_FIRST_PERSON);
             }
         }
 
         // Weapon fire AFTER camera so left-click does not disrupt movement
-        if (!ShowInventory && left_just_pressed) {
+        if (!ShowInventory && !g_consoleOpen && left_just_pressed) {
             if (SelectedObject == 1 &&
                 OmegaTechGameObjects.Object1Owned) {
                 FireWeapon();
@@ -405,6 +640,13 @@ int main(){
         FadeColor = (Color){R, G, B, 255};
     
         DrawWorld();
+
+        // Draw ground pickups in a second 3D pass to the render target
+        BeginTextureMode(Target);
+        BeginMode3D(OmegaTechData.MainCamera);
+        DrawGroundPickups();
+        EndMode3D();
+        EndTextureMode();
         
         BeginDrawing();  
 
@@ -491,6 +733,9 @@ int main(){
         if (ShowInventory) {
             DrawInventoryOverlay();
         }
+
+        // Console overlay (always on top)
+        DrawConsole();
 
         EndDrawing();
 

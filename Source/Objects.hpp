@@ -1,4 +1,5 @@
 #include "PPGIO.hpp"
+#include <cstdio>
 
 class GameObject
 {
@@ -62,6 +63,44 @@ class GameObject
         Texture2D Jewelry2Icon;
         bool Jewelry2Owned;
 
+        // RPG expansion slots
+        Model Helmet;
+        wstring HelmetName;
+        Texture2D HelmetTexture;
+        Texture2D HelmetIcon;
+        bool HelmetOwned;
+
+        Model Boots;
+        wstring BootsName;
+        Texture2D BootsTexture;
+        Texture2D BootsIcon;
+        bool BootsOwned;
+
+        Model Legs;
+        wstring LegsName;
+        Texture2D LegsTexture;
+        Texture2D LegsIcon;
+        bool LegsOwned;
+
+        Model Accessory1;
+        wstring Accessory1Name;
+        Texture2D Accessory1Texture;
+        Texture2D Accessory1Icon;
+        bool Accessory1Owned;
+
+        Model Accessory2;
+        wstring Accessory2Name;
+        Texture2D Accessory2Texture;
+        Texture2D Accessory2Icon;
+        bool Accessory2Owned;
+
+        // Item icon textures for consumables
+        Texture2D HealthVialIcon;
+        Texture2D ManaVialIcon;
+        Texture2D EnergyCrystalIcon;
+        Texture2D KeyIcon;
+        Texture2D CoinIcon;
+        Texture2D PowerupIcon;
 };
 
 static GameObject OmegaTechGameObjects;
@@ -153,41 +192,156 @@ void InitObjects(){
         OmegaTechGameObjects.Jewelry2Owned = false;
         OmegaTechGameObjects.Jewelry2Name = WSplitValue(LoadFile("GameData/Global/Objects/Jewelry2.info") , 0);
     }
+
+    // RPG expansion equipment slots
+    if (IsPathFile("GameData/Global/Objects/Helmet.obj")){
+        OmegaTechGameObjects.Helmet = LoadModel("GameData/Global/Objects/Helmet.obj");
+        OmegaTechGameObjects.HelmetTexture = LoadTexture("GameData/Global/Objects/HelmetTexture.png");
+        OmegaTechGameObjects.HelmetIcon = LoadTexture("GameData/Global/Objects/HelmetIcon.png");
+        OmegaTechGameObjects.Helmet.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.HelmetTexture; 
+    }
+    OmegaTechGameObjects.HelmetOwned = false;
+    OmegaTechGameObjects.HelmetName = L"Helmet";
+
+    if (IsPathFile("GameData/Global/Objects/Boots.obj")){
+        OmegaTechGameObjects.Boots = LoadModel("GameData/Global/Objects/Boots.obj");
+        OmegaTechGameObjects.BootsTexture = LoadTexture("GameData/Global/Objects/BootsTexture.png");
+        OmegaTechGameObjects.BootsIcon = LoadTexture("GameData/Global/Objects/BootsIcon.png");
+        OmegaTechGameObjects.Boots.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.BootsTexture; 
+    }
+    OmegaTechGameObjects.BootsOwned = false;
+    OmegaTechGameObjects.BootsName = L"Boots";
+
+    if (IsPathFile("GameData/Global/Objects/Legs.obj")){
+        OmegaTechGameObjects.Legs = LoadModel("GameData/Global/Objects/Legs.obj");
+        OmegaTechGameObjects.LegsTexture = LoadTexture("GameData/Global/Objects/LegsTexture.png");
+        OmegaTechGameObjects.LegsIcon = LoadTexture("GameData/Global/Objects/LegsIcon.png");
+        OmegaTechGameObjects.Legs.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.LegsTexture; 
+    }
+    OmegaTechGameObjects.LegsOwned = false;
+    OmegaTechGameObjects.LegsName = L"Legs";
+
+    if (IsPathFile("GameData/Global/Objects/Accessory1.obj")){
+        OmegaTechGameObjects.Accessory1 = LoadModel("GameData/Global/Objects/Accessory1.obj");
+        OmegaTechGameObjects.Accessory1Texture = LoadTexture("GameData/Global/Objects/Accessory1Texture.png");
+        OmegaTechGameObjects.Accessory1Icon = LoadTexture("GameData/Global/Objects/Accessory1Icon.png");
+        OmegaTechGameObjects.Accessory1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Accessory1Texture; 
+    }
+    OmegaTechGameObjects.Accessory1Owned = false;
+    OmegaTechGameObjects.Accessory1Name = L"Accessory 1";
+
+    if (IsPathFile("GameData/Global/Objects/Accessory2.obj")){
+        OmegaTechGameObjects.Accessory2 = LoadModel("GameData/Global/Objects/Accessory2.obj");
+        OmegaTechGameObjects.Accessory2Texture = LoadTexture("GameData/Global/Objects/Accessory2Texture.png");
+        OmegaTechGameObjects.Accessory2Icon = LoadTexture("GameData/Global/Objects/Accessory2Icon.png");
+        OmegaTechGameObjects.Accessory2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = OmegaTechGameObjects.Accessory2Texture; 
+    }
+    OmegaTechGameObjects.Accessory2Owned = false;
+    OmegaTechGameObjects.Accessory2Name = L"Accessory 2";
+
+    // Load consumable item icons
+    OmegaTechGameObjects.HealthVialIcon      = LoadTexture(ItemDB[0].iconPath);
+    OmegaTechGameObjects.ManaVialIcon        = LoadTexture(ItemDB[1].iconPath);
+    OmegaTechGameObjects.EnergyCrystalIcon   = LoadTexture(ItemDB[2].iconPath);
+    OmegaTechGameObjects.KeyIcon             = LoadTexture(ItemDB[11].iconPath);
+    OmegaTechGameObjects.CoinIcon            = LoadTexture(ItemDB[12].iconPath);
+    OmegaTechGameObjects.PowerupIcon         = LoadTexture(ItemDB[13].iconPath);
 }
 
 static int SelectedObject = 1;
 
+static void DrawHotbarSlot(int index, int x, int y, Texture2D* icon, const char* label) {
+    Color slotColor = (icon && icon->id > 0) ? WHITE : (Color){60, 60, 60, 200};
+    Color bgColor   = (icon && icon->id > 0) ? (Color){30, 30, 45, 220} : (Color){15, 15, 20, 180};
+
+    DrawRectangle(x, y, 96, 96, bgColor);
+    DrawRectangleLines(x, y, 96, 96, slotColor);
+
+    if (SelectedObject == index + 1) {
+        DrawRectangleLinesEx((Rectangle){(float)x-1, (float)y-1, 98, 98}, 3, (Color){255, 255, 0, 220});
+    }
+
+    if (icon && icon->id > 0) {
+        DrawTextureEx(*icon, (Vector2){(float)x + 6, (float)y + 6}, 0, 2.5f, WHITE);
+    }
+
+    if (label) {
+        DrawText(label, x + 6, y + 96 - 16, 10, slotColor);
+    }
+}
+
 void UpdateObjectBar(){
+    int barX = 10;
+    int barY = GetScreenHeight() - 5 - 96;
+    int slotW = 96;
+    int gap = 0;
 
-    DrawTextureEx(OmegaTechGameObjects.ObjectBar, {10, GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
+    DrawTextureEx(OmegaTechGameObjects.ObjectBar, (Vector2){(float)barX, (float)barY}, 0, 3, WHITE);
 
-    DrawRectangleLines(10 + 2 + ((SelectedObject - 1) * 96) - ((SelectedObject * 3)) ,  GetScreenHeight() - 5 - (32 * 3) , 32*3, 32*3, WHITE);
+    // Slots 1-5: Weapons
+    auto drawWeaponSlot = [&](int i, bool owned, Texture2D& icon, const wstring& name) {
+        Texture2D* ip = owned ? &icon : nullptr;
+        const char* lbl = owned ? "Weapon" : nullptr;
+        if (owned && !name.empty()) {
+            static char buf[64];
+            std::string n(name.begin(), name.end());
+            snprintf(buf, sizeof(buf), "%.6s", n.c_str());
+            lbl = buf;
+        }
+        DrawHotbarSlot(i, barX + slotW * i, barY, ip, lbl);
+    };
 
-    if (OmegaTechGameObjects.Object1Owned){
-        DrawTextureEx(OmegaTechGameObjects.Object1Icon, {10, GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
-        if (SelectedObject == 1)DrawTextEx(OmegaTechGameObjects.BarFont, TextFormat("%ls" , OmegaTechGameObjects.Object1Name.c_str() ),{ 10, (GetScreenHeight() - 5 - (32 * 3)) - 20 } , 20 , 1, WHITE);
+    drawWeaponSlot(0, OmegaTechGameObjects.Object1Owned, OmegaTechGameObjects.Object1Icon, OmegaTechGameObjects.Object1Name);
+    drawWeaponSlot(1, OmegaTechGameObjects.Object2Owned, OmegaTechGameObjects.Object2Icon, OmegaTechGameObjects.Object2Name);
+    drawWeaponSlot(2, OmegaTechGameObjects.Object3Owned, OmegaTechGameObjects.Object3Icon, OmegaTechGameObjects.Object3Name);
+    drawWeaponSlot(3, OmegaTechGameObjects.Object4Owned, OmegaTechGameObjects.Object4Icon, OmegaTechGameObjects.Object4Name);
+    drawWeaponSlot(4, OmegaTechGameObjects.Object5Owned, OmegaTechGameObjects.Object5Icon, OmegaTechGameObjects.Object5Name);
+
+    // Slots 6-8: Backpack consumables
+    for (int si = 5; si < 8; si++) {
+        int bpIdx = si - 5;
+        int foundSlot = -1;
+        int count = 0;
+        // Find the bpIdx-th non-empty backpack slot
+        for (int b = 0; b < BACKPACK_SLOTS; b++) {
+            if (gInventory.backpack[b].itemId != -1) {
+                if (count == bpIdx) { foundSlot = b; break; }
+                count++;
+            }
+        }
+        const char* lbl = nullptr;
+        Texture2D* icon = nullptr;
+        if (foundSlot >= 0) {
+            int itemId = gInventory.backpack[foundSlot].itemId;
+            const ItemDBEntry* def = GetItemDef(itemId);
+            if (def) {
+                // Find the icon texture
+                Texture2D* icons[] = {
+                    &OmegaTechGameObjects.HealthVialIcon,
+                    &OmegaTechGameObjects.ManaVialIcon,
+                    &OmegaTechGameObjects.EnergyCrystalIcon,
+                    &OmegaTechGameObjects.KeyIcon,
+                    &OmegaTechGameObjects.CoinIcon,
+                    &OmegaTechGameObjects.PowerupIcon
+                };
+                int iconIdx = -1;
+                switch (def->category) {
+                    case ItemCategory::HEALTH_VIAL:    iconIdx = 0; break;
+                    case ItemCategory::MANA_VIAL:      iconIdx = 1; break;
+                    case ItemCategory::ENERGY_CRYSTAL: iconIdx = 2; break;
+                    case ItemCategory::KEY:            iconIdx = 3; break;
+                    case ItemCategory::COIN:           iconIdx = 4; break;
+                    case ItemCategory::POWERUP:        iconIdx = 5; break;
+                    default: break;
+                }
+                if (iconIdx >= 0) icon = icons[iconIdx];
+                lbl = def->name;
+            }
+        }
+        DrawHotbarSlot(si, barX + slotW * si, barY, icon, lbl);
     }
 
-    if (OmegaTechGameObjects.Object2Owned){
-        DrawTextureEx(OmegaTechGameObjects.Object2Icon, {10 + (32 * 3), GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
-        if (SelectedObject == 2)DrawTextEx(OmegaTechGameObjects.BarFont, TextFormat("%ls" , OmegaTechGameObjects.Object2Name.c_str() ),{ 10 + 96, (GetScreenHeight() - 5 - (32 * 3)) - 20 } , 20 , 1, WHITE);
-    }
-
-    if (OmegaTechGameObjects.Object3Owned){
-        DrawTextureEx(OmegaTechGameObjects.Object3Icon, {10 + 96 * 2, GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
-        if (SelectedObject == 3)DrawTextEx(OmegaTechGameObjects.BarFont, TextFormat("%ls" , OmegaTechGameObjects.Object3Name.c_str() ),{ 10 + 96 * 2, (GetScreenHeight() - 5 - (32 * 3)) - 20 } , 20 , 1, WHITE);
-    }
-
-    if (OmegaTechGameObjects.Object4Owned){
-        DrawTextureEx(OmegaTechGameObjects.Object4Icon, {10+ 96 * 3, GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
-        if (SelectedObject == 4)DrawTextEx(OmegaTechGameObjects.BarFont, TextFormat("%ls" , OmegaTechGameObjects.Object4Name.c_str() ),{ 10 + 96 * 3, (GetScreenHeight() - 5 - (32 * 3)) - 20 } , 20 , 1, WHITE);
-    }
-
-    if (OmegaTechGameObjects.Object5Owned){
-        DrawTextureEx(OmegaTechGameObjects.Object5Icon, {10+ 96 * 4, GetScreenHeight() - 5 - (32 * 3)} , 0 , 3, WHITE);
-        if (SelectedObject == 5)DrawTextEx(OmegaTechGameObjects.BarFont, TextFormat("%ls" , OmegaTechGameObjects.Object5Name.c_str() ),{ 10 + 96 * 4, (GetScreenHeight() - 5 - (32 * 3)) - 20 } , 20 , 1, WHITE);
-    }
-
+    // Input handling
     if (IsKeyPressed(KEY_LEFT)){
         if (SelectedObject != 1) SelectedObject --;
     }
@@ -195,7 +349,6 @@ void UpdateObjectBar(){
         if (SelectedObject != 8) SelectedObject ++;
     }
 
-    // Number keys 1-8 for direct slot selection
     if (IsKeyPressed(KEY_ONE))   SelectedObject = 1;
     if (IsKeyPressed(KEY_TWO))   SelectedObject = 2;
     if (IsKeyPressed(KEY_THREE)) SelectedObject = 3;
@@ -223,4 +376,17 @@ void UpdateObjectBar(){
         }
     }
 
+    // Use selected slot
+    if (IsKeyPressed(KEY_ENTER) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (SelectedObject >= 6 && SelectedObject <= 8) {
+            int bpIdx = SelectedObject - 6;
+            int count = 0;
+            for (int b = 0; b < BACKPACK_SLOTS; b++) {
+                if (gInventory.backpack[b].itemId != -1) {
+                    if (count == bpIdx) { gInventory.UseItem(b); break; }
+                    count++;
+                }
+            }
+        }
+    }
 }
