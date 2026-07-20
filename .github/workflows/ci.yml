@@ -49,7 +49,7 @@ jobs:
       - name: Build server (oz_server)
         run: make oz_server
 
-      - name: Build client (OmegaTech)
+      - name: Build client (Angels95)
         run: make OTENGINE
 
       - name: Smoke test server
@@ -65,8 +65,8 @@ jobs:
       - name: Upload client binary
         uses: actions/upload-artifact@v4
         with:
-          name: OmegaTech-linux
-          path: OmegaTech
+          name: Angels95-linux
+          path: Angels95
 
   windows:
     runs-on: windows-latest
@@ -96,13 +96,17 @@ jobs:
       - name: Build server (oz_server)
         run: make oz_server SERVER_CXX=g++
 
-      - name: Build client (OmegaTech)
+      - name: Build client (Angels95)
         run: make OTENGINE
+
+      - name: Bundle raylib DLL
+        run: |
+          cp /mingw64/bin/libraylib*.dll . 2>/dev/null || echo "No DLL found"
 
       - name: Verify binaries exist
         run: |
           ls -la oz_server.exe 2>/dev/null && echo "Server OK" || echo "Server MISSING"
-          ls -la OmegaTech.exe 2>/dev/null && echo "Client OK" || echo "Client MISSING"
+          ls -la Angels95.exe 2>/dev/null && echo "Client OK" || echo "Client MISSING"
 
       - name: Upload server binary
         uses: actions/upload-artifact@v4
@@ -110,8 +114,10 @@ jobs:
           name: oz_server-windows
           path: oz_server*
 
-      - name: Upload client binary
+      - name: Upload client binary and dependencies
         uses: actions/upload-artifact@v4
         with:
-          name: OmegaTech-windows
-          path: OmegaTech.exe
+          name: Angels95-windows
+          path: |
+            Angels95.exe
+            libraylib*.dll

@@ -700,6 +700,26 @@ void OmegaTechInit()
     PlayMusicStream(OmegaTechData.HomeScreenMusic);
 }
 
+void PlaySplashScreen()
+{
+    Texture2D splash = LoadTexture("GameData/Global/Title/splash.png");
+    double startTime = GetTime();
+
+    while (!WindowShouldClose() && GetTime() - startTime < 2.5)
+    {
+        BeginDrawing();
+        ClearBackground(BLACK);
+        if (splash.id > 0)
+            DrawTexturePro(splash,
+                (Rectangle){0, 0, (float)splash.width, (float)splash.height},
+                (Rectangle){0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()},
+                (Vector2){0, 0}, 0, WHITE);
+        EndDrawing();
+    }
+
+    if (splash.id > 0) UnloadTexture(splash);
+}
+
 void PlayHomeScreen()
 {
     static char JoinIP[32] = "127.0.0.1";

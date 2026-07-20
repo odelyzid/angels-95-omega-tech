@@ -458,7 +458,7 @@ bool NetworkDiscovery::init(const char* game_name, const char* game_version,
                             uint16_t port) {
     if (!winsock_init()) return false;
 
-    m_game_name = game_name ? game_name : "OmegaTech";
+    m_game_name = game_name ? game_name : "Angels95";
     m_game_version = game_version ? game_version : "0.1.0";
     m_game_port = port;
     return true;

@@ -30,7 +30,7 @@ void ToggleSettings(){
 
 void UpdateSettings(){
     if (ShowSettings){
-        GuiWindowBox((Rectangle){ 20, 20, 300, 400 }, "OmegaTech Developer Settings");
+        GuiWindowBox((Rectangle){ 20, 20, 300, 400 }, "Angels95 Developer Settings");
         if (GuiButton((Rectangle){ 40, 50, 80, 40 }, "Toggle Debug")){
             if (Debug){
                 Debug = false;
@@ -161,7 +161,7 @@ void ShowMenuSetiings(){
         (Rectangle){ 268, 475, 140, 28 },
     };
     GuiWindowBox(LayoutRecs[1], "Settings");
-    GuiLabel(LayoutRecs[0], "Omega Tech Settings");
+    GuiLabel(LayoutRecs[0], "Angels95 Settings");
     GuiPanel(LayoutRecs[2], "Window");
     if (GuiButton(LayoutRecs[3], "Toggle Fullscreen")) ToggleFullscreen(); 
     VSYNCToggle = GuiToggle(LayoutRecs[7], "VSync", VSYNCToggle);
@@ -171,8 +171,8 @@ void ShowMenuSetiings(){
     MuteToggle = GuiToggle(LayoutRecs[9], "Mute Audio", MuteToggle);
     AudioSlider = GuiSlider(LayoutRecs[10], "Audio Volume", NULL, AudioSlider, 0, 100);
 
-    GuiLabel(LayoutRecs[12], "OMEGATECH ENGINE ");
-    GuiLabel(LayoutRecs[13], "PixelPhobicGames 2023");
+    GuiLabel(LayoutRecs[12], "ANGELS95 ");
+    GuiLabel(LayoutRecs[13], "TribeWarez 2025");
     GuiLabel(LayoutRecs[14], "@EC, JF , ZT , NC , LC");
 
     if (VSYNCToggle){

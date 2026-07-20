@@ -56,7 +56,7 @@ Client.o: Source/Client/Client.cpp Source/Client/Client.hpp
 
 # 6. Build Game Binary
 OTENGINE: $(OBJS)
-	$(COMP) $(OBJS) -o OmegaTech$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
+	$(COMP) $(OBJS) -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build oz_server (dedicated server, no raylib)
 GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp
@@ -66,4 +66,4 @@ oz_server: Network.o GameState.o Log.o Source/Server/Server.cpp Source/Network/N
 	$(SERVER_CXX) $(SERVER_FLAGS) Network.o GameState.o Log.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o oz_server$(EXE) $(SERVER_LIBS)
 
 clean:
-	rm -f *.o *.so *.dll OmegaTech OmegaTech.exe oz_server oz_server.exe
+	rm -f *.o *.so *.dll Angels95 Angels95.exe oz_server oz_server.exe

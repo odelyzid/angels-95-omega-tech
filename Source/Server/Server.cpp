@@ -657,7 +657,7 @@ int main(int argc, char** argv) {
 
     // LAN discovery
     net::NetworkDiscovery discovery;
-    discovery.init("OmegaTech", "0.2.0", static_cast<uint16_t>(game_port));
+    discovery.init("Angels95", "0.2.0", static_cast<uint16_t>(game_port));
     discovery.start();
 
     // Initialize game state with worlds

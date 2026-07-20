@@ -311,7 +311,7 @@ static void DrawInventoryOverlay() {
 int main(){
     SetConfigFlags(FLAG_VSYNC_HINT);
 
-    InitWindow(1280 , 720 , "Project Omega");
+    InitWindow(1280 , 720 , "Angels95");
     SetTargetFPS(60);
 
     InitAudioDevice();
@@ -321,6 +321,7 @@ int main(){
     }
 
     OmegaTechInit();
+    PlaySplashScreen();
     PlayHomeScreen();
     
     LoadWorld();

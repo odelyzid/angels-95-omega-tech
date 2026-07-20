@@ -88,7 +88,7 @@ make -j$(nproc)
 
 | Target | Description |
 |---|---|
-| `OmegaTech` / `OmegaTech.exe` | Game client (requires raylib) |
+| `Angels95` / `Angels95.exe` | Game client (requires raylib) |
 | `oz_server` / `oz_server.exe` | Dedicated server (no raylib) |
 
 ---
