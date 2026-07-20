@@ -49,9 +49,9 @@ typedef union thread_atomic_int64_t
 } thread_atomic_int64_t;
 
 static inline int64_t atomic_cmpxchg( thread_atomic_int64_t* atomic, int64_t expected, int64_t desired ) {
-  #if defined( _WIN32 )
+  #if defined( _MSC_VER )
     return _InterlockedCompareExchange64( &atomic->i, desired, expected );
-  #elif defined( __linux__ ) || defined( __APPLE__ ) || defined( __ANDROID__ )
+  #elif defined( __GNUC__ ) || defined( __clang__ )
     return __sync_val_compare_and_swap( &atomic->i, expected, desired );
   #else 
     #error Unknown platform.
@@ -67,9 +67,9 @@ static inline int64_t atomic_get( thread_atomic_int64_t* atomic ) {
 }
 
 static inline void atomic_set( thread_atomic_int64_t* atomic, int64_t desired ) {
-  #if defined( _WIN32 )
+  #if defined( _MSC_VER )
     _InterlockedExchange64( &atomic->i, desired );
-  #elif defined( __linux__ ) || defined( __APPLE__ ) || defined( __ANDROID__ )
+  #elif defined( __GNUC__ ) || defined( __clang__ )
     __sync_fetch_and_and( &atomic->i, 0 );
     __sync_fetch_and_or( &atomic->i, desired );
   #else 

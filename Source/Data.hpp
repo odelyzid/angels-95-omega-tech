@@ -1,3 +1,4 @@
+#include "WindowsCompat.hpp"
 #include "raylib.h"
 #include "Settings.hpp"
 #include "Player.hpp"
