@@ -1,5 +1,6 @@
 #include "raygui/raygui.h"
 #include  "raygui/dark.h"
+#include "Log.hpp"
 #include <cstddef>
 
 static bool ShowSettings = false;
@@ -8,6 +9,7 @@ static bool HeadBob = true;
 static bool PixelShader = true;
 static bool ParticlesEnabled = true;
 static bool FPSEnabled = false;
+static bool ShowLogWindow = false;
 static float ResolutionScale = 1.0f;
 
 static RenderTexture2D Target;
@@ -72,7 +74,11 @@ void UpdateSettings(){
             }
         } 
 
-        if (GuiButton((Rectangle){ 40 + 90 * 2, 50 + 50, 80, 40 }, "VSync .T")){
+        if (GuiButton((Rectangle){ 40, 50 + 100, 80, 40 }, "Log")){
+            ShowLogWindow = !ShowLogWindow;
+        }
+
+        if (GuiButton((Rectangle){ 40 + 90, 50 + 100, 80, 40 }, "VSync .T")){
             if (IsWindowState(FLAG_VSYNC_HINT)){
                 ClearWindowState(FLAG_VSYNC_HINT);
             }
@@ -80,6 +86,17 @@ void UpdateSettings(){
                 SetConfigFlags(FLAG_VSYNC_HINT);
             }
         } 
+        if (ShowLogWindow){
+            GuiWindowBox((Rectangle){ 340, 20, 500, 500 }, "Log Output");
+            int log_line_y = 50;
+            for (const auto& ll : Log::get_buffer()) {
+                if (log_line_y > 500) break;
+                Color c = RAYWHITE;
+                DrawText(ll.text, 350, log_line_y, 12, c);
+                log_line_y += 16;
+            }
+        }
+
         GuiGroupBox((Rectangle){ 40, 150, 260, 110 }, "Resolution Scale");
         ResolutionScale = GuiSlider((Rectangle){ 90, 160, 120, 40 }, "Internal" , TextFormat("%ipx: %ipx" , int(1280 * ResolutionScale) , int(720* ResolutionScale)), ResolutionScale, 0.0f, 3.0f);
         

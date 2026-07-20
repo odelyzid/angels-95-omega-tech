@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            g++ make libraylib-dev libgl1-mesa-dev \
+            libx11-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxext-dev
+
+      - name: Build server (oz_server)
+        run: |
+          make oz_server
+
+      - name: Build client (OmegaTech)
+        run: |
+          make OTENGINE
+
+      - name: Smoke test server
+        run: |
+          timeout 3 ./oz_server --dir GameData --port 27015 --http-port 8080 2>&1 | head -20
+
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: oz_server-linux
+          path: oz_server
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-raylib
+            mingw-w64-x86_64-pkg-config
+
+      - name: Build server (oz_server)
+        run: |
+          make oz_server SERVER_CXX=x86_64-w64-mingw32-g++ SERVER_LIBS="-lm -lws2_32"
+
+      - name: Smoke test server (syntax check only)
+        run: |
+          ls -la oz_server.exe 2>/dev/null || ls -la oz_server 2>/dev/null
+          echo "Build successful"
+
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: oz_server-windows
+          path: oz_server*

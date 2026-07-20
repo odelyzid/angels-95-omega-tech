@@ -1,5 +1,9 @@
 #include "OTCustom.hpp"
 #include <raylib.h>
+#include <sstream>
+#include <fstream>
+#include <string>
+#include <algorithm>
 
 void UpdateCustom(){
     
@@ -93,7 +97,7 @@ void ParseOzonePrimitive(const std::string& line) {
 
         Vector3 pos = { x, z, y }; // Swap Y and Z if your map uses Z-up orientation
 
-        DrawPyramid(pos, w, d, h, SKYBLUE);
+        DrawPyramidPrimitive(pos, w, d, h, SKYBLUE);
     }
 }
 

@@ -8,7 +8,15 @@ class Player{
         int HeadBob = 0;
         int HeadBobDirection = 1;
 
-        int Health = 100;
+        float Health = 100.0f;
+        float MaxHealth = 100.0f;
+        float Mana = 0.0f;
+        float MaxMana = 100.0f;
+        float PsychicEnergy = 0.0f;
+        float MaxPsychicEnergy = 100.0f;
+        int Level = 1;
+        int XP = 0;
+        int XPToNext = 100;
 
         float OldX = 0.0f;
         float OldY = 0.0f;
