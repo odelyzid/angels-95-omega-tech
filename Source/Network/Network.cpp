@@ -15,11 +15,11 @@ namespace net {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-static bool winsock_init_counted = 0;
+static int winsock_init_counted = 0;
 
 static bool winsock_init() {
 #ifdef _WIN32
-    if (winsock_init_counted++) return true;
+    if (winsock_init_counted++ > 0) return true;
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
         fprintf(stderr, "WSAStartup failed\n");
@@ -180,7 +180,7 @@ void NetworkServer::update() {
     while (true) {
         ssize_t bytes = recvfrom(TO_SOCK(m_socket_fd),
                                  sock_recvfrom_buf(&msg, sizeof(msg)),
-                                 MSG_DONTWAIT,
+                                 0,
                                  (struct sockaddr*)&client_addr, &addr_len);
         if (bytes <= 0) break;
 
@@ -396,7 +396,7 @@ void NetworkClient::update() {
     while (true) {
         ssize_t bytes = recvfrom(TO_SOCK(m_socket_fd),
                                  sock_recvfrom_buf(&msg, sizeof(msg)),
-                                 MSG_DONTWAIT,
+                                 0,
                                  (struct sockaddr*)&addr, &addr_len);
         if (bytes <= 0) break;
         if (static_cast<size_t>(bytes) < sizeof(NetworkMessage)) continue;
@@ -537,7 +537,7 @@ void NetworkDiscovery::update() {
     ssize_t received;
     while ((received = recvfrom(TO_SOCK(m_socket_fd),
                                 sock_recvfrom_buf(buf, sizeof(buf)-1),
-                                MSG_DONTWAIT,
+                                0,
                                 (struct sockaddr*)&sender, &sender_len)) > 0) {
         buf[received] = '\0';
     }
