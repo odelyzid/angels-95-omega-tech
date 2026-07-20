@@ -9,7 +9,7 @@ ifeq ($(UNAME_S),Linux)
 else
   # Windows (MINGW/MSYS/CYGWIN)
   PIC :=
-  LDFLAGS := -lraylib -lopengl32 -lgdi32 -lwinmm -lm
+  LDFLAGS := -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
   RPATH :=
   EXE := .exe
   SERVER_LIBS := -lm -lws2_32
