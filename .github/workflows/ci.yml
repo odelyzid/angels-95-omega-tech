@@ -99,9 +99,10 @@ jobs:
       - name: Build client (Angels95)
         run: make OTENGINE
 
-      - name: Bundle raylib DLL
+      - name: Bundle runtime DLLs
         run: |
-          cp /mingw64/bin/libraylib*.dll . 2>/dev/null || echo "No DLL found"
+          cp /mingw64/bin/libraylib*.dll . 2>/dev/null || echo "No raylib DLL found"
+          cp /mingw64/bin/libglfw*.dll . 2>/dev/null || echo "No glfw DLL found"
 
       - name: Verify binaries exist
         run: |
@@ -121,3 +122,4 @@ jobs:
           path: |
             Angels95.exe
             libraylib*.dll
+            libglfw*.dll
