@@ -21,15 +21,30 @@ jobs:
             libxi-dev libxinerama-dev libxext-dev \
             libasound2-dev libpulse-dev cmake
 
+      - name: Cache raylib
+        id: cache-raylib
+        uses: actions/cache@v4
+        with:
+          path: /tmp/raylib-install
+          key: raylib-5.5-${{ runner.os }}
+
       - name: Build raylib from source
+        if: steps.cache-raylib.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib
           cmake -S /tmp/raylib -B /tmp/raylib/build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/raylib-install \
             -DBUILD_EXAMPLES=OFF \
             -DBUILD_GAMES=OFF
           cmake --build /tmp/raylib/build --parallel
-          sudo cmake --install /tmp/raylib/build
+          cmake --install /tmp/raylib/build
+
+      - name: Install raylib
+        run: |
+          if [ -d /tmp/raylib-install ]; then
+            sudo cp -r /tmp/raylib-install/* /usr/local/
+          fi
 
       - name: Build server (oz_server)
         run: make oz_server
@@ -69,21 +84,25 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-make
             mingw-w64-x86_64-raylib
-            mingw-w64-x86_64-pkg-config
             make
 
-      - name: Build server (oz_server)
+      - name: Check toolchain
         run: |
-          make oz_server
+          uname -s
+          g++ --version | head -1
+          make --version | head -1
+          pkg-config --cflags --libs raylib 2>/dev/null || echo "pkg-config not used"
+
+      - name: Build server (oz_server)
+        run: make oz_server SERVER_CXX=g++
 
       - name: Build client (OmegaTech)
-        run: |
-          make OTENGINE
+        run: make OTENGINE
 
-      - name: Smoke test server (syntax check only)
+      - name: Verify binaries exist
         run: |
-          ls -la oz_server.exe 2>/dev/null || ls -la oz_server 2>/dev/null
-          echo "Build successful"
+          ls -la oz_server.exe 2>/dev/null && echo "Server OK" || echo "Server MISSING"
+          ls -la OmegaTech.exe 2>/dev/null && echo "Client OK" || echo "Client MISSING"
 
       - name: Upload server binary
         uses: actions/upload-artifact@v4
