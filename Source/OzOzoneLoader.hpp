@@ -49,6 +49,13 @@ public:
     const std::vector<OzoneCollisionVolume>& GetCollisionVolumes() const { return m_collisionVolumes; }
     void RebuildCollisionVolumes();
 
+    // Heightmap terrain (loaded from OZONE heightmap primitive)
+    bool HasHeightmap() const { return m_hmReady; }
+    float SampleHeightmapY(float px, float pz) const;
+    const Model& GetHeightmapModel() const { return m_hmModel; }
+    Vector3 GetHeightmapPosition() const { return m_hmPosition; }
+    float GetHeightmapScale() const { return m_hmScale; }
+
     // Editor integration
     void LoadWorldTextures(const std::string& worldDir);
     void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
@@ -62,12 +69,22 @@ private:
     std::vector<OzoneRenderable> m_renderables;
     std::vector<OzoneCollisionVolume> m_collisionVolumes;
 
+    // Heightmap state (set from OZONE heightmap primitive)
+    bool m_hmReady = false;
+    Image m_hmImage{0};
+    Texture2D m_hmTexture{0};
+    Model m_hmModel;
+    Vector3 m_hmPosition{0,0,0};
+    Vector3 m_hmSize{100,50,100};
+    float m_hmScale = 1.0f;
+
     Texture2D m_floorTex{0};
     Texture2D m_wallTex{0};
     Texture2D m_columnTex{0};
     Texture2D m_ceilTex{0};
 
     void UnloadTextures();
+    void UnloadHeightmap();
     void ComputeCollisionAABB(int type, const std::vector<float>& args, Vector3 position, BoundingBox& out);
 
     Model BuildFromPrimitive(int type, const std::vector<float>& args);
@@ -77,4 +94,6 @@ private:
     Model BuildSphere(float r, int segments);
     Model BuildPyramid(float w, float d, float h);
     Model BuildPlane(float nx, float ny, float nz, float dist);
+    Model BuildHeightmap(const std::string& imagePath, const std::string& texPath,
+                         const std::vector<float>& args);
 };

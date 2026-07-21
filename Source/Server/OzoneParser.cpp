@@ -108,6 +108,20 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                     catch (...) { break; }
                 }
             }
+        } else if (type_name == "heightmap") {
+            prim.type = OzonePrimitiveType::HEIGHTMAP;
+            // heightmap imagePath texturePath x y z scale sizeX sizeY sizeZ
+            ls >> prim.entityType;   // image path
+            std::string texPath;
+            ls >> texPath;           // texture path
+            prim.entitySubType = texPath;
+            {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
         }
 
         if (prim.type != OzonePrimitiveType::UNKNOWN)

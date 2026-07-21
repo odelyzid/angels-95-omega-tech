@@ -83,30 +83,45 @@ static bool CmdPack(int argc, char** argv) {
     int fileCount = 0;
 
     // Walk directory recursively, collecting all files
-    for (auto& p : fs::recursive_directory_iterator(inPath)) {
-        if (!p.is_regular_file()) continue;
-        auto relPath = fs::relative(p.path(), inPath);
-        std::string name = relPath.string();
-        // Normalize to forward slashes
-        for (auto& c : name) if (c == '\\') c = '/';
+    try {
+        for (auto& p : fs::recursive_directory_iterator(inPath)) {
+            if (!p.is_regular_file()) continue;
+            std::string name;
+            try {
+                auto relPath = fs::relative(p.path(), inPath);
+                name = relPath.string();
+            } catch (const fs::filesystem_error& e) {
+                fprintf(stderr, "Warning: path resolution error for %s: %s\n",
+                        p.path().string().c_str(), e.what());
+                continue;
+            }
+            // Normalize to forward slashes
+            for (auto& c : name) if (c == '\\') c = '/';
 
-        std::vector<uint8_t> fileData;
-        FILE* f = fopen(p.path().string().c_str(), "rb");
-        if (!f) { fprintf(stderr, "Warning: could not open %s\n", p.path().string().c_str()); continue; }
-        fseek(f, 0, SEEK_END);
-        size_t sz = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        fileData.resize(sz);
-        if (fread(fileData.data(), 1, sz, f) != sz) {
-            fprintf(stderr, "Warning: read error %s\n", p.path().string().c_str());
+            std::vector<uint8_t> fileData;
+            FILE* f = fopen(p.path().string().c_str(), "rb");
+            if (!f) { fprintf(stderr, "Warning: could not open %s\n", p.path().string().c_str()); continue; }
+            fseek(f, 0, SEEK_END);
+            size_t sz = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            fileData.resize(sz);
+            if (fread(fileData.data(), 1, sz, f) != sz) {
+                fprintf(stderr, "Warning: read error %s\n", p.path().string().c_str());
+                fclose(f);
+                continue;
+            }
             fclose(f);
-            continue;
-        }
-        fclose(f);
 
-        writer.AddFile(name.c_str(), fileData.data(), fileData.size());
-        totalBytes += sz;
-        fileCount++;
+            writer.AddFile(name.c_str(), fileData.data(), fileData.size());
+            totalBytes += sz;
+            fileCount++;
+        }
+    } catch (const fs::filesystem_error& e) {
+        fprintf(stderr, "Filesystem error: %s\n", e.what());
+        return false;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "Unexpected error: %s\n", e.what());
+        return false;
     }
 
     if (fileCount == 0) {

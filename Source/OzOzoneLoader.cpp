@@ -205,6 +205,42 @@ Model OzoneLoader::BuildPlane(float nx, float ny, float nz, float dist) {
 }
 
 // ---------------------------------------------------------------------------
+// BuildHeightmap — load grayscale PNG, generate terrain mesh
+// ---------------------------------------------------------------------------
+Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
+                                  const std::string& texPath,
+                                  const std::vector<float>& args) {
+    // args: x y z scale sizeX sizeY sizeZ
+    if (args.size() < 6) return Model{0};
+
+    // Load grayscale heightmap image
+    m_hmImage = LoadImage(imagePath.c_str());
+    if (m_hmImage.data == 0) return Model{0};
+    ImageFormat(&m_hmImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+
+    // Load texture overlay
+    m_hmTexture = LoadTexture(texPath.c_str());
+
+    // Position (Z-up → Y-up swap: args[1]=OZONE Y becomes raylib Z)
+    m_hmPosition = {args[0], args[2], args[1]};
+    m_hmScale = (args.size() > 3) ? args[3] : 1.0f;
+    m_hmSize = {(args.size() > 4) ? args[4] : 100.0f,
+                (args.size() > 5) ? args[5] : 50.0f,
+                (args.size() > 6) ? args[6] : 100.0f};
+
+    Mesh mesh = GenMeshHeightmap(m_hmImage, m_hmSize);
+    Model model = LoadModelFromMesh(mesh);
+    if (m_hmTexture.id)
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = m_hmTexture;
+    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    if (GetLitFogShader().id > 0)
+        model.materials[0].shader = GetLitFogShader();
+
+    m_hmReady = (m_hmImage.data != 0);
+    return model;
+}
+
+// ---------------------------------------------------------------------------
 // BuildFromPrimitive
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) {
@@ -271,6 +307,18 @@ bool OzoneLoader::LoadFile(const char* path) {
     for (auto& prim : primitives) {
         if (LoadOzoneEntity(prim)) continue;
 
+        // Heightmap is handled specially — builds its own model from image path
+        if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
+            OzoneRenderable r;
+            r.typeId = (int)prim.type;
+            r.position = {0,0,0};
+            r.scale = 1.0f;
+            r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+            r.loaded = m_hmReady;
+            m_renderables.push_back(r);
+            continue;
+        }
+
         OzoneRenderable r;
         r.typeId = (int)prim.type;
 
@@ -311,6 +359,18 @@ bool OzoneLoader::LoadString(const char* data) {
     for (auto& prim : primitives) {
         if (LoadOzoneEntity(prim)) continue;
 
+        // Heightmap is handled specially
+        if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
+            OzoneRenderable r;
+            r.typeId = (int)prim.type;
+            r.position = {0,0,0};
+            r.scale = 1.0f;
+            r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+            r.loaded = m_hmReady;
+            m_renderables.push_back(r);
+            continue;
+        }
+
         OzoneRenderable r;
         r.typeId = (int)prim.type;
         if (prim.args.size() >= 3)
@@ -330,7 +390,13 @@ bool OzoneLoader::LoadString(const char* data) {
 void OzoneLoader::Draw(Camera3D& camera) {
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        DrawModel(r.model, r.position, r.scale, WHITE);
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
+            // Heightmap uses its own position/scale stored from the primitive
+            DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
+                        (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
+        } else {
+            DrawModel(r.model, r.position, r.scale, WHITE);
+        }
     }
 }
 
@@ -413,6 +479,59 @@ void OzoneLoader::RebuildCollisionVolumes() {
 }
 
 // ---------------------------------------------------------------------------
+// UnloadHeightmap
+// ---------------------------------------------------------------------------
+void OzoneLoader::UnloadHeightmap() {
+    if (m_hmReady) {
+        UnloadModel(m_hmModel);
+        if (m_hmImage.data) UnloadImage(m_hmImage);
+        if (m_hmTexture.id) UnloadTexture(m_hmTexture);
+        m_hmReady = false;
+        m_hmImage = Image{0};
+        m_hmTexture = Texture2D{0};
+        m_hmModel = Model{0};
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SampleHeightmapY — bilinear sample the OZONE-loaded heightmap
+// Returns -99999.0f if no heightmap loaded or out of bounds.
+// ---------------------------------------------------------------------------
+float OzoneLoader::SampleHeightmapY(float px, float pz) const {
+    if (!m_hmReady || m_hmImage.data == 0) return -99999.0f;
+
+    Vector3 o = m_hmPosition;
+    float scale = m_hmScale;
+    float sx = m_hmSize.x * scale;
+    float sz = m_hmSize.z * scale;
+    int iw = m_hmImage.width;
+    int ih = m_hmImage.height;
+    if (iw < 1 || ih < 1) return -99999.0f;
+
+    float hx = (px - o.x) / sx;
+    float hz = (pz - o.z) / sz;
+    float fx = hx * (float)(iw - 1);
+    float fz = hz * (float)(ih - 1);
+    int ix = (int)fx;
+    int iz = (int)fz;
+    if (ix < 0 || ix >= iw - 1 || iz < 0 || iz >= ih - 1)
+        return o.y;
+
+    float tx = fx - ix;
+    float tz = fz - iz;
+    uint8_t* p = (uint8_t*)m_hmImage.data;
+    float h00 = p[iz * iw + ix] / 255.0f;
+    float h10 = p[iz * iw + ix + 1] / 255.0f;
+    float h01 = p[(iz + 1) * iw + ix] / 255.0f;
+    float h11 = p[(iz + 1) * iw + ix + 1] / 255.0f;
+    float ht = h00 * (1 - tx) * (1 - tz)
+             + h10 * tx * (1 - tz)
+             + h01 * (1 - tx) * tz
+             + h11 * tx * tz;
+    return o.y + ht * m_hmSize.y * scale;
+}
+
+// ---------------------------------------------------------------------------
 // Unload
 // ---------------------------------------------------------------------------
 void OzoneLoader::Unload() {
@@ -421,6 +540,7 @@ void OzoneLoader::Unload() {
     }
     m_renderables.clear();
     m_collisionVolumes.clear();
+    UnloadHeightmap();
     UnloadTextures();
 }
 

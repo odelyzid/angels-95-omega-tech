@@ -1929,27 +1929,42 @@ void DrawWorld()
         }
     }
 
-    // OZONE ground clamp — stand on top of brush primitives
-    // (only when heightmap and ClipBox didn't already provide ground)
+    // OZONE ground clamp — OZONE heightmap first, then brush primitives
+    // (only when WDL heightmap and ClipBox didn't already provide ground)
     if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
     {
         Vector3 cp = OmegaTechData.MainCamera.position;
-        float brushTop = -99999.0f;
-        auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
-        for (auto& vol : vols) {
-            if (cp.x >= vol.aabb.min.x && cp.x <= vol.aabb.max.x &&
-                cp.z >= vol.aabb.min.z && cp.z <= vol.aabb.max.z) {
-                float top = vol.aabb.max.y;
-                if (top > brushTop && top <= cp.y + 0.1f)
-                    brushTop = top;
-            }
-        }
-        if (brushTop > -50000.0f) {
+
+        // Check OZONE-loaded heightmap
+        auto& ozLoader = OzoneLoader::Instance();
+        float hmY = ozLoader.HasHeightmap()
+            ? ozLoader.SampleHeightmapY(cp.x, cp.z) : -99999.0f;
+        if (hmY > -50000.0f) {
             const float eyeHeight = 2.0f;
-            if (cp.y <= brushTop + eyeHeight + 0.1f) {
-                OmegaTechData.MainCamera.position.y = brushTop + eyeHeight;
+            if (cp.y <= hmY + eyeHeight + 0.1f) {
+                OmegaTechData.MainCamera.position.y = hmY + eyeHeight;
                 OmegaPlayer.velocityY = 0.0f;
                 OmegaPlayer.onGround = true;
+            }
+        } else {
+            // Fallback: stand on top of OZONE brush primitives
+            float brushTop = -99999.0f;
+            auto& vols = ozLoader.GetCollisionVolumes();
+            for (auto& vol : vols) {
+                if (cp.x >= vol.aabb.min.x && cp.x <= vol.aabb.max.x &&
+                    cp.z >= vol.aabb.min.z && cp.z <= vol.aabb.max.z) {
+                    float top = vol.aabb.max.y;
+                    if (top > brushTop && top <= cp.y + 0.1f)
+                        brushTop = top;
+                }
+            }
+            if (brushTop > -50000.0f) {
+                const float eyeHeight = 2.0f;
+                if (cp.y <= brushTop + eyeHeight + 0.1f) {
+                    OmegaTechData.MainCamera.position.y = brushTop + eyeHeight;
+                    OmegaPlayer.velocityY = 0.0f;
+                    OmegaPlayer.onGround = true;
+                }
             }
         }
     }

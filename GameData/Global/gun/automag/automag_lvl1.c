@@ -418,7 +418,7 @@ int main() {
     Model retroModel = LoadRetroModel_automag_lvl1();
     
     // Load retro texture and assign to model
-    Image img = LoadImage("texture.png"); // generated texture
+    Image img = LoadImage("automag_lvl1_texture.png"); // generated texture
     Texture2D tex = LoadTextureFromImage(img);
     UnloadImage(img);
     retroModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
