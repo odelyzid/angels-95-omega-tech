@@ -26,3 +26,9 @@ System/
 *.sav
 
 build.log
+
+# Build cache
+build/*.DB
+build/*.DB-shm
+build/*.DB-wal
+build/*.db
