@@ -359,35 +359,32 @@ int main(int argc, char **argv){
                 UpdateCamera(&OTEditor.MainCamera, CAMERA_FIRST_PERSON);
         }
         
-        // Apply EnvPanel fog/ambient settings
+        // Apply ZoneProperties fog/ambient/particle settings
         {
-            EnvSettings env = GetEnvSettings();
-            if (env.applyFog) {
-                // Update lit fog shader uniforms
+            ZoneProperties zp = GetZoneProperties();
+            if (zp.applyFog) {
                 if (OTEditor.LitFogShader.id > 0) {
-                    float fogColor[3] = {(float)env.fogR / 255.0f, (float)env.fogG / 255.0f, (float)env.fogB / 255.0f};
-                    float fogDensity = env.fogDensity;
+                    float fogColor[3] = {(float)zp.fogR / 255.0f, (float)zp.fogG / 255.0f, (float)zp.fogB / 255.0f};
+                    float fogDensity = zp.fogDensity;
                     float fogIntensity = 1.0f;
-
                     SetShaderValue(OTEditor.LitFogShader, OTEditor.FogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
                     SetShaderValue(OTEditor.LitFogShader, OTEditor.FogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
                     SetShaderValue(OTEditor.LitFogShader, OTEditor.FogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
                 }
-                OTEditor.FogColor = (Color){ (unsigned char)env.fogR, (unsigned char)env.fogG, (unsigned char)env.fogB, 255 };
-                OTEditor.FogDensity = env.fogDensity;
+                OTEditor.FogColor = (Color){ (unsigned char)zp.fogR, (unsigned char)zp.fogG, (unsigned char)zp.fogB, 255 };
+                OTEditor.FogDensity = zp.fogDensity;
             }
-            if (env.applyAmbient) {
-                OTEditor.AmbientColor = (Color){ (unsigned char)env.ambR, (unsigned char)env.ambG, (unsigned char)env.ambB, 255 };
-                OTEditor.AmbientIntensity = env.ambIntensity;
+            if (zp.applyAmbient) {
+                OTEditor.AmbientColor = (Color){ (unsigned char)zp.ambR, (unsigned char)zp.ambG, (unsigned char)zp.ambB, 255 };
+                OTEditor.AmbientIntensity = zp.ambIntensity;
                 if (OTEditor.AmbientLoc >= 0 && OTEditor.LitFogShader.id > 0) {
-                    float ambient[4] = {(float)env.ambR / 255.0f * env.ambIntensity,
-                                        (float)env.ambG / 255.0f * env.ambIntensity,
-                                        (float)env.ambB / 255.0f * env.ambIntensity,
-                                        1.0f};
+                    float ambient[4] = {(float)zp.ambR / 255.0f * zp.ambIntensity,
+                                        (float)zp.ambG / 255.0f * zp.ambIntensity,
+                                        (float)zp.ambB / 255.0f * zp.ambIntensity, 1.0f};
                     SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
                 }
             }
-            ClearEnvApplyFlags();
+            ClearZoneApplyFlags();
         }
 
         ClearBackground(BLACK);

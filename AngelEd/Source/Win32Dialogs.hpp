@@ -46,6 +46,9 @@ struct EditorPanelState {
     int actionTextureTarget = -1;
     std::string actionPreviewSoundPath;
     bool actionStopSoundPreview = false;
+    int actionSoundCategory = 0;    // 0=SFX, 1=Music, 2=Ambience
+    int actionSoundLoop = 0;        // 0=no loop, 1=loop
+    int actionSoundVolume = 80;     // 0-100
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
 
 #ifdef _WIN32
@@ -72,7 +75,7 @@ struct EditorPanelState {
     WinPos pawnMgrPos    = {50, 360, 360, 200};
     WinPos scriptMgrPos  = {440, 400, 420, 300};
     WinPos modelBrwPos   = {100, 80, 540, 500};
-    WinPos envPanelPos   = {60, 60, 420, 360};
+    WinPos envPanelPos   = {60, 60, 440, 560};
     WinPos pickPanelPos  = {60, 400, 200, 280};
     WinPos nodePanelPos  = {290, 400, 200, 200};
     WinPos settingsPos        = {50, 50, 400, 600};
@@ -83,17 +86,54 @@ struct EditorPanelState {
 
 extern EditorPanelState g_editorPanels;
 
-// --- Environment settings getters (for editor rendering) ---
-struct EnvSettings {
+// --- ZoneProperties — replaces old EnvSettings ---
+enum class GameType : uint8_t {
+    SINGLEPLAYER,
+    COOP,
+    ETHERAL_MATCH,
+    ANGEL_TEAM_GAME,
+    ANGEL_RUN,
+    CAPTURE_THE_ORB,
+    TIME_SHIFT
+};
+
+enum class ParticleType : uint8_t {
+    NONE,
+    SNOW,
+    RAIN,
+    VOID_REALM,
+    PSYCHIC_REALM
+};
+
+struct ZoneProperties {
+    // Fog
     int fogR = 200, fogG = 200, fogB = 210;
     float fogDensity = 0.02f;
+    float fogStart = 10.0f, fogEnd = 100.0f;
+    bool applyFog = false;
+    // Ambient
     int ambR = 180, ambG = 180, ambB = 200;
     float ambIntensity = 0.4f;
-    bool applyFog = false;
     bool applyAmbient = false;
+    // GameType
+    GameType gameType = GameType::SINGLEPLAYER;
+    int maxPlayers = 8;
+    float respawnTime = 5.0f;
+    bool timeLimitEnabled = false;
+    float timeLimitMinutes = 10.0f;
+    int scoreLimit = 50;
+    bool friendlyFire = false;
+    // Particles
+    ParticleType particleType = ParticleType::NONE;
+    float particleDensity = 50.0f;
+    float particleSpeed = 1.0f;
+    int particleColorR = 200, particleColorG = 200, particleColorB = 200;
+    float particleWindX = 0.0f, particleWindZ = 0.0f;
+    bool applyParticles = false;
 };
-EnvSettings GetEnvSettings();
-void ClearEnvApplyFlags();
+
+ZoneProperties GetZoneProperties();
+void ClearZoneApplyFlags();
 
 // --- Pawn management ---
 void PawnManagerAddPawn(const char* name, const char* meshPath);

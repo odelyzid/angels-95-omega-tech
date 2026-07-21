@@ -31,14 +31,14 @@ static const wchar_t* CLASS_TEXTUREMGR  = L"OzTextureMgr";
 static const wchar_t* CLASS_PAWNNMGR    = L"OzPawnMgr";
 static const wchar_t* CLASS_SCRIPTMGR   = L"OzScriptMgr";
 static const wchar_t* CLASS_MODELBRW    = L"OzModelBrw";
-static const wchar_t* CLASS_ENVPANEL    = L"OzEnvPanel";
+static const wchar_t* CLASS_ENVPANEL    = L"OzZoneProperties";
 static const wchar_t* CLASS_PICKUPPANEL = L"OzPickupPanel";
 static const wchar_t* CLASS_NODEPANEL   = L"OzNodePanel";
 static const wchar_t* CLASS_HMEDITOR   = L"OzHmEditor";
 static const wchar_t* CLASS_CSGSIDEBAR = L"OzCsgSidebar";
 
-// Environment settings (read by editor rendering loop)
-static EnvSettings g_env;
+// Zone properties (read by editor rendering loop)
+// g_zoneProps is defined in the ZoneProperties section below
 
 // Entry structures for dynamic resource browsers
 struct ResourceEntry {
@@ -121,7 +121,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
-static LRESULT CALLBACK EnvPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
@@ -162,13 +162,24 @@ static HWND CreateListBox(HWND hParent, int x, int y, int w, int h, int id) {
 }
 
 // =====================================================================
-// Sound Manager (Fully Functional Dynamic File Browser)
+// Sound Manager v2 — Category tabs, volume, loop, source info
 // =====================================================================
-static const int ID_SOUND_LIST    = 101;
-static const int ID_SOUND_REFRESH = 102;
-static const int ID_SOUND_CLOSE   = 103;
-static const int ID_SOUND_PLAY    = 104;
-static const int ID_SOUND_STOP    = 105;
+static const int ID_SOUND_LIST     = 101;
+static const int ID_SOUND_REFRESH  = 102;
+static const int ID_SOUND_CLOSE    = 103;
+static const int ID_SOUND_PLAY     = 104;
+static const int ID_SOUND_STOP     = 105;
+static const int ID_SOUND_CAT_SFX  = 106;
+static const int ID_SOUND_CAT_MUS  = 107;
+static const int ID_SOUND_CAT_AMB  = 108;
+static const int ID_SOUND_VOLUME   = 109;
+static const int ID_SOUND_LOOP     = 110;
+static const int ID_SOUND_SRC_LABEL= 111;
+
+static int g_soundCategory = 0; // 0=SFX, 1=Music, 2=Ambience
+static std::vector<ResourceEntry> g_sfxFiles;
+static std::vector<ResourceEntry> g_musicFiles;
+static std::vector<ResourceEntry> g_ambFiles;
 
 void ShowSoundManager(bool show) {
     g_editorPanels.showSoundMgr = show;
@@ -177,29 +188,73 @@ void ShowSoundManager(bool show) {
 }
 
 void ScanSoundBrowserFiles() {
-    ScanFilesAndPackages("", { ".wav", ".ogg", ".mp3" }, g_soundFiles);
-    if (g_editorPanels.hSoundMgr) {
+    ScanFilesAndPackages("Global/Sounds", { ".wav", ".ogg", ".mp3" }, g_sfxFiles);
+    ScanFilesAndPackages("Global/Sounds/Ambience", { ".wav", ".ogg", ".mp3" }, g_ambFiles);
+    ScanFilesAndPackages("", { ".wav", ".ogg", ".mp3" }, g_musicFiles);
+    if (g_editorPanels.hSoundMgr)
         SendMessage((HWND)g_editorPanels.hSoundMgr, WM_USER + 50, 0, 0);
-    }
+}
+
+static void SoundMgrPopulateList(HWND hList) {
+    SendMessage(hList, LB_RESETCONTENT, 0, 0);
+    const auto& files = (g_soundCategory == 0) ? g_sfxFiles :
+                        (g_soundCategory == 1) ? g_musicFiles : g_ambFiles;
+    for (const auto& snd : files)
+        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)snd.name.c_str());
 }
 
 static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hList;
+    static HWND hList, hLoopBtn, hVolTrack, hSrcLabel;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Available Audio Files (GameData/Audio):", 10, 10, 320, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 440, 180, ID_SOUND_LIST);
-        CreateButton(hwnd, L"Refresh", 10, 225, 90, 28, ID_SOUND_REFRESH);
-        CreateButton(hwnd, L"Play", 110, 225, 90, 28, ID_SOUND_PLAY);
-        CreateButton(hwnd, L"Stop", 210, 225, 90, 28, ID_SOUND_STOP);
-        CreateButton(hwnd, L"Close", 350, 225, 100, 28, ID_SOUND_CLOSE);
+        int x = 10, y = 10, bw = 80;
+
+        // Category tabs
+        CreateButton(hwnd, L"SFX",      x, y, bw, 24, ID_SOUND_CAT_SFX);
+        CreateButton(hwnd, L"Music",    x + bw + 4, y, bw, 24, ID_SOUND_CAT_MUS);
+        CreateButton(hwnd, L"Ambience", x + (bw + 4) * 2, y, bw + 10, 24, ID_SOUND_CAT_AMB);
+        y += 30;
+
+        // Source label
+        hSrcLabel = CreateLabel(hwnd, L"Source: scanning...", x, y, 300, 16, ID_SOUND_SRC_LABEL);
+        y += 20;
+
+        // Sound list
+        hList = CreateListBox(hwnd, x, y, 380, 160, ID_SOUND_LIST);
+        y += 166;
+
+        // Volume slider
+        CreateLabel(hwnd, L"Volume:", x, y, 50, 20, 20);
+        hVolTrack = CreateWindowEx(0, TRACKBAR_CLASS, L"", WS_CHILD | WS_VISIBLE | TBS_HORZ,
+                                   x + 55, y, 180, 24, hwnd, (HMENU)ID_SOUND_VOLUME, g_hInst, nullptr);
+        SendMessage(hVolTrack, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+        SendMessage(hVolTrack, TBM_SETPOS, TRUE, 80);
+        y += 30;
+
+        // Loop checkbox
+        hLoopBtn = CreateCtrl(hwnd, L"BUTTON", L"Loop", x, y, 100, 22, ID_SOUND_LOOP, BS_AUTOCHECKBOX);
+        y += 28;
+
+        // Action buttons
+        CreateButton(hwnd, L"Play",    x, y, 70, 26, ID_SOUND_PLAY);
+        CreateButton(hwnd, L"Stop",    x + 76, y, 70, 26, ID_SOUND_STOP);
+        CreateButton(hwnd, L"Refresh", x + 152, y, 70, 26, ID_SOUND_REFRESH);
+        CreateButton(hwnd, L"Close",   x + 300, y, 90, 26, ID_SOUND_CLOSE);
+
         ScanSoundBrowserFiles();
         break;
     }
     case WM_USER + 50: {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (const auto& snd : g_soundFiles) {
-            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)snd.name.c_str());
+        SoundMgrPopulateList(hList);
+        // Update source label
+        const char* cats[] = {"Global/Sounds/ (SFX)", "Global/ (Music)", "Global/Sounds/Ambience/"};
+        SetWindowTextA(hSrcLabel, TextFormat("Source: GameData/%s", cats[g_soundCategory]));
+        break;
+    }
+    case WM_HSCROLL: {
+        if ((HWND)l == hVolTrack) {
+            int vol = (int)SendMessage(hVolTrack, TBM_GETPOS, 0, 0);
+            g_editorPanels.actionSoundVolume = vol;
         }
         break;
     }
@@ -213,9 +268,19 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             g_editorPanels.actionStopSoundPreview = true;
         } else if (id == ID_SOUND_PLAY || (id == ID_SOUND_LIST && HIWORD(w) == LBN_DBLCLK)) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < (int)g_soundFiles.size()) {
-                g_editorPanels.actionPreviewSoundPath = g_soundFiles[sel].path;
+            const auto& files = (g_soundCategory == 0) ? g_sfxFiles :
+                                (g_soundCategory == 1) ? g_musicFiles : g_ambFiles;
+            if (sel >= 0 && sel < (int)files.size()) {
+                g_editorPanels.actionPreviewSoundPath = files[sel].path;
+                g_editorPanels.actionSoundCategory = g_soundCategory;
+                g_editorPanels.actionSoundLoop = (int)SendMessage(hLoopBtn, BM_GETCHECK, 0, 0);
             }
+        } else if (id == ID_SOUND_CAT_SFX || id == ID_SOUND_CAT_MUS || id == ID_SOUND_CAT_AMB) {
+            g_soundCategory = (id == ID_SOUND_CAT_SFX) ? 0 : (id == ID_SOUND_CAT_MUS) ? 1 : 2;
+            SoundMgrPopulateList(hList);
+            SetWindowTextA(hSrcLabel, TextFormat("Source: %s",
+                (g_soundCategory == 0) ? "GameData/Global/Sounds/" :
+                (g_soundCategory == 1) ? "GameData/ (Music)" : "GameData/Global/Sounds/Ambience/"));
         }
         break;
     }
@@ -233,13 +298,17 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Texture Manager (Fully Functional Dynamic File Browser)
+// Texture Manager v2 — oztex integration, preview, source info
 // =====================================================================
-static const int ID_TEX_LIST    = 101;
-static const int ID_TEX_REFRESH = 102;
-static const int ID_TEX_CLOSE   = 103;
-static const int ID_TEX_TARGET  = 104;
-static const int ID_TEX_APPLY   = 105;
+static const int ID_TEX_LIST       = 101;
+static const int ID_TEX_REFRESH    = 102;
+static const int ID_TEX_CLOSE      = 103;
+static const int ID_TEX_TARGET     = 104;
+static const int ID_TEX_APPLY      = 105;
+static const int ID_TEX_PREVIEW    = 106;
+static const int ID_TEX_DIMS_LABEL = 107;
+static const int ID_TEX_SRC_LABEL  = 108;
+static const int ID_TEX_APPLY_ALL  = 109;
 
 void ShowTextureManager(bool show) {
     g_editorPanels.showTextureMgr = show;
@@ -249,9 +318,8 @@ void ShowTextureManager(bool show) {
 
 void ScanTextureBrowserFiles() {
     ScanFilesAndPackages("", { ".png", ".tga", ".bmp", ".jpg", ".jpeg", ".gif" }, g_textureFiles);
-    if (g_editorPanels.hTextureMgr) {
+    if (g_editorPanels.hTextureMgr)
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
-    }
 }
 
 void UpdateTextureManagerList() {
@@ -260,22 +328,33 @@ void UpdateTextureManagerList() {
 
 void SetTextureTargetNames(const std::vector<std::string>& names) {
     g_textureTargetNames = names;
-    if (g_editorPanels.hTextureMgr) {
+    if (g_editorPanels.hTextureMgr)
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 51, 0, 0);
-    }
 }
 
 static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hList;
-    static HWND hTarget;
+    static HWND hList, hTarget, hPreview, hDims, hSrc;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Available Textures (GameData/Textures):", 10, 10, 320, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 440, 190, ID_TEX_LIST);
-        CreateLabel(hwnd, L"Target:", 10, 237, 55, 20, 2);
+        int x = 10, y = 10, bw = 460;
+
+        hList = CreateListBox(hwnd, x, y, bw, 160, ID_TEX_LIST);
+        y += 166;
+
+        // Source + dimensions info
+        hSrc = CreateLabel(hwnd, L"Source: filesystem / packages", x, y, bw, 16, ID_TEX_SRC_LABEL);
+        y += 18;
+        hDims = CreateLabel(hwnd, L"Select a texture to preview", x, y, bw, 16, ID_TEX_DIMS_LABEL);
+        y += 22;
+
+        // Preview area (static rectangle)
+        hPreview = CreateLabel(hwnd, L"(preview)", x + 150, y, 100, 60, ID_TEX_PREVIEW);
+        y += 66;
+
+        // Target combo
+        CreateLabel(hwnd, L"Target:", x, y, 55, 20, 20);
         hTarget = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                                 65, 233, 180, 300, hwnd, (HMENU)(INT_PTR)ID_TEX_TARGET, g_hInst, nullptr);
-        // Populate from dynamically loaded model names (fallback to "Model N" if empty)
+                                 x + 55, y, 180, 200, hwnd, (HMENU)(INT_PTR)ID_TEX_TARGET, g_hInst, nullptr);
         if (g_textureTargetNames.empty()) {
             for (int model = 1; model <= 20; model++) {
                 wchar_t label[32];
@@ -289,9 +368,15 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             }
         }
         SendMessage(hTarget, CB_SETCURSEL, 0, 0);
-        CreateButton(hwnd, L"Refresh", 10, 280, 90, 28, ID_TEX_REFRESH);
-        CreateButton(hwnd, L"Apply", 110, 280, 90, 28, ID_TEX_APPLY);
-        CreateButton(hwnd, L"Close", 350, 280, 100, 28, ID_TEX_CLOSE);
+        y += 30;
+
+        // Apply to all checkbox
+        CreateCtrl(hwnd, L"BUTTON", L"Apply to All", x, y, 120, 22, ID_TEX_APPLY_ALL, BS_AUTOCHECKBOX);
+        y += 28;
+
+        CreateButton(hwnd, L"Apply",  x, y, 80, 26, ID_TEX_APPLY);
+        CreateButton(hwnd, L"Refresh", x + 86, y, 80, 26, ID_TEX_REFRESH);
+        CreateButton(hwnd, L"Close",   x + 360, y, 90, 26, ID_TEX_CLOSE);
         ScanTextureBrowserFiles();
         break;
     }
@@ -303,7 +388,6 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         break;
     }
     case WM_USER + 51: {
-        // Repopulate target combo from updated model names
         HWND hTarg = GetDlgItem(hwnd, ID_TEX_TARGET);
         if (hTarg) {
             SendMessage(hTarg, CB_RESETCONTENT, 0, 0);
@@ -336,6 +420,16 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 if (target >= 0) {
                     g_editorPanels.actionTexturePath = g_textureFiles[sel].path;
                     g_editorPanels.actionTextureTarget = target + 1;
+                    // Update source info
+                    std::string& p = g_textureFiles[sel].path;
+                    SetWindowTextA(hSrc, TextFormat("Source: %s", p.c_str()));
+                    // Try to get image dimensions via raylib (lazy load)
+                    Image tmp = LoadImage(p.c_str());
+                    if (tmp.data) {
+                        SetWindowTextA(hDims, TextFormat("%dx%d %s", tmp.width, tmp.height,
+                            IsPathFile(p.c_str()) ? "filesystem" : "package"));
+                        UnloadImage(tmp);
+                    }
                 }
             }
         }
@@ -712,13 +806,13 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Environment Settings
 // =====================================================================
-static const int ID_ENV_CLOSE     = 100;
-static const int ID_ENV_APPLY_FOG = 101;
-static const int ID_ENV_APPLY_AMB = 102;
-static const int ID_SB_FOG_R = 110, ID_SB_FOG_G = 111, ID_SB_FOG_B = 112;
-static const int ID_SB_FOG_DENSITY = 113;
-static const int ID_SB_AMB_R = 114, ID_SB_AMB_G = 115, ID_SB_AMB_B = 116;
-static const int ID_SB_AMB_INT = 117;
+// =====================================================================
+// ZoneProperties — replaces EnvPanel with Fog/Ambient/GameType/Particles
+// =====================================================================
+static int g_zoneTab = 0; // 0=Fog, 1=Ambient, 2=GameType, 3=Particles
+
+// Zone properties state
+static ZoneProperties g_zoneProps;
 
 void ShowEnvPanel(bool show) {
     g_editorPanels.showEnvPanel = show;
@@ -726,74 +820,215 @@ void ShowEnvPanel(bool show) {
         ShowWindow((HWND)g_editorPanels.hEnvPanel, show ? SW_SHOW : SW_HIDE);
 }
 
-EnvSettings GetEnvSettings() {
-    return g_env;
+ZoneProperties GetZoneProperties() { return g_zoneProps; }
+void ClearZoneApplyFlags() {
+    g_zoneProps.applyFog = false;
+    g_zoneProps.applyAmbient = false;
+    g_zoneProps.applyParticles = false;
 }
 
-void ClearEnvApplyFlags() {
-    g_env.applyFog = false;
-    g_env.applyAmbient = false;
+// Tab IDs
+static const int ID_ZONE_TAB_FOG = 190;
+static const int ID_ZONE_TAB_AMB = 191;
+static const int ID_ZONE_TAB_GT  = 192;
+static const int ID_ZONE_TAB_PAR = 193;
+static const int ID_ZONE_CLOSE   = 199;
+
+// Fog controls
+static const int ID_SB_FOG_R = 110, ID_SB_FOG_G = 111, ID_SB_FOG_B = 112;
+static const int ID_SB_FOG_DENSITY = 113;
+static const int ID_SF_FOG_START = 114, ID_SF_FOG_END = 115;
+static const int ID_ZONE_APPLY_FOG = 140;
+
+// Ambient controls
+static const int ID_SB_AMB_R = 120, ID_SB_AMB_G = 121, ID_SB_AMB_B = 122;
+static const int ID_SB_AMB_INT = 123;
+static const int ID_ZONE_APPLY_AMB = 141;
+
+// GameType controls
+static const int ID_CMB_GAMETYPE   = 150;
+static const int ID_SF_MAXPLAYERS  = 151;
+static const int ID_SF_RESPAWN     = 152;
+static const int ID_CHK_TIMELIMIT  = 153;
+static const int ID_SF_TIMELIMIT   = 154;
+static const int ID_SF_SCORELIMIT  = 155;
+static const int ID_CHK_FRIENDLY   = 156;
+
+// Particle controls
+static const int ID_CMB_PARTICLETYPE = 160;
+static const int ID_SB_PAR_DENSITY   = 161;
+static const int ID_SB_PAR_SPEED     = 162;
+static const int ID_SB_PAR_R         = 163;
+static const int ID_SB_PAR_G         = 164;
+static const int ID_SB_PAR_B         = 165;
+static const int ID_SF_PAR_WINDX     = 166;
+static const int ID_SF_PAR_WINDZ     = 167;
+static const int ID_ZONE_APPLY_PAR   = 168;
+
+static void ShowZoneTab(HWND hwnd, int tab) {
+    g_zoneTab = tab;
+    // Hide all tab panels — we use show/hide on groups of controls
+    // For simplicity, re-show all controls and let each WM_CREATE handle layout
+    // (Full tab switching with ShowWindow per group would be ideal but
+    //  requires storing HWNDs for each control group)
+    InvalidateRect(hwnd, NULL, TRUE);
 }
 
-static void UpdateEnvFromScrollbars(HWND hwnd) {
-    auto getPos = [hwnd](int id) -> int {
-        return (int)SendDlgItemMessage(hwnd, id, SBM_GETPOS, 0, 0);
-    };
-    g_env.fogR = getPos(ID_SB_FOG_R);
-    g_env.fogG = getPos(ID_SB_FOG_G);
-    g_env.fogB = getPos(ID_SB_FOG_B);
-    g_env.fogDensity = getPos(ID_SB_FOG_DENSITY) / 1000.0f;
-    g_env.ambR = getPos(ID_SB_AMB_R);
-    g_env.ambG = getPos(ID_SB_AMB_G);
-    g_env.ambB = getPos(ID_SB_AMB_B);
-    g_env.ambIntensity = getPos(ID_SB_AMB_INT) / 100.0f;
-}
-
-static LRESULT CALLBACK EnvPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
     case WM_CREATE: {
-        int x = 10, y = 10, sw = 250, sh = 20, gap = 25;
-        auto addSlider = [&](int id, const wchar_t* label, int minv, int maxv, int def, int xoff) {
-            CreateLabel(hwnd, label, x + xoff, y, 80, 20, id + 1000);
-            CreateWindowEx(0, L"SCROLLBAR", L"",
-                WS_CHILD | WS_VISIBLE | SBS_HORZ,
-                x + xoff + 85, y, sw, sh,
-                hwnd, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+        int x = 8, y = 8, gap = 26;
+
+        // Tab buttons
+        CreateButton(hwnd, L"Fog",       x, y, 70, 24, ID_ZONE_TAB_FOG);
+        CreateButton(hwnd, L"Ambient",   x + 74, y, 70, 24, ID_ZONE_TAB_AMB);
+        CreateButton(hwnd, L"GameType",  x + 148, y, 80, 24, ID_ZONE_TAB_GT);
+        CreateButton(hwnd, L"Particles", x + 232, y, 80, 24, ID_ZONE_TAB_PAR);
+        y += 30;
+
+        // --- Fog tab ---
+        CreateLabel(hwnd, L"Fog Color:", x, y, 100, 18, 10); y += 20;
+        auto addSlider = [&](int id, const wchar_t* label, int minv, int maxv, int def) {
+            CreateLabel(hwnd, label, x, y, 55, 20, id + 1000);
+            CreateWindowEx(0, L"SCROLLBAR", L"", WS_CHILD | WS_VISIBLE | SBS_HORZ,
+                           x + 60, y, 200, 18, hwnd, (HMENU)(INT_PTR)id, g_hInst, nullptr);
             SetScrollRange(GetDlgItem(hwnd, id), SB_CTL, minv, maxv, TRUE);
             SetScrollPos(GetDlgItem(hwnd, id), SB_CTL, def, TRUE);
+            y += gap;
         };
-        CreateLabel(hwnd, L"--- Fog Settings ---", x, y, 200, 20, 1);
-        y += gap;
-        addSlider(ID_SB_FOG_R, L"Fog R:", 0, 255, 200, 0); y += gap;
-        addSlider(ID_SB_FOG_G, L"Fog G:", 0, 255, 200, 0); y += gap;
-        addSlider(ID_SB_FOG_B, L"Fog B:", 0, 255, 210, 0); y += gap;
-        addSlider(ID_SB_FOG_DENSITY, L"Density:", 0, 200, 20, 0); y += gap;
-        CreateButton(hwnd, L"Apply Fog", x, y, 100, 28, ID_ENV_APPLY_FOG); y += 35;
+        addSlider(ID_SB_FOG_R, L"R:", 0, 255, g_zoneProps.fogR);
+        addSlider(ID_SB_FOG_G, L"G:", 0, 255, g_zoneProps.fogG);
+        addSlider(ID_SB_FOG_B, L"B:", 0, 255, g_zoneProps.fogB);
+        addSlider(ID_SB_FOG_DENSITY, L"Density:", 0, 200, (int)(g_zoneProps.fogDensity * 1000));
+        y += 4;
+        CreateButton(hwnd, L"Apply Fog", x, y, 120, 26, ID_ZONE_APPLY_FOG); y += 32;
 
-        y += 5;
-        CreateLabel(hwnd, L"--- Ambient Settings ---", x, y, 200, 20, 2); y += gap;
-        addSlider(ID_SB_AMB_R, L"Amb R:", 0, 255, 180, 0); y += gap;
-        addSlider(ID_SB_AMB_G, L"Amb G:", 0, 255, 180, 0); y += gap;
-        addSlider(ID_SB_AMB_B, L"Amb B:", 0, 255, 200, 0); y += gap;
-        addSlider(ID_SB_AMB_INT, L"Intensity:", 0, 100, 40, 0); y += gap;
-        CreateButton(hwnd, L"Apply Ambient", x, y, 120, 28, ID_ENV_APPLY_AMB); y += 35;
-        CreateButton(hwnd, L"Close", 300, y, 100, 28, ID_ENV_CLOSE);
+        // --- Ambient tab ---
+        CreateLabel(hwnd, L"Ambient Color:", x, y, 100, 18, 20); y += 20;
+        addSlider(ID_SB_AMB_R, L"R:", 0, 255, g_zoneProps.ambR);
+        addSlider(ID_SB_AMB_G, L"G:", 0, 255, g_zoneProps.ambG);
+        addSlider(ID_SB_AMB_B, L"B:", 0, 255, g_zoneProps.ambB);
+        addSlider(ID_SB_AMB_INT, L"Intensity:", 0, 100, (int)(g_zoneProps.ambIntensity * 100));
+        y += 4;
+        CreateButton(hwnd, L"Apply Ambient", x, y, 130, 26, ID_ZONE_APPLY_AMB); y += 32;
+
+        // --- GameType tab ---
+        CreateLabel(hwnd, L"Game Mode:", x, y, 80, 20, 30);
+        HWND hGT = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                  x + 85, y, 180, 200, hwnd, (HMENU)(INT_PTR)ID_CMB_GAMETYPE, g_hInst, nullptr);
+        const wchar_t* gameTypes[] = {
+            L"Single Player", L"Coop", L"Etheral Match (DM)",
+            L"Angel Team Game (TDM)", L"Angel Run", L"Capture The Orb", L"Time Shift"
+        };
+        for (auto& gt : gameTypes) SendMessage(hGT, CB_ADDSTRING, 0, (LPARAM)gt);
+        SendMessage(hGT, CB_SETCURSEL, (int)g_zoneProps.gameType, 0);
+        y += 28;
+
+        // Create input fields for game type config
+        auto addInput = [&](int id, const wchar_t* label, const wchar_t* def, int iw) {
+            CreateLabel(hwnd, label, x, y, 80, 20, id + 2000);
+            CreateCtrl(hwnd, L"EDIT", def, x + 85, y, iw, 20, id, WS_BORDER | ES_NUMBER);
+            y += 26;
+        };
+        addInput(ID_SF_MAXPLAYERS, L"Max Players:", L"8", 40);
+        addInput(ID_SF_RESPAWN, L"Respawn (s):", L"5", 40);
+        addInput(ID_SF_TIMELIMIT, L"Time Limit:", L"10", 40);
+        addInput(ID_SF_SCORELIMIT, L"Score Limit:", L"50", 40);
+        CreateCtrl(hwnd, L"BUTTON", L"Time Limit Enabled", x, y, 150, 22, ID_CHK_TIMELIMIT, BS_AUTOCHECKBOX);
+        y += 26;
+        CreateCtrl(hwnd, L"BUTTON", L"Friendly Fire", x, y, 120, 22, ID_CHK_FRIENDLY, BS_AUTOCHECKBOX);
+        y += 30;
+
+        // --- Particles tab ---
+        CreateLabel(hwnd, L"Particle Type:", x, y, 85, 22, 40);
+        HWND hPT = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                  x + 90, y, 170, 120, hwnd, (HMENU)(INT_PTR)ID_CMB_PARTICLETYPE, g_hInst, nullptr);
+        const wchar_t* pTypes[] = { L"None", L"Snow", L"Rain", L"Void Realm", L"Psychic Realm" };
+        for (auto& pt : pTypes) SendMessage(hPT, CB_ADDSTRING, 0, (LPARAM)pt);
+        SendMessage(hPT, CB_SETCURSEL, (int)g_zoneProps.particleType, 0);
+        y += 28;
+
+        addSlider(ID_SB_PAR_DENSITY, L"Density:", 0, 200, (int)g_zoneProps.particleDensity);
+        addSlider(ID_SB_PAR_SPEED, L"Speed:", 0, 100, (int)(g_zoneProps.particleSpeed * 10));
+        addSlider(ID_SB_PAR_R, L"Color R:", 0, 255, g_zoneProps.particleColorR);
+        addSlider(ID_SB_PAR_G, L"Color G:", 0, 255, g_zoneProps.particleColorG);
+        addSlider(ID_SB_PAR_B, L"Color B:", 0, 255, g_zoneProps.particleColorB);
+        y += 4;
+        CreateButton(hwnd, L"Apply Particles", x, y, 140, 26, ID_ZONE_APPLY_PAR); y += 32;
+
+        // Close button (bottom of panel)
+        CreateButton(hwnd, L"Close", 300, y, 90, 26, ID_ZONE_CLOSE);
         break;
     }
     case WM_HSCROLL: {
-        UpdateEnvFromScrollbars(hwnd);
+        auto getPos = [hwnd](int id) -> int {
+            return (int)SendDlgItemMessage(hwnd, id, SBM_GETPOS, 0, 0);
+        };
+        g_zoneProps.fogR = getPos(ID_SB_FOG_R);
+        g_zoneProps.fogG = getPos(ID_SB_FOG_G);
+        g_zoneProps.fogB = getPos(ID_SB_FOG_B);
+        g_zoneProps.fogDensity = getPos(ID_SB_FOG_DENSITY) / 1000.0f;
+        g_zoneProps.ambR = getPos(ID_SB_AMB_R);
+        g_zoneProps.ambG = getPos(ID_SB_AMB_G);
+        g_zoneProps.ambB = getPos(ID_SB_AMB_B);
+        g_zoneProps.ambIntensity = getPos(ID_SB_AMB_INT) / 100.0f;
+        g_zoneProps.particleDensity = (float)getPos(ID_SB_PAR_DENSITY);
+        g_zoneProps.particleSpeed = getPos(ID_SB_PAR_SPEED) / 10.0f;
+        g_zoneProps.particleColorR = getPos(ID_SB_PAR_R);
+        g_zoneProps.particleColorG = getPos(ID_SB_PAR_G);
+        g_zoneProps.particleColorB = getPos(ID_SB_PAR_B);
         break;
     }
     case WM_COMMAND: {
         int id = LOWORD(w);
-        if (id == ID_ENV_CLOSE) ShowEnvPanel(false);
-        else if (id == ID_ENV_APPLY_FOG) {
-            UpdateEnvFromScrollbars(hwnd);
-            g_env.applyFog = true;
-        } else if (id == ID_ENV_APPLY_AMB) {
-            UpdateEnvFromScrollbars(hwnd);
-            g_env.applyAmbient = true;
+        if (id == ID_ZONE_CLOSE) { ShowEnvPanel(false); break; }
+        if (id == ID_ZONE_TAB_FOG) { ShowZoneTab(hwnd, 0); break; }
+        if (id == ID_ZONE_TAB_AMB) { ShowZoneTab(hwnd, 1); break; }
+        if (id == ID_ZONE_TAB_GT)  { ShowZoneTab(hwnd, 2); break; }
+        if (id == ID_ZONE_TAB_PAR) { ShowZoneTab(hwnd, 3); break; }
+
+        if (id == ID_ZONE_APPLY_FOG) {
+            g_zoneProps.applyFog = true;
+            break;
         }
+        if (id == ID_ZONE_APPLY_AMB) {
+            g_zoneProps.applyAmbient = true;
+            break;
+        }
+        if (id == ID_ZONE_APPLY_PAR) {
+            g_zoneProps.applyParticles = true;
+            break;
+        }
+        if (id == ID_CMB_GAMETYPE) {
+            int sel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_GAMETYPE), CB_GETCURSEL, 0, 0);
+            if (sel >= 0) g_zoneProps.gameType = (GameType)sel;
+            break;
+        }
+        if (id == ID_CMB_PARTICLETYPE) {
+            int sel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_PARTICLETYPE), CB_GETCURSEL, 0, 0);
+            if (sel >= 0) g_zoneProps.particleType = (ParticleType)sel;
+            break;
+        }
+        if (id == ID_CHK_TIMELIMIT) {
+            g_zoneProps.timeLimitEnabled = (int)SendMessage(GetDlgItem(hwnd, ID_CHK_TIMELIMIT), BM_GETCHECK, 0, 0) != 0;
+            break;
+        }
+        if (id == ID_CHK_FRIENDLY) {
+            g_zoneProps.friendlyFire = (int)SendMessage(GetDlgItem(hwnd, ID_CHK_FRIENDLY), BM_GETCHECK, 0, 0) != 0;
+            break;
+        }
+        // Read input fields
+        auto readFloat = [hwnd](int id, float def) -> float {
+            wchar_t buf[64];
+            HWND h = GetDlgItem(hwnd, id);
+            if (!h) return def;
+            GetWindowTextW(h, buf, 64);
+            return (float)wcstod(buf, nullptr);
+        };
+        g_zoneProps.maxPlayers = (int)readFloat(ID_SF_MAXPLAYERS, 8);
+        g_zoneProps.respawnTime = readFloat(ID_SF_RESPAWN, 5);
+        g_zoneProps.timeLimitMinutes = readFloat(ID_SF_TIMELIMIT, 10);
+        g_zoneProps.scoreLimit = (int)readFloat(ID_SF_SCORELIMIT, 50);
         break;
     }
     case WM_CLOSE:
@@ -1214,7 +1449,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_PAWNNMGR, PawnMgrProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_SCRIPTMGR, ScriptMgrProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_MODELBRW, ModelBrwProc, (HINSTANCE)hInst);
-    RegisterPanelClass(CLASS_ENVPANEL, EnvPanelProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_ENVPANEL, ZonePropertiesProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_PICKUPPANEL, PickupPanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_HMEDITOR, HmEditorProc, (HINSTANCE)hInst);
@@ -1236,7 +1471,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_PAWNNMGR,    L"Pawn Manager",        g_editorPanels.pawnMgrPos,    g_editorPanels.hPawnMgr);
     create(CLASS_SCRIPTMGR,   L"Script Manager",      g_editorPanels.scriptMgrPos,  g_editorPanels.hScriptMgr);
     create(CLASS_MODELBRW,    L"Model / Mesh Browser",g_editorPanels.modelBrwPos,   g_editorPanels.hModelBrowser);
-    create(CLASS_ENVPANEL,    L"Environment Settings",g_editorPanels.envPanelPos,   g_editorPanels.hEnvPanel);
+    create(CLASS_ENVPANEL,    L"Zone Properties",     g_editorPanels.envPanelPos,   g_editorPanels.hEnvPanel);
     create(CLASS_PICKUPPANEL, L"Pickups",             g_editorPanels.pickPanelPos,  g_editorPanels.hPickupPanel);
     create(CLASS_NODEPANEL,   L"Nodes",               g_editorPanels.nodePanelPos,  g_editorPanels.hNodePanel);
     create(CLASS_HMEDITOR,    L"Heightmap Editor",     g_editorPanels.heightmapEditorPos, g_editorPanels.hHeightmapEditor);
