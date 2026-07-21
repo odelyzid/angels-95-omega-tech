@@ -227,6 +227,19 @@ public:
                         PickupType* out_type = nullptr, int* out_value = nullptr);
     void respawn_pickup(WorldState& ws, ServerPickup& pickup);
 
+    // Enumerate active pickups (for join sync)
+    template<typename Fn>
+    void for_each_active_pickup(int world_index, Fn&& fn) {
+        WorldState* ws = get_world(world_index);
+        if (!ws) return;
+        for (auto& part : ws->partitions)
+            for (auto& p : part.pickups)
+                if (p.active) fn(*ws, p);
+        for (auto& p : ws->global_pickups)
+            if (p.active) fn(*ws, p);
+    }
+    int world_count() const { return (int)m_worlds.size(); }
+
     // XP
     void add_xp(uint32_t player_id, int amount);
     int xp_needed_for_level(int level) const;

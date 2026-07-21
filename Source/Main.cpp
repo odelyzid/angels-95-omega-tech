@@ -652,11 +652,14 @@ int main(){
         OmegaTechTextSystem.Write(msg);
     });
     g_client.set_on_item_collected([](int item_id, int quantity) {
+        fprintf(stderr, "ITEM collected id=%d qty=%d\n", item_id, quantity);
         if (item_id == 13) {
             gInventory.coins += quantity;
-        } else {
+        } else if (item_id > 0) {
             gInventory.AddToBackpack(item_id, quantity);
         }
+        if (OmegaTechSoundData.UIClick.frameCount > 0)
+            PlaySound(OmegaTechSoundData.UIClick);
     });
 
     if (SetServerJoinFlag && SetServerJoinIP) {
@@ -797,26 +800,33 @@ int main(){
                     OmegaEnemy[i].IsActive = npcs[i].active;
                 }
 
-                // Pickup collection check (press E near a pickup)
-                if (IsKeyPressed(KEY_E)) {
-                    const auto& pickups = g_client.pickups();
-                    Vector3 cp = OmegaTechData.MainCamera.position;
-                    float nearest_dist = 5.0f;
-                    int nearest_pickup = -1;
-                    int nearest_world = 0;
-                    for (const auto& p : pickups) {
-                        if (!p.active) continue;
-                        float dx = p.position.x - cp.x;
-                        float dz = p.position.z - cp.z;
-                        float dist = sqrtf(dx*dx + dz*dz);
-                        if (dist < nearest_dist) {
-                            nearest_dist = dist;
-                            nearest_pickup = p.id;
-                            nearest_world = p.world_index;
+                // Auto-collect when walking over a pickup (also E); throttle requests
+                {
+                    static double last_collect_try = 0.0;
+                    double t = GetTime();
+                    bool want = IsKeyPressed(KEY_E) || (t - last_collect_try > 0.35);
+                    if (want) {
+                        const auto& pickups = g_client.pickups();
+                        Vector3 cp = OmegaTechData.MainCamera.position;
+                        float nearest_dist = IsKeyPressed(KEY_E) ? 5.0f : 2.0f;
+                        int nearest_pickup = -1;
+                        int nearest_world = 0;
+                        for (const auto& p : pickups) {
+                            if (!p.active) continue;
+                            float dx = p.position.x - cp.x;
+                            float dy = p.position.y - cp.y;
+                            float dz = p.position.z - cp.z;
+                            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+                            if (dist < nearest_dist) {
+                                nearest_dist = dist;
+                                nearest_pickup = p.id;
+                                nearest_world = p.world_index;
+                            }
                         }
-                    }
-                    if (nearest_pickup >= 0) {
-                        g_client.send_pickup_collect(nearest_pickup, nearest_world);
+                        if (nearest_pickup >= 0) {
+                            g_client.send_pickup_collect(nearest_pickup, nearest_world);
+                            last_collect_try = t;
+                        }
                     }
                 }
             }

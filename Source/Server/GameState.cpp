@@ -103,16 +103,23 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
         ws.global_npcs.push_back(npc);
     }
 
-    // Spawn pickups: spread some across partitions, keep some global
-    // For simplicity, put a dozen pickups in each world
+    // Spawn pickups: first ring near spawn for playability, rest across world
     srand(static_cast<unsigned>(ws.world_index + 1));
+    static const PickupType kNearTypes[] = {
+        PickupType::HEALTH, PickupType::MANA, PickupType::PSYCHIC,
+        PickupType::KEY, PickupType::COIN, PickupType::POWERUP,
+        PickupType::HEALTH, PickupType::MANA, PickupType::PSYCHIC,
+        PickupType::COIN, PickupType::PSYCHIC, PickupType::POWERUP
+    };
     for (int i = 0; i < 40; i++) {
         ServerPickup pickup;
         pickup.id = i;
-        int type_idx = rand() % PICKUP_TYPE_COUNT;
-        pickup.type = static_cast<PickupType>(type_idx);
+        if (i < 12) {
+            pickup.type = kNearTypes[i];
+        } else {
+            pickup.type = static_cast<PickupType>(rand() % PICKUP_TYPE_COUNT);
+        }
         pickup.value = pickup_default_value(pickup.type);
-        // PSYCHIC pickups get a random Angel number value (111-999)
         if (pickup.type == PickupType::PSYCHIC) {
             int idx = rand() % 9;
             pickup.value = (idx + 1) * 111;
@@ -122,19 +129,27 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
         pickup.active = true;
         pickup.respawn_timer = 0.0f;
 
-        float x = ws.world_min_x + (rand() % 4000) - 2000.0f;
-        float z = ws.world_min_z + (rand() % 4000) - 2000.0f;
-        x = std::max(ws.world_min_x, std::min(ws.world_max_x, x));
-        z = std::max(ws.world_min_z, std::min(ws.world_max_z, z));
-        pickup.position = {x, 0, z};
+        float x, z, y;
+        if (i < 12) {
+            float angle = (2.0f * 3.14159265f / 12.0f) * (float)i;
+            x = 8.0f * std::cos(angle);
+            z = -10.0f + 8.0f * std::sin(angle);
+            y = 18.0f;
+        } else {
+            x = ws.world_min_x + (rand() % 4000) - 2000.0f;
+            z = ws.world_min_z + (rand() % 4000) - 2000.0f;
+            x = std::max(ws.world_min_x, std::min(ws.world_max_x, x));
+            z = std::max(ws.world_min_z, std::min(ws.world_max_z, z));
+            y = 0.0f;
+        }
+        pickup.position = {x, y, z};
         pickup.rotation = rand() % 360;
 
-        // Assign to partition
         int part_idx = get_partition_index(ws, x, z);
         if (part_idx >= 0) {
             ws.partitions[part_idx].pickups.push_back(pickup);
         } else {
-            ws.global_pickups.push_back(pickup); // fallback
+            ws.global_pickups.push_back(pickup);
         }
     }
 }

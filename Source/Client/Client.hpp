@@ -129,6 +129,7 @@ private:
     std::function<void(const std::string&)> m_on_scene_received;
     std::function<void(const std::string&)> m_on_chat_received;
     std::function<void(int item_id, int quantity)> m_on_item_collected;
+    int m_pending_collect_id = -1;
 
     void handle_message(const net::NetworkMessage& msg);
     void on_connected();

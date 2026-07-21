@@ -92,6 +92,7 @@ void OmegaClient::send_pickup_collect(int pickup_id, int world_index) {
     pcd.player_id = 0; // server knows player id
     pcd.pickup_id = pickup_id;
     pcd.world_index = world_index;
+    m_pending_collect_id = pickup_id;
 
     net::NetworkMessage msg;
     msg.magic = net::MAGIC;
@@ -210,7 +211,17 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::PickupCollectedData pcd;
             memcpy(&pcd, msg.payload, sizeof(pcd));
-            if (m_on_item_collected) m_on_item_collected(pcd.item_id, pcd.quantity);
+            for (auto& p : m_pickups) {
+                if (p.id == pcd.pickup_id) {
+                    p.active = false;
+                    break;
+                }
+            }
+            // Grant item only if we requested this collect
+            if (pcd.item_id > 0 && m_pending_collect_id == pcd.pickup_id) {
+                if (m_on_item_collected) m_on_item_collected(pcd.item_id, pcd.quantity);
+                m_pending_collect_id = -1;
+            }
             break;
         }
         case net::MessageType::XP_UPDATE: {
