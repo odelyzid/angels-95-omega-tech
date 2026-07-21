@@ -50,6 +50,10 @@ class GameModels
         Texture2D Skybox;
         
         Vector3 HeightMapPosition;
+        Vector3 HeightMapSize = {0, 0, 0};
+        float HeightMapScale = 1.0f;
+        Image HeightMapImage = {0};
+        bool HeightMapReady = false;
 
         // OBJ Models
 

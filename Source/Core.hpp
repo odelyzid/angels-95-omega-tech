@@ -5,6 +5,8 @@
 #include "rlights/rlights.h"
 #include "Custom/OTCustom.hpp"
 
+#include <cmath>
+
 bool FloorCollision = true;
 bool ObjectCollision = false;
 
@@ -18,6 +20,7 @@ void LoadSave();
 void SaveGame();
 void UpdateCustom();
 void CacheWDL();
+float SampleHeightmapGroundY(float px, float pz);
 void PutLight(Vector3 Position);
 void ClearLights();
 
@@ -186,22 +189,29 @@ auto LoadWorld()
             SpawnWDLProcess(TextFormat("GameData/Worlds/World%i/Entities/Entities.wdl", OmegaTechData.LevelIndex));
         }
 
+        if (WDLModels.HeightMapImage.data) {
+            UnloadImage(WDLModels.HeightMapImage);
+            WDLModels.HeightMapImage = (Image){0};
+        }
+        WDLModels.HeightMapReady = false;
+
         if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex)))
         {
             WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/HeightMapTexture.png", OmegaTechData.LevelIndex));
-            Image HeightMapImage = LoadImage(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex));
-            ImageFormat(&HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex));
+            ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
             int X = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 0);
             int Y = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 1);
             int Z = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 2);
-            Mesh Mesh1 = GenMeshHeightmap(HeightMapImage, (Vector3){(float)X, (float)Y, (float)Z});
-            UnloadImage(HeightMapImage);
-            fprintf(stderr, "HM: X=%d Y=%d Z=%d mesh v=%d t=%d tex=%d\n",
-                    X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount, WDLModels.HeightMapTexture.id);
+            WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
+            Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
+            fprintf(stderr, "HM: X=%d Y=%d Z=%d mesh v=%d t=%d tex=%d img=%dx%d\n",
+                    X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount, WDLModels.HeightMapTexture.id,
+                    WDLModels.HeightMapImage.width, WDLModels.HeightMapImage.height);
             WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
             WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
             WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-            // default shader — Lights shader blacks out terrain without proper light setup
+            WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
         }
 
         if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model1.obj", OmegaTechData.LevelIndex)))
@@ -1072,6 +1082,41 @@ int FlipNumber(int num) {
     return i - num;
 }
 
+// Sample heightmap at world XZ location, returns terrain-surface Y or -99999
+float SampleHeightmapGroundY(float px, float pz) {
+    if (!WDLModels.HeightMapReady || WDLModels.HeightMapImage.data == 0)
+        return -99999.0f;
+
+    Vector3 o = WDLModels.HeightMapPosition;
+    float scale = WDLModels.HeightMapScale;
+    float sx = WDLModels.HeightMapSize.x * scale;
+    float sz = WDLModels.HeightMapSize.z * scale;
+    int iw = WDLModels.HeightMapImage.width;
+    int ih = WDLModels.HeightMapImage.height;
+    if (iw < 1 || ih < 1) return -99999.0f;
+
+    float hx = (px - o.x) / sx;
+    float hz = (pz - o.z) / sz;
+    float fx = hx * (float)(iw - 1);
+    float fz = hz * (float)(ih - 1);
+    int ix = (int)fx;
+    int iz = (int)fz;
+    if (ix < 0 || ix >= iw - 1 || iz < 0 || iz >= ih - 1)
+        return o.y;
+    float tx = fx - ix;
+    float tz = fz - iz;
+    uint8_t* p = (uint8_t*)WDLModels.HeightMapImage.data;
+    float h00 = p[iz * iw + ix] / 255.0f;
+    float h10 = p[iz * iw + ix + 1] / 255.0f;
+    float h01 = p[(iz + 1) * iw + ix] / 255.0f;
+    float h11 = p[(iz + 1) * iw + ix + 1] / 255.0f;
+    float ht = h00 * (1 - tx) * (1 - tz)
+             + h10 * tx * (1 - tz)
+             + h01 * (1 - tx) * tz
+             + h11 * tx * tz;
+    return o.y + ht * WDLModels.HeightMapSize.y * scale;
+}
+
 
 void WDLProcess()
 {
@@ -1385,6 +1430,7 @@ void WDLProcess()
             WDLModels.HeightMapPosition.x = X;
             WDLModels.HeightMapPosition.y = Y;
             WDLModels.HeightMapPosition.z = Z;
+            WDLModels.HeightMapScale = S;
             DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, 1, 0}, 0, {S, S, S}, WHITE);
         }
 
@@ -1396,10 +1442,18 @@ void WDLProcess()
         Render = false;
     }
 
-    if (FoundPlatform ){
-        OmegaTechData.MainCamera.position.y = PlatformHeight;
+    // Stand on heightmap terrain (preferred) or ClipBox platforms
+    {
+        float groundY = SampleHeightmapGroundY(
+            OmegaTechData.MainCamera.position.x,
+            OmegaTechData.MainCamera.position.z);
+        if (groundY > -50000.0f) {
+            const float eyeHeight = 2.0f;
+            OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
+        } else if (FoundPlatform) {
+            OmegaTechData.MainCamera.position.y = PlatformHeight;
+        }
     }
-    // else: leave camera Y as-is (don't force to 10 — interferes with terrain movement)
 }
 
 void UpdateEntities()

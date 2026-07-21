@@ -8,6 +8,7 @@
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
+static bool g_demoPickupsReady = false;
 
 // Local projectiles (fired by this client)
 static struct LocalProjectile {
@@ -314,6 +315,7 @@ static void ExecuteConsoleCommand(const char* cmd) {
             fprintf(stderr, "WORLD switch -> %d\n", id);
             SetSceneId = id;
             SetSceneFlag = true;
+            g_demoPickupsReady = false;
             OmegaTechData.MainCamera.position = (Vector3){0.0f, 20.0f, 0.0f};
             OmegaTechData.MainCamera.target = (Vector3){0.0f, 20.0f, -10.0f};
         }
@@ -412,39 +414,67 @@ static void DrawPickupBillboard(Texture2D* icon, Vector3 pos) {
 
 // Offline demo pickups near spawn so sprites can be verified without a server
 struct LocalDemoPickup { Vector3 pos; int type; bool active; };
-static LocalDemoPickup g_demoPickups[] = {
-    {{  4.0f, 18.0f, -8.0f}, 0, true},  // health
-    {{  6.0f, 18.0f, -8.0f}, 1, true},  // mana
-    {{  8.0f, 18.0f, -8.0f}, 2, true},  // psychic
-    {{ 10.0f, 18.0f, -8.0f}, 6, true},  // key
-    {{ 12.0f, 18.0f, -8.0f}, 7, true},  // coin
-    {{ 14.0f, 18.0f, -8.0f}, 8, true},  // powerup
-};
 static constexpr int g_demoPickupCount = 6;
+
+static LocalDemoPickup g_demoPickups[g_demoPickupCount] = {};
+
+static void InitDemoPickupPositions() {
+    if (g_demoPickupsReady) return;
+    struct { float x, z; int type; } base[g_demoPickupCount] = {
+        {  4.0f, -8.0f, 0 },
+        {  6.0f, -8.0f, 1 },
+        {  8.0f, -8.0f, 2 },
+        { 10.0f, -8.0f, 6 },
+        { 12.0f, -8.0f, 7 },
+        { 14.0f, -8.0f, 8 },
+    };
+    for (int i = 0; i < g_demoPickupCount; i++) {
+        float gy = SampleHeightmapGroundY(base[i].x, base[i].z);
+        if (gy < -50000.0f) gy = 18.0f;
+        g_demoPickups[i] = {{ base[i].x, gy + 1.0f, base[i].z }, base[i].type, true };
+        fprintf(stderr, "DEMO pickup %d at %.1f %.1f %.1f type=%d\n",
+                i, base[i].x, gy + 1.0f, base[i].z, base[i].type);
+    }
+    g_demoPickupsReady = true;
+}
 
 static void UpdateDemoPickupCollect() {
     if (g_network_enabled && g_client.is_connected()) return;
+    InitDemoPickupPositions();
     Vector3 cam = OmegaTechData.MainCamera.position;
     for (int i = 0; i < g_demoPickupCount; i++) {
         if (!g_demoPickups[i].active) continue;
-        float dx = cam.x - g_demoPickups[i].pos.x;
-        float dz = cam.z - g_demoPickups[i].pos.z;
-        if (dx * dx + dz * dz > 2.25f) continue;
+        Vector3 dp = g_demoPickups[i].pos;
+        float dx = cam.x - dp.x, dy = cam.y - dp.y, dz = cam.z - dp.z;
+        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+        if (dist > 4.0f) continue;
         g_demoPickups[i].active = false;
-        int itemId = 1;
+        bool autoUsed = false;
         switch (g_demoPickups[i].type) {
-            case 0: itemId = 1; break;
-            case 1: itemId = 2; break;
-            case 2: itemId = 3; break;
-            case 6: itemId = 12; break;
-            case 7: itemId = 13; gInventory.coins += 1; break;
-            case 8: itemId = 14; break;
-            default: break;
+            case 0: // health vial — auto-use
+                OmegaPlayer.Health = std::min(OmegaPlayer.Health + 25.0f, OmegaPlayer.MaxHealth);
+                autoUsed = true;
+                break;
+            case 1: // mana vial — auto-use
+                OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + 25.0f, OmegaPlayer.MaxMana);
+                autoUsed = true;
+                break;
+            case 2: // psychic crystal
+                gInventory.AddToBackpack(3, 1);
+                break;
+            case 6: // key
+                gInventory.AddToBackpack(12, 1);
+                break;
+            case 7: // coin
+                gInventory.coins += 1;
+                break;
+            case 8: // powerup
+                gInventory.AddToBackpack(14, 1);
+                break;
         }
-        if (g_demoPickups[i].type != 7)
-            gInventory.AddToBackpack(itemId, 1);
         PlaySound(OmegaTechSoundData.UIClick);
-        fprintf(stderr, "DEMO pickup type=%d -> item %d\n", g_demoPickups[i].type, itemId);
+        fprintf(stderr, "DEMO pickup type=%d%s\n",
+                g_demoPickups[i].type, autoUsed ? " (auto-used)" : "");
     }
 }
 
@@ -458,6 +488,7 @@ static void DrawGroundPickups() {
         }
         return;
     }
+    InitDemoPickupPositions();
     for (int i = 0; i < g_demoPickupCount; i++) {
         if (!g_demoPickups[i].active) continue;
         DrawPickupBillboard(IconForPickupType(g_demoPickups[i].type), g_demoPickups[i].pos);
@@ -666,6 +697,12 @@ int main(){
         fprintf(stderr, "ITEM collected id=%d qty=%d\n", item_id, quantity);
         if (item_id == 13) {
             gInventory.coins += quantity;
+        } else if (item_id == 1) {
+            // Health vial — auto-heal locally (server already applied too)
+            OmegaPlayer.Health = std::min(OmegaPlayer.Health + 25.0f, OmegaPlayer.MaxHealth);
+        } else if (item_id == 2) {
+            // Mana vial — auto-restore locally
+            OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + 25.0f, OmegaPlayer.MaxMana);
         } else if (item_id > 0) {
             gInventory.AddToBackpack(item_id, quantity);
         }
