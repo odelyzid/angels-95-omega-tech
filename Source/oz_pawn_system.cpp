@@ -1,6 +1,8 @@
 #include "oz_pawn_system.h"
 #include "oz_assetmapper.h"
 #include "EngineBillboard.hpp"
+#include "Player.hpp"
+#include "Items.hpp"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -212,13 +214,38 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
         };
 
         if (CheckCollisionBoxes(pickupBox, playerBounds)) {
-            // Pickup collected - trigger event, deactivate
             n.active = false;
             n.respawnTimer = n.respawnTime;
 
-            // Here you'd trigger sound, add to inventory, etc.
-            // For now just deactivate
-            fprintf(stderr, "Pickup collected: %s\n", n.typeName.c_str());
+            // Map typeName to item ID, then apply effect
+            int itemId = 0;
+            if (n.typeName == "HealthVial") itemId = 1;
+            else if (n.typeName == "ManaVial") itemId = 2;
+            else if (n.typeName == "Coin") itemId = 13;
+            else if (n.typeName == "Key") itemId = 12;
+            else if (n.typeName == "Powerup") itemId = 14;
+
+            const ItemDBEntry* def = (itemId > 0) ? GetItemDef(itemId) : nullptr;
+            if (def) {
+                switch (def->category) {
+                    case ItemCategory::HEALTH_VIAL:
+                        OmegaPlayer.Health = std::min(OmegaPlayer.Health + (float)def->value, OmegaPlayer.MaxHealth);
+                        break;
+                    case ItemCategory::MANA_VIAL:
+                        OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + (float)def->value, OmegaPlayer.MaxMana);
+                        break;
+                    case ItemCategory::ENERGY_CRYSTAL:
+                        OmegaPlayer.PsychicEnergy = std::min(OmegaPlayer.PsychicEnergy + (float)def->value, OmegaPlayer.MaxPsychicEnergy);
+                        break;
+                    case ItemCategory::COIN:
+                        gInventory.coins += def->value;
+                        break;
+                    default:
+                        gInventory.AddToBackpack(itemId, 1);
+                        break;
+                }
+            }
+            fprintf(stderr, "Pickup collected: %s (itemId=%d)\n", n.typeName.c_str(), itemId);
         }
     }
 }

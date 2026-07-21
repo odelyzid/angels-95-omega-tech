@@ -636,6 +636,16 @@ static void on_player_join(net::NetworkPlayer& player) {
 static void on_player_leave(net::NetworkPlayer& player) {
     printf("Player %s left\n", player.name);
     g_game_state.remove_player(player.id);
+
+    // Broadcast departure to remaining clients
+    net::NetworkMessage leave;
+    leave.magic = net::MAGIC;
+    leave.type = static_cast<uint32_t>(net::MessageType::PLAYER_LEAVE);
+    leave.size = sizeof(player.id);
+    leave.sequence = 0;
+    leave.timestamp = static_cast<uint32_t>(time(nullptr));
+    memcpy(leave.payload, &player.id, sizeof(player.id));
+    g_game_server->broadcast_message(leave);
 }
 
 static void on_server_message(const net::NetworkMessage& msg,

@@ -73,7 +73,7 @@ void main()
     }
 
     // Base lit color
-    vec3 litColor = (texelColor.rgb * ((colDiffuse.rgb + vec3(specular)) * vec3(lightDot, 1.0)));
+    vec3 litColor = (texelColor.rgb * ((colDiffuse.rgb + specular) * lightDot));
     litColor += texelColor.rgb * (ambient.rgb / 10.0) * colDiffuse.rgb;
 
     // Gamma correction

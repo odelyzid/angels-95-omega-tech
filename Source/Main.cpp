@@ -730,6 +730,13 @@ int main(){
             PlaySound(OmegaTechSoundData.UIClick);
     });
 
+    g_client.set_on_player_hurt([](int damage, float remaining_health) {
+        OmegaPlayer.Health = remaining_health;
+        if (OmegaTechSoundData.Death.frameCount > 0 &&
+            !IsSoundPlaying(OmegaTechSoundData.Death))
+            PlaySound(OmegaTechSoundData.Death);
+    });
+
     if (SetServerJoinFlag && SetServerJoinIP) {
         g_network_enabled = g_client.connect(SetServerJoinIP, 27015);
         if (g_network_enabled) {
@@ -1079,5 +1086,7 @@ int main(){
     }
     
     g_client.disconnect();
+    UnloadRenderTexture(Target);
+    EngineBillboard::Shutdown();
     CloseWindow();
 }

@@ -234,7 +234,24 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             m_xp_to_next = xud.xp_to_next;
             break;
         }
+        case net::MessageType::PLAYER_LEAVE: {
+            if (msg.size < sizeof(uint32_t)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            uint32_t leave_id;
+            memcpy(&leave_id, msg.payload, sizeof(leave_id));
+            m_remote_players.erase(
+                std::remove_if(m_remote_players.begin(), m_remote_players.end(),
+                    [leave_id](const RemotePlayer& rp) { return rp.player_id == leave_id; }),
+                m_remote_players.end());
+            break;
+        }
         case net::MessageType::PLAYER_HURT: {
+            if (msg.size < sizeof(net::PlayerHurtData)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::PlayerHurtData pud;
+            memcpy(&pud, msg.payload, sizeof(pud));
+            if (m_on_player_hurt)
+                m_on_player_hurt(pud.damage, pud.remaining_health);
             break;
         }
         case net::MessageType::PLAYER_UPDATE: {
