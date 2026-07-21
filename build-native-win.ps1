@@ -115,18 +115,26 @@ Write-Step "oz_editor.exe built."
 
 # --- 5. Assemble System/ directory ---
 Write-Step "Assembling System/ release..."
-if (-not (Test-Path $OUT_DIR)) { New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null }
-if (-not (Test-Path "$OUT_DIR\Data")) { New-Item -ItemType Directory -Force -Path "$OUT_DIR\Data" | Out-Null }
+# Ensure clean system directory structure
+if (Test-Path $OUT_DIR) { Remove-Item -Recurse -Force "$OUT_DIR\*" -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path "$OUT_DIR\Data" | Out-Null
+New-Item -ItemType Directory -Force -Path "$OUT_DIR\Cache" | Out-Null
 
 # Move EXEs
-Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe"
-Move-Item -Force "$PSScriptRoot\oz_server.exe" "$OUT_DIR\oz_server.exe"
-Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe"
-Move-Item -Force "$PSScriptRoot\OTEditor\oz_editor.exe" "$OUT_DIR\oz_editor.exe"
+if (Test-Path "$PSScriptRoot\Angels95.exe")  { Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe" }
+if (Test-Path "$PSScriptRoot\oz_server.exe") { Move-Item -Force "$PSScriptRoot\oz_server.exe" "$OUT_DIR\oz_server.exe" }
+if (Test-Path "$PSScriptRoot\OzPack.exe")    { Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe" }
+if (Test-Path "$PSScriptRoot\OTEditor\oz_editor.exe") { Move-Item -Force "$PSScriptRoot\OTEditor\oz_editor.exe" "$OUT_DIR\oz_editor.exe" }
 
-# Copy/create INI files
-if (-not (Test-Path "$OUT_DIR\Angels95.ini")) {
-    @"
+# Copy raylib DLL if present
+$raylibDll = "$W64DEVKIT\bin\libraylib.dll"
+if (Test-Path $raylibDll) {
+    Copy-Item -Force $raylibDll "$OUT_DIR\libraylib.dll"
+}
+
+# Always recreate INI files
+@"
 [Video]
 Width=1280
 Height=720
@@ -142,10 +150,8 @@ SFXVolume=1.0
 ServerIP=127.0.0.1
 ServerPort=27015
 "@ | Set-Content "$OUT_DIR\Angels95.ini" -Encoding UTF8
-}
 
-if (-not (Test-Path "$OUT_DIR\oz_editor.ini")) {
-    @"
+@"
 [Editor]
 GridSize=1.0
 SnapToGrid=1
@@ -155,7 +161,6 @@ ShowGrid=1
 Width=1600
 Height=900
 "@ | Set-Content "$OUT_DIR\oz_editor.ini" -Encoding UTF8
-}
 
 # Create run scripts
 @"
@@ -178,6 +183,13 @@ if (-not $SkipData) {
     Pop-Location
 } else {
     Write-Step "Skipping asset packaging (-SkipData)"
+}
+
+# After packaging, copy any loose assets needed at runtime
+if (Test-Path "$PSScriptRoot\GameData\Shaders") {
+    $shaderDest = "$OUT_DIR\Shaders"
+    New-Item -ItemType Directory -Force -Path $shaderDest | Out-Null
+    Copy-Item -Recurse -Force "$PSScriptRoot\GameData\Shaders\*" $shaderDest -ErrorAction SilentlyContinue
 }
 
 # --- 7. Cleanup intermediate objects ---
@@ -205,4 +217,6 @@ Write-Host "  Angels95.exe  - Game client" -ForegroundColor Green
 Write-Host "  oz_server.exe - Dedicated server" -ForegroundColor Green
 Write-Host "  oz_editor.exe - Level editor" -ForegroundColor Green
 Write-Host "  OzPack.exe    - Asset packer" -ForegroundColor Green
+Write-Host "  libraylib.dll - Raylib runtime (if available)" -ForegroundColor Green
 Write-Host "  Data/*.oz*    - Packaged assets ($($dataFiles.Count) files)" -ForegroundColor Green
+Write-Host "  Cache/        - Temporary runtime cache" -ForegroundColor Green

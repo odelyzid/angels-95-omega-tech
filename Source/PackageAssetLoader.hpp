@@ -1,4 +1,5 @@
 #pragma once
+#include "raylib.h"
 #include "OzPackage.hpp"
 #include <string>
 #include <vector>
@@ -125,6 +126,16 @@ public:
     }
 
     int PackageCount() const { return (int)m_readers.size(); }
+
+    // List all filenames across all loaded packages
+    void ListAllFiles(std::vector<std::string>& names) const {
+        names.clear();
+        for (const auto& reader : m_readers) {
+            for (const auto& e : reader.Entries()) {
+                names.push_back(e.filename);
+            }
+        }
+    }
 
 private:
     std::vector<OzPackageReader> m_readers;

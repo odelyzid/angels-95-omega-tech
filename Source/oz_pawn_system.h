@@ -156,6 +156,9 @@ public:
     // Draw entities (billboards for player starts, pickups, zones)
     void DrawEntities(Camera3D& camera);
 
+    // Access registered definitions
+    const std::vector<PawnDef>& GetDefs() const { return m_defs; }
+
     // Singleton
     static PawnSystem& Instance();
 

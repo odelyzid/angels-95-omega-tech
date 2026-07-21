@@ -2,6 +2,8 @@
 #define UNICODE
 #define _UNICODE
 #include "../../Source/WindowsCompat.hpp"
+#include "../../Source/PackageAssetLoader.hpp"
+#include "../../Source/oz_pawn_system.h"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <commctrl.h>
@@ -45,15 +47,66 @@ struct ResourceEntry {
 static std::vector<ResourceEntry> g_textureFiles;
 static std::vector<ResourceEntry> g_soundFiles;
 
-// Pawn data
-struct PawnDef {
+// Pawn data (editor-local, distinct from oz_pawn_system.h::PawnDef)
+struct EditorPawnDef {
     std::string name;
     std::string meshPath;
 };
-static std::vector<PawnDef> g_pawns;
+static std::vector<EditorPawnDef> g_pawns;
 
 // Model preview sequence number (for refresh)
 static int g_previewSeq = 0;
+
+// =====================================================================
+// Helper: scan GameData/ filesystem + packages for matching extensions
+// =====================================================================
+static void ScanFilesAndPackages(const std::string& subdir,
+                                  const std::vector<std::string>& exts,
+                                  std::vector<ResourceEntry>& out) {
+    out.clear();
+    // Filesystem scan under GameData/
+    fs::path base = fs::current_path() / "GameData";
+    if (!subdir.empty()) base /= subdir;
+    try {
+        if (fs::exists(base)) {
+            for (auto& entry : fs::recursive_directory_iterator(base)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    for (const auto& e : exts) {
+                        if (ext == e) {
+                            out.push_back({ entry.path().stem().string(), entry.path().string() });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    } catch (...) {}
+
+    // Package entries
+    std::vector<std::string> pkgFiles;
+    PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
+    for (const auto& pkgPath : pkgFiles) {
+        std::string ext = pkgPath.substr(pkgPath.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        for (const auto& e : exts) {
+            if (ext == e) {
+                // Extract filename without extension for display
+                std::string name = pkgPath;
+                size_t slash = name.rfind('/');
+                if (slash != std::string::npos) name = name.substr(slash + 1);
+                size_t dot = name.rfind('.');
+                if (dot != std::string::npos) name = name.substr(0, dot);
+                out.push_back({ name, pkgPath });
+                break;
+            }
+        }
+    }
+
+    std::sort(out.begin(), out.end(),
+        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+}
 
 // =====================================================================
 // Forward declarations
@@ -117,25 +170,7 @@ void ShowSoundManager(bool show) {
 }
 
 void ScanSoundBrowserFiles() {
-    g_soundFiles.clear();
-    fs::path base = fs::current_path() / "GameData" / "Audio";
-    try {
-        if (fs::exists(base)) {
-            for (auto& entry : fs::recursive_directory_iterator(base)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (ext == ".wav" || ext == ".ogg") {
-                        g_soundFiles.push_back({ entry.path().stem().string(), entry.path().string() });
-                    }
-                }
-            }
-        }
-    } catch (...) {}
-
-    std::sort(g_soundFiles.begin(), g_soundFiles.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
-
+    ScanFilesAndPackages("", { ".wav", ".ogg", ".mp3" }, g_soundFiles);
     if (g_editorPanels.hSoundMgr) {
         SendMessage((HWND)g_editorPanels.hSoundMgr, WM_USER + 50, 0, 0);
     }
@@ -206,25 +241,7 @@ void ShowTextureManager(bool show) {
 }
 
 void ScanTextureBrowserFiles() {
-    g_textureFiles.clear();
-    fs::path base = fs::current_path() / "GameData" / "Textures";
-    try {
-        if (fs::exists(base)) {
-            for (auto& entry : fs::recursive_directory_iterator(base)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (ext == ".png" || ext == ".tga" || ext == ".bmp") {
-                        g_textureFiles.push_back({ entry.path().stem().string(), entry.path().string() });
-                    }
-                }
-            }
-        }
-    } catch (...) {}
-
-    std::sort(g_textureFiles.begin(), g_textureFiles.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
-
+    ScanFilesAndPackages("", { ".png", ".tga", ".bmp", ".jpg", ".jpeg", ".gif" }, g_textureFiles);
     if (g_editorPanels.hTextureMgr) {
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
     }
@@ -320,10 +337,11 @@ bool ChooseSaveWorldFile(std::string& outPath) { return ChooseWorldFile(true, ou
 // =====================================================================
 // Pawn Manager
 // =====================================================================
-static const int ID_PAWN_CLOSE = 100;
-static const int ID_PAWN_ADD   = 101;
-static const int ID_PAWN_LIST  = 102;
-static const int ID_PAWN_SPAWN = 103;
+static const int ID_PAWN_CLOSE   = 100;
+static const int ID_PAWN_ADD     = 101;
+static const int ID_PAWN_LIST    = 102;
+static const int ID_PAWN_SPAWN   = 103;
+static const int ID_PAWN_REFRESH = 104;
 
 void ShowPawnManager(bool show) {
     g_editorPanels.showPawnMgr = show;
@@ -344,27 +362,42 @@ const char* GetPawnName(int index) {
     return g_pawns[index].name.c_str();
 }
 
+static void PopulatePawnListFromSystem(HWND hList) {
+    g_pawns.clear();
+    // Pull from PawnSystem registered definitions
+    const auto& defs = PawnSystem::Instance().GetDefs();
+    for (const auto& def : defs) {
+        std::string meshPath = std::string("GameData/Models/") + def.name + ".obj";
+        g_pawns.push_back({ def.name, meshPath });
+    }
+    // Also scan for .obj files under GameData/ as potential pawn meshes
+    std::vector<ResourceEntry> models;
+    ScanFilesAndPackages("", { ".obj" }, models);
+    for (const auto& m : models) {
+        bool found = false;
+        for (const auto& p : g_pawns) {
+            if (p.name == m.name) { found = true; break; }
+        }
+        if (!found) {
+            g_pawns.push_back({ m.name, m.path });
+        }
+    }
+}
+
 static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Pawn Definitions:", 10, 10, 200, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 320, 100, ID_PAWN_LIST);
-        CreateButton(hwnd, L"Spawn in World", 10, 140, 120, 28, ID_PAWN_SPAWN);
-        CreateButton(hwnd, L"Add Pawn...", 10, 172, 100, 28, ID_PAWN_ADD);
-        CreateButton(hwnd, L"Close", 220, 172, 120, 28, ID_PAWN_CLOSE);
-        
-        // Ensure standard defaults exist if empty
-        if (g_pawns.empty()) {
-            g_pawns.push_back({ "Walker", "GameData/Models/Walker.obj" });
-            g_pawns.push_back({ "Skaarj", "GameData/Models/Skaarj.obj" });
-            g_pawns.push_back({ "Brute", "GameData/Models/Brute.obj" });
-            g_pawns.push_back({ "Floater", "GameData/Models/Floater.obj" });
-        }
+        CreateLabel(hwnd, L"Pawn Definitions (from PawnSystem + .obj files):", 10, 10, 350, 20, 1);
+        hList = CreateListBox(hwnd, 10, 35, 360, 120, ID_PAWN_LIST);
+        CreateButton(hwnd, L"Spawn in World", 10, 165, 120, 28, ID_PAWN_SPAWN);
+        CreateButton(hwnd, L"Refresh", 140, 165, 90, 28, ID_PAWN_REFRESH);
+        CreateButton(hwnd, L"Close", 240, 165, 120, 28, ID_PAWN_CLOSE);
         SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
     }
     case WM_USER + 50: {
+        PopulatePawnListFromSystem(hList);
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (auto& p : g_pawns)
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)p.name.c_str());
@@ -373,14 +406,13 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_COMMAND: {
         int id = LOWORD(w);
         if (id == ID_PAWN_CLOSE) ShowPawnManager(false);
-        else if (id == ID_PAWN_SPAWN) {
+        else if (id == ID_PAWN_REFRESH) {
+            SendMessage(hwnd, WM_USER + 50, 0, 0);
+        } else if (id == ID_PAWN_SPAWN) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_pawns.size()) {
                 g_editorPanels.actionSpawnPawn = sel;
             }
-        } else if (id == ID_PAWN_ADD) {
-            MessageBoxA(hwnd, "Use PawnManagerAddPawn() API to register new dynamic types.",
-                        "Add Pawn", MB_OK | MB_ICONINFORMATION);
         } else if (id == ID_PAWN_LIST && HIWORD(w) == LBN_DBLCLK) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_pawns.size()) {
@@ -405,9 +437,20 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Script Manager
+// Script Manager — Dynamic file scanning (GameData/ + packages)
 // =====================================================================
 static const int ID_SCRIPT_CLOSE = 100;
+static const int ID_SCRIPT_LIST  = 101;
+static const int ID_SCRIPT_REFRESH = 102;
+
+static std::vector<ResourceEntry> g_scriptFiles;
+
+void ScanScriptFiles() {
+    ScanFilesAndPackages("", { ".ps", ".wdl", ".ozone" }, g_scriptFiles);
+    if (g_editorPanels.hScriptMgr) {
+        SendMessage((HWND)g_editorPanels.hScriptMgr, WM_USER + 50, 0, 0);
+    }
+}
 
 void ShowScriptManager(bool show) {
     g_editorPanels.showScriptMgr = show;
@@ -419,19 +462,37 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Available Scripts (WDL Script1-10):", 10, 10, 380, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 380, 220, 2);
+        CreateLabel(hwnd, L"Available Scripts (GameData/.ps .wdl .ozone):", 10, 10, 380, 20, 1);
+        hList = CreateListBox(hwnd, 10, 35, 380, 220, ID_SCRIPT_LIST);
+        CreateButton(hwnd, L"Refresh", 10, 265, 90, 28, ID_SCRIPT_REFRESH);
         CreateButton(hwnd, L"Close", 300, 265, 100, 28, ID_SCRIPT_CLOSE);
-        for (int i = 1; i <= 10; i++) {
-            char label[64];
-            snprintf(label, sizeof(label), "Script%d.ps", i);
-            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)label);
+        ScanScriptFiles();
+        break;
+    }
+    case WM_USER + 50: {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (const auto& scr : g_scriptFiles) {
+            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)scr.name.c_str());
         }
         break;
     }
-    case WM_COMMAND:
-        if (LOWORD(w) == ID_SCRIPT_CLOSE) ShowScriptManager(false);
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_SCRIPT_CLOSE) {
+            ShowScriptManager(false);
+        } else if (id == ID_SCRIPT_REFRESH) {
+            ScanScriptFiles();
+        } else if (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_DBLCLK) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_scriptFiles.size()) {
+                char msgBuf[512];
+                snprintf(msgBuf, sizeof(msgBuf), "Script: %s\nPath: %s",
+                         g_scriptFiles[sel].name.c_str(), g_scriptFiles[sel].path.c_str());
+                MessageBoxA(hwnd, msgBuf, "Script Info", MB_OK);
+            }
+        }
         break;
+    }
     case WM_CLOSE:
         ShowScriptManager(false);
         break;
@@ -465,6 +526,8 @@ void ShowModelBrowser(bool show) {
 void ScanModelBrowserFiles() {
     g_editorPanels.modelEntries.clear();
     g_editorPanels.selectedModel = -1;
+
+    // Filesystem scan
     fs::path base = fs::current_path() / "GameData";
     try {
         if (fs::exists(base)) {
@@ -482,6 +545,25 @@ void ScanModelBrowserFiles() {
             }
         }
     } catch (...) {}
+
+    // Package scan for .obj files
+    std::vector<std::string> pkgFiles;
+    PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
+    for (const auto& pkgPath : pkgFiles) {
+        std::string ext = pkgPath.substr(pkgPath.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".obj") {
+            ModelBrowserEntry mbe;
+            std::string name = pkgPath;
+            size_t slash = name.rfind('/');
+            if (slash != std::string::npos) name = name.substr(slash + 1);
+            size_t dot = name.rfind('.');
+            if (dot != std::string::npos) name = name.substr(0, dot);
+            mbe.name = name;
+            mbe.path = pkgPath;
+            g_editorPanels.modelEntries.push_back(mbe);
+        }
+    }
     
     std::sort(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
         [](auto& a, auto& b) { return a.name < b.name; });
@@ -835,6 +917,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     ScanTextureBrowserFiles();
     ScanSoundBrowserFiles();
     ScanModelBrowserFiles();
+    ScanScriptFiles();
 }
 
 void DestroyAllEditorWindows() {
