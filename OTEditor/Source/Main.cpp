@@ -1,6 +1,11 @@
 #include "Editor.hpp"
 #include "raylib.h"
 #include "rlgl.h"
+#include "Win32Dialogs.hpp"
+#include "../../Source/IniConfig.hpp"
+#include "../../Source/oz_ozone_loader.h"
+#include "../../Source/oz_pawn_system.h"
+#include "../../Source/PackageAssetLoader.hpp"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -9,34 +14,20 @@ namespace fs = std::filesystem;
 enum class PlaceMode { MODEL, PICKUP, NODE, ENV };
 static PlaceMode g_placeMode = PlaceMode::MODEL;
 
+// INI config
+static IniConfig g_config;
+
 // --- Top menu bar state ---
 static int g_menuActive = -1;      // which dropdown is open (-1 = none)
-static bool g_showSoundMgr = false;
-static bool g_showTextureMgr = false;
-static bool g_showPawnMgr = false;
-static bool g_showScriptMgr = false;
-static bool g_showModelBrowser = false;
-
-// Model browser state
-struct ModelEntry {
-    std::string path;
-    std::string name;
-    Model model;
-    Texture2D texture;
-    bool loaded;
-};
-static std::vector<ModelEntry> g_modelBrowserEntries;
-static int g_modelBrowserSel = -1;
-static int g_modelBrowserScroll = 0;
 
 struct MenuItem { const char* label; void (*handler)(); };
 struct MenuDef { const char* label; std::vector<MenuItem> items; };
 
-static void ToggleSoundMgr()    { g_showSoundMgr     = !g_showSoundMgr;     g_menuActive = -1; }
-static void ToggleTextureMgr()  { g_showTextureMgr   = !g_showTextureMgr;   g_menuActive = -1; }
-static void TogglePawnMgr()     { g_showPawnMgr      = !g_showPawnMgr;      g_menuActive = -1; }
-static void ToggleScriptMgr()   { g_showScriptMgr    = !g_showScriptMgr;    g_menuActive = -1; }
-static void ToggleModelBrowser(){ g_showModelBrowser = !g_showModelBrowser; g_menuActive = -1; }
+static void ToggleSoundMgr()    { ShowSoundManager(!g_editorPanels.showSoundMgr);     g_menuActive = -1; }
+static void ToggleTextureMgr()  { ShowTextureManager(!g_editorPanels.showTextureMgr); g_menuActive = -1; }
+static void TogglePawnMgr()     { ShowPawnManager(!g_editorPanels.showPawnMgr);       g_menuActive = -1; }
+static void ToggleScriptMgr()   { ShowScriptManager(!g_editorPanels.showScriptMgr);   g_menuActive = -1; }
+static void ToggleModelBrowser(){ ShowModelBrowser(!g_editorPanels.showModelBrowser); g_menuActive = -1; }
 
 static std::vector<MenuDef> g_menus = {
     {"Models",    {{"Model Browser...", ToggleModelBrowser}}},
@@ -49,15 +40,12 @@ static std::vector<MenuDef> g_menus = {
 // Forward declarations for overlay UI functions
 static void DrawOverlay();
 static void RenderPreview();
-static void DrawEnvPanel();
-static void DrawPickupPanel();
-static void DrawNodePanel();
 static void DrawMenuBar();
-static void DrawSoundManager();
-static void DrawTextureManager();
-static void DrawPawnManager();
-static void DrawScriptManager();
-static void DrawModelBrowser();
+
+// Model preview for Win32 dialog (render-to-texture)
+static RenderTexture2D g_previewRT = {0};
+static int g_lastPreviewSel = -1;
+static bool g_previewNeedsUpdate = false;
 
 int main(int argc, char **argv){
     SetWindowState(FLAG_VSYNC_HINT);
@@ -77,8 +65,48 @@ int main(int argc, char **argv){
             OTEditor.Path[i] = defaultPath[i];
     }
 
+    // Load INI config
+    g_config.Load("System/oz_editor.ini");
+
+    // Initialize package-based asset loading
+    PackageAssetLoader::Instance().Init();
+
+#ifdef _WIN32
+    CreateAllEditorWindows(GetModuleHandle(NULL), GetWindowHandle());
+#endif
+
+    // Load editor world
     Init();
     CacheWDL();
+
+    // Load OZONE world if present
+    {
+        char ozonePath[512];
+        snprintf(ozonePath, sizeof(ozonePath), "%s/World.ozone", OTEditor.Path);
+        if (IsPathFile(ozonePath)) {
+            OzoneLoader::Instance().LoadFile(ozonePath);
+            std::string texDir = OTEditor.Path;
+            if (!texDir.empty() && texDir.back() != '/') texDir += '/';
+            OzoneLoader::Instance().LoadWorldTextures(texDir);
+            fprintf(stderr, "Editor: loaded OZONE world from %s\n", ozonePath);
+        }
+    }
+
+    // Register default pawn definitions
+    {
+        auto& ps = PawnSystem::Instance();
+        ps.RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
+        ps.RegisterDef({"Skaarj", 2.5f, 10.0f, 2.0f, 20.0f, 150});
+        ps.RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
+        ps.RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
+        PawnManagerAddPawn("Walker", "GameData/Models/Walker.obj");
+        PawnManagerAddPawn("Skaarj", "GameData/Models/Skaarj.obj");
+        PawnManagerAddPawn("Brute", "GameData/Models/Brute.obj");
+        PawnManagerAddPawn("Floater", "GameData/Models/Floater.obj");
+    }
+
+    // Create model preview render texture
+    g_previewRT = LoadRenderTexture(256, 256);
 
     DisableCursor();
 
@@ -102,8 +130,23 @@ int main(int argc, char **argv){
                 UpdateCamera(&OTEditor.MainCamera, CAMERA_FIRST_PERSON);
         }
         
-        BeginTextureMode(Target);
-        ClearBackground(BLACK);
+        // Apply EnvPanel fog/ambient settings
+        {
+            EnvSettings env = GetEnvSettings();
+            if (env.applyFog) {
+                Color fc = { (unsigned char)env.fogR, (unsigned char)env.fogG, (unsigned char)env.fogB, 255 };
+                ClearBackground(fc);
+            } else {
+                ClearBackground(BLACK);
+            }
+            if (env.applyAmbient) {
+                // Ambient applies to model tint — stored for future lighting pass
+                // Currently the editor renders unlit; ambient color stored in OTEditor state
+                OTEditor.AmbientColor = (Color){ (unsigned char)env.ambR, (unsigned char)env.ambG, (unsigned char)env.ambB, 255 };
+                OTEditor.AmbientIntensity = env.ambIntensity;
+            }
+            ClearEnvApplyFlags();
+        }
 
         BeginMode3D(OTEditor.MainCamera);
 
@@ -111,6 +154,12 @@ int main(int argc, char **argv){
 
         CWDLProcess();
         WDLProcess();
+
+        // OZONE world geometry
+        OzoneLoader::Instance().Draw(OTEditor.MainCamera);
+
+        // Pawn system — draw active pawns as billboards
+        PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
 
         // --- Placement visuals ---
         if (OmegaTechEditor.DrawModel)
@@ -296,20 +345,143 @@ int main(int argc, char **argv){
                 RenderPreview();
         }
 
-        // Manager panels (opened from menu bar)
-        DrawSoundManager();
-        DrawTextureManager();
-        DrawPawnManager();
-        DrawScriptManager();
-        DrawModelBrowser();
-
         EndDrawing();
+
+    #ifdef _WIN32
+    // --- Model preview render-to-texture (for Win32 Model Browser dialog) ---
+        if (g_editorPanels.selectedModel >= 0 &&
+            g_editorPanels.selectedModel < (int)g_editorPanels.modelEntries.size() &&
+            g_editorPanels.selectedModel != g_lastPreviewSel) {
+            g_lastPreviewSel = g_editorPanels.selectedModel;
+            g_previewNeedsUpdate = true;
+        }
+        if (g_previewNeedsUpdate && g_lastPreviewSel >= 0 &&
+            g_lastPreviewSel < (int)g_editorPanels.modelEntries.size()) {
+            auto& entry = g_editorPanels.modelEntries[g_lastPreviewSel];
+            if (!entry.loaded) {
+                Model mdl = LoadModel(entry.path.c_str());
+                std::string texPath = entry.path;
+                texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
+                std::string texPath2 = entry.path;
+                texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
+                Texture2D tex = {0};
+                if (fs::exists(texPath)) tex = LoadTexture(texPath.c_str());
+                else if (fs::exists(texPath2)) tex = LoadTexture(texPath2.c_str());
+                if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+                if (mdl.meshes != nullptr) {
+                    entry.triangles = mdl.meshes[0].triangleCount;
+                    entry.vertices = mdl.meshes[0].vertexCount;
+                }
+                UnloadModel(mdl);
+                if (tex.id > 0) UnloadTexture(tex);
+                entry.loaded = true;
+            }
+            Camera3D prevCam = {0};
+            prevCam.position = {5.0f, 4.0f, 5.0f};
+            prevCam.target = {0, 0, 0};
+            prevCam.up = {0, 1, 0};
+            prevCam.fovy = 45.0f;
+            prevCam.projection = CAMERA_PERSPECTIVE;
+
+            BeginTextureMode(g_previewRT);
+            ClearBackground((Color){40, 40, 50, 255});
+            BeginMode3D(prevCam);
+            DrawGrid(10, 1.0f);
+            Model mdl = LoadModel(entry.path.c_str());
+            std::string texPath = entry.path;
+            texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
+            std::string texPath2 = entry.path;
+            texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
+            Texture2D tex = {0};
+            if (fs::exists(texPath)) tex = LoadTexture(texPath.c_str());
+            else if (fs::exists(texPath2)) tex = LoadTexture(texPath2.c_str());
+            if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+            if (mdl.meshes != nullptr) {
+                rlDisableBackfaceCulling();
+                DrawModel(mdl, {0, 0, 0}, 1.0f, WHITE);
+                rlEnableBackfaceCulling();
+            }
+            EndMode3D();
+            EndTextureMode();
+            UnloadModel(mdl);
+            if (tex.id > 0) UnloadTexture(tex);
+
+            Image img = LoadImageFromTexture(g_previewRT.texture);
+            ImageFlipVertical(&img);
+            unsigned char* px = (unsigned char*)img.data;
+            for (int i = 0; i < img.width * img.height; i++) {
+                unsigned char tmp = px[i*4];
+                px[i*4] = px[i*4+2];
+                px[i*4+2] = tmp;
+            }
+            BITMAPINFO bmi = {};
+            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth = img.width;
+            bmi.bmiHeader.biHeight = -img.height;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+            HDC hdc = GetDC((HWND)GetWindowHandle());
+            void* bits = nullptr;
+            HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+            if (bits) memcpy(bits, img.data, img.width * img.height * 4);
+            ReleaseDC((HWND)GetWindowHandle(), hdc);
+            UpdateModelPreview(hBmp, img.width, img.height);
+            UnloadImage(img);
+            g_previewNeedsUpdate = false;
+        }
+#endif
+
+        // Handle action flags from Win32 dialogs
+        if (g_editorPanels.actionPickupType >= 0) {
+            g_placeMode = PlaceMode::PICKUP;
+            OmegaTechEditor.ActivePickupType = (EditorPickupType)g_editorPanels.actionPickupType;
+            OmegaTechEditor.DrawModel = true;
+            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+            OmegaTechEditor.R = 1;
+            g_editorPanels.actionPickupType = -1;
+        }
+        if (g_editorPanels.actionNodeType >= 0) {
+            g_placeMode = PlaceMode::NODE;
+            OmegaTechEditor.ActiveNodeType = (EditorNodeType)g_editorPanels.actionNodeType;
+            OmegaTechEditor.DrawModel = true;
+            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+            OmegaTechEditor.R = 1;
+            g_editorPanels.actionNodeType = -1;
+        }
+        if (g_editorPanels.actionPlaceModel >= 0) {
+            g_placeMode = PlaceMode::MODEL;
+            OmegaTechEditor.DrawModel = true;
+            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+            OmegaTechEditor.R = 1;
+            EMID = 0; // 0 = user-selected obj
+            g_editorPanels.actionPlaceModel = -1;
+        }
+        if (g_editorPanels.actionRefreshBrowser) {
+            ScanModelBrowserFiles();
+            g_editorPanels.actionRefreshBrowser = false;
+        }
+        if (g_editorPanels.actionSpawnPawn >= 0) {
+            int idx = g_editorPanels.actionSpawnPawn;
+            if (idx >= 0 && idx < GetPawnCount()) {
+                Vector3 pos = OTEditor.MainCamera.position;
+                PawnSystem::Instance().Spawn(pos, GetPawnName(idx));
+            }
+            g_editorPanels.actionSpawnPawn = -1;
+        }
+    }
 
         // Mode switching
         if (IsKeyPressed(KEY_ONE))   g_placeMode = PlaceMode::MODEL;
         if (IsKeyPressed(KEY_TWO))   g_placeMode = PlaceMode::PICKUP;
         if (IsKeyPressed(KEY_THREE)) g_placeMode = PlaceMode::NODE;
-        if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; OTEditor.ShowEnvPanel = !OTEditor.ShowEnvPanel; }
+        if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; ShowEnvPanel(!g_editorPanels.showEnvPanel); }
 
         if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
 
@@ -318,7 +490,12 @@ int main(int argc, char **argv){
             if (OverlayEnabled) EnableCursor(); else DisableCursor();
         }
     }
-    
+
+    // Cleanup
+    UnloadRenderTexture(g_previewRT);
+#ifdef _WIN32
+    DestroyAllEditorWindows();
+#endif
     CloseWindow();
 }
 
@@ -387,352 +564,8 @@ static void DrawMenuBar() {
     }
 }
 
-// =====================================================================
-// Manager panel windows  (opened from menu bar)
-// =====================================================================
-static void DrawSoundManager() {
-    if (!g_showSoundMgr) return;
-    GuiWindowBox((Rectangle){200, 60, 400, 280}, "Sound Manager");
-    GuiLabel((Rectangle){210, 90, 200, 20}, "Sound resources (WIP)");
-    GuiLabel((Rectangle){210, 120, 360, 40},
-        "Placeholder: list, preview, and manage\nsound assets per world.");
-    if (GuiButton((Rectangle){210, 200, 120, 28}, "Close"))
-        g_showSoundMgr = false;
-}
-
-static void DrawTextureManager() {
-    if (!g_showTextureMgr) return;
-    GuiWindowBox((Rectangle){250, 80, 480, 320}, "Texture Manager");
-    int y = 110;
-    struct { const char* name; Texture2D* tex; } entries[] = {
-        {"Model1", &WDLModels.Model1Texture},
-        {"Model2", &WDLModels.Model2Texture},
-        {"Model3", &WDLModels.Model3Texture},
-        {"Model4", &WDLModels.Model4Texture},
-        {"Model5", &WDLModels.Model5Texture},
-        {"HeightMap", &WDLModels.HeightMapTexture},
-    };
-    for (auto& e : entries) {
-        GuiLabel((Rectangle){260, (float)y, 200, 20},
-            TextFormat("%s: %dx%d", e.name, e.tex->id > 0 ? e.tex->width : 0,
-                                          e.tex->id > 0 ? e.tex->height : 0));
-        y += 22;
-    }
-    GuiLabel((Rectangle){260, (float)y, 200, 20},
-        TextFormat("Total models: %d / loaded: %d", 20, CachedModelCounter));
-    y += 30;
-    if (GuiButton((Rectangle){260, (float)y, 120, 28}, "Close"))
-        g_showTextureMgr = false;
-}
-
-static void DrawPawnManager() {
-    if (!g_showPawnMgr) return;
-    GuiWindowBox((Rectangle){300, 100, 360, 200}, "Pawn Manager");
-    GuiLabel((Rectangle){310, 130, 320, 40},
-        "Pawn system: fully implemented but not yet\n"
-        "wired into the game client.\n"
-        "See oz_pawn_system.h for definitions.");
-    if (GuiButton((Rectangle){310, 200, 120, 28}, "Close"))
-        g_showPawnMgr = false;
-}
-
-static void DrawScriptManager() {
-    if (!g_showScriptMgr) return;
-    GuiWindowBox((Rectangle){350, 120, 420, 300}, "Script Manager");
-    GuiLabel((Rectangle){360, 150, 200, 20}, "Available scripts:");
-    int y = 175;
-    for (int i = 1; i <= 10; i++) {
-        char path[256];
-        snprintf(path, sizeof(path), "%s/Scripts/Script%d.ps", OTEditor.Path, i);
-        bool exists = IsPathFile(path);
-        GuiLabel((Rectangle){360, (float)y, 360, 18},
-            TextFormat("Script %d: %s", i, exists ? path : "(not found)"));
-        y += 18;
-    }
-    y += 12;
-    if (GuiButton((Rectangle){360, (float)y, 120, 28}, "Close"))
-        g_showScriptMgr = false;
-}
-
-// =====================================================================
-// Model/Mesh Browser — scan GameData for .obj files, preview & select
-// =====================================================================
-static void ScanModelBrowser() {
-    g_modelBrowserEntries.clear();
-    g_modelBrowserSel = -1;
-    g_modelBrowserScroll = 0;
-
-    // Scan GameData/ recursively for .obj files
-    std::string base = OTEditor.Path;
-    if (base.empty()) base = "GameData/";
-    try {
-        for (auto& p : fs::recursive_directory_iterator(base)) {
-            if (p.path().extension() == ".obj") {
-                ModelEntry me;
-                me.path = p.path().string();
-                // Use relative path from base as display name
-                me.name = fs::relative(p.path(), base).string();
-                me.loaded = false;
-                g_modelBrowserEntries.push_back(me);
-            }
-        }
-    } catch (...) {}
-}
-
-static void UnloadModelBrowserModels() {
-    for (auto& e : g_modelBrowserEntries) {
-        if (e.loaded) {
-            UnloadTexture(e.texture);
-            UnloadModel(e.model);
-        }
-    }
-}
-
-static void DrawModelBrowser() {
-    if (!g_showModelBrowser) return;
-
-    const int PW = 520, PH = 460;
-    int sx = (GetScreenWidth() - PW) / 2;
-    int sy = 60;
-
-    GuiWindowBox((Rectangle){(float)sx, (float)sy, (float)PW, (float)PH}, "Model / Mesh Browser");
-
-    // Refresh button
-    if (GuiButton((Rectangle){(float)sx + PW - 80, (float)sy + 4, 72, 22}, "Refresh"))
-        ScanModelBrowser();
-
-    // List of models (left column)
-    int lx = sx + 8, ly = sy + 32, lw = 220, lh = PH - 80;
-    GuiPanel((Rectangle){(float)lx, (float)ly, (float)lw, (float)lh}, NULL);
-    BeginScissorMode(lx, ly, lw, lh);
-
-    int itemY = ly + 4;
-    int visibleCount = lh / 20;
-    for (int i = g_modelBrowserScroll; i < (int)g_modelBrowserEntries.size() && i < g_modelBrowserScroll + visibleCount; i++) {
-        Rectangle ir = {(float)lx + 2, (float)itemY, (float)lw - 4, 18};
-        bool hovered = CheckCollisionPointRec(GetMousePosition(), ir);
-        bool selected = (i == g_modelBrowserSel);
-        Color ic = selected ? (Color){70, 70, 120, 255} : hovered ? (Color){60, 60, 60, 255} : (Color){45, 45, 45, 255};
-        DrawRectangleRec(ir, ic);
-        DrawText(g_modelBrowserEntries[i].name.c_str(), lx + 6, itemY + 2, 11, selected ? WHITE : LIGHTGRAY);
-
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered) {
-            g_modelBrowserSel = i;
-        }
-        itemY += 20;
-    }
-    EndScissorMode();
-
-    // Scroll wheel
-    if (CheckCollisionPointRec(GetMousePosition(), {(float)lx, (float)ly, (float)lw, (float)lh})) {
-        int scrollDelta = (int)-GetMouseWheelMove();
-        g_modelBrowserScroll = (scrollDelta < 0) ? std::max(0, g_modelBrowserScroll - 1) :
-                              std::min((int)g_modelBrowserEntries.size() - visibleCount, g_modelBrowserScroll + 1);
-        if (g_modelBrowserScroll < 0) g_modelBrowserScroll = 0;
-    }
-
-    // Preview + info (right side)
-    int rx = sx + lw + 16;
-    int ry = sy + 32;
-    int rw = PW - lw - 24;
-
-    GuiPanel((Rectangle){(float)rx, (float)ry, (float)rw, 180}, "Preview");
-
-    if (g_modelBrowserSel >= 0 && g_modelBrowserSel < (int)g_modelBrowserEntries.size()) {
-        auto& entry = g_modelBrowserEntries[g_modelBrowserSel];
-
-        // Load model on demand if not loaded
-        if (!entry.loaded) {
-            entry.model = LoadModel(entry.path.c_str());
-            // Try loading companion texture
-            std::string texPath = entry.path;
-            texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
-            std::string texPath2 = entry.path;
-            texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
-            if (fs::exists(texPath))
-                entry.texture = LoadTexture(texPath.c_str());
-            else if (fs::exists(texPath2))
-                entry.texture = LoadTexture(texPath2.c_str());
-            if (entry.texture.id > 0)
-                entry.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = entry.texture;
-            entry.loaded = true;
-        }
-
-        // Draw small preview in panel
-        if (entry.loaded && entry.model.meshes != nullptr) {
-            rlPushMatrix();
-            rlTranslatef((float)rx + 90, (float)ry + 100, 0);
-            rlScalef(30.0f, 30.0f, 30.0f);
-            rlRotatef((float)(GetTime() * 45.0), 0, 1, 0);
-            rlDisableBackfaceCulling();
-            DrawModel(entry.model, {0, 0, 0}, 1.0f, WHITE);
-            rlEnableBackfaceCulling();
-            rlPopMatrix();
-        }
-
-        // Info text
-        char info[256];
-        snprintf(info, sizeof(info), "%s\nPath: %s", entry.name.c_str(), entry.path.c_str());
-        if (entry.loaded && entry.model.meshes != nullptr) {
-            int tc = entry.model.meshes[0].triangleCount;
-            int vc = entry.model.meshes[0].vertexCount;
-            snprintf(info + strlen(info), sizeof(info) - strlen(info),
-                     "\nTriangles: %d\nVertices: %d", tc, vc);
-        }
-        DrawText(info, rx + 4, ry + 184, 11, WHITE);
-
-        // Place in world button
-        if (GuiButton((Rectangle){(float)rx, (float)ry + 280, 120, 24}, "Place in World")) {
-            // Switch to model placement mode using a model ID
-            g_placeMode = PlaceMode::MODEL;
-            OmegaTechEditor.DrawModel = true;
-            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-            OmegaTechEditor.R = 1;
-            EMID = 0; // 0 = user-selected obj (not WDL model slot)
-        }
-    } else {
-        DrawText("Select a model from the list", rx + 4, ry + 4, 11, GRAY);
-    }
-
-    // Close button
-    if (GuiButton((Rectangle){(float)sx + PW - 72, (float)sy + PH - 28, 64, 22}, "Close")) {
-        UnloadModelBrowserModels();
-        g_showModelBrowser = false;
-    }
-}
-
-static void DrawEnvPanel() {
-    if (!OTEditor.ShowEnvPanel) return;
-    GuiWindowBox((Rectangle){288, 72, 400, 320}, "Environment Settings");
-
-    GuiLabel((Rectangle){300, 100, 120, 20}, "Fog Color (R G B)");
-    static float fogR = 200, fogG = 200, fogB = 210;
-    fogR = GuiSliderBar((Rectangle){420, 100, 200, 20}, "R", nullptr, fogR, 0, 255);
-    fogG = GuiSliderBar((Rectangle){420, 125, 200, 20}, "G", nullptr, fogG, 0, 255);
-    fogB = GuiSliderBar((Rectangle){420, 150, 200, 20}, "B", nullptr, fogB, 0, 255);
-    OTEditor.FogColor = (Color){(unsigned char)fogR, (unsigned char)fogG, (unsigned char)fogB, 255};
-
-    GuiLabel((Rectangle){300, 180, 120, 20}, "Fog Density");
-    OTEditor.FogDensity = GuiSliderBar((Rectangle){420, 180, 200, 20}, nullptr, nullptr, OTEditor.FogDensity, 0.0f, 0.2f);
-
-    GuiLabel((Rectangle){300, 210, 120, 20}, "Ambient R G B");
-    static float ambR = 180, ambG = 180, ambB = 200;
-    ambR = GuiSliderBar((Rectangle){420, 210, 200, 20}, "R", nullptr, ambR, 0, 255);
-    ambG = GuiSliderBar((Rectangle){420, 235, 200, 20}, "G", nullptr, ambG, 0, 255);
-    ambB = GuiSliderBar((Rectangle){420, 260, 200, 20}, "B", nullptr, ambB, 0, 255);
-    OTEditor.AmbientColor = (Color){(unsigned char)ambR, (unsigned char)ambG, (unsigned char)ambB, 255};
-
-    GuiLabel((Rectangle){300, 290, 120, 20}, "Ambient Intensity");
-    OTEditor.AmbientIntensity = GuiSliderBar((Rectangle){420, 290, 200, 20}, nullptr, nullptr, OTEditor.AmbientIntensity, 0.0f, 1.0f);
-
-    if (GuiButton((Rectangle){300, 340, 100, 30}, "Apply Fog")) {
-        wstring fogCmd = L"Fog:" + to_wstring(OTEditor.FogColor.r) + L":" +
-                         to_wstring(OTEditor.FogColor.g) + L":" +
-                         to_wstring(OTEditor.FogColor.b) + L":" +
-                         to_wstring(OTEditor.FogDensity) + L":0:";
-        OTEditor.WorldData += fogCmd;
-        CacheWDL();
-    }
-    if (GuiButton((Rectangle){420, 340, 120, 30}, "Apply Ambient")) {
-        wstring ambCmd = L"Ambient:" + to_wstring(OTEditor.AmbientColor.r) + L":" +
-                         to_wstring(OTEditor.AmbientColor.g) + L":" +
-                         to_wstring(OTEditor.AmbientColor.b) + L":" +
-                         to_wstring(OTEditor.AmbientIntensity) + L":0:";
-        OTEditor.WorldData += ambCmd;
-        CacheWDL();
-    }
-}
-
-static void DrawPickupPanel() {
-    GuiWindowBox((Rectangle){144, 400, 180, 240}, "Pickups");
-    if (GuiButton((Rectangle){152, 424, 160, 24}, "Health Vial")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::HEALTH_VIAL;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 452, 160, 24}, "Mana Vial")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::MANA_VIAL;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 480, 160, 24}, "Energy Crystal")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::ENERGY_CRYSTAL;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 508, 160, 24}, "Key")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::KEY;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 536, 160, 24}, "Coin")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::COIN;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 564, 160, 24}, "Powerup")) {
-        g_placeMode = PlaceMode::PICKUP;
-        OmegaTechEditor.ActivePickupType = EditorPickupType::POWERUP;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-}
-
-static void DrawNodePanel() {
-    GuiWindowBox((Rectangle){144, 120, 180, 160}, "Pawn Nodes");
-    if (GuiButton((Rectangle){152, 144, 160, 24}, "Player Spawn")) {
-        g_placeMode = PlaceMode::NODE;
-        OmegaTechEditor.ActiveNodeType = EditorNodeType::SPAWN;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 172, 160, 24}, "NPC Spawn")) {
-        g_placeMode = PlaceMode::NODE;
-        OmegaTechEditor.ActiveNodeType = EditorNodeType::NPC;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-    if (GuiButton((Rectangle){152, 200, 160, 24}, "Point Light")) {
-        g_placeMode = PlaceMode::NODE;
-        OmegaTechEditor.ActiveNodeType = EditorNodeType::LIGHT;
-        OmegaTechEditor.DrawModel = true;
-        OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-        OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-        OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-        OmegaTechEditor.R = 1;
-    }
-}
+// (Manager panel windows are now implemented as Win32 native dialogs
+//  in Win32Dialogs.cpp. The raygui versions have been removed.)
 
 // Help text boxes
 bool TextmultiBox005EditMode = false;
@@ -795,7 +628,7 @@ void DrawOverlay(){
     if (GuiButton((Rectangle){456, 672, 40, 32}, "UP")) OTEditor.MainCamera.position.y += 2;
     if (GuiButton((Rectangle){496, 672, 48, 32}, "DOWN")) OTEditor.MainCamera.position.y -= 2;
     if (GuiButton((Rectangle){552, 672, 116, 32}, "Env Settings")) {
-        OTEditor.ShowEnvPanel = !OTEditor.ShowEnvPanel;
+        ShowEnvPanel(!g_editorPanels.showEnvPanel);
         g_placeMode = PlaceMode::ENV;
     }
 
@@ -847,10 +680,10 @@ void DrawOverlay(){
     }
     CollisionToggle = GuiToggle((Rectangle){920+184, 176, 160, 32}, "Collision", CollisionToggle);
 
-    // Draw extra panels
-    DrawPickupPanel();
-    DrawNodePanel();
-    DrawEnvPanel();
+    // Win32 dialog buttons (replaces old inline panels)
+    if (GuiButton((Rectangle){8, 572, 128, 24}, "Pickups...")) ShowPickupPanel(!g_editorPanels.showPickupPanel);
+    if (GuiButton((Rectangle){8, 600, 128, 24}, "Nodes...")) ShowNodePanel(!g_editorPanels.showNodePanel);
+    if (GuiButton((Rectangle){8, 628, 128, 24}, "Env...")) ShowEnvPanel(!g_editorPanels.showEnvPanel);
 
     // Click handler for model/pickup/node panels
     if (IsMouseButtonPressed(0) && (

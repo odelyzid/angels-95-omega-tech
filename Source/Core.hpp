@@ -4,6 +4,7 @@
 #include "oz_sound_loader.h"
 #include "oz_ozone_loader.h"
 #include "oz_pawn_system.h"
+#include "PackageAssetLoader.hpp"
 
 #include "raymath.h"
 #include "rlights/rlights.h"
@@ -657,6 +658,9 @@ void OmegaTechInit()
 
     GuiLoadStyleDark();
 
+    // Initialize package-based asset loading
+    PackageAssetLoader::Instance().Init();
+
     OmegaTechData.InitCamera();
 
     OmegaTechData.PixelShader = LoadShader(0, "GameData/Shaders/Pixel.fs");
@@ -675,28 +679,29 @@ void OmegaTechInit()
     SetShaderValue(OmegaTechData.Lights, AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
 
 
-    if (IsPathFile("GameData/Global/Title/Title.png"))OmegaTechData.HomeScreen = LoadTexture("GameData/Global/Title/Title.png");
+    OmegaTechData.HomeScreen = LoadTextureWithFallback("GameData/Global/Title/Title.png");
     if (IsPathFile("GameData/Global/Title/Title.mpg"))OmegaTechData.HomeScreenVideo = ray_video_open("GameData/Global/Title/Title.mpg");
-    if (IsPathFile("GameData/Global/Title/Title.mp3"))OmegaTechData.HomeScreenMusic = LoadMusicStream("GameData/Global/Title/Title.mp3");
+    OmegaTechData.HomeScreenMusic = LoadMusicWithFallback("GameData/Global/Title/Title.mp3");
 
-    OmegaTechTextSystem.Bar = LoadTexture("GameData/Global/TextBar.png");
-    OmegaTechTextSystem.BarFont = LoadFont("GameData/Global/Font.ttf");
-    OmegaTechSoundData.CollisionSound = LoadSound("GameData/Global/Sounds/CollisionSound.mp3");
-    OmegaTechSoundData.WalkingSound = LoadSound("GameData/Global/Sounds/WalkingSound.mp3");
-    OmegaTechSoundData.ChasingSound = LoadSound("GameData/Global/Sounds/ChasingSound.mp3");
-    OmegaTechSoundData.UIClick = LoadSound("GameData/Global/Title/Click.mp3");
-    OmegaTechSoundData.Death = LoadSound("GameData/Global/Sounds/Hurt.mp3");
+    OmegaTechTextSystem.Bar = LoadTextureWithFallback("GameData/Global/TextBar.png");
+    OmegaTechTextSystem.BarFont = LoadFontWithFallback("GameData/Global/Font.ttf");
+    OmegaTechSoundData.CollisionSound = LoadSoundWithFallback("GameData/Global/Sounds/CollisionSound.mp3");
+    OmegaTechSoundData.WalkingSound = LoadSoundWithFallback("GameData/Global/Sounds/WalkingSound.mp3");
+    OmegaTechSoundData.ChasingSound = LoadSoundWithFallback("GameData/Global/Sounds/ChasingSound.mp3");
+    OmegaTechSoundData.UIClick = LoadSoundWithFallback("GameData/Global/Title/Click.mp3");
+    OmegaTechSoundData.Death = LoadSoundWithFallback("GameData/Global/Sounds/Hurt.mp3");
 
-    OmegaTechTextSystem.TextNoise = LoadSound("GameData/Global/Sounds/TalkingNoise.mp3");
+    OmegaTechTextSystem.TextNoise = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
 
-    if (IsPathFile("GameData/Global/FModels/FModel1.gltf"))
     {
-        WDLModels.FastModel1 = LoadModel("GameData/Global/FModels/FModel1.gltf");
-        WDLModels.FastModel1Texture = LoadTexture("GameData/Global/FModels/FModel1Texture.png");
-        WDLModels.FastModel1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel1Texture;
-        WDLModels.FastModel1.materials[0].shader = OmegaTechData.Lights;
+        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel1.gltf");
+        if (m.meshes != nullptr) {
+            WDLModels.FastModel1 = m;
+            WDLModels.FastModel1Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel1Texture.png");
+            WDLModels.FastModel1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel1Texture;
+            WDLModels.FastModel1.materials[0].shader = OmegaTechData.Lights;
+        }
     }
-    if (IsPathFile("GameData/Global/FModels/FModel2.gltf"))
     {
         WDLModels.FastModel2 = LoadModel("GameData/Global/FModels/FModel2.gltf");
         WDLModels.FastModel2Texture = LoadTexture("GameData/Global/FModels/FModel2Texture.png");
