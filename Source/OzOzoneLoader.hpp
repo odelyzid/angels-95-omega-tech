@@ -1,5 +1,6 @@
 #pragma once
 #include "raylib.h"
+#include "Physics/WorldChunk.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -50,6 +51,9 @@ public:
     const std::vector<OzoneCollisionVolume>& GetCollisionVolumes() const { return m_collisionVolumes; }
     void RebuildCollisionVolumes();
 
+    // Spatial partitioning for efficient collision queries
+    const WorldChunkManager& GetChunkManager() const { return m_chunkManager; }
+
     // Heightmap terrain (loaded from OZONE heightmap primitive)
     bool HasHeightmap() const { return m_hmReady; }
     float SampleHeightmapY(float px, float pz) const;
@@ -73,6 +77,7 @@ private:
     static Shader s_litFogShader;
     std::vector<OzoneRenderable> m_renderables;
     std::vector<OzoneCollisionVolume> m_collisionVolumes;
+    WorldChunkManager m_chunkManager;
 
     // Heightmap state (set from OZONE heightmap primitive)
     bool m_hmReady = false;

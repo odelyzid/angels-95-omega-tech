@@ -489,6 +489,13 @@ void OzoneLoader::RebuildCollisionVolumes() {
         cv.typeId = 0;
         m_collisionVolumes.push_back(cv);
     }
+
+    // Phase 3: rebuild spatial partition from processed volumes
+    std::vector<WorldChunkManager::Volume> wcVols;
+    wcVols.reserve(vols.size());
+    for (auto& v : vols)
+        wcVols.push_back({v.minX, v.minY, v.minZ, v.maxX, v.maxY, v.maxZ});
+    m_chunkManager.Build(wcVols);
 }
 
 // ---------------------------------------------------------------------------

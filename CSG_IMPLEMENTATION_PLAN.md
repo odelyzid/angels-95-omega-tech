@@ -9,7 +9,7 @@
 | 3 | AABB CSG brushes (add/sub/intersect/deresc) | ✅ Complete |
 | 4 | SkyZoneInfo skybox rendering | ✅ Complete |
 | 5 | Editor UI for CSG + Heightmap | ✅ Complete |
-| 6+7 | Server sync + Large-scale partitioning/chunking | ⏳ Pending |
+| 6+7 | Server sync + Large-scale partitioning/chunking | ✅ Complete |
 | 8 | CSG overflow protection | ⏳ Pending |
 | 9 | World migration (World3 → EngineTest.ozone) | ⏳ Pending |
 | 10 | LightningScript — ZoneInfo/SkyZoneInfo pawn | 🔮 Future |
@@ -74,14 +74,22 @@
   - **Modify**: `Source/Core.hpp` — use chunk query instead of linear scan
   - **Modify**: `Source/Server/GameState.hpp` — server uses same chunk system for partition queries
 
-### Files to modify:
+### Implementation complete (commit 0c0c1ae..HEAD):
+- `WorldChunkManager` class: uniform grid partitioning, O(1) cell lookup
+- `OzoneLoader` builds chunk grid from CSG-processed volumes in `RebuildCollisionVolumes()`
+- `Core.hpp` collision scan + ground clamp replaced with `GetVolumesNear()` chunk query (3×3 cell neighborhood)
+- `AngelServ` linked with `OzBsp.o` + `WorldChunk.o` for server-side CSG awareness
+- Server smoke-tested successfully
+
+### Files modified:
 | File | Changes |
 |---|---|
-| `Source/Physics/WorldChunk.hpp` (new) | Chunk grid class |
-| `Source/Physics/WorldChunk.cpp` (new) | Build grid, query overlapping cells |
-| `Source/Core.hpp` | Replace linear OZONE collision scan with chunk query |
-| `Makefile` | Add `WorldChunk.o` |
-| `Source/Server/GameState.cpp` | Use chunks for server-side NPC/pickup placement |
+| `Source/Physics/WorldChunk.hpp` (new) | Uniform grid spatial partition class |
+| `Source/Physics/WorldChunk.cpp` (new) | Build grid, `GetVolumesInCell`, `GetVolumesNear` |
+| `Source/OzOzoneLoader.hpp` | `#include WorldChunk`, `m_chunkManager` member, `GetChunkManager()` |
+| `Source/OzOzoneLoader.cpp` | Build chunk grid after CSG processing |
+| `Source/Core.hpp` | Linear OZONE scan → chunk-accelerated query |
+| `Makefile` | `WorldChunk.o` in OBJS, rules, OTENGINE + AngelServ links |
 
 ---
 

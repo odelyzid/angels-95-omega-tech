@@ -1931,11 +1931,16 @@ void DrawWorld()
 
     OzoneLoader::Instance().Draw(OmegaTechData.MainCamera);
 
-    // OZONE brush collision - test player AABB against each brush volume
+    // OZONE brush collision - chunk-accelerated query
     {
+        Vector3 cp = OmegaTechData.MainCamera.position;
+        auto& chunkMgr = OzoneLoader::Instance().GetChunkManager();
+        std::vector<int> nearIndices;
+        chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
         auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
-        for (auto& vol : vols) {
-            if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, vol.aabb)) {
+        for (int idx : nearIndices) {
+            if (idx >= 0 && idx < (int)vols.size() &&
+                CheckCollisionBoxes(OmegaPlayer.PlayerBounds, vols[idx].aabb)) {
                 ObjectCollision = true;
                 break;
             }
@@ -1960,10 +1965,15 @@ void DrawWorld()
                 OmegaPlayer.onGround = true;
             }
         } else {
-            // Fallback: stand on top of OZONE brush primitives
+            // Fallback: stand on top of OZONE brush primitives (chunk-accelerated)
             float brushTop = -99999.0f;
+            auto& chunkMgr = ozLoader.GetChunkManager();
+            std::vector<int> nearIndices;
+            chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
             auto& vols = ozLoader.GetCollisionVolumes();
-            for (auto& vol : vols) {
+            for (int idx : nearIndices) {
+                if (idx < 0 || idx >= (int)vols.size()) continue;
+                auto& vol = vols[idx];
                 if (cp.x >= vol.aabb.min.x && cp.x <= vol.aabb.max.x &&
                     cp.z >= vol.aabb.min.z && cp.z <= vol.aabb.max.z) {
                     float top = vol.aabb.max.y;
