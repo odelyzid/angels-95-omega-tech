@@ -522,7 +522,9 @@ static void on_server_message(const net::NetworkMessage& msg,
             if (msg.size < sizeof(net::PickupCollectData)) return;
             net::PickupCollectData pcd;
             memcpy(&pcd, msg.payload, sizeof(pcd));
-            if (g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index)) {
+            PickupType ptype;
+            int pvalue;
+            if (g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index, &ptype, &pvalue)) {
                 ServerPlayer* pl = g_game_state.get_player(sender.id);
                 if (pl) {
                     net::XpUpdateData xud;
@@ -537,9 +539,47 @@ static void on_server_message(const net::NetworkMessage& msg,
                     xmsg.sequence = 0;
                     xmsg.timestamp = static_cast<uint32_t>(time(nullptr));
                     memcpy(xmsg.payload, &xud, sizeof(xud));
-                    // Send back to the collecting player
                     net::NetworkPlayer tmp = sender;
                     g_game_server->send_message(tmp, xmsg);
+                }
+                // Map pickup type/value to inventory item
+                int item_id = -1;
+                int quantity = 0;
+                switch (ptype) {
+                    case PickupType::PSYCHIC:
+                        item_id = 2 + (pvalue / 111);
+                        quantity = 1;
+                        break;
+                    case PickupType::KEY:
+                        item_id = 12;
+                        quantity = 1;
+                        break;
+                    case PickupType::COIN:
+                        item_id = 13;
+                        quantity = pvalue;
+                        break;
+                    case PickupType::POWERUP:
+                        item_id = 14;
+                        quantity = 1;
+                        break;
+                    default:
+                        break;
+                }
+                if (item_id > 0) {
+                    net::PickupCollectedData pcd_out;
+                    pcd_out.player_id = sender.id;
+                    pcd_out.pickup_id = pcd.pickup_id;
+                    pcd_out.item_id = item_id;
+                    pcd_out.quantity = quantity;
+                    net::NetworkMessage imsg;
+                    imsg.magic = net::MAGIC;
+                    imsg.type = static_cast<uint32_t>(net::MessageType::PICKUP_COLLECTED);
+                    imsg.size = sizeof(pcd_out);
+                    imsg.sequence = 0;
+                    imsg.timestamp = static_cast<uint32_t>(time(nullptr));
+                    memcpy(imsg.payload, &pcd_out, sizeof(pcd_out));
+                    net::NetworkPlayer tmp = sender;
+                    g_game_server->send_message(tmp, imsg);
                 }
             }
             break;

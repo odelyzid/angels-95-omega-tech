@@ -183,7 +183,7 @@ auto PullConfigValue(const char *Path, int ValueIndex)
                     break;
                 }
 
-                if (Data[x] == L'|')
+                if (Data[x] < L'0' || Data[x] > L'9')
                 {
                     KillLoop = true;
                     break;

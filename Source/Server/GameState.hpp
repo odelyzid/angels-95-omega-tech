@@ -223,7 +223,8 @@ public:
     void tick_pickups(WorldState& ws, float dt);
 
     // Collect a pickup
-    bool collect_pickup(uint32_t player_id, int pickup_id, int world_index);
+    bool collect_pickup(uint32_t player_id, int pickup_id, int world_index,
+                        PickupType* out_type = nullptr, int* out_value = nullptr);
     void respawn_pickup(WorldState& ws, ServerPickup& pickup);
 
     // XP

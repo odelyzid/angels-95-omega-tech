@@ -75,6 +75,58 @@ static void DrawPlayerHUD() {
              x, y, 12, WHITE);
     DrawRectangle(x, y + 14, bar_w, bar_h, (Color){40, 10, 50, 255});
     DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
+    y += 14 + bar_h + pad;
+
+    // Current selected item/weapon
+    const char* slotLabel = nullptr;
+    if (SelectedObject >= 1 && SelectedObject <= 5) {
+        switch (SelectedObject) {
+            case 1: slotLabel = OmegaTechGameObjects.Object1Owned ? "Weapon 1" : "Empty"; break;
+            case 2: slotLabel = OmegaTechGameObjects.Object2Owned ? "Weapon 2" : "Empty"; break;
+            case 3: slotLabel = OmegaTechGameObjects.Object3Owned ? "Weapon 3" : "Empty"; break;
+            case 4: slotLabel = OmegaTechGameObjects.Object4Owned ? "Weapon 4" : "Empty"; break;
+            case 5: slotLabel = OmegaTechGameObjects.Object5Owned ? "Weapon 5" : "Empty"; break;
+        }
+    } else if (SelectedObject >= 6 && SelectedObject <= 8) {
+        int bpIdx = SelectedObject - 6;
+        int count = 0;
+        for (int b = 0; b < BACKPACK_SLOTS; b++) {
+            if (gInventory.backpack[b].itemId != -1) {
+                if (count == bpIdx) {
+                    const ItemDBEntry* def = GetItemDef(gInventory.backpack[b].itemId);
+                    slotLabel = def ? def->name : "Item";
+                    break;
+                }
+                count++;
+            }
+        }
+        if (!slotLabel) slotLabel = "Empty";
+    }
+    DrawText(TextFormat("Slot %d: %s", SelectedObject, slotLabel ? slotLabel : "None"),
+             x, y, 12, YELLOW);
+    y += 16;
+
+    // Weapon fire indicator (brief pulse)
+    static double lastFireTime = 0;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        lastFireTime = GetTime();
+    }
+    if (GetTime() - lastFireTime < 0.15) {
+        DrawText("FIRE", x, y, 20, RED);
+    }
+
+    // Coordinates (top-right)
+    Camera3D& cam = OmegaTechData.MainCamera;
+    float yaw = -atan2f(cam.target.x - cam.position.x, cam.target.z - cam.position.z) * RAD2DEG;
+    float pitch = asinf((cam.target.y - cam.position.y) /
+        Vector3Distance(cam.position, cam.target)) * RAD2DEG;
+    int rx = sw - 280;
+    DrawText(TextFormat("Pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z),
+             rx, 10, 14, LIGHTGRAY);
+    DrawText(TextFormat("Rot: %.0f %.0f", yaw, pitch),
+             rx, 28, 14, LIGHTGRAY);
+    fprintf(stderr, "POS: %.1f %.1f %.1f  ROT: %.0f %.0f\n",
+            cam.position.x, cam.position.y, cam.position.z, yaw, pitch);
 }
 
 static Color unpack_color(uint32_t packed) {
@@ -546,6 +598,13 @@ int main(){
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
+    g_client.set_on_item_collected([](int item_id, int quantity) {
+        if (item_id == 13) {
+            gInventory.coins += quantity;
+        } else {
+            gInventory.AddToBackpack(item_id, quantity);
+        }
+    });
 
     if (SetServerJoinFlag && SetServerJoinIP) {
         g_network_enabled = g_client.connect(SetServerJoinIP, 27015);
@@ -553,11 +612,6 @@ int main(){
             OZ_INFO("Network: connected to %s:27015", SetServerJoinIP);
         }
         SetServerJoinFlag = false;
-    } else {
-        g_network_enabled = g_client.connect("127.0.0.1", 27015);
-        if (g_network_enabled) {
-            OZ_INFO("Network: connected to 127.0.0.1:27015");
-        }
     }
 
     HideCursor(); 
@@ -654,7 +708,6 @@ int main(){
 
         DrawTexturePro(Target.texture, (Rectangle){ 0, 0, Target.texture.width, -Target.texture.height }, (Rectangle){ 0, 0, float(GetScreenWidth()), float(GetScreenHeight())}, (Vector2){ 0, 0 } , 0.f , WHITE);
         UpdateObjectBar();
-        EndShaderMode();
 
         if (ParticlesEnabled){
             OmegaTechData.RainParticles.Update(0,0);

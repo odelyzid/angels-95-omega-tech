@@ -66,7 +66,8 @@ enum class MessageType : uint32_t {
     XP_UPDATE = 14,
     PLAYER_HURT = 15,
     PLAYER_KILL = 16,
-    PLAYER_ACTION = 17
+    PLAYER_ACTION = 17,
+    PICKUP_COLLECTED = 18
 };
 
 struct NetworkPlayer {
@@ -144,6 +145,13 @@ struct PlayerHurtData {
 struct PlayerKillData {
     uint32_t killer_id;
     uint32_t victim_id;
+};
+
+struct PickupCollectedData {
+    uint32_t player_id;
+    int pickup_id;
+    int item_id;
+    int quantity;
 };
 
 struct WeaponFireData {

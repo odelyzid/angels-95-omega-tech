@@ -205,6 +205,14 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             }
             break;
         }
+        case net::MessageType::PICKUP_COLLECTED: {
+            if (msg.size < sizeof(net::PickupCollectedData)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::PickupCollectedData pcd;
+            memcpy(&pcd, msg.payload, sizeof(pcd));
+            if (m_on_item_collected) m_on_item_collected(pcd.item_id, pcd.quantity);
+            break;
+        }
         case net::MessageType::XP_UPDATE: {
             if (msg.size < sizeof(net::XpUpdateData)) return;
             const std::lock_guard<std::mutex> lock(m_msg_mutex);

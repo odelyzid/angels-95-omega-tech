@@ -65,6 +65,7 @@ const char* message_type_string(MessageType type) {
         case MessageType::COMMAND:       return "COMMAND";
         case MessageType::FILE_TRANSFER: return "FILE_TRANSFER";
         case MessageType::SCENE_UPDATE:  return "SCENE_UPDATE";
+        case MessageType::PICKUP_COLLECTED: return "PICKUP_COLLECTED";
         default: return "UNKNOWN";
     }
 }

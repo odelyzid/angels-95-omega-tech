@@ -1,4 +1,5 @@
 #include "Data.hpp"
+#include "Log.hpp"
 
 #include "raymath.h"
 #include "rlights/rlights.h"
@@ -25,7 +26,7 @@ class ParticleSystem;
 class EngineData
 {
     public:
-        int LevelIndex = 2;
+        int LevelIndex = 1;
         Camera MainCamera = {0};
         Shader PixelShader;
         Shader FogShader;
@@ -54,8 +55,8 @@ class EngineData
 
         void InitCamera()
         {
-            MainCamera.position = (Vector3){0.0f, 0.0f, 0.0f};
-            MainCamera.target = (Vector3){0.0f, 10.0f, 0.0f};
+            MainCamera.position = (Vector3){0.0f, 20.0f, 0.0f};
+            MainCamera.target = (Vector3){0.0f, 20.0f, -10.0f};
             MainCamera.up = (Vector3){0.0f, 1.0f, 0.0f};      
             MainCamera.fovy = 60.0f;                        
             MainCamera.projection = CAMERA_PERSPECTIVE;
@@ -189,15 +190,18 @@ auto LoadWorld()
         {
             WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/HeightMapTexture.png", OmegaTechData.LevelIndex));
             Image HeightMapImage = LoadImage(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex));
-            Texture2D Texture = LoadTextureFromImage(HeightMapImage);
+            ImageFormat(&HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
             int X = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 0);
             int Y = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 1);
             int Z = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 2);
-            Mesh Mesh1 = GenMeshHeightmap(HeightMapImage, (Vector3){X, Y, Z});
+            Mesh Mesh1 = GenMeshHeightmap(HeightMapImage, (Vector3){(float)X, (float)Y, (float)Z});
+            UnloadImage(HeightMapImage);
+            fprintf(stderr, "HM: X=%d Y=%d Z=%d mesh v=%d t=%d tex=%d\n",
+                    X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount, WDLModels.HeightMapTexture.id);
             WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
             WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
-            WDLModels.HeightMap.meshes[0] = Mesh1;
-            WDLModels.HeightMap.materials[0].shader = OmegaTechData.Lights;
+            WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+            // default shader — Lights shader blacks out terrain without proper light setup
         }
 
         if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model1.obj", OmegaTechData.LevelIndex)))
@@ -1377,11 +1381,11 @@ void WDLProcess()
         }
 
         if (Instruction == L"HeightMap")
-        { // ?
+        {
             WDLModels.HeightMapPosition.x = X;
             WDLModels.HeightMapPosition.y = Y;
             WDLModels.HeightMapPosition.z = Z;
-            DrawModel(WDLModels.HeightMap, {X, Y, Z}, S, FadeColor);
+            DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, 1, 0}, 0, {S, S, S}, WHITE);
         }
 
         if (!NextCollision)
@@ -1395,9 +1399,7 @@ void WDLProcess()
     if (FoundPlatform ){
         OmegaTechData.MainCamera.position.y = PlatformHeight;
     }
-    else {
-        OmegaTechData.MainCamera.position.y = 10;
-    }
+    // else: leave camera Y as-is (don't force to 10 — interferes with terrain movement)
 }
 
 void UpdateEntities()
@@ -1463,31 +1465,15 @@ void UpdatePlayer()
     {
         if (HeadBob)
         {
-            if (OmegaTechData.Ticker % 2 == 0)
+            if (OmegaTechData.Ticker % 4 == 0)
             {
-                OmegaTechData.MainCamera.target.y += OmegaPlayer.HeadBob;
-                if (OmegaPlayer.HeadBobDirection == 1)
-                {
-                    if (OmegaPlayer.HeadBob != 1)
-                    {
-                        OmegaPlayer.HeadBob++;
-                    }
-                    else
-                    {
-                        OmegaPlayer.HeadBobDirection = 0;
-                    }
-                }
-                else
-                {
-                    if (OmegaPlayer.HeadBob != -1)
-                    {
-                        OmegaPlayer.HeadBob--;
-                    }
-                    else
-                    {
-                        OmegaPlayer.HeadBobDirection = 1;
-                    }
-                }
+                float bob = (OmegaPlayer.HeadBobDirection == 1) ? 0.05f : -0.05f;
+                OmegaTechData.MainCamera.target.y += bob;
+                if (OmegaPlayer.HeadBob >= 1)
+                    OmegaPlayer.HeadBobDirection = 0;
+                else if (OmegaPlayer.HeadBob <= -1)
+                    OmegaPlayer.HeadBobDirection = 1;
+                OmegaPlayer.HeadBob += (OmegaPlayer.HeadBobDirection == 1) ? 1 : -1;
             }
         }
         if (!IsSoundPlaying(OmegaTechSoundData.WalkingSound))
@@ -2037,18 +2023,15 @@ void LoadSave()
     if (TFlags[103] == L'1')OmegaTechGameObjects.Object3Owned = true;
     if (TFlags[104] == L'1')OmegaTechGameObjects.Object4Owned = true;
     if (TFlags[105] == L'1')OmegaTechGameObjects.Object5Owned = true;
-    // Armory slots
-    if (TFlags.size() > 106 && TFlags[106] == L'1')OmegaTechGameObjects.Armory1Owned = true;
-    if (TFlags.size() > 107 && TFlags[107] == L'1')OmegaTechGameObjects.Armory2Owned = true;
-    // Jewelry slots
-    if (TFlags.size() > 108 && TFlags[108] == L'1')OmegaTechGameObjects.Jewelry1Owned = true;
-    if (TFlags.size() > 109 && TFlags[109] == L'1')OmegaTechGameObjects.Jewelry2Owned = true;
-    // RPG expansion equipment
-    if (TFlags.size() > 110 && TFlags[110] == L'1')OmegaTechGameObjects.HelmetOwned = true;
-    if (TFlags.size() > 111 && TFlags[111] == L'1')OmegaTechGameObjects.BootsOwned = true;
-    if (TFlags.size() > 112 && TFlags[112] == L'1')OmegaTechGameObjects.LegsOwned = true;
-    if (TFlags.size() > 113 && TFlags[113] == L'1')OmegaTechGameObjects.Accessory1Owned = true;
-    if (TFlags.size() > 114 && TFlags[114] == L'1')OmegaTechGameObjects.Accessory2Owned = true;
+    if (TFlags[106] == L'1')OmegaTechGameObjects.Armory1Owned = true;
+    if (TFlags[107] == L'1')OmegaTechGameObjects.Armory2Owned = true;
+    if (TFlags[108] == L'1')OmegaTechGameObjects.Jewelry1Owned = true;
+    if (TFlags[109] == L'1')OmegaTechGameObjects.Jewelry2Owned = true;
+    if (TFlags[110] == L'1')OmegaTechGameObjects.HelmetOwned = true;
+    if (TFlags[111] == L'1')OmegaTechGameObjects.BootsOwned = true;
+    if (TFlags[112] == L'1')OmegaTechGameObjects.LegsOwned = true;
+    if (TFlags[113] == L'1')OmegaTechGameObjects.Accessory1Owned = true;
+    if (TFlags[114] == L'1')OmegaTechGameObjects.Accessory2Owned = true;
 
     // Load backpack data (after second ':')
     size_t bpStart = TFlags.find(L':', 110);
@@ -2098,14 +2081,10 @@ void DrawWorld()
 {
     BeginTextureMode(Target);
     ClearBackground(BLACK);
-    if (OmegaTechData.SkyboxEnabled)
-    {
-        DrawTexture(WDLModels.Skybox, 0, 0, FadeColor);
-    }
+    // Skybox disabled — was drawn as 2D overlay causing blue rectangle covering HUD
     BeginMode3D(OmegaTechData.MainCamera);
 
-    BeginShaderMode(OmegaTechData.ToonShader);
-
+    // BeginShaderMode(OmegaTechData.ToonShader);
 
     if (OmegaTechSoundData.MusicFound)
     {
@@ -2148,8 +2127,6 @@ void DrawWorld()
 
     UpdateCustom();
 
-    EndShaderMode();
-    
     EndMode3D();
     EndTextureMode();
 

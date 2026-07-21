@@ -108,6 +108,9 @@ public:
     void set_on_chat_received(std::function<void(const std::string&)> cb) {
         m_on_chat_received = std::move(cb);
     }
+    void set_on_item_collected(std::function<void(int item_id, int quantity)> cb) {
+        m_on_item_collected = std::move(cb);
+    }
 
 private:
     net::NetworkClient m_client;
@@ -125,6 +128,7 @@ private:
 
     std::function<void(const std::string&)> m_on_scene_received;
     std::function<void(const std::string&)> m_on_chat_received;
+    std::function<void(int item_id, int quantity)> m_on_item_collected;
 
     void handle_message(const net::NetworkMessage& msg);
     void on_connected();

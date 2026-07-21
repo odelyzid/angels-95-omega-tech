@@ -112,6 +112,11 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
         int type_idx = rand() % PICKUP_TYPE_COUNT;
         pickup.type = static_cast<PickupType>(type_idx);
         pickup.value = pickup_default_value(pickup.type);
+        // PSYCHIC pickups get a random Angel number value (111-999)
+        if (pickup.type == PickupType::PSYCHIC) {
+            int idx = rand() % 9;
+            pickup.value = (idx + 1) * 111;
+        }
         pickup.respawn_time = pickup_default_respawn(pickup.type);
         pickup.respawnable = pickup_can_respawn(pickup.type);
         pickup.active = true;
@@ -412,7 +417,8 @@ void GameState::tick_pickups(WorldState& ws, float dt) {
     }
 }
 
-bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_index) {
+bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_index,
+                               PickupType* out_type, int* out_value) {
     ServerPlayer* player = get_player(player_id);
     if (!player) return false;
 
@@ -439,6 +445,10 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
         }
     }
     if (!pickup) return false;
+
+    // Write out-params before marking inactive
+    if (out_type)  *out_type  = pickup->type;
+    if (out_value) *out_value = pickup->value;
 
     // Apply pickup effect
     switch (pickup->type) {
