@@ -321,6 +321,24 @@ static void ExecuteConsoleCommand(const char* cmd) {
         }
     } else if (strcmp(cmd, "/world") == 0) {
         fprintf(stderr, "WORLD current=%d (use /world N)\n", OmegaTechData.LevelIndex);
+    } else if (strcmp(cmd, "/fly") == 0) {
+        OmegaPlayer.isFlying = !OmegaPlayer.isFlying;
+        if (OmegaPlayer.isFlying) {
+            OmegaPlayer.onGround = false;
+            OmegaPlayer.velocityY = 0.0f;
+            fprintf(stderr, "FLY enabled\n");
+        } else {
+            fprintf(stderr, "FLY disabled\n");
+        }
+    } else if (strcmp(cmd, "/noclip") == 0) {
+        OmegaPlayer.isNoClip = !OmegaPlayer.isNoClip;
+        if (OmegaPlayer.isNoClip) {
+            OmegaPlayer.onGround = false;
+            OmegaPlayer.velocityY = 0.0f;
+            fprintf(stderr, "NOCLIP enabled\n");
+        } else {
+            fprintf(stderr, "NOCLIP disabled\n");
+        }
     }
 }
 
@@ -763,9 +781,41 @@ int main(){
         OmegaPlayer.OldY = OmegaTechData.MainCamera.position.y;
         OmegaPlayer.OldZ = OmegaTechData.MainCamera.position.z;
 
+        // Save Y so we can override raylib's built-in Space/Shift vertical movement
+        float savedCamY = OmegaTechData.MainCamera.position.y;
+
         if (!ShowSettings && !ShowInventory && !g_consoleOpen){
             for (int i = 0 ; i <= OmegaTechData.CameraSpeed; i ++){
                 UpdateCamera(&OmegaTechData.MainCamera, CAMERA_FIRST_PERSON);
+            }
+        }
+
+        // --- Jump / Fly / Noclip Y management ---
+        {
+            float dt = GetFrameTime();
+
+            if (OmegaPlayer.isNoClip) {
+                // Noclip: let raylib control Y natively (space up / shift down)
+                // No gravity, no terrain snapping, no collision
+            } else if (OmegaPlayer.isFlying) {
+                // Flying: let raylib control Y, no terrain snap, no gravity
+                // But restore Y from before camera if space was not held
+                // Actually raylib space/shift works fine for fly up/down
+            } else {
+                // Normal / grounded: restore Y, raylib's space/shift is ignored
+                OmegaTechData.MainCamera.position.y = savedCamY;
+
+                // Jump input
+                if (IsKeyPressed(KEY_SPACE) && OmegaPlayer.onGround && !g_consoleOpen && !ShowInventory) {
+                    OmegaPlayer.velocityY = 8.0f;
+                    OmegaPlayer.onGround = false;
+                }
+
+                // Gravity
+                if (!OmegaPlayer.onGround) {
+                    OmegaPlayer.velocityY += -20.0f * dt;
+                    OmegaTechData.MainCamera.position.y += OmegaPlayer.velocityY * dt;
+                }
             }
         }
 

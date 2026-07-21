@@ -1443,15 +1443,26 @@ void WDLProcess()
     }
 
     // Stand on heightmap terrain (preferred) or ClipBox platforms
+    // Skipped when flying or noclipping — player controls Y manually
+    if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
     {
         float groundY = SampleHeightmapGroundY(
             OmegaTechData.MainCamera.position.x,
             OmegaTechData.MainCamera.position.z);
         if (groundY > -50000.0f) {
             const float eyeHeight = 2.0f;
-            OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
+            // Only snap if at or below ground (allows jumping above terrain)
+            if (OmegaTechData.MainCamera.position.y <= groundY + eyeHeight + 0.1f) {
+                OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
+                OmegaPlayer.velocityY = 0.0f;
+                OmegaPlayer.onGround = true;
+            }
         } else if (FoundPlatform) {
-            OmegaTechData.MainCamera.position.y = PlatformHeight;
+            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + 0.1f) {
+                OmegaTechData.MainCamera.position.y = PlatformHeight;
+                OmegaPlayer.velocityY = 0.0f;
+                OmegaPlayer.onGround = true;
+            }
         }
     }
 }
@@ -2173,9 +2184,12 @@ void DrawWorld()
     }
     if (ObjectCollision)
     {
-        OmegaTechData.MainCamera.position.x = OmegaPlayer.OldX;
-        OmegaTechData.MainCamera.position.y = OmegaPlayer.OldY;
-        OmegaTechData.MainCamera.position.z = OmegaPlayer.OldZ;
+        if (!OmegaPlayer.isNoClip)
+        {
+            OmegaTechData.MainCamera.position.x = OmegaPlayer.OldX;
+            OmegaTechData.MainCamera.position.y = OmegaPlayer.OldY;
+            OmegaTechData.MainCamera.position.z = OmegaPlayer.OldZ;
+        }
         ObjectCollision = false;
     }
 

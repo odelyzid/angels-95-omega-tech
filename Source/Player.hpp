@@ -22,6 +22,12 @@ class Player{
         float OldY = 0.0f;
         float OldZ = 0.0f;
 
+        // Jump / fly / noclip
+        float velocityY = 0.0f;
+        bool onGround = false;
+        bool isFlying = false;
+        bool isNoClip = false;
+
         BoundingBox PlayerBounds;
 };
 
