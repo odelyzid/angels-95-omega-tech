@@ -917,12 +917,14 @@ int main(){
                 OmegaPlayer.XPToNext = g_client.get_xp_to_next();
 
                 const auto& npcs = g_client.npcs();
-                int limit = std::min((int)npcs.size(), EntityCount);
-                for (int i = 0; i < limit; i++) {
-                    OmegaEnemy[i].X = npcs[i].position.x;
-                    OmegaEnemy[i].Y = npcs[i].position.y;
-                    OmegaEnemy[i].Z = npcs[i].position.z;
-                    OmegaEnemy[i].IsActive = npcs[i].active;
+                for (size_t i = 0; i < npcs.size(); i++) {
+                    Pawn* p = PawnSystem::Instance().Get(static_cast<int>(i + 1));
+                    if (p) {
+                        p->position = { npcs[i].position.x, npcs[i].position.y, npcs[i].position.z };
+                        p->active = npcs[i].active;
+                    } else if (npcs[i].active) {
+                        PawnSystem::Instance().Spawn({ npcs[i].position.x, npcs[i].position.y, npcs[i].position.z }, "Walker");
+                    }
                 }
 
                 // Auto-collect when walking over a pickup (also E); throttle requests

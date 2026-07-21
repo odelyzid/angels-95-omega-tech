@@ -98,8 +98,6 @@ void SpawnWDLProcess(const char *Path)
         }
     }
 
-    int EntityCounter = 0;
-
     for (int i = 0; i <= WDLSize; i++)
     {
         wstring Instruction = WSplitValue(WData, i);
@@ -112,16 +110,6 @@ void SpawnWDLProcess(const char *Path)
             
             // Spawn via PawnSystem (dynamic, unlimited NPCs)
             PawnSystem::Instance().Spawn({x, y, z}, "Walker");
-            
-            // Legacy: also fill OmegaEnemy array for backward compatibility
-            if (EntityCounter < EntityCount) {
-                OmegaEnemy[EntityCounter].X = x;
-                OmegaEnemy[EntityCounter].Y = y;
-                OmegaEnemy[EntityCounter].Z = z;
-                OmegaEnemy[EntityCounter].IsActive = true;
-                OmegaEnemy[EntityCounter].Scream = false;
-            }
-            EntityCounter++;
         }
 
         if (Instruction == L"Light")
@@ -183,12 +171,6 @@ auto LoadWorld()
 
             WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Skybox.png", OmegaTechData.LevelIndex));
             OmegaTechData.SkyboxEnabled = true;
-        }
-
-        for (int i = 0; i <= EntityCount - 1; i++)
-        {
-            OmegaEnemy[i].IsActive = false;
-            OmegaEnemy[i].Scream = false;
         }
 
         if (IsPathFile(TextFormat("GameData/Worlds/World%i/Scripts/Launch.ps", OmegaTechData.LevelIndex)))

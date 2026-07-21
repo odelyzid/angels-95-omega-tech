@@ -1,10 +1,11 @@
 #include <vector>
 #include <string>
-#include <bits/stdc++.h> 
+#include <cmath>
+#include <algorithm>
+#include <cstdlib>
+#include <cstdio>
 
 #include "raylib.h"
-
-using namespace std;
 
 
 
