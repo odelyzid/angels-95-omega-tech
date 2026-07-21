@@ -304,7 +304,7 @@ int main(int argc, char **argv){
     // Create model preview render texture
     g_previewRT = LoadRenderTexture(256, 256);
 
-    DisableCursor();
+    EnableCursor();
 
     int LastClickTime = 0;
     bool DoubleClick = false;
@@ -354,9 +354,60 @@ int main(int argc, char **argv){
             if (LastClickTime == 30){ LastClickTime = 0; DoubleClick = false; }
         }
 
-        for (int i = 0; i <= 7; i++){
-            if(!IsMouseButtonDown(0) && !IsMouseButtonDown(1))
-                UpdateCamera(&OTEditor.MainCamera, CAMERA_FIRST_PERSON);
+        // Mouse-controlled camera: only move when middle-mouse-button is held.
+        // Leaves the cursor free for clicking Win32 panels.
+        // MMB          = pan horizontal (X/Z)
+        // Shift + MMB  = pan vertical (Y)
+        // Alt + MMB    = orbit around target
+        // Scroll wheel = dolly forward/backward
+        {
+            if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+                Vector2 delta = GetMouseDelta();
+                float sensitivity = 0.1f;
+                bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                bool alt   = IsKeyDown(KEY_LEFT_ALT)   || IsKeyDown(KEY_RIGHT_ALT);
+
+                if (shift) {
+                    // Shift + MMB = pan up/down
+                    OTEditor.MainCamera.position.y -= delta.y * sensitivity;
+                    OTEditor.MainCamera.target.y -= delta.y * sensitivity;
+                } else if (alt) {
+                    // Alt + MMB = orbit around target
+                    Vector3 v = Vector3Subtract(OTEditor.MainCamera.position, OTEditor.MainCamera.target);
+                    float radius = Vector3Length(v);
+                    if (radius > 0.01f) {
+                        Vector2 ang;
+                        ang.x = atan2f(v.x, v.z); // yaw
+                        ang.y = asinf(v.y / radius); // pitch
+                        ang.x -= delta.x * 0.01f;
+                        ang.y += delta.y * 0.01f;
+                        if (ang.y > PI/2 - 0.01f) ang.y = PI/2 - 0.01f;
+                        if (ang.y < -PI/2 + 0.01f) ang.y = -PI/2 + 0.01f;
+                        v.x = radius * cosf(ang.y) * sinf(ang.x);
+                        v.y = radius * sinf(ang.y);
+                        v.z = radius * cosf(ang.y) * cosf(ang.x);
+                        OTEditor.MainCamera.position = Vector3Add(OTEditor.MainCamera.target, v);
+                    }
+                } else {
+                    // Plain MMB = pan X/Z
+                    OTEditor.MainCamera.position.x -= delta.x * sensitivity;
+                    OTEditor.MainCamera.position.z -= delta.y * sensitivity;
+                    OTEditor.MainCamera.target.x -= delta.x * sensitivity;
+                    OTEditor.MainCamera.target.z -= delta.y * sensitivity;
+                }
+            }
+
+            // Scroll wheel = dolly forward/backward
+            float wheel = GetMouseWheelMove();
+            if (wheel != 0) {
+                Vector3 dir = Vector3Normalize(Vector3Subtract(OTEditor.MainCamera.target, OTEditor.MainCamera.position));
+                OTEditor.MainCamera.position.x += dir.x * wheel * 2.0f;
+                OTEditor.MainCamera.position.y += dir.y * wheel * 2.0f;
+                OTEditor.MainCamera.position.z += dir.z * wheel * 2.0f;
+                OTEditor.MainCamera.target.x += dir.x * wheel * 2.0f;
+                OTEditor.MainCamera.target.y += dir.y * wheel * 2.0f;
+                OTEditor.MainCamera.target.z += dir.z * wheel * 2.0f;
+            }
         }
         
         // Apply ZoneProperties fog/ambient/particle settings
@@ -553,32 +604,72 @@ int main(int argc, char **argv){
         EndTextureMode();
 
         BeginDrawing();
+        // Draw the 3D viewport render target (offset by sidebar width)
+        int sbW = 200;
         DrawTexturePro(Target.texture, (Rectangle){0, 0, (float)Target.texture.width, -(float)Target.texture.height},
-                       (Rectangle){0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()}, (Vector2){0,0}, 0, WHITE);
-        DrawFPS(10, 34);
-        DrawText(TextFormat("%.1f, %.1f, %.1f", OTEditor.MainCamera.position.x, OTEditor.MainCamera.position.y, OTEditor.MainCamera.position.z), 10, 52, 15, PURPLE);
-        DrawText(TextFormat("Mode: %s  (1=MODEL 2=PICKUP 3=NODE 4=ENV)",
-                g_placeMode == PlaceMode::MODEL ? "MODEL" :
-                g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
-                g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, 72, 15, WHITE);
+                       (Rectangle){(float)sbW, 0, (float)(GetScreenWidth() - sbW), (float)GetScreenHeight()}, (Vector2){0,0}, 0, WHITE);
+        DrawFPS(GetScreenWidth() - 60, 10);
 
-        // CSG operation display
+        // Left sidebar overlay (always visible) — CSG brushes + tools
         {
+            const int sbW = 200;
+            Color bg = {25, 25, 30, 220};
+            DrawRectangle(0, 0, sbW, GetScreenHeight(), bg);
+            DrawRectangleLines(0, 0, sbW, GetScreenHeight(), (Color){60, 60, 70, 255});
+
+            int y = 10;
+            DrawText("CSG Brushes", 10, y, 16, WHITE); y += 24;
+
+            // Primitive type display
+            const char* primLabels[] = {"Box", "Cylinder", "Sphere", "Pyramid", "Plane"};
+            int prim = g_editorPanels.actionCsgPlace >= 0 ? g_editorPanels.actionCsgPlace : 0;
+            DrawText(TextFormat("Primitive: %s", primLabels[prim]), 10, y, 13, LIGHTGRAY); y += 18;
+            DrawText("(1-5 to change)", 10, y, 11, DARKGRAY); y += 22;
+
+            // CSG operation
             static const char* csgLabels[] = {"SOLID", "ADD", "SUB", "INTERSECT", "DE_RESC"};
             int op = OmegaTechEditor.CSGOperation;
             if (op < 0 || op > 4) op = 0;
-            DrawText(TextFormat("CSG: %s", csgLabels[op]), 10, 92, 15, ORANGE);
-        }
+            DrawText(TextFormat("Operation: %s", csgLabels[op]), 10, y, 13, ORANGE); y += 18;
+            DrawText("(G to cycle)", 10, y, 11, DARKGRAY); y += 22;
 
-        // Collision volume count
-        {
+            // Placement info
+            DrawText(TextFormat("Pos: %.1f %.1f %.1f", OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z),
+                     10, y, 12, SKYBLUE); y += 16;
+            DrawText(TextFormat("Size: %.1f x %.1f x %.1f", OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L),
+                     10, y, 12, SKYBLUE); y += 16;
+            DrawText(TextFormat("Rot: %.0f  Scale: %.1f", OmegaTechEditor.R, OmegaTechEditor.S),
+                     10, y, 12, SKYBLUE); y += 22;
+
+            // Collision volume stats
             int volCount = OzoneLoader::Instance().GetCollisionVolumes().size();
             int chunkCount = OzoneLoader::Instance().GetChunkManager().CellCount();
-            DrawText(TextFormat("Collision: %d volumes / %d chunks", volCount, chunkCount),
-                     10, 112, 14, (volCount > 500) ? RED : DARKGREEN);
+            DrawText(TextFormat("Collision: %d vols", volCount), 10, y, 12, volCount > 500 ? RED : DARKGREEN); y += 14;
+            DrawText(TextFormat("Chunks: %d", chunkCount), 10, y, 12, DARKGREEN); y += 22;
+
+            // Mode display
+            DrawText(TextFormat("Mode: %s", g_placeMode == PlaceMode::MODEL ? "MODEL" :
+                   g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
+                   g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, y, 13, WHITE); y += 18;
+            DrawText("1=Model 2=Pickup 3=Node 4=Env", 10, y, 10, DARKGRAY); y += 18;
+
+            // Heightmap button
+            DrawText("---", 10, y, 12, GRAY); y += 18;
+            DrawText("[H] Heightmap Editor", 10, y, 12, YELLOW); y += 16;
+            DrawText("[F5] Model Browser  [F6] Sound", 10, y, 10, DARKGRAY); y += 13;
+            DrawText("[F7] Textures  [F8] Pawn Manager", 10, y, 10, DARKGRAY); y += 13;
+            DrawText("[F12] Zone Properties", 10, y, 10, DARKGRAY); y += 16;
+
+            // Camera info
+            DrawText("---", 10, y, 12, GRAY); y += 18;
+            DrawText("Camera:", 10, y, 13, WHITE); y += 16;
+            DrawText(TextFormat("%.1f %.1f %.1f", OTEditor.MainCamera.position.x,
+                     OTEditor.MainCamera.position.y, OTEditor.MainCamera.position.z),
+                     10, y, 11, PURPLE); y += 14;
+            DrawText("MMB=Pan S+MMB=Y Alt+MMB=Orbit", 10, y, 9, DARKGRAY); y += 12;
+            DrawText("Scroll=Dolly Home=Reset", 10, y, 9, DARKGRAY);
         }
 
-        // Top menu bar (always visible)
         EndDrawing();
 
     #ifdef _WIN32
@@ -727,10 +818,20 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_THREE)) g_placeMode = PlaceMode::NODE;
         if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; ShowEnvPanel(!g_editorPanels.showEnvPanel); }
 
+        // Primitive type cycling (1-5 for box/cyl/sph/pyr/pln, only in MODEL mode)
+        if (g_placeMode == PlaceMode::MODEL) {
+            int prim = g_editorPanels.actionCsgPlace;
+            if (prim < 0 || prim > 4) prim = 0;
+            if (IsKeyPressed(KEY_FIVE))  { prim = (prim + 1) % 5; g_editorPanels.actionCsgPlace = prim; }
+        }
+
         // CSG operation cycling (G key)
         if (IsKeyPressed(KEY_G) && g_placeMode == PlaceMode::MODEL) {
             OmegaTechEditor.CSGOperation = (OmegaTechEditor.CSGOperation + 1) % 5;
         }
+
+        // Heightmap editor toggle (H key)
+        if (IsKeyPressed(KEY_H)) ToggleHeightmapEditor();
 
         // Panel keyboard shortcuts (F5-F12 replace old top menu bar)
         if (IsKeyPressed(KEY_F5))  ToggleModelBrowser();
