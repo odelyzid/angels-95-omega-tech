@@ -7,7 +7,7 @@
 //
 // Magic values: OZPK (models), OZTX (textures), OZSD (sounds), OZMX (music), OZWN (worlds)
 
-#include "OzPackage.hpp"
+#include "Package/OzPackage.hpp"
 #include <cstdio>
 #include <cstring>
 #include <string>

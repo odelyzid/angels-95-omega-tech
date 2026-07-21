@@ -1,7 +1,7 @@
 #include "PPGIO.hpp"
-#include "../../Source/PackageAssetLoader.hpp"
-#include "../../Source/EngineBillboard.hpp"
-#include "../../Source/oz_ozone_loader.h"
+#include "../../Source/Package/PackageAssetLoader.hpp"
+#include "../../Source/Renderer/EngineBillboard.hpp"
+#include "../../Source/OzOzoneLoader.hpp"
 #include <cstring>
 #include <cmath>
 #include <filesystem>

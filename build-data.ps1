@@ -5,6 +5,10 @@
 $OZPACK   = "$PSScriptRoot\System\OzPack.exe"
 $GAMEDATA = "$PSScriptRoot\GameData"
 $OUT      = "$PSScriptRoot\System\Data"
+$OUT_TEX  = "$OUT\Textures"
+$OUT_MUS  = "$OUT\Music"
+$OUT_SND  = "$OUT\Sound"
+$OUT_ZONES= "$OUT\Zones"
 
 function Write-Step { Write-Host "==> $args" -ForegroundColor Cyan }
 function Run-OzPack { param($magic, $dir, $out)
@@ -17,8 +21,10 @@ function Run-OzPack { param($magic, $dir, $out)
     Write-Host "  $output"
 }
 
-# Ensure output directory
-if (-not (Test-Path $OUT)) { New-Item -ItemType Directory -Force -Path $OUT | Out-Null }
+# Ensure output directories
+foreach ($d in @($OUT, $OUT_TEX, $OUT_MUS, $OUT_SND, $OUT_ZONES)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+}
 
 Write-Step "=== Packaging Global Assets ==="
 
@@ -52,19 +58,19 @@ if (Test-Path $objDir) {
 # --- Items (textures) ---
 $itemsDir = "$GAMEDATA\Global\Items"
 if (Test-Path $itemsDir) {
-    Run-OzPack "OZTX" $itemsDir "$OUT\items.oztex"
+    Run-OzPack "OZTX" $itemsDir "$OUT_TEX\items.oztex"
 }
 
 # --- Sounds ---
 $sndDir = "$GAMEDATA\Global\Sounds"
 if (Test-Path $sndDir) {
-    Run-OzPack "OZSD" "$sndDir" "$OUT\global.ozsnd"
+    Run-OzPack "OZSD" "$sndDir" "$OUT_SND\global.ozsnd"
 }
 
 # --- Music (ambience) ---
 $ambDir = "$GAMEDATA\Global\Sounds\Ambience"
 if (Test-Path $ambDir) {
-    Run-OzPack "OZMX" $ambDir "$OUT\ambience.ozmux"
+    Run-OzPack "OZMX" $ambDir "$OUT_MUS\ambience.ozmux"
 }
 
 # --- Shaders ---
@@ -76,7 +82,7 @@ if (Test-Path $shaderDir) {
 # --- Engine icons ---
 $engineDir = "$GAMEDATA\Global\Engine"
 if (Test-Path $engineDir) {
-    Run-OzPack "OZTX" $engineDir "$OUT\engine_icons.oztex"
+    Run-OzPack "OZTX" $engineDir "$OUT_TEX\engine_icons.oztex"
 }
 
 Write-Step "=== Packaging Worlds ==="
@@ -88,18 +94,18 @@ Get-ChildItem "$GAMEDATA\Worlds" -Directory | ForEach-Object {
     # Package tileset textures as .oztex
     $tilesetDir = "$GAMEDATA\Worlds\$worldName\oztex"
     if (Test-Path $tilesetDir) {
-        Run-OzPack "OZTX" $tilesetDir "$OUT\world_${worldName}_tex.oztex"
+        Run-OzPack "OZTX" $tilesetDir "$OUT_TEX\world_${worldName}_tex.oztex"
     }
 
     # Package world file(s) as .ozone (or .ozwn)
     $worldFile = "$GAMEDATA\Worlds\$worldName\World.ozone"
     $wdlFile   = "$GAMEDATA\Worlds\$worldName\World.wdl"
     if (Test-Path $worldFile) {
-        Run-OzPack "OZWN" "$GAMEDATA\Worlds\$worldName" "$OUT\world_${worldName}.ozone"
+        Run-OzPack "OZWN" "$GAMEDATA\Worlds\$worldName" "$OUT_ZONES\world_${worldName}.ozone"
     }
 }
 
 Write-Step "=== Verifying Output ==="
-Get-ChildItem $OUT -Filter "*.oz*" | Select-Object Name, Length | Format-Table -AutoSize
+Get-ChildItem $OUT -Recurse -Filter "*.oz*" | Select-Object Name, Length | Format-Table -AutoSize
 
 Write-Step "Done. Packages in $OUT" -ForegroundColor Green

@@ -3,7 +3,7 @@
 
 #include "raylib.h"
 #include "raymath.h"
-#include "oz_assetmapper.h"
+#include "../Package/OzAssetMapper.hpp"
 #include <string>
 
 // EngineBillboard - Helper class for drawing lit billboard sprites

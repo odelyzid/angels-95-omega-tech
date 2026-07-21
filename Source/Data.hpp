@@ -1,14 +1,14 @@
 #include "WindowsCompat.hpp"
 #include "raylib.h"
 #include "Settings.hpp"
-#include "Player.hpp"
-#include "Items.hpp"
+#include "Pawn/Player.hpp"
+#include "Pawn/Items.hpp"
 #include "Editor.hpp"
-#include "Video.hpp"
+#include "Renderer/Video.hpp"
 #include "ParticleDemon/ParticleDemon.hpp"
 #include "Parasite/ParasiteScript.hpp"
 #include "Encoder/Encoder.hpp"
-#include "Entities.hpp"
+#include "Pawn/Entities.hpp"
 
 #include <string>
 #include <iostream>

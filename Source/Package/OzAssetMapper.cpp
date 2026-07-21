@@ -1,5 +1,5 @@
-#include "oz_assetmapper.h"
-#include "Log.hpp"
+#include "OzAssetMapper.hpp"
+#include "../Log.hpp"
 #include <cstring>
 #include <cctype>
 #include <cstdio>

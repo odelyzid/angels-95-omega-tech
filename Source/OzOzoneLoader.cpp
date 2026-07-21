@@ -1,9 +1,9 @@
-#include "oz_ozone_loader.h"
-#include "oz_assetmapper.h"
-#include "oz_pawn_system.h"
+#include "OzOzoneLoader.hpp"
+#include "Package/OzAssetMapper.hpp"
+#include "Pawn/OzPawnSystem.hpp"
 #include "Server/OzoneParser.hpp"
 #include "Log.hpp"
-#include "PackageAssetLoader.hpp"
+#include "Package/PackageAssetLoader.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cmath>

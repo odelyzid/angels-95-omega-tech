@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <cstring>
 
-#include "../TextSystem.hpp"
+#include "../Renderer/TextSystem.hpp"
 
 using namespace std;
 

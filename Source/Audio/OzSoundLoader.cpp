@@ -1,4 +1,4 @@
-#include "oz_sound_loader.h"
+#include "OzSoundLoader.hpp"
 #include <cstdio>
 #include <cstring>
 

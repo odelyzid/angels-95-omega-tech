@@ -85,14 +85,14 @@ g++ @EDITOR_FLAGS @EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "Editor Win32Dialogs.cpp compilation failed" }
 
 # Compile engine sources needed by editor
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_pawn_system.cpp -o oz_pawn_system.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "oz_pawn_system.cpp compilation failed" }
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OzPawnSystem.cpp compilation failed" }
 
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_assetmapper.cpp -o oz_assetmapper.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "oz_assetmapper.cpp compilation failed" }
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Package/OzAssetMapper.cpp -o OzAssetMapper.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OzAssetMapper.cpp compilation failed" }
 
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_ozone_loader.cpp -o oz_ozone_loader.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "oz_ozone_loader.cpp compilation failed" }
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/OzOzoneLoader.cpp -o OzOzoneLoader.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OzOzoneLoader.cpp compilation failed" }
 
 g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OzoneParser.cpp compilation failed" }
@@ -106,11 +106,11 @@ $stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
 # Link editor
-g++ Main.o Win32Dialogs.o oz_pawn_system.o oz_assetmapper.o oz_ozone_loader.o OzoneParser.o WDLParser.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "oz_editor link failed" }
 
 # Cleanup editor objects
-Remove-Item Main.o, Win32Dialogs.o, oz_pawn_system.o, oz_assetmapper.o, oz_ozone_loader.o, OzoneParser.o, WDLParser.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
+Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
 Write-Step "oz_editor.exe built."
 
@@ -162,6 +162,18 @@ ShowGrid=1
 Width=1600
 Height=900
 "@ | Set-Content "$OUT_DIR\oz_editor.ini" -Encoding UTF8
+
+ # Create OzServer.ini
+@"
+[Server]
+Port=27015
+HttpPort=8080
+MaxPlayers=16
+WorldDir=GameData
+
+[Game]
+ServerName=Angels95 Server
+"@ | Set-Content "$OUT_DIR\OzServer.ini" -Encoding UTF8
 
 # Create run scripts
 @"

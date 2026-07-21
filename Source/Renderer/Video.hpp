@@ -173,7 +173,7 @@ inline void performance_counter_reset(performance_counter_t * c) {
 // implementation
 
 #define PL_MPEG_IMPLEMENTATION
-#include "plmpeg/pl_mpeg.h"
+#include "../plmpeg/pl_mpeg.h"
 #include <rlgl.h>
 #include <stdint.h>
 

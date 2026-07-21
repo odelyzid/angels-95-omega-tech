@@ -1,7 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "OzPackage.hpp"
-#include "Log.hpp"
+#include "../Log.hpp"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -24,7 +24,7 @@ public:
         fs::path dataDir = fs::current_path() / "System" / "Data";
         if (!fs::exists(dataDir)) return;
 
-        for (auto& entry : fs::directory_iterator(dataDir)) {
+        for (auto& entry : fs::recursive_directory_iterator(dataDir)) {
             if (entry.is_regular_file()) {
                 std::string ext = entry.path().extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);

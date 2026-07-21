@@ -2,8 +2,8 @@
 #define UNICODE
 #define _UNICODE
 #include "../../Source/WindowsCompat.hpp"
-#include "../../Source/PackageAssetLoader.hpp"
-#include "../../Source/oz_pawn_system.h"
+#include "../../Source/Package/PackageAssetLoader.hpp"
+#include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <commctrl.h>

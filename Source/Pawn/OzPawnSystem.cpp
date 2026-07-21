@@ -1,9 +1,9 @@
-#include "oz_pawn_system.h"
-#include "oz_assetmapper.h"
-#include "EngineBillboard.hpp"
+#include "OzPawnSystem.hpp"
+#include "../Package/OzAssetMapper.hpp"
+#include "../Renderer/EngineBillboard.hpp"
 #include "Player.hpp"
 #include "Items.hpp"
-#include "Log.hpp"
+#include "../Log.hpp"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>

@@ -10,9 +10,9 @@
 #include "rlgl.h"
 #include "Win32Dialogs.hpp"
 #include "../../Source/IniConfig.hpp"
-#include "../../Source/oz_ozone_loader.h"
-#include "../../Source/oz_pawn_system.h"
-#include "../../Source/PackageAssetLoader.hpp"
+#include "../../Source/OzOzoneLoader.hpp"
+#include "../../Source/Pawn/OzPawnSystem.hpp"
+#include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Server/WDLParser.hpp"
 #include <algorithm>
 #include <cstring>
