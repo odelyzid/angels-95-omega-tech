@@ -34,8 +34,8 @@ OBJS := raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
         oz_assetmapper.o oz_sound_loader.o oz_pawn_system.o oz_ozone_loader.o \
         OzoneParser.o
 
-.PHONY: all clean
-all: OTENGINE oz_server
+.PHONY: all clean data
+all: OTENGINE oz_server ozpack
 
 # 1. Compile Main Game Logic
 Main.o: Source/Main.cpp Source/*.hpp Source/Parasite/*.hpp
@@ -93,5 +93,9 @@ GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp
 oz_server: Network.o GameState.o Log.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
 	$(SERVER_CXX) $(SERVER_FLAGS) Network.o GameState.o Log.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o oz_server$(EXE) $(SERVER_LIBS)
 
+# 8. Build OzPack (standalone packer/unpacker, no raylib)
+ozpack: Source/OzPack.cpp Source/OzPackage.hpp
+	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp -o OzPack$(EXE) $(SERVER_LIBS)
+
 clean:
-	rm -f *.o *.so *.dll Angels95 Angels95.exe oz_server oz_server.exe
+	rm -f *.o *.so *.dll Angels95 Angels95.exe oz_server oz_server.exe OzPack OzPack.exe

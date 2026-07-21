@@ -1,7 +1,10 @@
 #include "Editor.hpp"
 #include "raylib.h"
+#include "rlgl.h"
 #include <string>
 #include <vector>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 enum class PlaceMode { MODEL, PICKUP, NODE, ENV };
 static PlaceMode g_placeMode = PlaceMode::MODEL;
@@ -12,16 +15,31 @@ static bool g_showSoundMgr = false;
 static bool g_showTextureMgr = false;
 static bool g_showPawnMgr = false;
 static bool g_showScriptMgr = false;
+static bool g_showModelBrowser = false;
+
+// Model browser state
+struct ModelEntry {
+    std::string path;
+    std::string name;
+    Model model;
+    Texture2D texture;
+    bool loaded;
+};
+static std::vector<ModelEntry> g_modelBrowserEntries;
+static int g_modelBrowserSel = -1;
+static int g_modelBrowserScroll = 0;
 
 struct MenuItem { const char* label; void (*handler)(); };
 struct MenuDef { const char* label; std::vector<MenuItem> items; };
 
-static void ToggleSoundMgr()  { g_showSoundMgr   = !g_showSoundMgr; g_menuActive = -1; }
-static void ToggleTextureMgr(){ g_showTextureMgr = !g_showTextureMgr; g_menuActive = -1; }
-static void TogglePawnMgr()   { g_showPawnMgr   = !g_showPawnMgr; g_menuActive = -1; }
-static void ToggleScriptMgr() { g_showScriptMgr = !g_showScriptMgr; g_menuActive = -1; }
+static void ToggleSoundMgr()    { g_showSoundMgr     = !g_showSoundMgr;     g_menuActive = -1; }
+static void ToggleTextureMgr()  { g_showTextureMgr   = !g_showTextureMgr;   g_menuActive = -1; }
+static void TogglePawnMgr()     { g_showPawnMgr      = !g_showPawnMgr;      g_menuActive = -1; }
+static void ToggleScriptMgr()   { g_showScriptMgr    = !g_showScriptMgr;    g_menuActive = -1; }
+static void ToggleModelBrowser(){ g_showModelBrowser = !g_showModelBrowser; g_menuActive = -1; }
 
 static std::vector<MenuDef> g_menus = {
+    {"Models",    {{"Model Browser...", ToggleModelBrowser}}},
     {"Sound",     {{"Sound Manager...", ToggleSoundMgr}}},
     {"Texture",   {{"Texture Manager...", ToggleTextureMgr}}},
     {"Pawn",      {{"Pawn Manager...", TogglePawnMgr}}},
@@ -39,6 +57,7 @@ static void DrawSoundManager();
 static void DrawTextureManager();
 static void DrawPawnManager();
 static void DrawScriptManager();
+static void DrawModelBrowser();
 
 int main(int argc, char **argv){
     SetWindowState(FLAG_VSYNC_HINT);
@@ -282,6 +301,7 @@ int main(int argc, char **argv){
         DrawTextureManager();
         DrawPawnManager();
         DrawScriptManager();
+        DrawModelBrowser();
 
         EndDrawing();
 
@@ -432,6 +452,155 @@ static void DrawScriptManager() {
     y += 12;
     if (GuiButton((Rectangle){360, (float)y, 120, 28}, "Close"))
         g_showScriptMgr = false;
+}
+
+// =====================================================================
+// Model/Mesh Browser — scan GameData for .obj files, preview & select
+// =====================================================================
+static void ScanModelBrowser() {
+    g_modelBrowserEntries.clear();
+    g_modelBrowserSel = -1;
+    g_modelBrowserScroll = 0;
+
+    // Scan GameData/ recursively for .obj files
+    std::string base = OTEditor.Path;
+    if (base.empty()) base = "GameData/";
+    try {
+        for (auto& p : fs::recursive_directory_iterator(base)) {
+            if (p.path().extension() == ".obj") {
+                ModelEntry me;
+                me.path = p.path().string();
+                // Use relative path from base as display name
+                me.name = fs::relative(p.path(), base).string();
+                me.loaded = false;
+                g_modelBrowserEntries.push_back(me);
+            }
+        }
+    } catch (...) {}
+}
+
+static void UnloadModelBrowserModels() {
+    for (auto& e : g_modelBrowserEntries) {
+        if (e.loaded) {
+            UnloadTexture(e.texture);
+            UnloadModel(e.model);
+        }
+    }
+}
+
+static void DrawModelBrowser() {
+    if (!g_showModelBrowser) return;
+
+    const int PW = 520, PH = 460;
+    int sx = (GetScreenWidth() - PW) / 2;
+    int sy = 60;
+
+    GuiWindowBox((Rectangle){(float)sx, (float)sy, (float)PW, (float)PH}, "Model / Mesh Browser");
+
+    // Refresh button
+    if (GuiButton((Rectangle){(float)sx + PW - 80, (float)sy + 4, 72, 22}, "Refresh"))
+        ScanModelBrowser();
+
+    // List of models (left column)
+    int lx = sx + 8, ly = sy + 32, lw = 220, lh = PH - 80;
+    GuiPanel((Rectangle){(float)lx, (float)ly, (float)lw, (float)lh}, NULL);
+    BeginScissorMode(lx, ly, lw, lh);
+
+    int itemY = ly + 4;
+    int visibleCount = lh / 20;
+    for (int i = g_modelBrowserScroll; i < (int)g_modelBrowserEntries.size() && i < g_modelBrowserScroll + visibleCount; i++) {
+        Rectangle ir = {(float)lx + 2, (float)itemY, (float)lw - 4, 18};
+        bool hovered = CheckCollisionPointRec(GetMousePosition(), ir);
+        bool selected = (i == g_modelBrowserSel);
+        Color ic = selected ? (Color){70, 70, 120, 255} : hovered ? (Color){60, 60, 60, 255} : (Color){45, 45, 45, 255};
+        DrawRectangleRec(ir, ic);
+        DrawText(g_modelBrowserEntries[i].name.c_str(), lx + 6, itemY + 2, 11, selected ? WHITE : LIGHTGRAY);
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered) {
+            g_modelBrowserSel = i;
+        }
+        itemY += 20;
+    }
+    EndScissorMode();
+
+    // Scroll wheel
+    if (CheckCollisionPointRec(GetMousePosition(), {(float)lx, (float)ly, (float)lw, (float)lh})) {
+        int scrollDelta = (int)-GetMouseWheelMove();
+        g_modelBrowserScroll = (scrollDelta < 0) ? std::max(0, g_modelBrowserScroll - 1) :
+                              std::min((int)g_modelBrowserEntries.size() - visibleCount, g_modelBrowserScroll + 1);
+        if (g_modelBrowserScroll < 0) g_modelBrowserScroll = 0;
+    }
+
+    // Preview + info (right side)
+    int rx = sx + lw + 16;
+    int ry = sy + 32;
+    int rw = PW - lw - 24;
+
+    GuiPanel((Rectangle){(float)rx, (float)ry, (float)rw, 180}, "Preview");
+
+    if (g_modelBrowserSel >= 0 && g_modelBrowserSel < (int)g_modelBrowserEntries.size()) {
+        auto& entry = g_modelBrowserEntries[g_modelBrowserSel];
+
+        // Load model on demand if not loaded
+        if (!entry.loaded) {
+            entry.model = LoadModel(entry.path.c_str());
+            // Try loading companion texture
+            std::string texPath = entry.path;
+            texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
+            std::string texPath2 = entry.path;
+            texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
+            if (fs::exists(texPath))
+                entry.texture = LoadTexture(texPath.c_str());
+            else if (fs::exists(texPath2))
+                entry.texture = LoadTexture(texPath2.c_str());
+            if (entry.texture.id > 0)
+                entry.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = entry.texture;
+            entry.loaded = true;
+        }
+
+        // Draw small preview in panel
+        if (entry.loaded && entry.model.meshes != nullptr) {
+            rlPushMatrix();
+            rlTranslatef((float)rx + 90, (float)ry + 100, 0);
+            rlScalef(30.0f, 30.0f, 30.0f);
+            rlRotatef((float)(GetTime() * 45.0), 0, 1, 0);
+            rlDisableBackfaceCulling();
+            DrawModel(entry.model, {0, 0, 0}, 1.0f, WHITE);
+            rlEnableBackfaceCulling();
+            rlPopMatrix();
+        }
+
+        // Info text
+        char info[256];
+        snprintf(info, sizeof(info), "%s\nPath: %s", entry.name.c_str(), entry.path.c_str());
+        if (entry.loaded && entry.model.meshes != nullptr) {
+            int tc = entry.model.meshes[0].triangleCount;
+            int vc = entry.model.meshes[0].vertexCount;
+            snprintf(info + strlen(info), sizeof(info) - strlen(info),
+                     "\nTriangles: %d\nVertices: %d", tc, vc);
+        }
+        DrawText(info, rx + 4, ry + 184, 11, WHITE);
+
+        // Place in world button
+        if (GuiButton((Rectangle){(float)rx, (float)ry + 280, 120, 24}, "Place in World")) {
+            // Switch to model placement mode using a model ID
+            g_placeMode = PlaceMode::MODEL;
+            OmegaTechEditor.DrawModel = true;
+            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+            OmegaTechEditor.R = 1;
+            EMID = 0; // 0 = user-selected obj (not WDL model slot)
+        }
+    } else {
+        DrawText("Select a model from the list", rx + 4, ry + 4, 11, GRAY);
+    }
+
+    // Close button
+    if (GuiButton((Rectangle){(float)sx + PW - 72, (float)sy + PH - 28, 64, 22}, "Close")) {
+        UnloadModelBrowserModels();
+        g_showModelBrowser = false;
+    }
 }
 
 static void DrawEnvPanel() {
