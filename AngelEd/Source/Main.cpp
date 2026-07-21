@@ -305,6 +305,9 @@ int main(int argc, char **argv){
         if (fs::exists(ozonePath)) OzoneLoader::Instance().LoadFile(ozonePath.string().c_str());
     }
 
+    // Suppress raylib's texture-not-found warnings from .obj material refs
+    SetTraceLogLevel(LOG_WARNING);
+
     // Create model preview render texture
     g_previewRT = LoadRenderTexture(256, 256);
 

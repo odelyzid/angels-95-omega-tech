@@ -39,3 +39,6 @@ build/*.db
 build/*.DB
 build/*.DB-shm
 build/*.DB-wal
+
+build/VSCODE-BROWSE.DB*
+build/cmake*
