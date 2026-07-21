@@ -288,7 +288,9 @@ bool OzoneLoader::LoadFile(const char* path) {
         m_renderables.push_back(r);
     }
 
-    OZ_INFO("OzoneLoader: loaded %zu primitives from %s", primitives.size(), path);
+    RebuildCollisionVolumes();
+    OZ_INFO("OzoneLoader: loaded %zu primitives, %zu collision volumes from %s",
+            primitives.size(), m_collisionVolumes.size(), path);
     return true;
 }
 
@@ -318,6 +320,7 @@ bool OzoneLoader::LoadString(const char* data) {
         r.loaded = (r.model.meshCount > 0);
         m_renderables.push_back(r);
     }
+    RebuildCollisionVolumes();
     return true;
 }
 
@@ -332,6 +335,84 @@ void OzoneLoader::Draw(Camera3D& camera) {
 }
 
 // ---------------------------------------------------------------------------
+// ComputeCollisionAABB — generate world-space AABB from primitive params
+// ---------------------------------------------------------------------------
+void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
+                                       Vector3 position, BoundingBox& out) {
+    out = {{0,0,0},{0,0,0}};
+    switch ((OzonePrimitiveType)type) {
+        case OzonePrimitiveType::BOX: {
+            float w = (args.size() > 3) ? args[3] : 2.0f;
+            float h = (args.size() > 4) ? args[4] : 2.0f;
+            float d = (args.size() > 5) ? args[5] : 2.0f;
+            out.min = {position.x - w/2, position.y,       position.z - d/2};
+            out.max = {position.x + w/2, position.y + h,   position.z + d/2};
+            break;
+        }
+        case OzonePrimitiveType::CYLINDER: {
+            float rTop = (args.size() > 3) ? args[3] : 1.0f;
+            float rBot = (args.size() > 4) ? args[4] : 1.0f;
+            float h    = (args.size() > 5) ? args[5] : 2.0f;
+            float maxR = (rTop > rBot) ? rTop : rBot;
+            out.min = {position.x - maxR, position.y,       position.z - maxR};
+            out.max = {position.x + maxR, position.y + h,   position.z + maxR};
+            break;
+        }
+        case OzonePrimitiveType::SPHERE: {
+            float r = (args.size() > 3) ? args[3] : 1.0f;
+            out.min = {position.x - r, position.y - r, position.z - r};
+            out.max = {position.x + r, position.y + r, position.z + r};
+            break;
+        }
+        case OzonePrimitiveType::PYRAMID: {
+            float w = (args.size() > 3) ? args[3] : 2.0f;
+            float d = (args.size() > 4) ? args[4] : 2.0f;
+            float h = (args.size() > 5) ? args[5] : 2.0f;
+            out.min = {position.x - w/2, position.y,       position.z - d/2};
+            out.max = {position.x + w/2, position.y + h,   position.z + d/2};
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RebuildCollisionVolumes — iterate renderables and generate AABBs
+// ---------------------------------------------------------------------------
+void OzoneLoader::RebuildCollisionVolumes() {
+    m_collisionVolumes.clear();
+    for (auto& r : m_renderables) {
+        if (!r.loaded) continue;
+        // Only brush primitives have collision; entity types (playerstart,
+        // pickup, zone, npc) are handled by PawnSystem separately.
+        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC)
+            continue;
+
+        OzoneCollisionVolume vol;
+        // We need the original args to compute the AABB — store a placeholder
+        // and compute from the model's bounding box as fallback.
+        BoundingBox meshBounds = GetMeshBoundingBox(r.model.meshes[0]);
+        // Transform mesh-local bounds to world space
+        vol.aabb.min = {
+            r.position.x + meshBounds.min.x * r.scale,
+            r.position.y + meshBounds.min.y * r.scale,
+            r.position.z + meshBounds.min.z * r.scale
+        };
+        vol.aabb.max = {
+            r.position.x + meshBounds.max.x * r.scale,
+            r.position.y + meshBounds.max.y * r.scale,
+            r.position.z + meshBounds.max.z * r.scale
+        };
+        vol.typeId = r.typeId;
+        m_collisionVolumes.push_back(vol);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unload
 // ---------------------------------------------------------------------------
 void OzoneLoader::Unload() {
@@ -339,6 +420,7 @@ void OzoneLoader::Unload() {
         if (r.loaded) UnloadModel(r.model);
     }
     m_renderables.clear();
+    m_collisionVolumes.clear();
     UnloadTextures();
 }
 

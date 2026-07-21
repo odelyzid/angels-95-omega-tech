@@ -29,6 +29,12 @@ struct OzoneRenderable {
     bool loaded = false;
 };
 
+// Collision AABB for an OZONE brush primitive.
+struct OzoneCollisionVolume {
+    BoundingBox aabb;
+    int typeId = 0;
+};
+
 class OzoneLoader {
 public:
     bool LoadFile(const char* path);
@@ -38,6 +44,10 @@ public:
 
     int Count() const { return (int)m_renderables.size(); }
     OzoneRenderable* Get(int index);
+
+    // Collision volumes for OZONE brush primitives
+    const std::vector<OzoneCollisionVolume>& GetCollisionVolumes() const { return m_collisionVolumes; }
+    void RebuildCollisionVolumes();
 
     // Editor integration
     void LoadWorldTextures(const std::string& worldDir);
@@ -50,6 +60,7 @@ public:
 private:
     static Shader s_litFogShader;
     std::vector<OzoneRenderable> m_renderables;
+    std::vector<OzoneCollisionVolume> m_collisionVolumes;
 
     Texture2D m_floorTex{0};
     Texture2D m_wallTex{0};
@@ -57,6 +68,7 @@ private:
     Texture2D m_ceilTex{0};
 
     void UnloadTextures();
+    void ComputeCollisionAABB(int type, const std::vector<float>& args, Vector3 position, BoundingBox& out);
 
     Model BuildFromPrimitive(int type, const std::vector<float>& args);
 
