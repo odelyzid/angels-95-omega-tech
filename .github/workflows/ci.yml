@@ -126,9 +126,10 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/OzOzoneLoader.cpp -o OzOzoneLoader.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Server/WDLParser.cpp -o WDLParser.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Log.cpp -o Log.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o raygui.o OTCustom_stub.o -o oz_editor.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o oz_editor.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

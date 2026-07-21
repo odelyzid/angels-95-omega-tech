@@ -22,6 +22,9 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
+// WDLModels definition (extern declared in Editor.hpp)
+GameModels WDLModels;
+
 // Editor log file (appended to System/oz_editor.log)
 static FILE* g_editorLog = nullptr;
 static void EditorLog(const char* fmt, ...) {

@@ -130,17 +130,21 @@ if ($LASTEXITCODE -ne 0) { Fail "OzoneParser.cpp compilation failed" }
 g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/WDLParser.cpp -o WDLParser.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "WDLParser.cpp compilation failed" }
 
+# Compile Log system (used by engine modules)
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Log.cpp -o Log.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "Log.cpp compilation failed" }
+
 # Compile OTCustom stub
 $stub = 'int main_custom() { return 0; }'
 $stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
 # Link editor
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "oz_editor link failed" }
 
 # Cleanup editor objects
-Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
+Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
 Write-Step "oz_editor.exe built."
 
