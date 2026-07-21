@@ -1,7 +1,11 @@
 #define WIN32_LEAN_AND_MEAN
+#define UNICODE
+#define _UNICODE
+#include "../../Source/WindowsCompat.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -32,6 +36,15 @@ static const wchar_t* CLASS_NODEPANEL   = L"OzNodePanel";
 // Environment settings (read by editor rendering loop)
 static EnvSettings g_env;
 
+// Entry structures for dynamic resource browsers
+struct ResourceEntry {
+    std::string name;
+    std::string path;
+};
+
+static std::vector<ResourceEntry> g_textureFiles;
+static std::vector<ResourceEntry> g_soundFiles;
+
 // Pawn data
 struct PawnDef {
     std::string name;
@@ -55,7 +68,7 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
-// Window class registration
+// Helper functions
 // =====================================================================
 static bool RegisterPanelClass(const wchar_t* className, WNDPROC proc, HINSTANCE hInst) {
     WNDCLASSEX wc = {};
@@ -69,9 +82,6 @@ static bool RegisterPanelClass(const wchar_t* className, WNDPROC proc, HINSTANCE
     return RegisterClassEx(&wc) != 0;
 }
 
-// =====================================================================
-// Helper: create a basic child control
-// =====================================================================
 static HWND CreateCtrl(HWND hParent, const wchar_t* cls, const wchar_t* text,
                        int x, int y, int w, int h, int id, DWORD extraStyle = 0) {
     return CreateWindowEx(0, cls, text, WS_CHILD | WS_VISIBLE | extraStyle,
@@ -88,34 +98,87 @@ static HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, 
 
 static HWND CreateListBox(HWND hParent, int x, int y, int w, int h, int id) {
     return CreateCtrl(hParent, L"LISTBOX", L"", x, y, w, h, id,
-                      WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOCOLUMNHEADER);
+                      WS_BORDER | WS_VSCROLL | LBS_NOTIFY);
 }
 
 // =====================================================================
-// Sound Manager
+// Sound Manager (Fully Functional Dynamic File Browser)
 // =====================================================================
-static const int ID_SOUND_CLOSE = 100;
+static const int ID_SOUND_LIST    = 101;
+static const int ID_SOUND_REFRESH = 102;
+static const int ID_SOUND_CLOSE   = 103;
+static const int ID_SOUND_PLAY    = 104;
+static const int ID_SOUND_STOP    = 105;
 
 void ShowSoundManager(bool show) {
     g_editorPanels.showSoundMgr = show;
     if (g_editorPanels.hSoundMgr)
-        ShowWindow(g_editorPanels.hSoundMgr, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hSoundMgr, show ? SW_SHOW : SW_HIDE);
+}
+
+void ScanSoundBrowserFiles() {
+    g_soundFiles.clear();
+    fs::path base = fs::current_path() / "GameData" / "Audio";
+    try {
+        if (fs::exists(base)) {
+            for (auto& entry : fs::recursive_directory_iterator(base)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".wav" || ext == ".ogg") {
+                        g_soundFiles.push_back({ entry.path().stem().string(), entry.path().string() });
+                    }
+                }
+            }
+        }
+    } catch (...) {}
+
+    std::sort(g_soundFiles.begin(), g_soundFiles.end(),
+        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+
+    if (g_editorPanels.hSoundMgr) {
+        SendMessage((HWND)g_editorPanels.hSoundMgr, WM_USER + 50, 0, 0);
+    }
 }
 
 static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    static HWND hList;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Sound Manager — Placeholder", 10, 10, 360, 20, 1);
-        CreateLabel(hwnd, L"Sound list and preview coming soon.", 10, 40, 360, 40, 2);
-        CreateButton(hwnd, L"Close", 280, 220, 100, 28, ID_SOUND_CLOSE);
+        CreateLabel(hwnd, L"Available Audio Files (GameData/Audio):", 10, 10, 320, 20, 1);
+        hList = CreateListBox(hwnd, 10, 35, 440, 180, ID_SOUND_LIST);
+        CreateButton(hwnd, L"Refresh", 10, 225, 90, 28, ID_SOUND_REFRESH);
+        CreateButton(hwnd, L"Play", 110, 225, 90, 28, ID_SOUND_PLAY);
+        CreateButton(hwnd, L"Stop", 210, 225, 90, 28, ID_SOUND_STOP);
+        CreateButton(hwnd, L"Close", 350, 225, 100, 28, ID_SOUND_CLOSE);
+        ScanSoundBrowserFiles();
+        break;
+    }
+    case WM_USER + 50: {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (const auto& snd : g_soundFiles) {
+            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)snd.name.c_str());
+        }
         break;
     }
     case WM_COMMAND: {
         int id = LOWORD(w);
-        if (id == ID_SOUND_CLOSE) ShowSoundManager(false);
+        if (id == ID_SOUND_CLOSE) {
+            ShowSoundManager(false);
+        } else if (id == ID_SOUND_REFRESH) {
+            ScanSoundBrowserFiles();
+        } else if (id == ID_SOUND_STOP) {
+            g_editorPanels.actionStopSoundPreview = true;
+        } else if (id == ID_SOUND_PLAY || (id == ID_SOUND_LIST && HIWORD(w) == LBN_DBLCLK)) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_soundFiles.size()) {
+                g_editorPanels.actionPreviewSoundPath = g_soundFiles[sel].path;
+            }
+        }
         break;
     }
     case WM_CLOSE:
+        g_editorPanels.actionStopSoundPreview = true;
         ShowSoundManager(false);
         break;
     case WM_DESTROY:
@@ -128,44 +191,96 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Texture Manager
+// Texture Manager (Fully Functional Dynamic File Browser)
 // =====================================================================
-static const int ID_TEX_CLOSE = 100;
+static const int ID_TEX_LIST    = 101;
+static const int ID_TEX_REFRESH = 102;
+static const int ID_TEX_CLOSE   = 103;
+static const int ID_TEX_TARGET  = 104;
+static const int ID_TEX_APPLY   = 105;
 
 void ShowTextureManager(bool show) {
     g_editorPanels.showTextureMgr = show;
     if (g_editorPanels.hTextureMgr)
-        ShowWindow(g_editorPanels.hTextureMgr, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hTextureMgr, show ? SW_SHOW : SW_HIDE);
+}
+
+void ScanTextureBrowserFiles() {
+    g_textureFiles.clear();
+    fs::path base = fs::current_path() / "GameData" / "Textures";
+    try {
+        if (fs::exists(base)) {
+            for (auto& entry : fs::recursive_directory_iterator(base)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".png" || ext == ".tga" || ext == ".bmp") {
+                        g_textureFiles.push_back({ entry.path().stem().string(), entry.path().string() });
+                    }
+                }
+            }
+        }
+    } catch (...) {}
+
+    std::sort(g_textureFiles.begin(), g_textureFiles.end(),
+        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+
+    if (g_editorPanels.hTextureMgr) {
+        SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
+    }
 }
 
 void UpdateTextureManagerList() {
-    if (!g_editorPanels.hTextureMgr) return;
-    // Send a custom message to rebuild texture list
-    SendMessage(g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
+    ScanTextureBrowserFiles();
 }
 
 static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList;
+    static HWND hTarget;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Loaded Textures:", 10, 10, 200, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 440, 240, 2);
-        CreateButton(hwnd, L"Close", 340, 285, 120, 28, ID_TEX_CLOSE);
+        CreateLabel(hwnd, L"Available Textures (GameData/Textures):", 10, 10, 320, 20, 1);
+        hList = CreateListBox(hwnd, 10, 35, 440, 190, ID_TEX_LIST);
+        CreateLabel(hwnd, L"Target:", 10, 237, 55, 20, 2);
+        hTarget = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                 65, 233, 180, 300, hwnd, (HMENU)(INT_PTR)ID_TEX_TARGET, g_hInst, nullptr);
+        for (int model = 1; model <= 20; model++) {
+            wchar_t label[32];
+            swprintf(label, 32, L"Model %d", model);
+            SendMessage(hTarget, CB_ADDSTRING, 0, (LPARAM)label);
+        }
+        SendMessage(hTarget, CB_SETCURSEL, 0, 0);
+        CreateButton(hwnd, L"Refresh", 10, 280, 90, 28, ID_TEX_REFRESH);
+        CreateButton(hwnd, L"Apply", 110, 280, 90, 28, ID_TEX_APPLY);
+        CreateButton(hwnd, L"Close", 350, 280, 100, 28, ID_TEX_CLOSE);
+        ScanTextureBrowserFiles();
         break;
     }
     case WM_USER + 50: {
-        // Rebuild list — in future this reads from shared texture state
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)"Model1Texture");
-        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)"Model2Texture");
-        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)"Model3Texture");
-        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)"Model4Texture");
-        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)"HeightMapTexture");
+        for (const auto& tex : g_textureFiles) {
+            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)tex.name.c_str());
+        }
         break;
     }
-    case WM_COMMAND:
-        if (LOWORD(w) == ID_TEX_CLOSE) ShowTextureManager(false);
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_TEX_CLOSE) {
+            ShowTextureManager(false);
+        } else if (id == ID_TEX_REFRESH) {
+            ScanTextureBrowserFiles();
+        } else if (id == ID_TEX_APPLY || (id == ID_TEX_LIST && HIWORD(w) == LBN_DBLCLK)) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_textureFiles.size()) {
+                int target = (int)SendMessage(hTarget, CB_GETCURSEL, 0, 0);
+                if (target >= 0) {
+                    g_editorPanels.actionTexturePath = g_textureFiles[sel].path;
+                    g_editorPanels.actionTextureTarget = target + 1;
+                }
+            }
+        }
         break;
+    }
     case WM_CLOSE:
         ShowTextureManager(false);
         break;
@@ -178,24 +293,48 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     return 0;
 }
 
+static bool ChooseWorldFile(bool save, std::string& outPath) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_hRaylibWnd;
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter = save ? L"WDL World (*.wdl)\0*.wdl\0All Files (*.*)\0*.*\0\0"
+                              : L"World Files (*.wdl;*.ozone)\0*.wdl;*.ozone\0WDL World (*.wdl)\0*.wdl\0OZONE World (*.ozone)\0*.ozone\0\0";
+    dialog.lpstrDefExt = save ? L"wdl" : nullptr;
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return false;
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return false;
+    std::vector<char> utf8((size_t)size);
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), size, nullptr, nullptr);
+    outPath.assign(utf8.data());
+    return true;
+}
+
+bool ChooseOpenWorldFile(std::string& outPath) { return ChooseWorldFile(false, outPath); }
+bool ChooseSaveWorldFile(std::string& outPath) { return ChooseWorldFile(true, outPath); }
+
 // =====================================================================
 // Pawn Manager
 // =====================================================================
 static const int ID_PAWN_CLOSE = 100;
-static const int ID_PAWN_ADD = 101;
-static const int ID_PAWN_LIST = 102;
-static const int ID_PAWN_SPAWN = 103; // spawn selected pawn in world
+static const int ID_PAWN_ADD   = 101;
+static const int ID_PAWN_LIST  = 102;
+static const int ID_PAWN_SPAWN = 103;
 
 void ShowPawnManager(bool show) {
     g_editorPanels.showPawnMgr = show;
     if (g_editorPanels.hPawnMgr)
-        ShowWindow(g_editorPanels.hPawnMgr, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hPawnMgr, show ? SW_SHOW : SW_HIDE);
 }
 
 void PawnManagerAddPawn(const char* name, const char* meshPath) {
     g_pawns.push_back({name, meshPath});
     if (g_editorPanels.hPawnMgr) {
-        SendMessage(g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
+        SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
     }
 }
 
@@ -214,13 +353,18 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         CreateButton(hwnd, L"Spawn in World", 10, 140, 120, 28, ID_PAWN_SPAWN);
         CreateButton(hwnd, L"Add Pawn...", 10, 172, 100, 28, ID_PAWN_ADD);
         CreateButton(hwnd, L"Close", 220, 172, 120, 28, ID_PAWN_CLOSE);
-        // Add default pawns
-        PawnManagerAddPawn("Default Player", "GameData/Models/Player.obj");
-        PawnManagerAddPawn("Skaarj Trooper", "GameData/Models/Skaarj.obj");
+        
+        // Ensure standard defaults exist if empty
+        if (g_pawns.empty()) {
+            g_pawns.push_back({ "Walker", "GameData/Models/Walker.obj" });
+            g_pawns.push_back({ "Skaarj", "GameData/Models/Skaarj.obj" });
+            g_pawns.push_back({ "Brute", "GameData/Models/Brute.obj" });
+            g_pawns.push_back({ "Floater", "GameData/Models/Floater.obj" });
+        }
+        SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
     }
     case WM_USER + 50: {
-        // Refresh list from g_pawns
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (auto& p : g_pawns)
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)p.name.c_str());
@@ -235,17 +379,15 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                 g_editorPanels.actionSpawnPawn = sel;
             }
         } else if (id == ID_PAWN_ADD) {
-            // In future: open a dialog to input name + mesh path
-            MessageBoxA(hwnd, "Pawn addition dialog coming soon.\n"
-                       "Use PawnManagerAddPawn() from code for now.",
-                       "Add Pawn", MB_OK);
+            MessageBoxA(hwnd, "Use PawnManagerAddPawn() API to register new dynamic types.",
+                        "Add Pawn", MB_OK | MB_ICONINFORMATION);
         } else if (id == ID_PAWN_LIST && HIWORD(w) == LBN_DBLCLK) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_pawns.size()) {
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Selected: %s\nMesh: %s",
+                char msgBuf[256];
+                snprintf(msgBuf, sizeof(msgBuf), "Selected Pawn: %s\nMesh: %s",
                          g_pawns[sel].name.c_str(), g_pawns[sel].meshPath.c_str());
-                MessageBoxA(hwnd, msg, "Pawn Info", MB_OK);
+                MessageBoxA(hwnd, msgBuf, "Pawn Info", MB_OK);
             }
         }
         break;
@@ -270,7 +412,7 @@ static const int ID_SCRIPT_CLOSE = 100;
 void ShowScriptManager(bool show) {
     g_editorPanels.showScriptMgr = show;
     if (g_editorPanels.hScriptMgr)
-        ShowWindow(g_editorPanels.hScriptMgr, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hScriptMgr, show ? SW_SHOW : SW_HIDE);
 }
 
 static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -280,7 +422,6 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         CreateLabel(hwnd, L"Available Scripts (WDL Script1-10):", 10, 10, 380, 20, 1);
         hList = CreateListBox(hwnd, 10, 35, 380, 220, 2);
         CreateButton(hwnd, L"Close", 300, 265, 100, 28, ID_SCRIPT_CLOSE);
-        // Populate script list
         for (int i = 1; i <= 10; i++) {
             char label[64];
             snprintf(label, sizeof(label), "Script%d.ps", i);
@@ -306,21 +447,19 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Model / Mesh Browser
 // =====================================================================
-static const int ID_MDL_LIST = 100;
+static const int ID_MDL_LIST    = 100;
 static const int ID_MDL_REFRESH = 101;
-static const int ID_MDL_PLACE = 102;
-static const int ID_MDL_CLOSE = 103;
-static const int ID_MDL_PREVIEW = 104; // static control for preview bitmap
+static const int ID_MDL_PLACE   = 102;
+static const int ID_MDL_CLOSE   = 103;
+static const int ID_MDL_PREVIEW = 104;
 
-// Custom messages
-static const UINT WM_MODEL_SELECTED = WM_USER + 100; // sent to raylib wnd
-static const UINT WM_PREVIEW_READY  = WM_USER + 101; // sent to dialog wnd
-// wParam = (WPARAM)HBITMAP, lParam = MAKELPARAM(w, h)
+static const UINT WM_MODEL_SELECTED = WM_USER + 100;
+static const UINT WM_PREVIEW_READY  = WM_USER + 101;
 
 void ShowModelBrowser(bool show) {
     g_editorPanels.showModelBrowser = show;
     if (g_editorPanels.hModelBrowser)
-        ShowWindow(g_editorPanels.hModelBrowser, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hModelBrowser, show ? SW_SHOW : SW_HIDE);
 }
 
 void ScanModelBrowserFiles() {
@@ -328,36 +467,37 @@ void ScanModelBrowserFiles() {
     g_editorPanels.selectedModel = -1;
     fs::path base = fs::current_path() / "GameData";
     try {
-        for (auto& entry : fs::recursive_directory_iterator(base)) {
-            if (entry.is_regular_file()) {
-                std::string ext = entry.path().extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                if (ext == ".obj") {
-                    ModelBrowserEntry mbe;
-                    mbe.name = entry.path().stem().string();
-                    mbe.path = entry.path().string();
-                    g_editorPanels.modelEntries.push_back(mbe);
+        if (fs::exists(base)) {
+            for (auto& entry : fs::recursive_directory_iterator(base)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".obj") {
+                        ModelBrowserEntry mbe;
+                        mbe.name = entry.path().stem().string();
+                        mbe.path = entry.path().string();
+                        g_editorPanels.modelEntries.push_back(mbe);
+                    }
                 }
             }
         }
     } catch (...) {}
-    // Sort by name
+    
     std::sort(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
         [](auto& a, auto& b) { return a.name < b.name; });
-    // Refresh listbox
+
     if (g_editorPanels.hModelBrowser)
-        SendMessage(g_editorPanels.hModelBrowser, WM_USER + 50, 0, 0);
+        SendMessage((HWND)g_editorPanels.hModelBrowser, WM_USER + 50, 0, 0);
 }
 
-void UpdateModelPreview(HBITMAP hBmp, int w, int h) {
+void UpdateModelPreview(void* hBmp, int w, int h) {
     if (g_editorPanels.hPreviewBitmap)
-        DeleteObject(g_editorPanels.hPreviewBitmap);
+        DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
     g_editorPanels.hPreviewBitmap = hBmp;
     g_editorPanels.previewW = w;
     g_editorPanels.previewH = h;
     if (g_editorPanels.hModelBrowser) {
-        // WM_PREVIEW_READY: wParam=HBITMAP, lParam=MAKELPARAM(w,h)
-        PostMessage(g_editorPanels.hModelBrowser, WM_PREVIEW_READY,
+        PostMessage((HWND)g_editorPanels.hModelBrowser, WM_PREVIEW_READY,
                     (WPARAM)hBmp, MAKELPARAM(w, h));
     }
 }
@@ -368,34 +508,26 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
     case WM_CREATE: {
         int PW = 540, PH = 500;
-        // Left: listbox
         hList = CreateListBox(hwnd, 8, 32, 230, PH - 100, ID_MDL_LIST);
-        // Right: preview area
         hPreview = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"",
              WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
              248, 32, 260, 220, hwnd, (HMENU)(INT_PTR)ID_MDL_PREVIEW,
              g_hInst, nullptr);
-        // Info text
         CreateLabel(hwnd, L"Select a model from the list", 248, 260, 260, 60, 2);
-        // Buttons
         CreateButton(hwnd, L"Refresh", 8, 4, 80, 22, ID_MDL_REFRESH);
         CreateButton(hwnd, L"Place in World", 248, 340, 120, 24, ID_MDL_PLACE);
         CreateButton(hwnd, L"Close", PW - 72, PH - 28, 64, 22, ID_MDL_CLOSE);
         break;
     }
     case WM_USER + 50: {
-        // Refresh list from g_editorPanels.modelEntries
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (auto& e : g_editorPanels.modelEntries)
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)e.name.c_str());
         break;
     }
     case WM_PREVIEW_READY: {
-        // Receives HBITMAP from raylib main loop
         HBITMAP hBmp = (HBITMAP)w;
-        int bw = LOWORD(l), bh = HIWORD(l);
         if (hBmp) {
-            // Set as preview static control image
             SendMessage(hPreview, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
         }
         break;
@@ -421,15 +553,14 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         break;
     }
     case WM_DRAWITEM: {
-        // Owner-draw for preview static
         LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)l;
         if (dis->CtlID == ID_MDL_PREVIEW && g_editorPanels.hPreviewBitmap) {
             HDC hdc = dis->hDC;
             RECT r = dis->rcItem;
             BITMAP bm;
-            GetObject(g_editorPanels.hPreviewBitmap, sizeof(bm), &bm);
+            GetObject((HGDIOBJ)g_editorPanels.hPreviewBitmap, sizeof(bm), &bm);
             HDC hdcMem = CreateCompatibleDC(hdc);
-            SelectObject(hdcMem, g_editorPanels.hPreviewBitmap);
+            SelectObject(hdcMem, (HGDIOBJ)g_editorPanels.hPreviewBitmap);
             StretchBlt(hdc, r.left, r.top, r.right - r.left, r.bottom - r.top,
                        hdcMem, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
             DeleteDC(hdcMem);
@@ -443,7 +574,7 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_DESTROY:
         g_editorPanels.hModelBrowser = nullptr;
         if (g_editorPanels.hPreviewBitmap) {
-            DeleteObject(g_editorPanels.hPreviewBitmap);
+            DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
             g_editorPanels.hPreviewBitmap = nullptr;
         }
         break;
@@ -456,10 +587,9 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Environment Settings
 // =====================================================================
-static const int ID_ENV_CLOSE = 100;
+static const int ID_ENV_CLOSE     = 100;
 static const int ID_ENV_APPLY_FOG = 101;
 static const int ID_ENV_APPLY_AMB = 102;
-// Scrollbar IDs for sliders
 static const int ID_SB_FOG_R = 110, ID_SB_FOG_G = 111, ID_SB_FOG_B = 112;
 static const int ID_SB_FOG_DENSITY = 113;
 static const int ID_SB_AMB_R = 114, ID_SB_AMB_G = 115, ID_SB_AMB_B = 116;
@@ -468,7 +598,7 @@ static const int ID_SB_AMB_INT = 117;
 void ShowEnvPanel(bool show) {
     g_editorPanels.showEnvPanel = show;
     if (g_editorPanels.hEnvPanel)
-        ShowWindow(g_editorPanels.hEnvPanel, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hEnvPanel, show ? SW_SHOW : SW_HIDE);
 }
 
 EnvSettings GetEnvSettings() {
@@ -507,7 +637,6 @@ static LRESULT CALLBACK EnvPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             SetScrollRange(GetDlgItem(hwnd, id), SB_CTL, minv, maxv, TRUE);
             SetScrollPos(GetDlgItem(hwnd, id), SB_CTL, def, TRUE);
         };
-        // Fog section
         CreateLabel(hwnd, L"--- Fog Settings ---", x, y, 200, 20, 1);
         y += gap;
         addSlider(ID_SB_FOG_R, L"Fog R:", 0, 255, 200, 0); y += gap;
@@ -527,7 +656,6 @@ static LRESULT CALLBACK EnvPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         break;
     }
     case WM_HSCROLL: {
-        // Update env state when any scrollbar changes
         UpdateEnvFromScrollbars(hwnd);
         break;
     }
@@ -558,20 +686,20 @@ static LRESULT CALLBACK EnvPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Pickup Panel
 // =====================================================================
-static const int ID_PICK_CLOSE = 100;
-static const int ID_PICK_HEALTH = 101;
-static const int ID_PICK_MANA = 102;
-static const int ID_PICK_ENERGY = 103;
-static const int ID_PICK_KEY = 104;
-static const int ID_PICK_COIN = 105;
+static const int ID_PICK_CLOSE   = 100;
+static const int ID_PICK_HEALTH  = 101;
+static const int ID_PICK_MANA    = 102;
+static const int ID_PICK_ENERGY  = 103;
+static const int ID_PICK_KEY     = 104;
+static const int ID_PICK_COIN    = 105;
 static const int ID_PICK_POWERUP = 106;
 
-static int g_lastPickupType = 0; // 0=Health, 1=Mana, 2=Energy, etc.
+static int g_lastPickupType = 0;
 
 void ShowPickupPanel(bool show) {
     g_editorPanels.showPickupPanel = show;
     if (g_editorPanels.hPickupPanel)
-        ShowWindow(g_editorPanels.hPickupPanel, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hPickupPanel, show ? SW_SHOW : SW_HIDE);
 }
 
 static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -622,13 +750,14 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 // =====================================================================
 static const int ID_NODE_CLOSE = 100;
 static const int ID_NODE_SPAWN = 101;
-static const int ID_NODE_NPC = 102;
+static const int ID_NODE_NPC   = 102;
 static const int ID_NODE_LIGHT = 103;
+static const int ID_NODE_ZONE  = 104;
 
 void ShowNodePanel(bool show) {
     g_editorPanels.showNodePanel = show;
     if (g_editorPanels.hNodePanel)
-        ShowWindow(g_editorPanels.hNodePanel, show ? SW_SHOW : SW_HIDE);
+        ShowWindow((HWND)g_editorPanels.hNodePanel, show ? SW_SHOW : SW_HIDE);
 }
 
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -638,7 +767,8 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         CreateButton(hwnd, L"Player Spawn", 10, 35, 160, 24, ID_NODE_SPAWN);
         CreateButton(hwnd, L"NPC Spawn", 10, 63, 160, 24, ID_NODE_NPC);
         CreateButton(hwnd, L"Point Light", 10, 91, 160, 24, ID_NODE_LIGHT);
-        CreateButton(hwnd, L"Close", 50, 135, 100, 28, ID_NODE_CLOSE);
+        CreateButton(hwnd, L"Zone Volume", 10, 119, 160, 24, ID_NODE_ZONE);
+        CreateButton(hwnd, L"Close", 50, 151, 100, 28, ID_NODE_CLOSE);
         break;
     }
     case WM_COMMAND: {
@@ -649,6 +779,7 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             if (id == ID_NODE_SPAWN) type = 0;
             else if (id == ID_NODE_NPC) type = 1;
             else if (id == ID_NODE_LIGHT) type = 2;
+            else if (id == ID_NODE_ZONE) type = 3;
             if (type >= 0) g_editorPanels.actionNodeType = type;
         }
         break;
@@ -668,51 +799,47 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Public API — Create / Destroy
 // =====================================================================
-void CreateAllEditorWindows(HINSTANCE hInst, HWND hRaylibWnd) {
-    g_hInst = hInst;
-    g_hRaylibWnd = hRaylibWnd;
+void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
+    g_hInst = (HINSTANCE)hInst;
+    g_hRaylibWnd = (HWND)hRaylibWnd;
 
-    // Register ALL window classes
-    RegisterPanelClass(CLASS_SOUNDMGR, SoundMgrProc, hInst);
-    RegisterPanelClass(CLASS_TEXTUREMGR, TextureMgrProc, hInst);
-    RegisterPanelClass(CLASS_PAWNNMGR, PawnMgrProc, hInst);
-    RegisterPanelClass(CLASS_SCRIPTMGR, ScriptMgrProc, hInst);
-    RegisterPanelClass(CLASS_MODELBRW, ModelBrwProc, hInst);
-    RegisterPanelClass(CLASS_ENVPANEL, EnvPanelProc, hInst);
-    RegisterPanelClass(CLASS_PICKUPPANEL, PickupPanelProc, hInst);
-    RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, hInst);
+    RegisterPanelClass(CLASS_SOUNDMGR, SoundMgrProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_TEXTUREMGR, TextureMgrProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_PAWNNMGR, PawnMgrProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_SCRIPTMGR, ScriptMgrProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_MODELBRW, ModelBrwProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_ENVPANEL, EnvPanelProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_PICKUPPANEL, PickupPanelProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, (HINSTANCE)hInst);
 
     auto create = [&](const wchar_t* cls, const wchar_t* title,
-                      EditorPanelState::WinPos& pos, HWND& out) {
-        out = CreateWindowEx(WS_EX_DLGMODALFRAME,
+                      EditorPanelState::WinPos& pos, void*& out) {
+        HWND hwnd = CreateWindowEx(WS_EX_TOOLWINDOW,
               cls, title,
-              WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX,
+              WS_OVERLAPPEDWINDOW,
               pos.x, pos.y, pos.w, pos.h,
-              hRaylibWnd, nullptr, hInst, nullptr);
-        // Hide initially
-        if (out) ShowWindow(out, SW_HIDE);
+              nullptr, nullptr, (HINSTANCE)hInst, nullptr);
+        out = hwnd;
+        if (hwnd) ShowWindow(hwnd, SW_HIDE);
     };
 
     create(CLASS_SOUNDMGR,    L"Sound Manager",       g_editorPanels.soundMgrPos,   g_editorPanels.hSoundMgr);
     create(CLASS_TEXTUREMGR,  L"Texture Manager",     g_editorPanels.textureMgrPos, g_editorPanels.hTextureMgr);
     create(CLASS_PAWNNMGR,    L"Pawn Manager",        g_editorPanels.pawnMgrPos,    g_editorPanels.hPawnMgr);
     create(CLASS_SCRIPTMGR,   L"Script Manager",      g_editorPanels.scriptMgrPos,  g_editorPanels.hScriptMgr);
-    create(CLASS_MODELBRW,    L"Model / Mesh Browser", g_editorPanels.modelBrwPos,  g_editorPanels.hModelBrowser);
-    create(CLASS_ENVPANEL,    L"Environment Settings", g_editorPanels.envPanelPos,  g_editorPanels.hEnvPanel);
+    create(CLASS_MODELBRW,    L"Model / Mesh Browser",g_editorPanels.modelBrwPos,   g_editorPanels.hModelBrowser);
+    create(CLASS_ENVPANEL,    L"Environment Settings",g_editorPanels.envPanelPos,   g_editorPanels.hEnvPanel);
     create(CLASS_PICKUPPANEL, L"Pickups",             g_editorPanels.pickPanelPos,  g_editorPanels.hPickupPanel);
     create(CLASS_NODEPANEL,   L"Nodes",               g_editorPanels.nodePanelPos,  g_editorPanels.hNodePanel);
 
-    // Initial texture list population
-    if (g_editorPanels.hTextureMgr)
-        SendMessage(g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
-
-    // Scan model files
+    ScanTextureBrowserFiles();
+    ScanSoundBrowserFiles();
     ScanModelBrowserFiles();
 }
 
 void DestroyAllEditorWindows() {
-    auto destroy = [](HWND& hwnd) {
-        if (hwnd) { DestroyWindow(hwnd); hwnd = nullptr; }
+    auto destroy = [](void*& hwnd) {
+        if (hwnd) { DestroyWindow((HWND)hwnd); hwnd = nullptr; }
     };
     destroy(g_editorPanels.hSoundMgr);
     destroy(g_editorPanels.hTextureMgr);
@@ -723,7 +850,7 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hPickupPanel);
     destroy(g_editorPanels.hNodePanel);
     if (g_editorPanels.hPreviewBitmap) {
-        DeleteObject(g_editorPanels.hPreviewBitmap);
+        DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
         g_editorPanels.hPreviewBitmap = nullptr;
     }
 }

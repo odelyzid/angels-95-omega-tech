@@ -4,6 +4,7 @@
 #include <fstream>
 #include <chrono>
 #include <utility>
+#include <algorithm>
 
 #include "raygui/raygui.h"
 #include "raygui/dark.h"
@@ -11,11 +12,19 @@ using namespace std;
 
 wstring LoadFile(const char *Path)
 {
-    wstring Data;
-    wifstream OutFile;
-    OutFile.open(Path);
-    OutFile >> Data;
-    return Data;
+    wifstream input(Path);
+    if (!input.is_open()) return L"";
+
+    wstring data;
+    wstring line;
+    while (getline(input, line)) {
+        size_t comment = line.find(L'#');
+        if (comment != wstring::npos) line.erase(comment);
+        if (line.find_first_not_of(L" \t\r") == wstring::npos) continue;
+        data += line;
+        if (data.empty() || data.back() != L':') data += L':';
+    }
+    return data;
 }
 
 float ToFloat(wstring Data)
@@ -30,7 +39,7 @@ int GetWDLSize(wstring WData , wstring Extra)
 {
     int Out = 0;
     wstring Data = WData + Extra;
-    for (int i = 0; i <= WData.size() + Extra.size(); i++)
+    for (size_t i = 0; i < Data.size(); i++)
     {
         if (Data[i] == ':')
         {
@@ -48,6 +57,8 @@ static wstring ReadValueOut = L"";
 auto WReadValue(wstring Data, int Start, int End)
 { // Reads Value from (Start to End)
     ReadValueOut = L"";
+    if (Start < 0 || End < Start || Start >= (int)Data.size()) return ReadValueOut;
+    End = std::min(End, (int)Data.size() - 1);
     for (int i = Start; i <= End; i++)
     {
         ReadValueOut += Data[i];
@@ -67,9 +78,9 @@ auto WSplitValue(wstring Data, int Place)
 
     if (Place == 0)
     {
-        for (int i = 0; i <= Data.size(); i++)
+        for (size_t i = 0; i <= Data.size(); i++)
         {
-            if (Data[i] == L':' || i == Data.size())
+            if (i == Data.size() || Data[i] == L':')
             {
                 SVEnd = i - 1;
                 break;
@@ -80,14 +91,14 @@ auto WSplitValue(wstring Data, int Place)
     {
         Place = Place;
         SVPlaceCounter = 1;
-        for (int i = 0; i <= Data.size(); i++)
+        for (size_t i = 0; i < Data.size(); i++)
         {
             if (SVPlaceCounter == Place)
             {
                 SVStart = i + 1;
-                for (int x = i + 1; x <= Data.size(); x++)
+                for (size_t x = i + 1; x <= Data.size(); x++)
                 {
-                    if (Data[x] == L':' || x == Data.size())
+                    if (x == Data.size() || Data[x] == L':')
                     {
                         SVEnd = x - 1;
                         break;

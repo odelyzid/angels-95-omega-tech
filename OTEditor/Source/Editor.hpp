@@ -1,5 +1,7 @@
 #include "PPGIO.hpp"
 #include "../../Source/PackageAssetLoader.hpp"
+#include "../../Source/EngineBillboard.hpp"
+#include "../../Source/oz_ozone_loader.h"
 #include <cstring>
 #include <cmath>
 
@@ -13,7 +15,7 @@ class Editor{
     public:
         Camera3D MainCamera = {0}; 
         Camera3D PreviewCamera = {0}; 
-        char Path[100];
+        char Path[512] = {};
         wstring WorldData;
         wstring OtherData;
         // Environmental settings
@@ -23,6 +25,14 @@ class Editor{
         float AmbientIntensity = 0.4f;
         // Window flag
         bool ShowEnvPanel = false;
+        // Lit fog shader
+        Shader LitFogShader = {0};
+        int FogStartLoc = -1;
+        int FogEndLoc = -1;
+        int FogDensityLoc = -1;
+        int FogColorLoc = -1;
+        int FogIntensityLoc = -1;
+        int AmbientLoc = -1;
 };
 
 static Editor OTEditor;
@@ -143,12 +153,13 @@ static const char* PickupTypeLabel(EditorPickupType t) {
 }
 
 // --- Pawn node types ---
-enum class EditorNodeType { SPAWN, NPC, LIGHT };
+enum class EditorNodeType { SPAWN, NPC, LIGHT, ZONE };
 static const char* NodeTypeLabel(EditorNodeType t) {
     switch (t) {
         case EditorNodeType::SPAWN: return "Player Spawn";
         case EditorNodeType::NPC:   return "NPC Spawn";
         case EditorNodeType::LIGHT: return "Point Light";
+        case EditorNodeType::ZONE:  return "Zone Volume";
         default: return "?";
     }
 }
@@ -177,6 +188,51 @@ void Init(){
     Target = LoadRenderTexture(320 , 200);
     PreviewTarget = LoadRenderTexture(256 , 256);
 
+    // Initialize lit fog shader for editor
+    // Use OTEditor.Path prefix so shaders resolve from ../GameData/ when cwd=System/
+    std::string shaderBase = std::string(OTEditor.Path) + "Shaders/Lights/";
+    OTEditor.LitFogShader = LoadShaderWithFallback(
+        (shaderBase + "Lighting.vs").c_str(),
+        (shaderBase + "LitFog.fs").c_str()
+    );
+    
+    // Initialize fog uniforms for editor
+    if (OTEditor.LitFogShader.id > 0) {
+        OTEditor.FogStartLoc = GetShaderLocation(OTEditor.LitFogShader, "fogStart");
+        OTEditor.FogEndLoc = GetShaderLocation(OTEditor.LitFogShader, "fogEnd");
+        OTEditor.FogDensityLoc = GetShaderLocation(OTEditor.LitFogShader, "fogDensity");
+        OTEditor.FogColorLoc = GetShaderLocation(OTEditor.LitFogShader, "fogColor");
+        OTEditor.FogIntensityLoc = GetShaderLocation(OTEditor.LitFogShader, "fogIntensity");
+        
+        // Set default fog values
+        float fogStart = 10.0f;
+        float fogEnd = 100.0f;
+        float fogDensity = 1.0f;
+        float fogColor[3] = {0.7f, 0.7f, 0.8f};
+        float fogIntensity = 1.0f;
+        
+        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogEndLoc, &fogEnd, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
+        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
+        
+        // Ambient uniform
+        OTEditor.AmbientLoc = GetShaderLocation(OTEditor.LitFogShader, "ambient");
+        float ambient[4] = {(float)OTEditor.AmbientColor.r / 255.0f * OTEditor.AmbientIntensity,
+                            (float)OTEditor.AmbientColor.g / 255.0f * OTEditor.AmbientIntensity,
+                            (float)OTEditor.AmbientColor.b / 255.0f * OTEditor.AmbientIntensity,
+                            1.0f};
+        if (OTEditor.AmbientLoc >= 0)
+            SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+    }
+
+    // Pass lit fog shader to OzoneLoader for OZONE geometry
+    OzoneLoader::Instance().SetLitFogShader(OTEditor.LitFogShader);
+
+    // Initialize engine billboard system
+    EngineBillboard::Init();
+
     if (IsPathFile(TextFormat("%s/Models/HeightMap.png", OTEditor.Path)))
     {
         WDLModels.HeightMapTexture = LoadTexture(TextFormat("%sModels/HeightMapTexture.png", OTEditor.Path));
@@ -192,6 +248,9 @@ void Init(){
         WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
         WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
         WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        if (OTEditor.LitFogShader.id > 0) {
+            WDLModels.HeightMap.materials[0].shader = OTEditor.LitFogShader;
+        }
         WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
     }
 
@@ -201,6 +260,9 @@ void Init(){
             WDLModels.Model1 = m;
             WDLModels.Model1Texture = LoadTextureWithFallback(TextFormat("%sModels/Model1Texture.png", OTEditor.Path));
             WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model1.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -209,6 +271,9 @@ void Init(){
             WDLModels.Model2 = m;
             WDLModels.Model2Texture = LoadTextureWithFallback(TextFormat("%sModels/Model2Texture.png", OTEditor.Path));
             WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model2.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -217,6 +282,9 @@ void Init(){
             WDLModels.Model3 = m;
             WDLModels.Model3Texture = LoadTextureWithFallback(TextFormat("%sModels/Model3Texture.png", OTEditor.Path));
             WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model3.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -225,6 +293,9 @@ void Init(){
             WDLModels.Model4 = m;
             WDLModels.Model4Texture = LoadTextureWithFallback(TextFormat("%sModels/Model4Texture.png", OTEditor.Path));
             WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model4.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -233,6 +304,9 @@ void Init(){
             WDLModels.Model5 = m;
             WDLModels.Model5Texture = LoadTextureWithFallback(TextFormat("%sModels/Model5Texture.png", OTEditor.Path));
             WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model5.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -241,6 +315,9 @@ void Init(){
             WDLModels.Model6 = m;
             WDLModels.Model6Texture = LoadTextureWithFallback(TextFormat("%sModels/Model6Texture.png", OTEditor.Path));
             WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model6.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -249,6 +326,9 @@ void Init(){
             WDLModels.Model7 = m;
             WDLModels.Model7Texture = LoadTextureWithFallback(TextFormat("%sModels/Model7Texture.png", OTEditor.Path));
             WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model7.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -257,6 +337,9 @@ void Init(){
             WDLModels.Model8 = m;
             WDLModels.Model8Texture = LoadTextureWithFallback(TextFormat("%sModels/Model8Texture.png", OTEditor.Path));
             WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model8.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -265,6 +348,9 @@ void Init(){
             WDLModels.Model9 = m;
             WDLModels.Model9Texture = LoadTextureWithFallback(TextFormat("%sModels/Model9Texture.png", OTEditor.Path));
             WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model9.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -273,6 +359,9 @@ void Init(){
             WDLModels.Model10 = m;
             WDLModels.Model10Texture = LoadTextureWithFallback(TextFormat("%sModels/Model10Texture.png", OTEditor.Path));
             WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model10.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -281,6 +370,9 @@ void Init(){
             WDLModels.Model11 = m;
             WDLModels.Model11Texture = LoadTextureWithFallback(TextFormat("%sModels/Model11Texture.png", OTEditor.Path));
             WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model11.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -289,6 +381,9 @@ void Init(){
             WDLModels.Model12 = m;
             WDLModels.Model12Texture = LoadTextureWithFallback(TextFormat("%sModels/Model12Texture.png", OTEditor.Path));
             WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model12.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -297,6 +392,9 @@ void Init(){
             WDLModels.Model13 = m;
             WDLModels.Model13Texture = LoadTextureWithFallback(TextFormat("%sModels/Model13Texture.png", OTEditor.Path));
             WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model13.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -305,6 +403,9 @@ void Init(){
             WDLModels.Model14 = m;
             WDLModels.Model14Texture = LoadTextureWithFallback(TextFormat("%sModels/Model14Texture.png", OTEditor.Path));
             WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model14.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -313,6 +414,9 @@ void Init(){
             WDLModels.Model15 = m;
             WDLModels.Model15Texture = LoadTextureWithFallback(TextFormat("%sModels/Model15Texture.png", OTEditor.Path));
             WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model15.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -321,6 +425,9 @@ void Init(){
             WDLModels.Model16 = m;
             WDLModels.Model16Texture = LoadTextureWithFallback(TextFormat("%sModels/Model16Texture.png", OTEditor.Path));
             WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model16.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -329,6 +436,9 @@ void Init(){
             WDLModels.Model17 = m;
             WDLModels.Model17Texture = LoadTextureWithFallback(TextFormat("%sModels/Model17Texture.png", OTEditor.Path));
             WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model17.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -337,6 +447,9 @@ void Init(){
             WDLModels.Model18 = m;
             WDLModels.Model18Texture = LoadTextureWithFallback(TextFormat("%sModels/Model18Texture.png", OTEditor.Path));
             WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model18.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -345,6 +458,9 @@ void Init(){
             WDLModels.Model19 = m;
             WDLModels.Model19Texture = LoadTextureWithFallback(TextFormat("%sModels/Model19Texture.png", OTEditor.Path));
             WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model19.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
     {
@@ -353,6 +469,9 @@ void Init(){
             WDLModels.Model20 = m;
             WDLModels.Model20Texture = LoadTextureWithFallback(TextFormat("%sModels/Model20Texture.png", OTEditor.Path));
             WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
+            if (OTEditor.LitFogShader.id > 0) {
+                WDLModels.Model20.materials[0].shader = OTEditor.LitFogShader;
+            }
         }
     }
 }
@@ -418,10 +537,7 @@ void CacheWDL()
             CachedCollisionCounter ++;
         }
 
-        if (WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" ||
-            WReadValue(Instruction, 0, 6) == L"Pickup" || WReadValue(Instruction, 0, 5) == L"Spawn" ||
-            WReadValue(Instruction, 0, 3) == L"NPC" || WReadValue(Instruction, 0, 5) == L"Light" ||
-            WReadValue(Instruction, 0, 3) == L"Fog" || WReadValue(Instruction, 0, 7) == L"Ambient")
+        if (WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script")
         {
             OTEditor.OtherData += Instruction + L":" +
                 WSplitValue(WData, i + 1) + L":" + WSplitValue(WData, i + 2) + L":" +
@@ -553,10 +669,34 @@ void WDLProcess()
 
             if (Instruction == L"Collision") DrawCubeWires({X, Y, Z}, S, S, S, RED);
             if (WReadValue(Instruction, 0, 5) == L"Script") DrawCubeWires({X, Y, Z}, S, S, S, YELLOW);
-            if (WReadValue(Instruction, 0, 6) == L"Pickup")  DrawCubeWires({X, Y, Z}, 0.5f, 0.5f, 0.5f, GREEN);
-            if (WReadValue(Instruction, 0, 5) == L"Spawn")  DrawCubeWires({X, Y, Z}, 1.0f, 0.2f, 1.0f, BLUE);
-            if (WReadValue(Instruction, 0, 3) == L"NPC")    DrawCubeWires({X, Y, Z}, 1.0f, 2.0f, 1.0f, MAGENTA);
-            if (WReadValue(Instruction, 0, 5) == L"Light")  DrawSphereWires({X, Y, Z}, 1.0f, 8, 8, YELLOW);
+            if (WReadValue(Instruction, 0, 6) == L"Pickup") {
+                Camera3D cam = OTEditor.MainCamera;
+                const char* pickupNames[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
+                int pickupType = std::stoi(WSplitValue(WData, i + 1));
+                if (pickupType >= 0 && pickupType < 6) {
+                    EngineBillboard::DrawPickup(cam, pickupNames[pickupType], {X, Y, Z}, 0.8f);
+                } else {
+                    DrawCubeWires({X, Y, Z}, 0.5f, 0.5f, 0.5f, GREEN);
+                }
+            }
+            if (WReadValue(Instruction, 0, 5) == L"Spawn") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "PlayerStart", {X, Y + 0.5f, Z}, 1.2f);
+            }
+            if (WReadValue(Instruction, 0, 3) == L"NPC") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "PawnNode", {X, Y + 1.0f, Z}, 1.5f);
+            }
+            if (WReadValue(Instruction, 0, 5) == L"Light") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "Light", {X, Y + 0.5f, Z}, 1.0f);
+            }
+            if (WReadValue(Instruction, 0, 5) == L"Sound") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "Sound", {X, Y + 0.5f, Z}, 1.0f);
+            }
+            if (WReadValue(Instruction, 0, 5) == L"Music") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "Music", {X, Y + 0.5f, Z}, 1.0f);
+            }
+            if (WReadValue(Instruction, 0, 8) == L"ZoneInfo") {
+                EngineBillboard::Draw(OTEditor.MainCamera, "ZoneInfo", {X, Y + 0.5f, Z}, 1.0f);
+            }
         }
 
         if (Instruction == L"ClipBox") {

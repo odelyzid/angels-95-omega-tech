@@ -1,4 +1,5 @@
 #include "OzoneParser.hpp"
+#include <cstdio>
 
 std::vector<OzonePrimitive> OzoneParser::parse_file(const std::string& path) {
     std::ifstream file(path);
@@ -68,6 +69,44 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             while (ls >> s) {
                 try { prim.args.push_back(std::stof(s)); }
                 catch (...) { break; }
+            }
+        } else if (type_name == "playerstart") {
+            prim.type = OzonePrimitiveType::ENTITY_PLAYERSTART;
+            // playerstart x y z yaw
+            std::string s;
+            while (ls >> s) {
+                try { prim.args.push_back(std::stof(s)); }
+                catch (...) { break; }
+            }
+        } else if (type_name == "pickup") {
+            prim.type = OzonePrimitiveType::ENTITY_PICKUP;
+            // pickup type x y z [respawnTime]
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
+        } else if (type_name == "zone") {
+            prim.type = OzonePrimitiveType::ENTITY_ZONE;
+            // zone zonetype minX minY minZ maxX maxY maxZ [intensity]
+            if (ls >> prim.entitySubType) {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
+        } else if (type_name == "npc") {
+            prim.type = OzonePrimitiveType::ENTITY_NPC;
+            // npc npctype x y z
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
             }
         }
 

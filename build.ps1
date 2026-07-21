@@ -1,13 +1,20 @@
 # Angels95 Windows Build Script (PowerShell)
+# For MSYS2/MINGW64 or similar MinGW-w64 environments.
+# For native w64devkit builds, use build-native-win.ps1 instead.
 # Requires: MinGW-w64 (g++), CMake, Git
 # Run from the repo root.
+
+param(
+    [switch]$SkipData,
+    [switch]$SkipClean
+)
 
 $RAYLIB_VERSION = "5.5"
 $RAYLIB_DIR = "$env:USERPROFILE\raylib-$RAYLIB_VERSION"
 $OUT_DIR       = "$PSScriptRoot\System"
 
 function Write-Step { Write-Host "==> $args" -ForegroundColor Cyan }
-function Write-Error { Write-Host "ERROR: $args" -ForegroundColor Red; exit 1 }
+function Fail { Write-Host "ERROR: $args" -ForegroundColor Red; exit 1 }
 
 # --- Prerequisites ---
 Write-Step "Checking prerequisites..."
@@ -17,16 +24,13 @@ $haveCmake = Get-Command cmake -ErrorAction SilentlyContinue
 $haveGit = Get-Command git -ErrorAction SilentlyContinue
 
 if (-not $haveGpp) {
-    Write-Error "g++ not found in PATH. Install MinGW-w64 (https://winlibs.com) and add to PATH."
-    exit 1
+    Fail "g++ not found in PATH. Install MinGW-w64 (https://winlibs.com) and add to PATH."
 }
 if (-not $haveCmake) {
-    Write-Error "cmake not found. Install from https://cmake.org/download/"
-    exit 1
+    Fail "cmake not found. Install from https://cmake.org/download/"
 }
 if (-not $haveGit) {
-    Write-Error "git not found. Install from https://git-scm.com/downloads"
-    exit 1
+    Fail "git not found. Install from https://git-scm.com/downloads"
 }
 
 Write-Step "g++: $($haveGpp.Source)"
@@ -45,9 +49,9 @@ if (-not $raylibInstalled) {
     Set-Location raylib-src\build
     cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
              -DCMAKE_INSTALL_PREFIX="$RAYLIB_DIR"
-    if (-not $?) { Write-Error "CMake configuration failed"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Fail "CMake configuration failed" }
     cmake --build . --parallel
-    if (-not $?) { Write-Error "Build failed"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Fail "Build failed" }
     cmake --install .
     Pop-Location
     Remove-Item "$env:TEMP\raylib-src" -Recurse -Force -ErrorAction SilentlyContinue
@@ -67,58 +71,173 @@ if (Test-Path $raylibBin) {
 }
 
 # --- Clean previous build artifacts from root ---
-Write-Step "Cleaning previous build..."
-Push-Location $PSScriptRoot
-& mingw32-make clean 2>&1 | Out-Null
+if (-not $SkipClean) {
+    Write-Step "Cleaning previous build..."
+    Push-Location $PSScriptRoot
+    & mingw32-make clean 2>&1 | Out-Null
+    Pop-Location
+}
 
 # --- 1. Build OTENGINE (game client) ---
 Write-Step "Building Angels95 (OTENGINE)..."
+Push-Location $PSScriptRoot
 $env:Path += ";$RAYLIB_DIR\lib"
 & mingw32-make -j $env:NUMBER_OF_PROCESSORS OTENGINE
-if (-not $?) { Write-Error "Game build failed" }
+if ($LASTEXITCODE -ne 0) { Fail "Game build failed" }
 
 # --- 2. Build oz_server (dedicated server) ---
 Write-Step "Building oz_server..."
 & mingw32-make -j $env:NUMBER_OF_PROCESSORS oz_server
-if (-not $?) { Write-Error "Server build failed" }
+if ($LASTEXITCODE -ne 0) { Fail "Server build failed" }
 
-# --- 3. Build oz_editor (level editor) ---
+# --- 3. Build OzPack (asset packer) ---
+Write-Step "Building OzPack..."
+& mingw32-make ozpack
+if ($LASTEXITCODE -ne 0) { Fail "OzPack build failed" }
+Pop-Location
+
+# --- 4. Build oz_editor (level editor) ---
 Write-Step "Building oz_editor..."
 Push-Location "$PSScriptRoot\OTEditor"
-$EDITOR_FLAGS = "-O3 -g --std=c++20 -Wno-narrowing"
-$EDITOR_LIBS  = "-lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm"
+$EDITOR_FLAGS = @('-O3', '-g', '--std=c++20', '-Wno-narrowing')
+$EDITOR_INC   = @('-I', '../Source', '-I', 'Source')
+$EDITOR_LIBS  = @('-lraylib', '-lopengl32', '-lgdi32', '-lwinmm', '-lcomctl32', '-lcomdlg32', '-lws2_32', '-lm')
 
-g++ -fpermissive $EDITOR_FLAGS -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o
-if (-not $?) { Write-Error "raygui compilation failed" }
+# Compile raygui
+g++ -fpermissive @EDITOR_FLAGS @EDITOR_INC -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "raygui compilation failed" }
 
-g++ $EDITOR_FLAGS -c Source/Main.cpp -o Main.o
-if (-not $?) { Write-Error "Editor Main.cpp compilation failed" }
+# Compile editor sources
+g++ @EDITOR_FLAGS @EDITOR_INC -c Source/Main.cpp -o Main.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "Editor Main.cpp compilation failed" }
 
+g++ @EDITOR_FLAGS @EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "Editor Win32Dialogs.cpp compilation failed" }
+
+# Compile engine sources needed by editor
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_pawn_system.cpp -o oz_pawn_system.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "oz_pawn_system.cpp compilation failed" }
+
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_assetmapper.cpp -o oz_assetmapper.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "oz_assetmapper.cpp compilation failed" }
+
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/oz_ozone_loader.cpp -o oz_ozone_loader.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "oz_ozone_loader.cpp compilation failed" }
+
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OzoneParser.cpp compilation failed" }
+
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/WDLParser.cpp -o WDLParser.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "WDLParser.cpp compilation failed" }
+
+# Compile OTCustom stub
 $stub = 'int main_custom() { return 0; }'
-$stub | g++ $EDITOR_FLAGS -x c++ -c - -o OTCustom_stub.o
-if (-not $?) { Write-Error "OTCustom stub compilation failed" }
+$stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
-g++ Main.o raygui.o OTCustom_stub.o -o oz_editor.exe $EDITOR_FLAGS $EDITOR_LIBS
-if (-not $?) { Write-Error "oz_editor link failed" }
+# Link editor
+g++ Main.o Win32Dialogs.o oz_pawn_system.o oz_assetmapper.o oz_ozone_loader.o OzoneParser.o WDLParser.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "oz_editor link failed" }
 
-Remove-Item Main.o, raygui.o, OTCustom_stub.o -Force
+# Cleanup editor objects
+Remove-Item Main.o, Win32Dialogs.o, oz_pawn_system.o, oz_assetmapper.o, oz_ozone_loader.o, OzoneParser.o, WDLParser.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
+Write-Step "oz_editor.exe built."
 
-# --- Gather outputs into System/ ---
-Write-Step "Moving binaries to $OUT_DIR..."
+# --- 5. Assemble System/ directory ---
+Write-Step "Assembling System/ release..."
 if (-not (Test-Path $OUT_DIR)) { New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null }
-Move-Item -Force "$PSScriptRoot\Angels95.exe"   "$OUT_DIR\Angels95.exe"
-Move-Item -Force "$PSScriptRoot\oz_server.exe"  "$OUT_DIR\oz_server.exe"
+if (-not (Test-Path "$OUT_DIR\Data")) { New-Item -ItemType Directory -Force -Path "$OUT_DIR\Data" | Out-Null }
+
+# Move EXEs
+Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe"
+Move-Item -Force "$PSScriptRoot\oz_server.exe" "$OUT_DIR\oz_server.exe"
+Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe"
 Move-Item -Force "$PSScriptRoot\OTEditor\oz_editor.exe" "$OUT_DIR\oz_editor.exe"
 
-# --- Cleanup intermediate objects ---
+# Copy/create INI files
+if (-not (Test-Path "$OUT_DIR\Angels95.ini")) {
+    @"
+[Video]
+Width=1280
+Height=720
+Fullscreen=0
+VSync=1
+
+[Audio]
+MasterVolume=1.0
+MusicVolume=0.7
+SFXVolume=1.0
+
+[Game]
+ServerIP=127.0.0.1
+ServerPort=27015
+"@ | Set-Content "$OUT_DIR\Angels95.ini" -Encoding UTF8
+}
+
+if (-not (Test-Path "$OUT_DIR\oz_editor.ini")) {
+    @"
+[Editor]
+GridSize=1.0
+SnapToGrid=1
+ShowGrid=1
+
+[Video]
+Width=1600
+Height=900
+"@ | Set-Content "$OUT_DIR\oz_editor.ini" -Encoding UTF8
+}
+
+# Create run scripts
+@"
+@echo off
+cd /d "%~dp0.."
+start "" "%~dp0Angels95.exe"
+"@ | Set-Content "$OUT_DIR\run.bat" -Encoding ASCII
+
+@"
+Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
+& "$PSScriptRoot\Angels95.exe"
+"@ | Set-Content "$OUT_DIR\run.ps1" -Encoding UTF8
+
+# --- 6. Package assets (optional) ---
+if (-not $SkipData) {
+    Write-Step "Packaging assets..."
+    Push-Location $PSScriptRoot
+    if (Test-Path ".\build-data.ps1") {
+        & .\build-data.ps1 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: Asset packaging failed" -ForegroundColor Yellow }
+    } else {
+        Write-Host "WARNING: build-data.ps1 not found, skipping asset packaging" -ForegroundColor Yellow
+    }
+    Pop-Location
+} else {
+    Write-Step "Skipping asset packaging (-SkipData)"
+}
+
+# --- 7. Cleanup intermediate objects ---
 Remove-Item "$PSScriptRoot\*.o" -Force -ErrorAction SilentlyContinue
+Remove-Item "$PSScriptRoot\OTEditor\*.o" -Force -ErrorAction SilentlyContinue
 
-Pop-Location
+# --- 8. Verify outputs ---
+Write-Step "Verifying outputs..."
+$missing = @()
+foreach ($exe in @("Angels95.exe", "oz_server.exe", "oz_editor.exe", "OzPack.exe")) {
+    if (-not (Test-Path "$OUT_DIR\$exe")) { $missing += $exe }
+}
+if ($missing.Count -gt 0) {
+    Fail "Missing EXEs: $($missing -join ', ')"
+}
 
-# --- Done ---
+$dataFiles = Get-ChildItem "$OUT_DIR\Data" -Filter "*.oz*" -ErrorAction SilentlyContinue
+if ($dataFiles.Count -eq 0 -and -not $SkipData) {
+    Write-Host "WARNING: No .oz* packages found in System/Data" -ForegroundColor Yellow
+}
+
 Write-Step "Build complete."
-Write-Host "Binaries in $OUT_DIR" -ForegroundColor Green
+Write-Host "System/ release in $OUT_DIR" -ForegroundColor Green
 Write-Host "  Angels95.exe  - Game client" -ForegroundColor Green
 Write-Host "  oz_server.exe - Dedicated server" -ForegroundColor Green
 Write-Host "  oz_editor.exe - Level editor" -ForegroundColor Green
+Write-Host "  OzPack.exe    - Asset packer" -ForegroundColor Green
+Write-Host "  Data/*.oz*    - Packaged assets ($($dataFiles.Count) files)" -ForegroundColor Green

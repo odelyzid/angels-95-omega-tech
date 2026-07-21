@@ -8,12 +8,8 @@
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif
-    #ifndef NOGDI
-        #define NOGDI
-    #endif
-    #ifndef NOMB
-        #define NOMB
-    #endif
+    // NOTE: NOGDI intentionally NOT defined — editor needs GDI (CreateDIBSection)
+    // for model preview render-to-texture via raylib → HBITMAP.
 
     // Rename conflicting Windows function declarations so they don't clash with raylib.
     // raylib declares its own CloseWindow(), ShowCursor(), LoadImage(), DrawTextEx(), etc.
@@ -21,20 +17,21 @@
     // #undef so the rest of the code can use the original names for raylib's versions.
     #define CloseWindow  __WIN32_CloseWindow
     #define ShowCursor   __WIN32_ShowCursor
+    #define Rectangle    GDI_Rectangle
+    #define DrawText     GDI_DrawText
 
     #include <windows.h>
 
     #undef CloseWindow
     #undef ShowCursor
+    #undef Rectangle
+    #undef DrawText
 
     #ifdef LoadImage
         #undef LoadImage
     #endif
     #ifdef DrawTextEx
         #undef DrawTextEx
-    #endif
-    #ifdef DrawText
-        #undef DrawText
     #endif
     #ifdef byte
         #undef byte

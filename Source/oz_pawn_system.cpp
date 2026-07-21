@@ -1,4 +1,6 @@
 #include "oz_pawn_system.h"
+#include "oz_assetmapper.h"
+#include "EngineBillboard.hpp"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -84,6 +86,7 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
     p.stateTimer = 0.0f;
     p.sprite = {0};
     p.scream = {0};
+    p.defName = defName;
 
     return (int)p.id;
 }
@@ -125,138 +128,277 @@ Pawn* PawnSystem::Get(int id) {
 }
 
 // ---------------------------------------------------------------------------
-// FSM transitions
+// IsPlayerAttacked — check if any pawn is close enough to damage the player
 // ---------------------------------------------------------------------------
-void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
-    if (p.state == newState) return;
-    p.prevState = p.state;
-    p.state = newState;
-    p.stateTimer = 0.0f;
-}
-
-// ---------------------------------------------------------------------------
-// Patrol state: wander in a circle around spawn
-// ---------------------------------------------------------------------------
-void PawnSystem::TickPatrol(Pawn& p, float dt) {
-    PatrolState& ps = PState(p);
-    ps.angle += dt * 0.8f;
-    if (ps.angle > 6.2832f) ps.angle -= 6.2832f;
-
-    float radius = 3.0f;
-    float tx = p.spawnPosition.x + cosf(ps.angle) * radius;
-    float tz = p.spawnPosition.z + sinf(ps.angle) * radius;
-
-    Vector3 dir = {tx - p.position.x, 0, tz - p.position.z};
-    float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
-    if (dist > 0.1f) {
-        dir.x /= dist; dir.z /= dist;
-        p.position.x += dir.x * p.speed * dt;
-        p.position.z += dir.z * p.speed * dt;
-        p.yaw = atan2f(dir.x, dir.z);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Chase state: move toward player
-// ---------------------------------------------------------------------------
-void PawnSystem::TickChase(Pawn& p, const Vector3& playerPos, float dt) {
-    Vector3 dir = {playerPos.x - p.position.x, 0, playerPos.z - p.position.z};
-    float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
-    if (dist > 0.1f) {
-        dir.x /= dist; dir.z /= dist;
-        p.position.x += dir.x * p.speed * 1.5f * dt;
-        p.position.z += dir.z * p.speed * 1.5f * dt;
-        p.yaw = atan2f(dir.x, dir.z);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Return state: go back to spawn
-// ---------------------------------------------------------------------------
-void PawnSystem::TickReturn(Pawn& p, float dt) {
-    Vector3 dir = {p.spawnPosition.x - p.position.x, 0, p.spawnPosition.z - p.position.z};
-    float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
-    if (dist > 0.5f) {
-        dir.x /= dist; dir.z /= dist;
-        p.position.x += dir.x * p.speed * dt;
-        p.position.z += dir.z * p.speed * dt;
-        p.yaw = atan2f(dir.x, dir.z);
-    } else {
-        // Arrived — go back to patrol
-        TransitionState(p, PawnState::PATROL);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Per-pawn patrol state storage (keyed by Pawn pointer)
-// ---------------------------------------------------------------------------
-PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {
-    static PatrolState defaultPs;
-    // Use a simple map keyed by pawn id
-    static std::unordered_map<uint32_t, PatrolState> psMap;
-    return psMap[p.id];
-}
-
-// ---------------------------------------------------------------------------
-// Update — tick all active pawn FSM
-// ---------------------------------------------------------------------------
-void PawnSystem::Update(Vector3 playerPos, float dt) {
+bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
+    outDamage = 0.0f;
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
 
         float dx = playerPos.x - p.position.x;
         float dz = playerPos.z - p.position.z;
-        float distToPlayer = sqrtf(dx * dx + dz * dz);
+        float dist = sqrtf(dx * dx + dz * dz);
 
+        if (dist < p.attackRange) {
+            outDamage = p.damage;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Player Start Nodes
+// ---------------------------------------------------------------------------
+void PawnSystem::AddPlayerStart(const PlayerStartNode& node) {
+    PlayerStartNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_playerStarts.push_back(n);
+}
+
+void PawnSystem::ClearPlayerStarts() {
+    m_playerStarts.clear();
+}
+
+PlayerStartNode* PawnSystem::GetFirstPlayerStart() {
+    if (!m_playerStarts.empty()) return &m_playerStarts[0];
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Pickup Nodes
+// ---------------------------------------------------------------------------
+int PawnSystem::AddPickup(const PickupNode& node) {
+    PickupNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_pickups.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemovePickup(int id) {
+    auto it = std::remove_if(m_pickups.begin(), m_pickups.end(),
+        [id](const PickupNode& n) { return n.id == (uint32_t)id; });
+    m_pickups.erase(it, m_pickups.end());
+}
+
+void PawnSystem::ClearPickups() {
+    m_pickups.clear();
+}
+
+PickupNode* PawnSystem::GetPickup(int id) {
+    for (auto& n : m_pickups) {
+        if (n.id == (uint32_t)id) return &n;
+    }
+    return nullptr;
+}
+
+void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBounds) {
+    for (auto& n : m_pickups) {
+        if (!n.active) {
+            // Handle respawn timer
+            if (n.respawnTimer > 0.0f) {
+                n.respawnTimer -= dt;
+                if (n.respawnTimer <= 0.0f) {
+                    n.active = true;
+                }
+            }
+            continue;
+        }
+
+        // Check AABB collision with player
+        BoundingBox pickupBox = {
+            {n.position.x - 0.5f, n.position.y - 0.5f, n.position.z - 0.5f},
+            {n.position.x + 0.5f, n.position.y + 0.5f, n.position.z + 0.5f}
+        };
+
+        if (CheckCollisionBoxes(pickupBox, playerBounds)) {
+            // Pickup collected - trigger event, deactivate
+            n.active = false;
+            n.respawnTimer = n.respawnTime;
+
+            // Here you'd trigger sound, add to inventory, etc.
+            // For now just deactivate
+            fprintf(stderr, "Pickup collected: %s\n", n.typeName.c_str());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zone Volume Nodes
+// ---------------------------------------------------------------------------
+int PawnSystem::AddZone(const ZoneVolumeNode& node) {
+    ZoneVolumeNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_zones.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveZone(int id) {
+    auto it = std::remove_if(m_zones.begin(), m_zones.end(),
+        [id](const ZoneVolumeNode& n) { return n.id == (uint32_t)id; });
+    m_zones.erase(it, m_zones.end());
+}
+
+void PawnSystem::ClearZones() {
+    m_zones.clear();
+}
+
+ZoneVolumeNode* PawnSystem::GetZone(int id) {
+    for (auto& n : m_zones) {
+        if (n.id == (uint32_t)id) return &n;
+    }
+    return nullptr;
+}
+
+ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) {
+    // Check if point is inside any zone
+    for (auto& n : m_zones) {
+        if (pos.x >= n.bounds.min.x && pos.x <= n.bounds.max.x &&
+            pos.y >= n.bounds.min.y && pos.y <= n.bounds.max.y &&
+            pos.z >= n.bounds.min.z && pos.z <= n.bounds.max.z) {
+            return &n;
+        }
+    }
+    // Also check box collision
+    for (auto& n : m_zones) {
+        if (CheckCollisionBoxes(bounds, n.bounds)) {
+            return &n;
+        }
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Update - tick AI for all pawns
+// ---------------------------------------------------------------------------
+void PawnSystem::Update(Vector3 playerPos, float dt) {
+    for (auto& p : m_pawns) {
+        if (!p.active) continue;
+
+        float dx = playerPos.x - p.position.x;
+        float dz = playerPos.z - p.position.z;
+        float distToPlayer = sqrtf(dx * dx + dz * dz);
         p.stateTimer += dt;
 
         switch (p.state) {
             case PawnState::IDLE:
-                if (distToPlayer < p.aggroRange) {
-                    TransitionState(p, PawnState::CHASE);
-                } else if (p.stateTimer > 2.0f) {
-                    TransitionState(p, PawnState::PATROL);
-                }
+                if (distToPlayer < p.aggroRange) TransitionState(p, PawnState::CHASE);
+                else if (p.stateTimer > 2.0f) TransitionState(p, PawnState::PATROL);
                 break;
-
             case PawnState::PATROL:
                 TickPatrol(p, dt);
-                if (distToPlayer < p.aggroRange) {
-                    TransitionState(p, PawnState::CHASE);
-                }
+                if (distToPlayer < p.aggroRange) TransitionState(p, PawnState::CHASE);
                 break;
-
             case PawnState::CHASE:
                 TickChase(p, playerPos, dt);
-                if (distToPlayer > p.aggroRange * 1.5f) {
-                    TransitionState(p, PawnState::RETURN);
-                }
                 break;
-
             case PawnState::RETURN:
                 TickReturn(p, dt);
-                if (distToPlayer < p.aggroRange) {
-                    TransitionState(p, PawnState::CHASE);
-                }
                 break;
-
-            default:
+            case PawnState::DEAD:
                 break;
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// DrawAll — render billboards for every active pawn
+// DrawAll - draw pawn billboards
 // ---------------------------------------------------------------------------
 void PawnSystem::DrawAll(Camera3D& camera) {
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
-        if (p.sprite.id > 0) {
-            DrawBillboard(camera, p.sprite, p.position, 10.0f, WHITE);
-        } else {
-            // Fallback cube
-            DrawCube(p.position, 1.0f, 2.0f, 1.0f, RED);
-        }
+
+        EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f);
     }
+}
+
+// ---------------------------------------------------------------------------
+// DrawEntities - draw player starts, pickups, zones as billboards
+// ---------------------------------------------------------------------------
+void PawnSystem::DrawEntities(Camera3D& camera) {
+    // Player start billboards
+    for (auto& n : m_playerStarts) {
+        EngineBillboard::Draw(camera, "PlayerStart",
+            {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f);
+    }
+
+    // Pickup billboards with bobbing
+    for (auto& n : m_pickups) {
+        if (!n.active) continue;
+        EngineBillboard::DrawPickup(camera, n.typeName.c_str(), n.position, 0.8f);
+    }
+
+    // Zone billboards at center of bounding box
+    for (auto& n : m_zones) {
+        Vector3 center = {
+            (n.bounds.min.x + n.bounds.max.x) * 0.5f,
+            (n.bounds.min.y + n.bounds.max.y) * 0.5f,
+            (n.bounds.min.z + n.bounds.max.z) * 0.5f
+        };
+        const char* icon = "ZoneInfo";
+        if (n.zoneType == ZoneType::ZONE_WATER) icon = "ZoneWater";
+        else if (n.zoneType == ZoneType::ZONE_LADDER) icon = "ZoneLadder";
+        else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
+        else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
+        EngineBillboard::Draw(camera, icon, center, 1.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FSM tick helpers
+// ---------------------------------------------------------------------------
+void PawnSystem::TickPatrol(Pawn& p, float dt) {
+    p.patrolTimer += dt;
+    if (p.patrolTimer > 2.0f) {
+        // Random direction change
+        float angle = PState(p).angle;
+        p.velocity.x = cosf(angle) * p.speed * 0.5f;
+        p.velocity.z = sinf(angle) * p.speed * 0.5f;
+        PState(p).angle += dt * 1.5f;
+        p.patrolTimer = 0.0f;
+    }
+
+    p.position.x += p.velocity.x * dt;
+    p.position.z += p.velocity.z * dt;
+
+}
+
+void PawnSystem::TickChase(Pawn& p, const Vector3& playerPos, float dt) {
+    Vector3 dir = {playerPos.x - p.position.x, 0, playerPos.z - p.position.z};
+    float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
+    if (dist > 0.1f) {
+        dir.x /= dist;
+        dir.z /= dist;
+        p.position.x += dir.x * p.speed * dt;
+        p.position.z += dir.z * p.speed * dt;
+    }
+
+    // Return to patrol if player out of aggro range
+    if (dist > p.aggroRange * 1.5f) {
+        TransitionState(p, PawnState::RETURN);
+    }
+}
+
+void PawnSystem::TickReturn(Pawn& p, float dt) {
+    Vector3 dir = {p.spawnPosition.x - p.position.x, 0, p.spawnPosition.z - p.position.z};
+    float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
+    if (dist < 1.0f) {
+        TransitionState(p, PawnState::PATROL);
+    } else if (dist > 0.1f) {
+        dir.x /= dist;
+        dir.z /= dist;
+        p.position.x += dir.x * p.speed * dt;
+        p.position.z += dir.z * p.speed * dt;
+    }
+}
+
+void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
+    p.prevState = p.state;
+    p.state = newState;
+    p.stateTimer = 0.0f;
+}
+
+PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {
+    static std::unordered_map<uint32_t, PatrolState> states;
+    return states[p.id];
 }

@@ -28,6 +28,14 @@ enum class PawnState : uint8_t {
     DEAD
 };
 
+// Zone volume types
+enum class ZoneType : uint8_t {
+    ZONE_WATER = 0,
+    ZONE_LADDER = 1,
+    ZONE_SKY = 2,
+    ZONE_REVERB = 3
+};
+
 // Template definition shared between spawn calls; stored in an internal
 // registry so Spawn() can be called by name.
 struct PawnDef {
@@ -63,6 +71,32 @@ struct Pawn {
 
     Texture2D sprite;       // billboard frame (loaded externally)
     Sound scream;           // aggro sound (loaded externally)
+    std::string defName;  // name of the pawn definition (e.g., "Walker", "Skaarj")
+};
+
+// Player start node - position and orientation for player spawn
+struct PlayerStartNode {
+    uint32_t id = 0;
+    Vector3 position{0, 0, 0};
+    float yaw = 0.0f;
+};
+
+// Pickup node - collectible items in the world
+struct PickupNode {
+    uint32_t id = 0;
+    Vector3 position{0, 0, 0};
+    std::string typeName;   // e.g., "HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"
+    bool active = true;
+    float respawnTimer = 0.0f;
+    float respawnTime = 30.0f;  // default respawn time
+};
+
+// Zone volume node - AABB volumes with behavior flags
+struct ZoneVolumeNode {
+    uint32_t id = 0;
+    BoundingBox bounds;
+    ZoneType zoneType = ZoneType::ZONE_WATER;
+    float intensity = 1.0f;  // e.g., water density, ladder speed
 };
 
 class PawnSystem {
@@ -88,6 +122,39 @@ public:
     // Access individual pawns
     Pawn* Get(int id);
     int Count() const { return (int)m_pawns.size(); }
+    const std::vector<Pawn>& GetPawns() const { return m_pawns; }
+
+    // Check if any pawn is attacking the player at given position
+    bool IsPlayerAttacked(Vector3 playerPos, float& outDamage);
+
+    // --- Entity node management ---
+
+    // Player start nodes
+    void AddPlayerStart(const PlayerStartNode& node);
+    void ClearPlayerStarts();
+    const std::vector<PlayerStartNode>& GetPlayerStarts() const { return m_playerStarts; }
+    PlayerStartNode* GetFirstPlayerStart();
+
+    // Pickup nodes
+    int AddPickup(const PickupNode& node);
+    void RemovePickup(int id);
+    void ClearPickups();
+    std::vector<PickupNode>& GetPickups() { return m_pickups; }
+    const std::vector<PickupNode>& GetPickups() const { return m_pickups; }
+    PickupNode* GetPickup(int id);
+    void UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBounds);
+
+    // Zone volume nodes
+    int AddZone(const ZoneVolumeNode& node);
+    void RemoveZone(int id);
+    void ClearZones();
+    std::vector<ZoneVolumeNode>& GetZones() { return m_zones; }
+    const std::vector<ZoneVolumeNode>& GetZones() const { return m_zones; }
+    ZoneVolumeNode* GetZone(int id);
+    ZoneVolumeNode* CheckZoneCollision(Vector3 pos, BoundingBox bounds);
+
+    // Draw entities (billboards for player starts, pickups, zones)
+    void DrawEntities(Camera3D& camera);
 
     // Singleton
     static PawnSystem& Instance();
@@ -97,6 +164,12 @@ private:
     std::vector<int> m_freeIds;
     std::vector<PawnDef> m_defs;
     uint32_t m_nextId = 1;
+
+    // Entity node storage
+    std::vector<PlayerStartNode> m_playerStarts;
+    std::vector<PickupNode> m_pickups;
+    std::vector<ZoneVolumeNode> m_zones;
+    uint32_t m_nextEntityId = 1;
 
     PawnDef* FindDef(const char* name);
     int AllocSlot();

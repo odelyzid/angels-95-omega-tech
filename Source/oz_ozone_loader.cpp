@@ -7,6 +7,60 @@
 #include <cmath>
 #include <algorithm>
 
+static ZoneType ParseZoneType(std::string name) {
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    if (name == "ladder") return ZoneType::ZONE_LADDER;
+    if (name == "sky") return ZoneType::ZONE_SKY;
+    if (name == "reverb") return ZoneType::ZONE_REVERB;
+    return ZoneType::ZONE_WATER;
+}
+
+static bool LoadOzoneEntity(const OzonePrimitive& prim) {
+    auto& pawns = PawnSystem::Instance();
+    switch (prim.type) {
+        case OzonePrimitiveType::ENTITY_PLAYERSTART:
+            if (prim.args.size() >= 3) {
+                pawns.AddPlayerStart({0, {prim.args[0], prim.args[2], prim.args[1]},
+                                      prim.args.size() >= 4 ? prim.args[3] : 0.0f});
+            }
+            return true;
+        case OzonePrimitiveType::ENTITY_PICKUP:
+            if (prim.args.size() >= 3) {
+                PickupNode node;
+                node.position = {prim.args[0], prim.args[2], prim.args[1]};
+                node.typeName = prim.entityType;
+                if (prim.args.size() >= 4) node.respawnTime = prim.args[3];
+                pawns.AddPickup(node);
+            }
+            return true;
+        case OzonePrimitiveType::ENTITY_ZONE:
+            if (prim.args.size() >= 6) {
+                ZoneVolumeNode node;
+                node.bounds.min = {
+                    std::min(prim.args[0], prim.args[3]),
+                    std::min(prim.args[2], prim.args[5]),
+                    std::min(prim.args[1], prim.args[4])
+                };
+                node.bounds.max = {
+                    std::max(prim.args[0], prim.args[3]),
+                    std::max(prim.args[2], prim.args[5]),
+                    std::max(prim.args[1], prim.args[4])
+                };
+                node.zoneType = ParseZoneType(prim.entitySubType);
+                if (prim.args.size() >= 7) node.intensity = prim.args[6];
+                pawns.AddZone(node);
+            }
+            return true;
+        case OzonePrimitiveType::ENTITY_NPC:
+            if (prim.args.size() >= 3)
+                pawns.Spawn({prim.args[0], prim.args[2], prim.args[1]}, prim.entityType.c_str());
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
@@ -14,6 +68,8 @@ OzoneLoader& OzoneLoader::Instance() {
     static OzoneLoader instance;
     return instance;
 }
+
+Shader OzoneLoader::s_litFogShader = {0};
 
 // ---------------------------------------------------------------------------
 // World texture loading (from worlddir/oztex/tileset/)
@@ -50,6 +106,8 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
         model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
     else
         model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = fallback;
+    if (OzoneLoader::GetLitFogShader().id > 0)
+        model.materials[0].shader = OzoneLoader::GetLitFogShader();
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +136,8 @@ Model OzoneLoader::BuildSphere(float r, int segments) {
     Mesh mesh = GenMeshSphere(r, segments, segments);
     Model model = LoadModelFromMesh(mesh);
     model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = PURPLE;
+    if (GetLitFogShader().id > 0)
+        model.materials[0].shader = GetLitFogShader();
     return model;
 }
 
@@ -130,6 +190,8 @@ Model OzoneLoader::BuildPyramid(float w, float d, float h) {
     UploadMesh(&mesh, false);
     Model model = LoadModelFromMesh(mesh);
     model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = GOLD;
+    if (GetLitFogShader().id > 0)
+        model.materials[0].shader = GetLitFogShader();
     return model;
 }
 
@@ -185,6 +247,13 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 // LoadFile — also loads world textures from the .ozone file's directory
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadFile(const char* path) {
+    Unload();
+    auto& pawns = PawnSystem::Instance();
+    pawns.DespawnAll();
+    pawns.ClearPlayerStarts();
+    pawns.ClearPickups();
+    pawns.ClearZones();
+
     // Extract world directory from the .ozone path and load textures
     std::string p(path);
     size_t slash = p.find_last_of("/\\");
@@ -197,6 +266,8 @@ bool OzoneLoader::LoadFile(const char* path) {
     if (primitives.empty()) return false;
 
     for (auto& prim : primitives) {
+        if (LoadOzoneEntity(prim)) continue;
+
         OzoneRenderable r;
         r.typeId = (int)prim.type;
 
@@ -215,17 +286,26 @@ bool OzoneLoader::LoadFile(const char* path) {
     }
 
     fprintf(stderr, "OzoneLoader: loaded %zu primitives from %s\n", primitives.size(), path);
-    return !m_renderables.empty();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
 // LoadString
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadString(const char* data) {
+    Unload();
+    auto& pawns = PawnSystem::Instance();
+    pawns.DespawnAll();
+    pawns.ClearPlayerStarts();
+    pawns.ClearPickups();
+    pawns.ClearZones();
+
     auto primitives = OzoneParser::parse_string(data);
     if (primitives.empty()) return false;
 
     for (auto& prim : primitives) {
+        if (LoadOzoneEntity(prim)) continue;
+
         OzoneRenderable r;
         r.typeId = (int)prim.type;
         if (prim.args.size() >= 3)
@@ -235,7 +315,7 @@ bool OzoneLoader::LoadString(const char* data) {
         r.loaded = (r.model.meshCount > 0);
         m_renderables.push_back(r);
     }
-    return !m_renderables.empty();
+    return true;
 }
 
 // ---------------------------------------------------------------------------

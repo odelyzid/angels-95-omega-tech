@@ -141,6 +141,33 @@ public:
 
     ~OzPackageReader() { Close(); }
 
+    OzPackageReader(const OzPackageReader&) = delete;
+    OzPackageReader& operator=(const OzPackageReader&) = delete;
+
+    OzPackageReader(OzPackageReader&& other) noexcept
+        : m_data(other.m_data), m_size(other.m_size), m_owned(other.m_owned),
+          m_magic(other.m_magic), m_version(other.m_version), m_entries(std::move(other.m_entries)) {
+        other.m_data = nullptr;
+        other.m_size = 0;
+        other.m_owned = false;
+    }
+
+    OzPackageReader& operator=(OzPackageReader&& other) noexcept {
+        if (this != &other) {
+            Close();
+            m_data = other.m_data;
+            m_size = other.m_size;
+            m_owned = other.m_owned;
+            m_magic = other.m_magic;
+            m_version = other.m_version;
+            m_entries = std::move(other.m_entries);
+            other.m_data = nullptr;
+            other.m_size = 0;
+            other.m_owned = false;
+        }
+        return *this;
+    }
+
     bool Open(const char* path) {
         FILE* f = fopen(path, "rb");
         if (!f) return false;
@@ -186,6 +213,18 @@ public:
     const OzPackageEntry* Find(const char* name) const {
         for (auto& e : m_entries) {
             if (strcmp(e.filename, name) == 0)
+                return &e;
+        }
+        return nullptr;
+    }
+
+    // Find entry by basename only (ignores path components)
+    const OzPackageEntry* FindBasename(const char* name) const {
+        for (auto& e : m_entries) {
+            const char* base = strrchr(e.filename, '/');
+            if (!base) base = strrchr(e.filename, '\\');
+            if (base) base++; else base = e.filename;
+            if (strcmp(base, name) == 0)
                 return &e;
         }
         return nullptr;

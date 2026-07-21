@@ -1,74 +1,102 @@
 ﻿# OTEditor
 
-OTEditor is a simple, user-friendly level editor designed for the OmegaTech Game Engine. It is built using C++ and utilizes the raylib and raygui libraries for graphics and user interface elements. With OTEditor, you can easily create and modify game levels using WDL files.
+OTEditor is a Windows level editor for the OmegaTech / Angels95 game engine. It combines Win32 native panels with a raylib 3D viewport for creating and editing game worlds.
 
 ## Features
 
-- **Level Editing**: OTEditor provides a straightforward interface for creating and editing game levels. You can place and manipulate various entities, objects, and elements within the level.
+### Win32 Panels
+- **Model Browser** — Browse and place 3D models from `GameData/`
+- **Environment Settings** — Fog, ambient light, skybox configuration
+- **Pickups** — Place health, mana, keys, coins, powerups
+- **Nodes** — Player spawns, NPC spawns, point lights
+- **Pawn Manager** — Spawn and configure NPCs (Walker, Skaarj, Brute, Floater)
+- **Texture Manager** — Manage world textures
+- **Sound Manager** — Configure world sounds
+- **Script Manager** — Edit WDL scripts
 
-- **WDL File Support**: OTEditor allows you to open and modify WDL (OmegaTech Game Engine Level) files. These files store all the necessary information about the level, including its structure, objects, and properties.
+### 3D Viewport
+- Real-time raylib rendering
+- Heightmap visualization
+- Model preview with texture mapping
+- Grid snapping and coordinate display
 
-- **Visual Interface**: The editor features a visually appealing and intuitive user interface. It provides easy-to-use tools, menus, and panels to assist you in designing and modifying game levels efficiently.
+### World Formats
+- **WDL** — World Description Language (colon-delimited plain text)
+- **OZONE** — Editor binary format with embedded textures
 
 ## Prerequisites
 
-Before using OTEditor, make sure you have the following dependencies installed:
+- **Windows 10/11** (Win32 API required for panels)
+- **raylib 5.5** (statically linked via w64devkit or MSYS2)
+- **C++20 compiler** (GCC 15.2.0 via w64devkit recommended)
 
-- C++ compiler compatible with your operating system
-- raylib library (version 4.5)
-## Getting Started
+## Building
 
-To use OTEditor, follow these steps:
+### Native Windows (w64devkit)
 
-1. Clone or download the OTEditor repository to your local machine.
+```powershell
+# From repo root
+.\build-native-win.ps1
+```
 
-2. Ensure that the necessary dependencies (C++ compiler, raylib, and raygui) are installed on your system. Make sure you're on Linux.
+This builds all targets (Angels95, oz_server, oz_editor, OzPack) and assembles the `System/` release.
 
-3. Open a terminal or command prompt and navigate to the OTEditor directory.
+### MSYS2 / MINGW64
 
-4. Compile the source code using the C++ compiler. For example:
+```powershell
+# From repo root
+.\build.ps1
+```
 
-   ```
-   make
-   ```
-
-5. Once the compilation is successful, run the executable:
-
-   ```
-   ./OTE /pathtowdl/World.wdl
-   ```
-
-6. The OTEditor interface should appear on your screen, allowing you to start creating or editing game levels.
+Both scripts produce `System/oz_editor.exe` along with INI files and launch scripts.
 
 ## Usage
 
-OTEditor provides a range of tools and features to assist you in level editing. Here are some of the basic operations you can perform:
+1. Launch the editor:
+   ```
+   System\oz_editor.exe
+   ```
 
-- **Opening a Level**: To open an existing WDL file, Open the file with the OTE Executable
+2. Open a world:
+   - File → Open → Select `GameData/Worlds/<WorldName>/World.wdl`
+   - Or drag-and-drop a `.wdl` file onto the executable
 
-- **Placing Objects**: Use the provided tools or menus to place objects, entities, or elements within the level. There is a Help Menu Provided.
+3. Edit the world:
+   - Use the menu bar to toggle panels
+   - Place models, pickups, nodes via panel buttons
+   - Adjust environment settings (fog, ambient)
+   - Spawn NPCs via Pawn Manager
 
-- **Saving a Level**: To save your modifications, go to the File menu and select "Save." 
+4. Save the world:
+   - File → Save (writes `World.wdl`)
+   - File → Save As OZONE (writes `World.ozone`)
 
+## Configuration
 
+`System/oz_editor.ini`:
+```ini
+[Editor]
+GridSize=1.0
+SnapToGrid=1
+ShowGrid=1
+
+[Video]
+Width=1600
+Height=900
+```
+
+## Architecture
+
+- **Entry point:** `OTEditor/Source/Main.cpp`
+- **Win32 dialogs:** `OTEditor/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` for cross-platform compat
+- **Editor state:** `OTEditor/Source/Editor.hpp` — WDL cache, models, placement modes
+- **Engine integration:** Links `oz_pawn_system.o`, `oz_ozone_loader.o`, `OzoneParser.o`
 
 ## License
 
-OTEditor is released under the [MIT License](https://opensource.org/licenses/MIT). Please review the LICENSE file for more information.
+MIT — see [LICENSE](../LICENSE).
 
 ## Acknowledgments
 
-OTEditor is built upon the raylib and raygui libraries, which are developed by raysan5. We extend our gratitude to raysan5 for their excellent work and support.
-
-For more information on the raylib and raygui libraries, visit:
-
-- [raylib GitHub repository](https://github.com/raysan5/raylib
-
-		  
-
-	 
-
-		  
-
-	 
-
+- [raylib](https://www.raylib.com/) — Ramon Santamaria
+- [raygui](https://github.com/raysan5/raygui) — Immediate-mode GUI

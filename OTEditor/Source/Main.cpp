@@ -1,3 +1,10 @@
+#include "../../Source/WindowsCompat.hpp"
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #include "Editor.hpp"
 #include "raylib.h"
 #include "rlgl.h"
@@ -6,6 +13,10 @@
 #include "../../Source/oz_ozone_loader.h"
 #include "../../Source/oz_pawn_system.h"
 #include "../../Source/PackageAssetLoader.hpp"
+#include "../../Source/Server/WDLParser.hpp"
+#include <algorithm>
+#include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -16,12 +27,24 @@ static PlaceMode g_placeMode = PlaceMode::MODEL;
 
 // INI config
 static IniConfig g_config;
+static fs::path g_documentPath;
+static fs::path g_pendingOpenPath;
+static bool g_pendingNew = false;
+static Sound g_previewSound = {0};
+static bool g_previewSoundLoaded = false;
 
 // --- Top menu bar state ---
 static int g_menuActive = -1;      // which dropdown is open (-1 = none)
 
 struct MenuItem { const char* label; void (*handler)(); };
 struct MenuDef { const char* label; std::vector<MenuItem> items; };
+
+static void FileNew();
+static void FileOpen();
+static void FileSaveAs();
+static void ClearScene();
+static bool LoadWorldDocument(const fs::path& path);
+static bool SaveWorldDocument(const fs::path& path);
 
 static void ToggleSoundMgr()    { ShowSoundManager(!g_editorPanels.showSoundMgr);     g_menuActive = -1; }
 static void ToggleTextureMgr()  { ShowTextureManager(!g_editorPanels.showTextureMgr); g_menuActive = -1; }
@@ -30,6 +53,7 @@ static void ToggleScriptMgr()   { ShowScriptManager(!g_editorPanels.showScriptMg
 static void ToggleModelBrowser(){ ShowModelBrowser(!g_editorPanels.showModelBrowser); g_menuActive = -1; }
 
 static std::vector<MenuDef> g_menus = {
+    {"File",      {{"New", FileNew}, {"Open...", FileOpen}, {"Save As...", FileSaveAs}}},
     {"Models",    {{"Model Browser...", ToggleModelBrowser}}},
     {"Sound",     {{"Sound Manager...", ToggleSoundMgr}}},
     {"Texture",   {{"Texture Manager...", ToggleTextureMgr}}},
@@ -47,23 +71,171 @@ static RenderTexture2D g_previewRT = {0};
 static int g_lastPreviewSel = -1;
 static bool g_previewNeedsUpdate = false;
 
+static void SetWorldDirectory(const fs::path& directory) {
+    std::string path = directory.string();
+    if (!path.empty() && path.back() != '/' && path.back() != '\\') path += fs::path::preferred_separator;
+    std::strncpy(OTEditor.Path, path.c_str(), sizeof(OTEditor.Path) - 1);
+    OTEditor.Path[sizeof(OTEditor.Path) - 1] = '\0';
+}
+
+static void StopSoundPreview() {
+    if (!g_previewSoundLoaded) return;
+    StopSound(g_previewSound);
+    UnloadSound(g_previewSound);
+    g_previewSound = {0};
+    g_previewSoundLoaded = false;
+}
+
+static void ClearScene() {
+    StopSoundPreview();
+    OTEditor.WorldData.clear();
+    OTEditor.OtherData.clear();
+    CacheWDL();
+    OzoneLoader::Instance().Unload();
+    auto& pawns = PawnSystem::Instance();
+    pawns.DespawnAll();
+    pawns.ClearPlayerStarts();
+    pawns.ClearPickups();
+    pawns.ClearZones();
+    OmegaTechEditor.DrawModel = false;
+}
+
+static ZoneType ParseWDLZoneType(std::string name) {
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    if (name == "ladder" || name == "1") return ZoneType::ZONE_LADDER;
+    if (name == "sky" || name == "2") return ZoneType::ZONE_SKY;
+    if (name == "reverb" || name == "3") return ZoneType::ZONE_REVERB;
+    return ZoneType::ZONE_WATER;
+}
+
+static void SyncWDLNodes() {
+    static const char* pickupNames[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
+    auto& pawns = PawnSystem::Instance();
+    pawns.DespawnAll();
+    pawns.ClearPlayerStarts();
+    pawns.ClearPickups();
+    pawns.ClearZones();
+
+    std::string content(OTEditor.WorldData.begin(), OTEditor.WorldData.end());
+    for (const auto& element : WDLParser::parse_string(content)) {
+        if (element.type == WDLElementType::SPAWN && element.args.size() >= 3) {
+            pawns.AddPlayerStart({0, {element.args[0], element.args[1], element.args[2]}, element.yaw});
+        } else if (element.type == WDLElementType::PICKUP && element.args.size() >= 3) {
+            PickupNode node;
+            node.position = {element.args[0], element.args[1], element.args[2]};
+            node.typeName = element.pickupType;
+            try {
+                int type = std::stoi(node.typeName);
+                if (type >= 0 && type < 6) node.typeName = pickupNames[type];
+            } catch (...) {}
+            pawns.AddPickup(node);
+        } else if (element.type == WDLElementType::NPC && element.args.size() >= 3) {
+            pawns.Spawn({element.args[0], element.args[1], element.args[2]}, element.entityType.c_str());
+        } else if (element.type == WDLElementType::ZONE_INFO && element.args.size() >= 6) {
+            ZoneVolumeNode node;
+            node.bounds = {{element.args[0], element.args[1], element.args[2]},
+                           {element.args[3], element.args[4], element.args[5]}};
+            node.zoneType = ParseWDLZoneType(element.zoneType);
+            node.intensity = element.intensity;
+            pawns.AddZone(node);
+        }
+    }
+}
+
+static bool LoadWorldDocument(const fs::path& path) {
+    ClearScene();
+    SetWorldDirectory(path.parent_path());
+    g_documentPath = path;
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    if (extension == ".ozone") return OzoneLoader::Instance().LoadFile(path.string().c_str());
+    if (extension != ".wdl") return false;
+
+    OTEditor.WorldData = LoadFile(path.string().c_str());
+    CacheWDL();
+    SyncWDLNodes();
+    return true;
+}
+
+static void AppendOzoneEntities(std::wofstream& output) {
+    auto& pawns = PawnSystem::Instance();
+    for (const auto& start : pawns.GetPlayerStarts())
+        output << L"Spawn:" << start.position.x << L":" << start.position.y << L":" << start.position.z << L":" << start.yaw << L":\n";
+    for (const auto& pickup : pawns.GetPickups())
+        output << L"Pickup:" << std::wstring(pickup.typeName.begin(), pickup.typeName.end()) << L":"
+               << pickup.position.x << L":" << pickup.position.y << L":" << pickup.position.z << L":\n";
+    for (const auto& pawn : pawns.GetPawns()) {
+        if (!pawn.active || pawn.defName.empty()) continue;
+        output << L"NPC:" << std::wstring(pawn.defName.begin(), pawn.defName.end()) << L":"
+               << pawn.position.x << L":" << pawn.position.y << L":" << pawn.position.z << L":\n";
+    }
+    for (const auto& zone : pawns.GetZones())
+        output << L"ZoneInfo:" << (int)zone.zoneType << L":"
+               << zone.bounds.min.x << L":" << zone.bounds.min.y << L":" << zone.bounds.min.z << L":"
+               << zone.bounds.max.x << L":" << zone.bounds.max.y << L":" << zone.bounds.max.z << L":"
+               << zone.intensity << L":\n";
+}
+
+static bool SaveWorldDocument(const fs::path& path) {
+    if (path.extension() != ".wdl") return false;
+    std::wofstream output(path);
+    if (!output.is_open()) return false;
+    output << OTEditor.WorldData;
+    if (g_documentPath.extension() == ".ozone") AppendOzoneEntities(output);
+    g_documentPath = path;
+    SetWorldDirectory(path.parent_path());
+    return true;
+}
+
+static void FileNew() {
+    g_pendingNew = true;
+    g_menuActive = -1;
+}
+
+static void FileOpen() {
+    std::string path;
+    if (ChooseOpenWorldFile(path)) g_pendingOpenPath = fs::path(path);
+    g_menuActive = -1;
+}
+
+static void FileSaveAs() {
+    std::string path;
+    if (ChooseSaveWorldFile(path)) SaveWorldDocument(fs::path(path));
+    g_menuActive = -1;
+}
+
+static bool ApplyTextureToModel(int target, const char* path) {
+    Model* model = nullptr;
+    Texture2D* owned = nullptr;
+#define MODEL_TEXTURE_CASE(N) case N: model = &WDLModels.Model##N; owned = &WDLModels.Model##N##Texture; break
+    switch (target) {
+        MODEL_TEXTURE_CASE(1); MODEL_TEXTURE_CASE(2); MODEL_TEXTURE_CASE(3); MODEL_TEXTURE_CASE(4);
+        MODEL_TEXTURE_CASE(5); MODEL_TEXTURE_CASE(6); MODEL_TEXTURE_CASE(7); MODEL_TEXTURE_CASE(8);
+        MODEL_TEXTURE_CASE(9); MODEL_TEXTURE_CASE(10); MODEL_TEXTURE_CASE(11); MODEL_TEXTURE_CASE(12);
+        MODEL_TEXTURE_CASE(13); MODEL_TEXTURE_CASE(14); MODEL_TEXTURE_CASE(15); MODEL_TEXTURE_CASE(16);
+        MODEL_TEXTURE_CASE(17); MODEL_TEXTURE_CASE(18); MODEL_TEXTURE_CASE(19); MODEL_TEXTURE_CASE(20);
+        default: return false;
+    }
+#undef MODEL_TEXTURE_CASE
+    Texture2D texture = LoadTexture(path);
+    if (texture.id == 0 || !model || model->materialCount == 0) return false;
+    if (owned->id > 0) UnloadTexture(*owned);
+    *owned = texture;
+    SetMaterialTexture(&model->materials[0], MATERIAL_MAP_DIFFUSE, texture);
+    return true;
+}
+
 int main(int argc, char **argv){
     SetWindowState(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "oz_editor");
+    InitAudioDevice();
     SetTargetFPS(60);
     GuiLoadStyleDark();
 
-    if (argc > 1 && argv[1] != nullptr) {
-        int pathLen = strlen(argv[1]);
-        if (pathLen >= 10) {
-            for (int i = 0; i <= pathLen - 10; i++)
-                OTEditor.Path[i] = argv[1][i];
-        }
-    } else {
-        const char* defaultPath = "GameData/";
-        for (int i = 0; defaultPath[i] != '\0'; i++)
-            OTEditor.Path[i] = defaultPath[i];
-    }
+    g_documentPath = argc > 1 && argv[1] ? fs::path(argv[1]) : fs::path("../GameData/World.wdl");
+    SetWorldDirectory(g_documentPath.parent_path());
 
     // Load INI config
     g_config.Load("System/oz_editor.ini");
@@ -79,19 +251,6 @@ int main(int argc, char **argv){
     Init();
     CacheWDL();
 
-    // Load OZONE world if present
-    {
-        char ozonePath[512];
-        snprintf(ozonePath, sizeof(ozonePath), "%s/World.ozone", OTEditor.Path);
-        if (IsPathFile(ozonePath)) {
-            OzoneLoader::Instance().LoadFile(ozonePath);
-            std::string texDir = OTEditor.Path;
-            if (!texDir.empty() && texDir.back() != '/') texDir += '/';
-            OzoneLoader::Instance().LoadWorldTextures(texDir);
-            fprintf(stderr, "Editor: loaded OZONE world from %s\n", ozonePath);
-        }
-    }
-
     // Register default pawn definitions
     {
         auto& ps = PawnSystem::Instance();
@@ -105,6 +264,14 @@ int main(int argc, char **argv){
         PawnManagerAddPawn("Floater", "GameData/Models/Floater.obj");
     }
 
+    if (argc > 1 && argv[1]) {
+        LoadWorldDocument(g_documentPath);
+    } else {
+        SyncWDLNodes();
+        fs::path ozonePath = g_documentPath.parent_path() / "World.ozone";
+        if (fs::exists(ozonePath)) OzoneLoader::Instance().LoadFile(ozonePath.string().c_str());
+    }
+
     // Create model preview render texture
     g_previewRT = LoadRenderTexture(256, 256);
 
@@ -115,6 +282,39 @@ int main(int argc, char **argv){
 
     while (!WindowShouldClose())
     {
+        // Process Win32 messages for child panels
+        MSG msg;
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        if (g_pendingNew) {
+            ClearScene();
+            g_documentPath.clear();
+            g_pendingNew = false;
+        }
+        if (!g_pendingOpenPath.empty()) {
+            LoadWorldDocument(g_pendingOpenPath);
+            g_pendingOpenPath.clear();
+        }
+        if (g_editorPanels.actionStopSoundPreview) {
+            StopSoundPreview();
+            g_editorPanels.actionStopSoundPreview = false;
+        }
+        if (!g_editorPanels.actionPreviewSoundPath.empty()) {
+            StopSoundPreview();
+            g_previewSound = LoadSound(g_editorPanels.actionPreviewSoundPath.c_str());
+            g_previewSoundLoaded = g_previewSound.frameCount > 0;
+            if (g_previewSoundLoaded) PlaySound(g_previewSound);
+            g_editorPanels.actionPreviewSoundPath.clear();
+        }
+        if (g_editorPanels.actionTextureTarget > 0 && !g_editorPanels.actionTexturePath.empty()) {
+            ApplyTextureToModel(g_editorPanels.actionTextureTarget, g_editorPanels.actionTexturePath.c_str());
+            g_editorPanels.actionTextureTarget = -1;
+            g_editorPanels.actionTexturePath.clear();
+        }
+
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON))
         {
             if (LastClickTime != 0) DoubleClick = true;
@@ -134,19 +334,34 @@ int main(int argc, char **argv){
         {
             EnvSettings env = GetEnvSettings();
             if (env.applyFog) {
-                Color fc = { (unsigned char)env.fogR, (unsigned char)env.fogG, (unsigned char)env.fogB, 255 };
-                ClearBackground(fc);
-            } else {
-                ClearBackground(BLACK);
+                // Update lit fog shader uniforms
+                if (OTEditor.LitFogShader.id > 0) {
+                    float fogColor[3] = {(float)env.fogR / 255.0f, (float)env.fogG / 255.0f, (float)env.fogB / 255.0f};
+                    float fogDensity = env.fogDensity;
+                    float fogIntensity = 1.0f;
+
+                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
+                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
+                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
+                }
+                OTEditor.FogColor = (Color){ (unsigned char)env.fogR, (unsigned char)env.fogG, (unsigned char)env.fogB, 255 };
+                OTEditor.FogDensity = env.fogDensity;
             }
             if (env.applyAmbient) {
-                // Ambient applies to model tint — stored for future lighting pass
-                // Currently the editor renders unlit; ambient color stored in OTEditor state
                 OTEditor.AmbientColor = (Color){ (unsigned char)env.ambR, (unsigned char)env.ambG, (unsigned char)env.ambB, 255 };
                 OTEditor.AmbientIntensity = env.ambIntensity;
+                if (OTEditor.AmbientLoc >= 0 && OTEditor.LitFogShader.id > 0) {
+                    float ambient[4] = {(float)env.ambR / 255.0f * env.ambIntensity,
+                                        (float)env.ambG / 255.0f * env.ambIntensity,
+                                        (float)env.ambB / 255.0f * env.ambIntensity,
+                                        1.0f};
+                    SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+                }
             }
             ClearEnvApplyFlags();
         }
+
+        ClearBackground(BLACK);
 
         BeginMode3D(OTEditor.MainCamera);
 
@@ -160,6 +375,7 @@ int main(int argc, char **argv){
 
         // Pawn system — draw active pawns as billboards
         PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
+        PawnSystem::Instance().DrawEntities(OTEditor.MainCamera);
 
         // --- Placement visuals ---
         if (OmegaTechEditor.DrawModel)
@@ -475,7 +691,6 @@ int main(int argc, char **argv){
             }
             g_editorPanels.actionSpawnPawn = -1;
         }
-    }
 
         // Mode switching
         if (IsKeyPressed(KEY_ONE))   g_placeMode = PlaceMode::MODEL;
@@ -492,10 +707,13 @@ int main(int argc, char **argv){
     }
 
     // Cleanup
+    StopSoundPreview();
+    OzoneLoader::Instance().Unload();
     UnloadRenderTexture(g_previewRT);
 #ifdef _WIN32
     DestroyAllEditorWindows();
 #endif
+    CloseAudioDevice();
     CloseWindow();
 }
 
@@ -616,13 +834,11 @@ void DrawOverlay(){
 
     GuiWindowBox((Rectangle){144, 624, 532, 96}, "Actions");
     if (GuiButton((Rectangle){152, 672, 80, 32}, "Undo")){
-        OTEditor.WorldData = LoadFile(TextFormat("%s/World.wdl", OTEditor.Path));
-        CacheWDL();
+        if (!g_documentPath.empty() && g_documentPath.extension() == ".wdl") LoadWorldDocument(g_documentPath);
     }
     if (GuiButton((Rectangle){240, 672, 64, 32}, "Save")){
-        wofstream Outfile;
-        Outfile.open(TextFormat("%s/World.wdl", OTEditor.Path));
-        Outfile << OTEditor.WorldData << "\n";
+        if (!g_documentPath.empty() && g_documentPath.extension() == ".wdl") SaveWorldDocument(g_documentPath);
+        else FileSaveAs();
     }
     if (GuiButton((Rectangle){336, 672, 112, 32}, "Reset Camera")) OTEditor.MainCamera.position = {0, 10, 0};
     if (GuiButton((Rectangle){456, 672, 40, 32}, "UP")) OTEditor.MainCamera.position.y += 2;

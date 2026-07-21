@@ -20,6 +20,7 @@
 #include <dirent.h>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 // ---------------------------------------------------------------------------
 // Globals / Config
@@ -28,6 +29,7 @@ static bool g_running = true;
 static net::NetworkServer* g_game_server = nullptr;
 static std::string g_gamedata_dir = "GameData";
 static int g_http_port = 8080;
+static std::mutex g_print_mutex;
 static std::vector<std::string> g_world_list;
 
 static GameState g_game_state;
@@ -81,7 +83,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
             break;
         case WDLElementType::MODEL:
             add_field("type", json_escape("model")); out += ',';
-            add_num("id", static_cast<float>(e.model_id)); out += ',';
+            add_num("id", static_cast<float>(e.int_id)); out += ',';
             if (e.args.size() >= 5) {
                 add_num("x", e.args[0]); out += ',';
                 add_num("y", e.args[1]); out += ',';
@@ -123,6 +125,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
                 add_num("rotation", e.args[4]); out += ',';
                 add_num("w", e.args[5]);  out += ',';
                 add_num("h", e.args[6]);  out += ',';
+                add_num("l", e.args[7]);
             }
             break;
         case WDLElementType::LIGHT:
@@ -135,7 +138,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
             break;
         case WDLElementType::SCRIPT:
             add_field("type", json_escape("script")); out += ',';
-            add_num("id", static_cast<float>(e.model_id)); out += ',';
+            add_num("id", static_cast<float>(e.int_id)); out += ',';
             if (e.args.size() >= 5) {
                 add_num("x", e.args[0]); out += ',';
                 add_num("y", e.args[1]); out += ',';
@@ -146,7 +149,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
             break;
         case WDLElementType::OBJECT:
             add_field("type", json_escape("object")); out += ',';
-            add_num("id", static_cast<float>(e.model_id)); out += ',';
+            add_num("id", static_cast<float>(e.int_id)); out += ',';
             if (e.args.size() >= 5) {
                 add_num("x", e.args[0]); out += ',';
                 add_num("y", e.args[1]); out += ',';
@@ -155,7 +158,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
             break;
         case WDLElementType::NOISE_EMITTER:
             add_field("type", json_escape("noise_emitter")); out += ',';
-            add_num("id", static_cast<float>(e.model_id)); out += ',';
+            add_num("id", static_cast<float>(e.int_id)); out += ',';
             if (e.args.size() >= 5) {
                 add_num("x", e.args[0]); out += ',';
                 add_num("y", e.args[1]); out += ',';
@@ -163,6 +166,74 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
                 add_num("scale", e.args[3]); out += ',';
                 add_num("rotation", e.args[4]);
             }
+            break;
+        case WDLElementType::PICKUP:
+            add_field("type", json_escape("pickup")); out += ',';
+            add_field("pickupType", json_escape(e.pickupType)); out += ',';
+            if (e.args.size() >= 3) {
+                add_num("x", e.args[0]); out += ',';
+                add_num("y", e.args[1]); out += ',';
+                add_num("z", e.args[2]);
+            }
+            break;
+        case WDLElementType::SPAWN:
+            add_field("type", json_escape("spawn"));
+            if (e.args.size() >= 3) {
+                out += ','; add_num("x", e.args[0]); out += ',';
+                add_num("y", e.args[1]); out += ',';
+                add_num("z", e.args[2]); out += ',';
+            }
+            else out += ',';
+            add_num("yaw", e.yaw);
+            break;
+        case WDLElementType::NPC:
+            add_field("type", json_escape("npc")); out += ',';
+            add_field("npcType", json_escape(e.entityType)); out += ',';
+            if (e.args.size() >= 3) {
+                add_num("x", e.args[0]); out += ',';
+                add_num("y", e.args[1]); out += ',';
+                add_num("z", e.args[2]);
+            }
+            break;
+        case WDLElementType::LIGHT_TYPE:
+            add_field("type", json_escape("light_type")); out += ',';
+            if (e.args.size() >= 3) {
+                add_num("x", e.args[0]); out += ',';
+                add_num("y", e.args[1]); out += ',';
+                add_num("z", e.args[2]);
+            }
+            break;
+        case WDLElementType::AMBIENT_TYPE:
+            add_field("type", json_escape("ambient")); out += ',';
+            if (e.args.size() >= 4) {
+                add_num("r", e.args[0]); out += ',';
+                add_num("g", e.args[1]); out += ',';
+                add_num("b", e.args[2]); out += ',';
+                add_num("intensity", e.args[3]);
+            }
+            break;
+        case WDLElementType::FOG:
+            add_field("type", json_escape("fog")); out += ',';
+            if (e.args.size() >= 4) {
+                add_num("r", e.args[0]); out += ',';
+                add_num("g", e.args[1]); out += ',';
+                add_num("b", e.args[2]); out += ',';
+                add_num("density", e.args[3]);
+            }
+            break;
+        case WDLElementType::ZONE_INFO:
+            add_field("type", json_escape("zone_info")); out += ',';
+            add_field("zoneType", json_escape(e.zoneType));
+            if (e.args.size() >= 6) {
+                out += ','; add_num("minX", e.args[0]); out += ',';
+                add_num("minY", e.args[1]); out += ',';
+                add_num("minZ", e.args[2]); out += ',';
+                add_num("maxX", e.args[3]); out += ',';
+                add_num("maxY", e.args[4]); out += ',';
+                add_num("maxZ", e.args[5]); out += ',';
+            }
+            else out += ',';
+            add_num("intensity", e.intensity);
             break;
         case WDLElementType::ENTITY_WALKER:
             add_field("type", json_escape("entity")); out += ',';
@@ -186,7 +257,7 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
 
 static void append_ozone_json(std::string& out, const OzonePrimitive& p, bool first) {
     if (!first) out += ',';
-    out += R"("type":)";
+    out += R"({"type":)";
 
     auto esc = [](const std::string& s) { return json_escape(s); };
 
@@ -253,6 +324,50 @@ static void append_ozone_json(std::string& out, const OzonePrimitive& p, bool fi
                     p.args[0], p.args[1], p.args[2],
                     p.args[3], p.args[4], p.args[5],
                     p.args[6]);
+                out += buf;
+            }
+            break;
+        }
+        case OzonePrimitiveType::ENTITY_PLAYERSTART: {
+            out += esc("playerstart");
+            if (p.args.size() >= 4) {
+                char buf[160];
+                snprintf(buf, sizeof(buf), R"(,"position":[%.3f,%.3f,%.3f],"yaw":%.3f)",
+                         p.args[0], p.args[1], p.args[2], p.args[3]);
+                out += buf;
+            }
+            break;
+        }
+        case OzonePrimitiveType::ENTITY_PICKUP:
+        case OzonePrimitiveType::ENTITY_NPC: {
+            out += esc(p.type == OzonePrimitiveType::ENTITY_PICKUP ? "pickup" : "npc");
+            out += R"(,"subtype":)" + esc(p.entityType);
+            if (p.args.size() >= 3) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), R"(,"position":[%.3f,%.3f,%.3f])",
+                         p.args[0], p.args[1], p.args[2]);
+                out += buf;
+            }
+            if (p.type == OzonePrimitiveType::ENTITY_PICKUP && p.args.size() >= 4) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), R"(,"respawnTime":%.3f)", p.args[3]);
+                out += buf;
+            }
+            break;
+        }
+        case OzonePrimitiveType::ENTITY_ZONE: {
+            out += esc("zone");
+            out += R"(,"subtype":)" + esc(p.entitySubType);
+            if (p.args.size() >= 6) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         R"(,"min":[%.3f,%.3f,%.3f],"max":[%.3f,%.3f,%.3f])",
+                         p.args[0], p.args[1], p.args[2], p.args[3], p.args[4], p.args[5]);
+                out += buf;
+            }
+            if (p.args.size() >= 7) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), R"(,"intensity":%.3f)", p.args[6]);
                 out += buf;
             }
             break;
@@ -434,7 +549,10 @@ static void http_server_thread(int port) {
         fprintf(stderr, "HTTP: failed to listen on port %d\n", port);
         return;
     }
-    printf("HTTP: map server on http://127.0.0.1:%d\n", port);
+    {
+        std::lock_guard<std::mutex> lock(g_print_mutex);
+        printf("HTTP: map server on http://127.0.0.1:%d\n", port);
+    }
 
     fd_set master_fds;
     FD_ZERO(&master_fds);
@@ -722,7 +840,10 @@ int main(int argc, char** argv) {
 
     // Initialize game state with worlds
     g_game_state.init_worlds(g_gamedata_dir, g_world_list);
-    printf("oz_server ready\n");
+    {
+        std::lock_guard<std::mutex> lock(g_print_mutex);
+        printf("oz_server ready\n");
+    }
 
     // Main loop
     int tick = 0;

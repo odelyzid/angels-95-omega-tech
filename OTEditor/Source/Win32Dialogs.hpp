@@ -28,6 +28,7 @@ struct EditorPanelState {
     bool showEnvPanel = false;
     bool showPickupPanel = false;
     bool showNodePanel = false;
+    bool showSettingsPanel = false;
 
     // Model browser state (used cross-platform)
     std::vector<ModelBrowserEntry> modelEntries;
@@ -39,6 +40,10 @@ struct EditorPanelState {
     int actionPlaceModel = -1;
     bool actionRefreshBrowser = false;
     int actionSpawnPawn = -1;
+    std::string actionTexturePath;
+    int actionTextureTarget = -1;
+    std::string actionPreviewSoundPath;
+    bool actionStopSoundPreview = false;
 
 #ifdef _WIN32
     // Window handles (Windows only)
@@ -50,6 +55,7 @@ struct EditorPanelState {
     void* hEnvPanel = nullptr;
     void* hPickupPanel = nullptr;
     void* hNodePanel = nullptr;
+    void* hSettingsPanel = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -64,6 +70,7 @@ struct EditorPanelState {
     WinPos envPanelPos   = {60, 60, 420, 360};
     WinPos pickPanelPos  = {60, 400, 200, 280};
     WinPos nodePanelPos  = {290, 400, 200, 200};
+    WinPos settingsPos   = {50, 50, 400, 600};
 #endif
 };
 
@@ -100,6 +107,8 @@ void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
+bool ChooseOpenWorldFile(std::string& outPath);
+bool ChooseSaveWorldFile(std::string& outPath);
 #else
 // Stub implementations for non-Windows
 inline void CreateAllEditorWindows(void*, void*) {}
@@ -114,6 +123,8 @@ inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
+inline bool ChooseOpenWorldFile(std::string&) { return false; }
+inline bool ChooseSaveWorldFile(std::string&) { return false; }
 inline EnvSettings GetEnvSettings() { return {}; }
 inline void ClearEnvApplyFlags() {}
 inline void PawnManagerAddPawn(const char*, const char*) {}

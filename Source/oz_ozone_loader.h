@@ -39,9 +39,16 @@ public:
     int Count() const { return (int)m_renderables.size(); }
     OzoneRenderable* Get(int index);
 
+    // Editor integration
+    void LoadWorldTextures(const std::string& worldDir);
+    void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
+
     static OzoneLoader& Instance();
+    
+    static Shader GetLitFogShader() { return s_litFogShader; }
 
 private:
+    static Shader s_litFogShader;
     std::vector<OzoneRenderable> m_renderables;
 
     Texture2D m_floorTex{0};
@@ -49,7 +56,6 @@ private:
     Texture2D m_columnTex{0};
     Texture2D m_ceilTex{0};
 
-    void LoadWorldTextures(const std::string& worldDir);
     void UnloadTextures();
 
     Model BuildFromPrimitive(int type, const std::vector<float>& args);

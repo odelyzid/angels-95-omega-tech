@@ -1,5 +1,7 @@
 # OmegaTech Engine — Angels95 Edition
 
+![Angels95 Title Splash](GameData/Global/Title/splash.png)
+
 Angels95 reimagines the OmegaTech Engine as a **multiplayer game world** — a persistent, server-authoritative realm where players explore partitioned worlds, collect power-ups, level up, and fight NPCs alongside other connected players.
 
 Built on [raylib](https://www.raylib.com/) with PS1-inspired retro aesthetics and a custom WDL world format.
@@ -77,11 +79,22 @@ cmake --build /tmp/raylib/build --parallel && sudo cmake --install /tmp/raylib/b
 make -j$(nproc)
 ```
 
+### Windows (Native w64devkit)
+
+```powershell
+# Requires C:\raylib\w64devkit with raylib 5.5 statically linked
+.\build-native-win.ps1              # full System/ release
+.\build-native-win.ps1 -SkipData    # skip asset packaging
+```
+
+**Note:** Do NOT use WinGet GCC 16.1.0 — its C++ headers are broken with POSIX UCRT. Use w64devkit GCC 15.2.0.
+
 ### Windows (MSYS2 / MINGW64)
 
 ```
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-raylib make
-make -j$(nproc)
+.\build.ps1                         # full System/ release
+.\build.ps1 -SkipData               # skip asset packaging
 ```
 
 ### Outputs
@@ -90,6 +103,76 @@ make -j$(nproc)
 |---|---|
 | `Angels95` / `Angels95.exe` | Game client (requires raylib) |
 | `oz_server` / `oz_server.exe` | Dedicated server (no raylib) |
+| `oz_editor.exe` | Level editor (Windows only, Win32 panels + raylib viewport) |
+| `OzPack.exe` | Asset packer CLI |
+
+All binaries are assembled into `System/` with INI files, run scripts, and packaged assets.
+
+---
+
+## System/ Release
+
+The `System/` directory contains a complete, runnable release:
+
+```
+System/
+  Angels95.exe          # Game client
+  oz_server.exe         # Dedicated server
+  oz_editor.exe         # Level editor
+  OzPack.exe            # Asset packer
+  Angels95.ini          # Client config
+  oz_editor.ini         # Editor config
+  run.bat / run.ps1     # Launch scripts
+  Data/
+    *.ozpak             # Generic assets (guns, objects, shaders)
+    *.oztex             # Textures
+    *.ozsnd             # Sounds
+    *.ozmux             # Music
+    *.ozone             # Worlds
+```
+
+Run the game from `System/` using `run.bat` or `run.ps1`. The game expects `GameData/` as a sibling directory for worlds, saves, and loose assets.
+
+---
+
+## Package System (OzPackage)
+
+Assets are packaged into `.oz*` containers for efficient distribution:
+
+| Extension | Type | Contents |
+|---|---|---|
+| `.ozpak` | OZPK | Generic assets (models, scripts, shaders) |
+| `.oztex` | OZTX | Textures (PNG) |
+| `.ozsnd` | OZSD | Sounds (WAV/MP3/OGG) |
+| `.ozmux` | OZMX | Music (WAV/MP3) |
+| `.ozone` | OZWN | World files |
+
+### Packaging Assets
+
+```powershell
+.\build-data.ps1        # packages all GameData assets into System/Data/
+```
+
+### Runtime Loading
+
+The engine uses `PackageAssetLoader` with `*WithFallback` wrappers that check the filesystem first, then search packages. This allows seamless transition from loose files to packaged assets.
+
+---
+
+## Level Editor (oz_editor)
+
+The Windows-only level editor combines Win32 native panels with a raylib 3D viewport:
+
+- **Model Browser** — Browse and place 3D models
+- **Environment Settings** — Fog, ambient light, skybox
+- **Pickups** — Place health, mana, keys, etc.
+- **Nodes** — Player spawns, NPC spawns, lights
+- **Pawn Manager** — Spawn and configure NPCs
+- **Texture Manager** — Manage world textures
+- **Sound Manager** — Configure world sounds
+- **Script Manager** — Edit WDL scripts
+
+Launch with `System\oz_editor.exe`. The editor saves worlds in OZONE format (`.ozone`) alongside the WDL text format.
 
 ---
 

@@ -5,6 +5,7 @@
 #include "oz_ozone_loader.h"
 #include "oz_pawn_system.h"
 #include "PackageAssetLoader.hpp"
+#include "EngineBillboard.hpp"
 
 #include "raymath.h"
 #include "rlights/rlights.h"
@@ -105,11 +106,21 @@ void SpawnWDLProcess(const char *Path)
 
         if (WReadValue(Instruction, 0, 5) == L"Walker")
         {
-            OmegaEnemy[EntityCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            OmegaEnemy[EntityCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            OmegaEnemy[EntityCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            OmegaEnemy[EntityCounter].IsActive = true;
-            OmegaEnemy[EntityCounter].Scream = false;
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            
+            // Spawn via PawnSystem (dynamic, unlimited NPCs)
+            PawnSystem::Instance().Spawn({x, y, z}, "Walker");
+            
+            // Legacy: also fill OmegaEnemy array for backward compatibility
+            if (EntityCounter < EntityCount) {
+                OmegaEnemy[EntityCounter].X = x;
+                OmegaEnemy[EntityCounter].Y = y;
+                OmegaEnemy[EntityCounter].Z = z;
+                OmegaEnemy[EntityCounter].IsActive = true;
+                OmegaEnemy[EntityCounter].Scream = false;
+            }
             EntityCounter++;
         }
 
@@ -661,22 +672,56 @@ void OmegaTechInit()
     // Initialize package-based asset loading
     PackageAssetLoader::Instance().Init();
 
+    // Initialize engine billboard system
+    EngineBillboard::Init();
+
+    // Register pawn definitions for NPC system
+    PawnSystem::Instance().RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
+    PawnSystem::Instance().RegisterDef({"Skaarj", 2.0f, 8.0f, 2.0f, 15.0f, 150});
+    PawnSystem::Instance().RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
+    PawnSystem::Instance().RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
+
     OmegaTechData.InitCamera();
 
-    OmegaTechData.PixelShader = LoadShader(0, "GameData/Shaders/Pixel.fs");
-    OmegaTechData.FogShader = LoadShader(0, "GameData/Shaders/Fog.fs");
-    OmegaTechData.LineShader = LoadShader(0, "GameData/Shaders/Scanlines.fs");
-    OmegaTechData.SobelShader = LoadShader(0, "GameData/Shaders/Sobel.fs");
-    OmegaTechData.ToonShader = LoadShader(0, "GameData/Shaders/Toon.fs");
-    OmegaTechData.JitterShader = LoadShader(0, "GameData/Shaders/Jitter.fs");
-    OmegaTechData.Lights = LoadShader("GameData/Shaders/Lights/Lighting.vs","GameData/Shaders/Lights/Lighting.fs");
-    OmegaTechData.GameLights[MAX_LIGHTS] = { 0 };
+    OmegaTechData.PixelShader = LoadShaderWithFallback(0, "GameData/Shaders/Pixel.fs");
+    // Legacy FogShader disabled - using LitFog material shader instead
+    OmegaTechData.FogShader = {0};
+    OmegaTechData.LineShader = LoadShaderWithFallback(0, "GameData/Shaders/Scanlines.fs");
+    OmegaTechData.SobelShader = LoadShaderWithFallback(0, "GameData/Shaders/Sobel.fs");
+    OmegaTechData.ToonShader = LoadShaderWithFallback(0, "GameData/Shaders/Toon.fs");
+    OmegaTechData.JitterShader = LoadShaderWithFallback(0, "GameData/Shaders/Jitter.fs");
+    OmegaTechData.Lights = LoadShaderWithFallback("GameData/Shaders/Lights/Lighting.vs","GameData/Shaders/Lights/LitFog.fs");
+    OzoneLoader::Instance().SetLitFogShader(OmegaTechData.Lights);
+    
+    // Initialize all lights to disabled
+    for (int i = 0; i < MAX_LIGHTS; i++) {
+        OmegaTechData.GameLights[i] = { 0 };
+    }
 
 
     OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(OmegaTechData.Lights, "viewPos");
     int AmbientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
     float ambient[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     SetShaderValue(OmegaTechData.Lights, AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+
+    // Initialize fog uniforms
+    int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
+    int fogEndLoc = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
+    int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+    int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+    int fogIntensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogIntensity");
+    
+    float fogStart = 10.0f;
+    float fogEnd = 100.0f;
+    float fogDensity = 1.0f;
+    float fogColor[3] = {0.7f, 0.7f, 0.8f};
+    float fogIntensity = 1.0f;
+    
+    SetShaderValue(OmegaTechData.Lights, fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(OmegaTechData.Lights, fogEndLoc, &fogEnd, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(OmegaTechData.Lights, fogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
+    SetShaderValue(OmegaTechData.Lights, fogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
 
 
     OmegaTechData.HomeScreen = LoadTextureWithFallback("GameData/Global/Title/Title.png");
@@ -1185,7 +1230,11 @@ void WDLProcess()
             NextCollision = true;
         }
 
-        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 1) == L"NE" || WReadValue(Instruction, 0, 6) == L"ClipBox" ||WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" || WReadValue(Instruction, 0, 8) == L"HeightMap" || WReadValue(Instruction, 0, 8) == L"Collision" || WReadValue(Instruction, 0, 11) == L"AdvCollision")
+        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 1) == L"NE" || WReadValue(Instruction, 0, 6) == L"ClipBox" ||WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" || WReadValue(Instruction, 0, 8) == L"HeightMap" || WReadValue(Instruction, 0, 8) == L"Collision" || WReadValue(Instruction, 0, 11) == L"AdvCollision" ||
+            WReadValue(Instruction, 0, 6) == L"Pickup" || WReadValue(Instruction, 0, 5) == L"Spawn" ||
+            WReadValue(Instruction, 0, 3) == L"NPC" || WReadValue(Instruction, 0, 5) == L"Light" ||
+            WReadValue(Instruction, 0, 5) == L"Sound" || WReadValue(Instruction, 0, 5) == L"Music" ||
+            WReadValue(Instruction, 0, 8) == L"ZoneInfo")
         {
 
             X = ToFloat(WSplitValue(WData, i + 1));
@@ -1399,6 +1448,33 @@ void WDLProcess()
                     }
                 }
             }
+
+            // Entity rendering (Pickup, Spawn, NPC, Light, etc.)
+            if (Debug)
+            {
+                Camera3D cam = OmegaTechData.MainCamera;
+                if (WReadValue(Instruction, 0, 6) == L"Pickup") {
+                    EngineBillboard::DrawPickup(cam, "HealthVial", {X, Y, Z}, 0.8f);
+                }
+                if (WReadValue(Instruction, 0, 5) == L"Spawn") {
+                    EngineBillboard::Draw(cam, "PlayerStart", {X, Y + 0.5f, Z}, 1.2f);
+                }
+                if (WReadValue(Instruction, 0, 3) == L"NPC") {
+                    EngineBillboard::Draw(cam, "PawnNode", {X, Y + 1.0f, Z}, 1.5f);
+                }
+                if (WReadValue(Instruction, 0, 5) == L"Light") {
+                    EngineBillboard::Draw(cam, "Light", {X, Y + 0.5f, Z}, 1.0f);
+                }
+                if (WReadValue(Instruction, 0, 5) == L"Sound") {
+                    EngineBillboard::Draw(cam, "Sound", {X, Y + 0.5f, Z}, 1.0f);
+                }
+                if (WReadValue(Instruction, 0, 5) == L"Music") {
+                    EngineBillboard::Draw(cam, "Music", {X, Y + 0.5f, Z}, 1.0f);
+                }
+                if (WReadValue(Instruction, 0, 8) == L"ZoneInfo") {
+                    EngineBillboard::Draw(cam, "ZoneInfo", {X, Y + 0.5f, Z}, 1.0f);
+                }
+            }
         }
         if (Instruction == L"ClipBox")
         { 
@@ -1496,8 +1572,9 @@ void WDLProcess()
                 OmegaPlayer.onGround = true;
             }
         } else if (FoundPlatform) {
-            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + 0.1f) {
-                OmegaTechData.MainCamera.position.y = PlatformHeight;
+            const float eyeHeight = 2.0f;
+            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + eyeHeight + 0.1f) {
+                OmegaTechData.MainCamera.position.y = PlatformHeight + eyeHeight;
                 OmegaPlayer.velocityY = 0.0f;
                 OmegaPlayer.onGround = true;
             }
@@ -1507,56 +1584,27 @@ void WDLProcess()
 
 void UpdateEntities()
 {
-    float PX = OmegaTechData.MainCamera.position.x;
-    float PY = OmegaTechData.MainCamera.position.y;
-    float PZ = OmegaTechData.MainCamera.position.z;
-
-    float Speed = .8f;
-    int AttackRadius = 100;
-
-    for (int i = 0; i <= EntityCount - 1; i++)
-    {
-        if (OmegaEnemy[i].IsActive)
-        {
-
-
-            DrawBillboard(OmegaTechData.MainCamera, EnemyTextures.Frame1, {OmegaEnemy[i].X, OmegaEnemy[i].Y, OmegaEnemy[i].Z}, 10.0f, WHITE);
-            
-
-            if (PZ - AttackRadius < OmegaEnemy[i].Z && PZ + AttackRadius > OmegaEnemy[i].Z)
-            {
-                if (PX - AttackRadius < OmegaEnemy[i].X && PX + AttackRadius > OmegaEnemy[i].X)
-                {
-                    if (OmegaEnemy[i].X > PX)
-                        OmegaEnemy[i].X -= Speed;
-                    if (OmegaEnemy[i].X < PX)
-                        OmegaEnemy[i].X += Speed;
-
-                    if (OmegaEnemy[i].Z > PZ)
-                        OmegaEnemy[i].Z -= Speed;
-                    if (OmegaEnemy[i].Z < PZ)
-                        OmegaEnemy[i].Z += Speed;
-
-                    if (PZ - 1 < OmegaEnemy[i].Z && PZ + 1 > OmegaEnemy[i].Z)
-                    {
-                        if (PX - 1 < OmegaEnemy[i].X && PX + 1 > OmegaEnemy[i].X)
-                        {
-                            OmegaPlayer.Health = 0;
-                        }
-                    }
-
-                    if (OmegaTechData.PanicCounter != 240){
-                        OmegaTechData.PanicCounter += 2;
-                    }
-
-                    if (OmegaTechData.Ticker % 2 == 0)
-                    {
-                        if (!IsSoundPlaying(OmegaTechSoundData.ChasingSound))
-                        {
-                            PlaySound(OmegaTechSoundData.ChasingSound);
-                        }
-                    }
-                }
+    Vector3 playerPos = OmegaTechData.MainCamera.position;
+    float dt = GetFrameTime();
+    
+    // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
+    PawnSystem::Instance().Update(playerPos, dt);
+    
+    // Draw all pawns
+    PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera);
+    
+    // Check if any pawn is attacking the player
+    float damage = 0;
+    if (PawnSystem::Instance().IsPlayerAttacked(playerPos, damage)) {
+        OmegaPlayer.Health = 0;
+        
+        if (OmegaTechData.PanicCounter != 240) {
+            OmegaTechData.PanicCounter += 2;
+        }
+        
+        if (OmegaTechData.Ticker % 2 == 0) {
+            if (!IsSoundPlaying(OmegaTechSoundData.ChasingSound)) {
+                PlaySound(OmegaTechSoundData.ChasingSound);
             }
         }
     }
