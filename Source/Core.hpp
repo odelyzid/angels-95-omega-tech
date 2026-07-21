@@ -1,5 +1,9 @@
 #include "Data.hpp"
 #include "Log.hpp"
+#include "oz_assetmapper.h"
+#include "oz_sound_loader.h"
+#include "oz_ozone_loader.h"
+#include "oz_pawn_system.h"
 
 #include "raymath.h"
 #include "rlights/rlights.h"
@@ -708,6 +712,10 @@ void OmegaTechInit()
     OmegaTechData.GameLights[0] = CreateLight(LIGHT_DIRECTIONAL, { OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z }, Vector3Zero(), WHITE, OmegaTechData.Lights);
 
     Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+
+    // Initialize oz_* subsystems — lazy init on first access
+    AssetMapper::Instance().Init();
+    SoundLoader::Instance().RegisterDefaults();
 
     InitObjects();
 

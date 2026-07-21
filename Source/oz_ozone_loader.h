@@ -4,10 +4,6 @@
 #include <string>
 #include <vector>
 
-// Forward-declare the server-side OZONE types; we reuse the parser.
-// (Included in .cpp so the header stays lightweight.)
-enum class OzonePrimitiveType : std::uint8_t;
-
 // ---------------------------------------------------------------------------
 // OzoneLoader — client-side OZONE format loader + mesh renderer
 //

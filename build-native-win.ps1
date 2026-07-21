@@ -1,4 +1,4 @@
-# build-native-win.ps1 — Native Windows build using C:\raylib w64devkit + raylib
+﻿# build-native-win.ps1 â€” Native Windows build using C:\raylib w64devkit + raylib
 # Run from repo root: powershell -File build-native-win.ps1
 
 $W64DEVKIT = "C:\raylib\w64devkit"
@@ -87,6 +87,6 @@ Pop-Location
 # --- Done ---
 Write-Step "Build complete."
 Write-Host "Binaries in $OUT_DIR" -ForegroundColor Green
-Write-Host "  Angels95.exe  — Game client" -ForegroundColor Green
-Write-Host "  oz_server.exe — Dedicated server" -ForegroundColor Green
-Write-Host "  oz_editor.exe — Level editor" -ForegroundColor Green
+Write-Host "  Angels95.exe  - Game client" -ForegroundColor Green
+Write-Host "  oz_server.exe - Dedicated server" -ForegroundColor Green
+Write-Host "  oz_editor.exe - Level editor" -ForegroundColor Green

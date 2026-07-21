@@ -52,6 +52,7 @@ public:
 
 private:
     std::vector<AssetMapEntry> m_entries;
+    std::vector<std::string> m_strings;  // owns the string data for entry paths
     std::unordered_map<std::string, Texture2D> m_cache;
 
     AssetMapEntry* Find(const char* alias);

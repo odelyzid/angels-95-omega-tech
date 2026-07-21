@@ -9,7 +9,14 @@ ifeq ($(UNAME_S),Linux)
 else
   # Windows (MINGW/MSYS/CYGWIN)
   PIC :=
-  LDFLAGS := -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
+  # raylib library path (detect w64devkit; fall back to default search path)
+  RAYLIB_LIB := $(wildcard C:/raylib/w64devkit/lib/libraylib.a)
+  ifneq ($(RAYLIB_LIB),)
+    RAYLIB_DIR := -LC:/raylib/w64devkit/lib
+  else
+    RAYLIB_DIR :=
+  endif
+  LDFLAGS := $(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
   RPATH :=
   EXE := .exe
   SERVER_LIBS := -lm -lws2_32
@@ -21,7 +28,9 @@ SERVER_CXX := g++
 SERVER_FLAGS := -O3 --std=c++20
 
 # Object files (OTCustom statically linked to avoid DLL cross-platform issues)
-OBJS := raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o
+OBJS := raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
+        oz_assetmapper.o oz_sound_loader.o oz_pawn_system.o oz_ozone_loader.o \
+        OzoneParser.o
 
 .PHONY: all clean
 all: OTENGINE oz_server
@@ -53,6 +62,23 @@ Log.o: Source/Log.cpp Source/Log.hpp
 # 5c. Compile Client networking
 Client.o: Source/Client/Client.cpp Source/Client/Client.hpp
 	$(COMP) $(CFLAGS) -c Source/Client/Client.cpp
+
+# 5d. Compile the oz_* subsystem modules
+oz_assetmapper.o: Source/oz_assetmapper.cpp Source/oz_assetmapper.h
+	$(COMP) $(CFLAGS) -c Source/oz_assetmapper.cpp
+
+oz_sound_loader.o: Source/oz_sound_loader.cpp Source/oz_sound_loader.h
+	$(COMP) $(CFLAGS) -c Source/oz_sound_loader.cpp
+
+oz_pawn_system.o: Source/oz_pawn_system.cpp Source/oz_pawn_system.h
+	$(COMP) $(CFLAGS) -c Source/oz_pawn_system.cpp
+
+oz_ozone_loader.o: Source/oz_ozone_loader.cpp Source/oz_ozone_loader.h Source/Server/OzoneParser.hpp
+	$(COMP) $(CFLAGS) -c Source/oz_ozone_loader.cpp
+
+# 5e. Compile OzoneParser (used by both client and server)
+OzoneParser.o: Source/Server/OzoneParser.cpp Source/Server/OzoneParser.hpp
+	$(COMP) $(CFLAGS) -c Source/Server/OzoneParser.cpp
 
 # 6. Build Game Binary
 OTENGINE: $(OBJS)

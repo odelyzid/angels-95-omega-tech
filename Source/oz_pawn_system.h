@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 // ---------------------------------------------------------------------------
 // PawnSystem — dynamic entity / NPC manager

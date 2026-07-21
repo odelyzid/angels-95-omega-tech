@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <bitset>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // SoundLoader — centralized sound & music stream manager
