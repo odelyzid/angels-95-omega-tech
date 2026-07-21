@@ -11,7 +11,7 @@
 | 5 | Editor UI for CSG + Heightmap | ✅ Complete |
 | 6+7 | Server sync + Large-scale partitioning/chunking | ✅ Complete |
 | 8 | CSG overflow protection | ✅ Complete |
-| 9 | World migration (World3 → EngineTest.ozone) | ⏳ Pending |
+| 9 | World migration (World3 → EngineTest.ozone) | ✅ Complete |
 | 10 | LightningScript — ZoneInfo/SkyZoneInfo pawn | 🔮 Future |
 
 ---
@@ -149,11 +149,20 @@ After the CsgProcessor finishes, run a merge pass:
 3. Set `g_world_to_load = "EngineTest"` in `Core.hpp:19`
 4. Test all collision types (heightmap, brushes, CSG subtract)
 
-### Files to modify:
+### Implementation complete:
+- **Legacy move**: World1, World2, World3, Snowy, EtheralTestRealm → `GameData/Worlds/Legacy/`
+- **EngineTest**: New world with `World.ozone` using CSG `add` brushes + `zone sky` + `heightmap` primitive
+- **Named world paths**: All `"GameData/Worlds/World%i/"` replaced with `"GameData/Worlds/%s/"` using `g_world_to_load`
+- **Default world**: Changed to `"EngineTest"`
+- All OZONE paths, WDL paths, texture/model paths, and music paths updated
+
+### Files modified:
 | File | Changes |
 |---|---|
-| `Source/Core.hpp` | `g_world_to_load` default → `"EngineTest"` |
-| `GameData/Worlds/EngineTest/` (new) | World assets + `World.ozone` |
+| `Source/Core.hpp` | `g_world_to_load = "EngineTest"`, all `World%i` → `%s` with `g_world_to_load` |
+| `GameData/Worlds/EngineTest/World.ozone` (new) | CSG brush map, heightmap, sky zone, NPCs |
+| `GameData/Worlds/EngineTest/oztex/tileset/` (new) | Textures from World3 |
+| `GameData/Worlds/Legacy/` (new) | All 5 legacy worlds moved here |
 
 ---
 

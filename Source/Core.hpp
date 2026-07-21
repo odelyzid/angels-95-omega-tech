@@ -1,4 +1,4 @@
-#include "Data.hpp"
+﻿#include "Data.hpp"
 #include "Log.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Audio/OzSoundLoader.hpp"
@@ -16,7 +16,7 @@
 bool FloorCollision = true;
 bool ObjectCollision = false;
 
-const char* g_world_to_load = "EtheralTestRealm";
+const char* g_world_to_load = "EngineTest";
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -248,42 +248,42 @@ auto LoadWorld()
 
         OmegaTechData.SkyboxEnabled = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE1.mp3", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE1.mp3", g_world_to_load)))
         {
             StopMusicStream(OmegaTechSoundData.NESound1);
-            OmegaTechSoundData.NESound1 = LoadMusicStream(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE1.mp3", OmegaTechData.LevelIndex));
+            OmegaTechSoundData.NESound1 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE1.mp3", g_world_to_load));
         }
         else {
             UnloadMusicStream(OmegaTechSoundData.NESound1);
         }
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE2.mp3", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE2.mp3", g_world_to_load)))
         {
             StopMusicStream(OmegaTechSoundData.NESound2);
-            OmegaTechSoundData.NESound2 = LoadMusicStream(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE2.mp3", OmegaTechData.LevelIndex));
+            OmegaTechSoundData.NESound2 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE2.mp3", g_world_to_load));
         }
         else {
             UnloadMusicStream(OmegaTechSoundData.NESound2);
         }
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE3.mp3", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE3.mp3", g_world_to_load)))
         {
             StopMusicStream(OmegaTechSoundData.NESound3);
-            OmegaTechSoundData.NESound3 = LoadMusicStream(TextFormat("GameData/Worlds/World%i/NoiseEmitter/NE3.mp3", OmegaTechData.LevelIndex));
+            OmegaTechSoundData.NESound3 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE3.mp3", g_world_to_load));
         }
         else {
             UnloadMusicStream(OmegaTechSoundData.NESound3);
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Skybox.png", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Skybox.png", g_world_to_load)))
         {
 
-            WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Skybox.png", OmegaTechData.LevelIndex));
+            WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Skybox.png", g_world_to_load));
             OmegaTechData.SkyboxEnabled = true;
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Scripts/Launch.ps", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", g_world_to_load)))
         {
             ParasiteScriptInit();
-            LoadScript(TextFormat("GameData/Worlds/World%i/Scripts/Launch.ps", OmegaTechData.LevelIndex));
+            LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", g_world_to_load));
             for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
             {
                 CycleInstruction();
@@ -291,11 +291,11 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Entities/Walker/Frame1.png", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Entities/Walker/Frame1.png", g_world_to_load)))
         {
-            EnemyTextures.Frame1 = LoadTexture(TextFormat("GameData/Worlds/World%i/Entities/Walker/Frame1.png", OmegaTechData.LevelIndex));
-            EnemyTextures.Scream = LoadSound(TextFormat("GameData/Worlds/World%i/Entities/Walker/Scream.mp3", OmegaTechData.LevelIndex));
-            SpawnWDLProcess(TextFormat("GameData/Worlds/World%i/Entities/Entities.wdl", OmegaTechData.LevelIndex));
+            EnemyTextures.Frame1 = LoadTexture(TextFormat("GameData/Worlds/%s/Entities/Walker/Frame1.png", g_world_to_load));
+            EnemyTextures.Scream = LoadSound(TextFormat("GameData/Worlds/%s/Entities/Walker/Scream.mp3", g_world_to_load));
+            SpawnWDLProcess(TextFormat("GameData/Worlds/%s/Entities/Entities.wdl", g_world_to_load));
         }
 
         if (WDLModels.HeightMapImage.data) {
@@ -304,14 +304,14 @@ auto LoadWorld()
         }
         WDLModels.HeightMapReady = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", g_world_to_load)))
         {
-            WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/HeightMapTexture.png", OmegaTechData.LevelIndex));
-            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/World%i/Models/HeightMap.png", OmegaTechData.LevelIndex));
+            WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/HeightMapTexture.png", g_world_to_load));
+            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", g_world_to_load));
             ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
-            int X = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 0);
-            int Y = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 1);
-            int Z = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 2);
+            int X = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 0);
+            int Y = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 1);
+            int Z = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 2);
             WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
             Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
             OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
@@ -326,10 +326,10 @@ auto LoadWorld()
             OZ_INFO("HeightMap: world=%d not found (no heightmap)", OmegaTechData.LevelIndex);
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model1.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model1.obj", g_world_to_load)))
         {
-            WDLModels.Model1 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model1.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model1Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model1Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model1 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model1.obj", g_world_to_load));
+            WDLModels.Model1Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model1Texture.png", g_world_to_load));
             WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
             WDLModels.Model1.materials[0].shader = OmegaTechData.Lights;
         }
@@ -342,10 +342,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model2.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model2.obj", g_world_to_load)))
         {
-            WDLModels.Model2 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model2.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model2Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model2Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model2 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model2.obj", g_world_to_load));
+            WDLModels.Model2Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model2Texture.png", g_world_to_load));
             WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
             WDLModels.Model2.materials[0].shader = OmegaTechData.Lights;
         }
@@ -357,10 +357,10 @@ auto LoadWorld()
                 UnloadTexture(WDLModels.Model2Texture);
             }
         }
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model3.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model3.obj", g_world_to_load)))
         {
-            WDLModels.Model3 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model3.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model3Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model3Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model3 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model3.obj", g_world_to_load));
+            WDLModels.Model3Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model3Texture.png", g_world_to_load));
             WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
             WDLModels.Model3.materials[0].shader = OmegaTechData.Lights;
         }
@@ -373,10 +373,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model4.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model4.obj", g_world_to_load)))
         {
-            WDLModels.Model4 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model4.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model4Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model4Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model4 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model4.obj", g_world_to_load));
+            WDLModels.Model4Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model4Texture.png", g_world_to_load));
             WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
             WDLModels.Model4.materials[0].shader = OmegaTechData.Lights;
         }
@@ -389,10 +389,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model5.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model5.obj", g_world_to_load)))
         {
-            WDLModels.Model5 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model5.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model5Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model5Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model5 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model5.obj", g_world_to_load));
+            WDLModels.Model5Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model5Texture.png", g_world_to_load));
             WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
             WDLModels.Model5.materials[0].shader = OmegaTechData.Lights;
         }
@@ -405,10 +405,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model6.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model6.obj", g_world_to_load)))
         {
-            WDLModels.Model6 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model6.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model6Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model6Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model6 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model6.obj", g_world_to_load));
+            WDLModels.Model6Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model6Texture.png", g_world_to_load));
             WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
             WDLModels.Model6.materials[0].shader = OmegaTechData.Lights;
         }
@@ -421,10 +421,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model7.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model7.obj", g_world_to_load)))
         {
-            WDLModels.Model7 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model7.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model7Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model7Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model7 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model7.obj", g_world_to_load));
+            WDLModels.Model7Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model7Texture.png", g_world_to_load));
             WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
             WDLModels.Model7.materials[0].shader = OmegaTechData.Lights;
 
@@ -438,10 +438,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model8.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model8.obj", g_world_to_load)))
         {
-            WDLModels.Model8 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model8.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model8Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model8Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model8 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model8.obj", g_world_to_load));
+            WDLModels.Model8Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model8Texture.png", g_world_to_load));
             WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
             WDLModels.Model8.materials[0].shader = OmegaTechData.Lights;
 
@@ -455,10 +455,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model9.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model9.obj", g_world_to_load)))
         {
-            WDLModels.Model9 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model9.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model9Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model9Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model9 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model9.obj", g_world_to_load));
+            WDLModels.Model9Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model9Texture.png", g_world_to_load));
             WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
             WDLModels.Model9.materials[0].shader = OmegaTechData.Lights;
 
@@ -472,10 +472,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model10.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model10.obj", g_world_to_load)))
         {
-            WDLModels.Model10 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model10.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model10Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model10Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model10 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model10.obj", g_world_to_load));
+            WDLModels.Model10Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model10Texture.png", g_world_to_load));
             WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
             WDLModels.Model10.materials[0].shader = OmegaTechData.Lights;
 
@@ -488,10 +488,10 @@ auto LoadWorld()
                 UnloadTexture(WDLModels.Model10Texture);
             }
         }
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model11.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model11.obj", g_world_to_load)))
         {
-            WDLModels.Model11 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model11.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model11Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model11Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model11 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model11.obj", g_world_to_load));
+            WDLModels.Model11Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model11Texture.png", g_world_to_load));
             WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
             WDLModels.Model11.materials[0].shader = OmegaTechData.Lights;
 
@@ -505,10 +505,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model12.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model12.obj", g_world_to_load)))
         {
-            WDLModels.Model12 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model12.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model12Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model12Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model12 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model12.obj", g_world_to_load));
+            WDLModels.Model12Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model12Texture.png", g_world_to_load));
             WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
             WDLModels.Model12.materials[0].shader = OmegaTechData.Lights;
 
@@ -522,10 +522,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model13.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model13.obj", g_world_to_load)))
         {
-            WDLModels.Model13 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model13.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model13Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model13Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model13 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model13.obj", g_world_to_load));
+            WDLModels.Model13Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model13Texture.png", g_world_to_load));
             WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
             WDLModels.Model13.materials[0].shader = OmegaTechData.Lights;
 
@@ -539,10 +539,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model14.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model14.obj", g_world_to_load)))
         {
-            WDLModels.Model14 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model14.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model14Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model14Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model14 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model14.obj", g_world_to_load));
+            WDLModels.Model14Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model14Texture.png", g_world_to_load));
             WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
             WDLModels.Model14.materials[0].shader = OmegaTechData.Lights;
 
@@ -556,10 +556,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model15.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model15.obj", g_world_to_load)))
         {
-            WDLModels.Model15 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model15.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model15Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model15Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model15 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model15.obj", g_world_to_load));
+            WDLModels.Model15Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model15Texture.png", g_world_to_load));
             WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
             WDLModels.Model15.materials[0].shader = OmegaTechData.Lights;
 
@@ -573,10 +573,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model16.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model16.obj", g_world_to_load)))
         {
-            WDLModels.Model16 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model16.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model16Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model16Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model16 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model16.obj", g_world_to_load));
+            WDLModels.Model16Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model16Texture.png", g_world_to_load));
             WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
             WDLModels.Model16.materials[0].shader = OmegaTechData.Lights;
 
@@ -590,10 +590,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model17.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model17.obj", g_world_to_load)))
         {
-            WDLModels.Model17 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model17.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model17Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model17Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model17 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model17.obj", g_world_to_load));
+            WDLModels.Model17Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model17Texture.png", g_world_to_load));
             WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
             WDLModels.Model17.materials[0].shader = OmegaTechData.Lights;
 
@@ -607,10 +607,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model18.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model18.obj", g_world_to_load)))
         {
-            WDLModels.Model18 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model18.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model18Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model18Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model18 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model18.obj", g_world_to_load));
+            WDLModels.Model18Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model18Texture.png", g_world_to_load));
             WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
             WDLModels.Model18.materials[0].shader = OmegaTechData.Lights;
 
@@ -624,10 +624,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model19.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model19.obj", g_world_to_load)))
         {
-            WDLModels.Model19 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model19.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model19Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model19Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model19 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model19.obj", g_world_to_load));
+            WDLModels.Model19Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model19Texture.png", g_world_to_load));
             WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
             WDLModels.Model19.materials[0].shader = OmegaTechData.Lights;
 
@@ -641,10 +641,10 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model20.obj", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model20.obj", g_world_to_load)))
         {
-            WDLModels.Model20 = LoadModel(TextFormat("GameData/Worlds/World%i/Models/Model20.obj", OmegaTechData.LevelIndex));
-            WDLModels.Model20Texture = LoadTexture(TextFormat("GameData/Worlds/World%i/Models/Model20Texture.png", OmegaTechData.LevelIndex));
+            WDLModels.Model20 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model20.obj", g_world_to_load));
+            WDLModels.Model20Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model20Texture.png", g_world_to_load));
             WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
             WDLModels.Model20.materials[0].shader = OmegaTechData.Lights;
 
@@ -660,18 +660,18 @@ auto LoadWorld()
 
         if (GameDataEncoded)
         {
-            WorldData = Encode(LoadFile(TextFormat("GameData/Worlds/World%i/World.wdl", OmegaTechData.LevelIndex)), MainKey);
+            WorldData = Encode(LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", g_world_to_load)), MainKey);
         }
         else
         {
             WorldData = L"";
-            WorldData = LoadFile(TextFormat("GameData/Worlds/World%i/World.wdl", OmegaTechData.LevelIndex));
+            WorldData = LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", g_world_to_load));
             OtherWDLData = L"";
             CacheWDL();
         }
 
         char ozonePath[512];
-        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/World%i/World.ozone", OmegaTechData.LevelIndex);
+        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
         if (IsPathFile(ozonePath))
             OzoneLoader::Instance().LoadFile(ozonePath);
 
@@ -687,9 +687,9 @@ auto LoadWorld()
 
         OmegaTechSoundData.MusicFound = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/World%i/Music/Main.mp3", OmegaTechData.LevelIndex)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Music/Main.mp3", g_world_to_load)))
         {
-            OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("GameData/Worlds/World%i/Music/Main.mp3", OmegaTechData.LevelIndex));
+            OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("GameData/Worlds/%s/Music/Main.mp3", g_world_to_load));
             OmegaTechSoundData.MusicFound = true;
             PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
         }
@@ -893,7 +893,7 @@ void OmegaTechInit()
 
     Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    // Initialize oz_* subsystems — lazy init on first access
+    // Initialize oz_* subsystems â€” lazy init on first access
     AssetMapper::Instance().Init();
     SoundLoader::Instance().RegisterDefaults();
 
@@ -1529,7 +1529,7 @@ void WDLProcess()
                     if (ScriptTimer == 0)
                     {
                         ParasiteScriptInit();
-                        LoadScript(TextFormat("GameData/Worlds/World%i/Scripts/Script%i.ps", OmegaTechData.LevelIndex, int(ToFloat(WReadValue(Instruction, 6, Instruction.size() - 1)))));
+                        LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Script%i.ps", g_world_to_load, int(ToFloat(WReadValue(Instruction, 6, Instruction.size() - 1)))));
 
                         for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
                         {
@@ -1637,7 +1637,7 @@ void WDLProcess()
     }
 
     // Stand on heightmap terrain (preferred) or ClipBox platforms
-    // Skipped when flying or noclipping — player controls Y manually
+    // Skipped when flying or noclipping â€” player controls Y manually
     if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
     {
         float groundY = SampleHeightmapGroundY(
@@ -1903,7 +1903,7 @@ void DrawWorld()
 
     BeginMode3D(OmegaTechData.MainCamera);
 
-    // Sky zone geometry — drawn first as backdrop (unlit background)
+    // Sky zone geometry â€” drawn first as backdrop (unlit background)
     if (inSkyZone) {
         rlDisableDepthMask();
         OzoneLoader::Instance().DrawZoneGeometry(
@@ -1947,7 +1947,7 @@ void DrawWorld()
         }
     }
 
-    // OZONE ground clamp — OZONE heightmap first, then brush primitives
+    // OZONE ground clamp â€” OZONE heightmap first, then brush primitives
     // (only when WDL heightmap and ClipBox didn't already provide ground)
     if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
     {
@@ -2027,8 +2027,7 @@ void DrawWorld()
         SetSceneFlag = false;
 
         // Place player near the new world's collision surface
-        // World3 uses a ClipBox platform; other worlds use heightmap terrain
-        float sy = (OmegaTechData.LevelIndex == 3) ? 8.0f : 20.0f;
+        float sy = 8.0f;
         OmegaTechData.MainCamera.position.y = sy;
         OmegaTechData.MainCamera.target.y = sy;
     }
@@ -2053,6 +2052,7 @@ void DrawWorld()
         OmegaTechData.Ticker = 0;
     }
 }
+
 
 
 
