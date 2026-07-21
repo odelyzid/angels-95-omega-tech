@@ -17,6 +17,9 @@ static int   TextureFilterMode = 1;      // 0=Point, 1=Bilinear, 2=Trilinear, 3=
 static float PixelSize = 5.0f;           // pixelation block size (pixels)
 static bool  JitterEnabled = false;      // vertex / screen jitter toggle
 static float JitterIntensity = 1.0f;     // jitter strength
+static bool  FogEnabled = false;         // fog post-process toggle
+static float FogIntensity = 0.3f;        // fog blend amount
+static Color FogTint = {200, 200, 210, 255}; // fog color (R,G,B,A)
 
 // --- Menu bar state ---
 static bool ShowMenuBar = false;         // top menu bar visibility
@@ -81,6 +84,7 @@ void UpdateSettings(){
             }
         }
         if (GuiButton((Rectangle){ x + w + gap, y, w, h }, "Jitter")) JitterEnabled = !JitterEnabled;
+        if (GuiButton((Rectangle){ x + (w + gap) * 2, y, w, h }, "Fog")) FogEnabled = !FogEnabled;
 
         // Log window
         if (ShowLogWindow){

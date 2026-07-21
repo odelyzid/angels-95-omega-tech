@@ -703,31 +703,40 @@ void OmegaTechInit()
         }
     }
     {
-        WDLModels.FastModel2 = LoadModel("GameData/Global/FModels/FModel2.gltf");
-        WDLModels.FastModel2Texture = LoadTexture("GameData/Global/FModels/FModel2Texture.png");
-        WDLModels.FastModel2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel2Texture;
-        WDLModels.FastModel2.materials[0].shader = OmegaTechData.Lights;
+        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel2.gltf");
+        if (m.meshes != nullptr) {
+            WDLModels.FastModel2 = m;
+            WDLModels.FastModel2Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel2Texture.png");
+            WDLModels.FastModel2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel2Texture;
+            WDLModels.FastModel2.materials[0].shader = OmegaTechData.Lights;
+        }
     }
-    if (IsPathFile("GameData/Global/FModels/FModel3.gltf"))
     {
-        WDLModels.FastModel3 = LoadModel("GameData/Global/FModels/FModel3.gltf");
-        WDLModels.FastModel3Texture = LoadTexture("GameData/Global/FModels/FModel3Texture.png");
-        WDLModels.FastModel3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel3Texture;
-        WDLModels.FastModel3.materials[0].shader = OmegaTechData.Lights;
+        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel3.gltf");
+        if (m.meshes != nullptr) {
+            WDLModels.FastModel3 = m;
+            WDLModels.FastModel3Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel3Texture.png");
+            WDLModels.FastModel3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel3Texture;
+            WDLModels.FastModel3.materials[0].shader = OmegaTechData.Lights;
+        }
     }
-    if (IsPathFile("GameData/Global/FModels/FModel4.gltf"))
     {
-        WDLModels.FastModel4 = LoadModel("GameData/Global/FModels/FModel4.gltf");
-        WDLModels.FastModel4Texture = LoadTexture("GameData/Global/FModels/FModel4Texture.png");
-        WDLModels.FastModel4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel4Texture;
-        WDLModels.FastModel4.materials[0].shader = OmegaTechData.Lights;
+        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel4.gltf");
+        if (m.meshes != nullptr) {
+            WDLModels.FastModel4 = m;
+            WDLModels.FastModel4Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel4Texture.png");
+            WDLModels.FastModel4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel4Texture;
+            WDLModels.FastModel4.materials[0].shader = OmegaTechData.Lights;
+        }
     }
-    if (IsPathFile("GameData/Global/FModels/FModel5.gltf"))
     {
-        WDLModels.FastModel5 = LoadModel("GameData/Global/FModels/FModel5.gltf");
-        WDLModels.FastModel5Texture = LoadTexture("GameData/Global/FModels/FModel5Texture.png");
-        WDLModels.FastModel5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel5Texture;
-        WDLModels.FastModel5.materials[0].shader = OmegaTechData.Lights;
+        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel5.gltf");
+        if (m.meshes != nullptr) {
+            WDLModels.FastModel5 = m;
+            WDLModels.FastModel5Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel5Texture.png");
+            WDLModels.FastModel5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel5Texture;
+            WDLModels.FastModel5.materials[0].shader = OmegaTechData.Lights;
+        }
     }
 
     OmegaTechData.GameLights[0] = CreateLight(LIGHT_DIRECTIONAL, { OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z }, Vector3Zero(), WHITE, OmegaTechData.Lights);

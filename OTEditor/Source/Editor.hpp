@@ -1,4 +1,5 @@
 #include "PPGIO.hpp"
+#include "../../Source/PackageAssetLoader.hpp"
 #include <cstring>
 #include <cmath>
 
@@ -194,125 +195,165 @@ void Init(){
         WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
     }
 
-    if (IsPathFile(TextFormat("%sModels/Model1.obj", OTEditor.Path)))
     {
-        WDLModels.Model1 = LoadModel(TextFormat("%sModels/Model1.obj", OTEditor.Path));
-        WDLModels.Model1Texture = LoadTexture(TextFormat("%sModels/Model1Texture.png", OTEditor.Path));
-        WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model1.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model1 = m;
+            WDLModels.Model1Texture = LoadTextureWithFallback(TextFormat("%sModels/Model1Texture.png", OTEditor.Path));
+            WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model2.obj", OTEditor.Path)))
     {
-        WDLModels.Model2 = LoadModel(TextFormat("%sModels/Model2.obj", OTEditor.Path));
-        WDLModels.Model2Texture = LoadTexture(TextFormat("%sModels/Model2Texture.png", OTEditor.Path));
-        WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model2.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model2 = m;
+            WDLModels.Model2Texture = LoadTextureWithFallback(TextFormat("%sModels/Model2Texture.png", OTEditor.Path));
+            WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model3.obj", OTEditor.Path)))
     {
-        WDLModels.Model3 = LoadModel(TextFormat("%sModels/Model3.obj", OTEditor.Path));
-        WDLModels.Model3Texture = LoadTexture(TextFormat("%sModels/Model3Texture.png", OTEditor.Path));
-        WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model3.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model3 = m;
+            WDLModels.Model3Texture = LoadTextureWithFallback(TextFormat("%sModels/Model3Texture.png", OTEditor.Path));
+            WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model4.obj", OTEditor.Path)))
     {
-        WDLModels.Model4 = LoadModel(TextFormat("%sModels/Model4.obj", OTEditor.Path));
-        WDLModels.Model4Texture = LoadTexture(TextFormat("%sModels/Model4Texture.png", OTEditor.Path));
-        WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model4.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model4 = m;
+            WDLModels.Model4Texture = LoadTextureWithFallback(TextFormat("%sModels/Model4Texture.png", OTEditor.Path));
+            WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model5.obj", OTEditor.Path)))
     {
-        WDLModels.Model5 = LoadModel(TextFormat("%sModels/Model5.obj", OTEditor.Path));
-        WDLModels.Model5Texture = LoadTexture(TextFormat("%sModels/Model5Texture.png", OTEditor.Path));
-        WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model5.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model5 = m;
+            WDLModels.Model5Texture = LoadTextureWithFallback(TextFormat("%sModels/Model5Texture.png", OTEditor.Path));
+            WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model6.obj", OTEditor.Path)))
     {
-        WDLModels.Model6 = LoadModel(TextFormat("%sModels/Model6.obj", OTEditor.Path));
-        WDLModels.Model6Texture = LoadTexture(TextFormat("%sModels/Model6Texture.png", OTEditor.Path));
-        WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model6.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model6 = m;
+            WDLModels.Model6Texture = LoadTextureWithFallback(TextFormat("%sModels/Model6Texture.png", OTEditor.Path));
+            WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model7.obj", OTEditor.Path)))
     {
-        WDLModels.Model7 = LoadModel(TextFormat("%sModels/Model7.obj", OTEditor.Path));
-        WDLModels.Model7Texture = LoadTexture(TextFormat("%sModels/Model7Texture.png", OTEditor.Path));
-        WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model7.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model7 = m;
+            WDLModels.Model7Texture = LoadTextureWithFallback(TextFormat("%sModels/Model7Texture.png", OTEditor.Path));
+            WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model8.obj", OTEditor.Path)))
     {
-        WDLModels.Model8 = LoadModel(TextFormat("%sModels/Model8.obj", OTEditor.Path));
-        WDLModels.Model8Texture = LoadTexture(TextFormat("%sModels/Model8Texture.png", OTEditor.Path));
-        WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model8.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model8 = m;
+            WDLModels.Model8Texture = LoadTextureWithFallback(TextFormat("%sModels/Model8Texture.png", OTEditor.Path));
+            WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model9.obj", OTEditor.Path)))
     {
-        WDLModels.Model9 = LoadModel(TextFormat("%sModels/Model9.obj", OTEditor.Path));
-        WDLModels.Model9Texture = LoadTexture(TextFormat("%sModels/Model9Texture.png", OTEditor.Path));
-        WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model9.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model9 = m;
+            WDLModels.Model9Texture = LoadTextureWithFallback(TextFormat("%sModels/Model9Texture.png", OTEditor.Path));
+            WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model10.obj", OTEditor.Path)))
     {
-        WDLModels.Model10 = LoadModel(TextFormat("%sModels/Model10.obj", OTEditor.Path));
-        WDLModels.Model10Texture = LoadTexture(TextFormat("%sModels/Model10Texture.png", OTEditor.Path));
-        WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model10.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model10 = m;
+            WDLModels.Model10Texture = LoadTextureWithFallback(TextFormat("%sModels/Model10Texture.png", OTEditor.Path));
+            WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model11.obj", OTEditor.Path)))
     {
-        WDLModels.Model11 = LoadModel(TextFormat("%sModels/Model11.obj", OTEditor.Path));
-        WDLModels.Model11Texture = LoadTexture(TextFormat("%sModels/Model11Texture.png", OTEditor.Path));
-        WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model11.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model11 = m;
+            WDLModels.Model11Texture = LoadTextureWithFallback(TextFormat("%sModels/Model11Texture.png", OTEditor.Path));
+            WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model12.obj", OTEditor.Path)))
     {
-        WDLModels.Model12 = LoadModel(TextFormat("%sModels/Model12.obj", OTEditor.Path));
-        WDLModels.Model12Texture = LoadTexture(TextFormat("%sModels/Model12Texture.png", OTEditor.Path));
-        WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model12.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model12 = m;
+            WDLModels.Model12Texture = LoadTextureWithFallback(TextFormat("%sModels/Model12Texture.png", OTEditor.Path));
+            WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model13.obj", OTEditor.Path)))
     {
-        WDLModels.Model13 = LoadModel(TextFormat("%sModels/Model13.obj", OTEditor.Path));
-        WDLModels.Model13Texture = LoadTexture(TextFormat("%sModels/Model13Texture.png", OTEditor.Path));
-        WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model13.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model13 = m;
+            WDLModels.Model13Texture = LoadTextureWithFallback(TextFormat("%sModels/Model13Texture.png", OTEditor.Path));
+            WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model14.obj", OTEditor.Path)))
     {
-        WDLModels.Model14 = LoadModel(TextFormat("%sModels/Model14.obj", OTEditor.Path));
-        WDLModels.Model14Texture = LoadTexture(TextFormat("%sModels/Model14Texture.png", OTEditor.Path));
-        WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model14.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model14 = m;
+            WDLModels.Model14Texture = LoadTextureWithFallback(TextFormat("%sModels/Model14Texture.png", OTEditor.Path));
+            WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model15.obj", OTEditor.Path)))
     {
-        WDLModels.Model15 = LoadModel(TextFormat("%sModels/Model15.obj", OTEditor.Path));
-        WDLModels.Model15Texture = LoadTexture(TextFormat("%sModels/Model15Texture.png", OTEditor.Path));
-        WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model15.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model15 = m;
+            WDLModels.Model15Texture = LoadTextureWithFallback(TextFormat("%sModels/Model15Texture.png", OTEditor.Path));
+            WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model16.obj", OTEditor.Path)))
     {
-        WDLModels.Model16 = LoadModel(TextFormat("%sModels/Model16.obj", OTEditor.Path));
-        WDLModels.Model16Texture = LoadTexture(TextFormat("%sModels/Model16Texture.png", OTEditor.Path));
-        WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model16.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model16 = m;
+            WDLModels.Model16Texture = LoadTextureWithFallback(TextFormat("%sModels/Model16Texture.png", OTEditor.Path));
+            WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model17.obj", OTEditor.Path)))
     {
-        WDLModels.Model17 = LoadModel(TextFormat("%sModels/Model17.obj", OTEditor.Path));
-        WDLModels.Model17Texture = LoadTexture(TextFormat("%sModels/Model17Texture.png", OTEditor.Path));
-        WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model17.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model17 = m;
+            WDLModels.Model17Texture = LoadTextureWithFallback(TextFormat("%sModels/Model17Texture.png", OTEditor.Path));
+            WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model18.obj", OTEditor.Path)))
     {
-        WDLModels.Model18 = LoadModel(TextFormat("%sModels/Model18.obj", OTEditor.Path));
-        WDLModels.Model18Texture = LoadTexture(TextFormat("%sModels/Model18Texture.png", OTEditor.Path));
-        WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model18.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model18 = m;
+            WDLModels.Model18Texture = LoadTextureWithFallback(TextFormat("%sModels/Model18Texture.png", OTEditor.Path));
+            WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model19.obj", OTEditor.Path)))
     {
-        WDLModels.Model19 = LoadModel(TextFormat("%sModels/Model19.obj", OTEditor.Path));
-        WDLModels.Model19Texture = LoadTexture(TextFormat("%sModels/Model19Texture.png", OTEditor.Path));
-        WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model19.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model19 = m;
+            WDLModels.Model19Texture = LoadTextureWithFallback(TextFormat("%sModels/Model19Texture.png", OTEditor.Path));
+            WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
+        }
     }
-    if (IsPathFile(TextFormat("%sModels/Model20.obj", OTEditor.Path)))
     {
-        WDLModels.Model20 = LoadModel(TextFormat("%sModels/Model20.obj", OTEditor.Path));
-        WDLModels.Model20Texture = LoadTexture(TextFormat("%sModels/Model20Texture.png", OTEditor.Path));
-        WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
+        Model m = LoadModelWithFallback(TextFormat("%sModels/Model20.obj", OTEditor.Path));
+        if (m.meshes != nullptr) {
+            WDLModels.Model20 = m;
+            WDLModels.Model20Texture = LoadTextureWithFallback(TextFormat("%sModels/Model20Texture.png", OTEditor.Path));
+            WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
+        }
     }
 }
 
