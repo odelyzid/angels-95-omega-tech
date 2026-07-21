@@ -562,6 +562,11 @@ auto LoadWorld()
             CacheWDL();
         }
 
+        char ozonePath[512];
+        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/World%i/World.ozone", OmegaTechData.LevelIndex);
+        if (IsPathFile(ozonePath))
+            OzoneLoader::Instance().LoadFile(ozonePath);
+
         if (OmegaTechSoundData.MusicFound)StopMusicStream(OmegaTechSoundData.BackgroundMusic);
 
         OmegaTechSoundData.MusicFound = false;
@@ -2176,7 +2181,7 @@ void DrawWorld()
         WDLProcess();
     }
 
-    
+    OzoneLoader::Instance().Draw(OmegaTechData.MainCamera);
 
     UpdatePlayer();
 
