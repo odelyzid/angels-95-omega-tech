@@ -1,0 +1,20 @@
+# PSX Retro Mesh Generator - MTL Export
+
+newmtl automag_metal
+Ka 1.0000 1.0000 1.0000
+Kd 1.0000 1.0000 1.0000
+Ks 0.0000 0.0000 0.0000
+Ns 1.0000
+d 1.0000
+illum 1
+map_Kd automag_lvl1_texture.png
+
+newmtl automag_grip
+Ka 1.0000 1.0000 1.0000
+Kd 1.0000 1.0000 1.0000
+Ks 0.0000 0.0000 0.0000
+Ns 1.0000
+d 1.0000
+illum 1
+map_Kd automag_lvl1_texture.png
+

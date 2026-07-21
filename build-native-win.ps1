@@ -81,6 +81,7 @@ Move-Item -Force "$PSScriptRoot\OTEditor\oz_editor.exe" "$OUT_DIR\oz_editor.exe"
 
 # --- Cleanup intermediate objects ---
 Remove-Item "$PSScriptRoot\*.o" -Force -ErrorAction SilentlyContinue
+Remove-Item "$PSScriptRoot\OTEditor\*.o" -Force -ErrorAction SilentlyContinue
 
 Pop-Location
 

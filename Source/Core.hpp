@@ -40,6 +40,7 @@ class EngineData
         Shader LineShader;
         Shader ToonShader;
         Shader SobelShader;
+        Shader JitterShader;
         Shader Lights;
         Light GameLights[MAX_LIGHTS];
 
@@ -127,6 +128,9 @@ auto LoadWorld()
     PlayFade();
     ClearLights();
 
+    // Reset movement state so player falls to new world's collision
+    OmegaPlayer.onGround = false;
+    OmegaPlayer.velocityY = 0.0f;
 
     if (OmegaTechData.Deaths != 3)
     {
@@ -577,6 +581,12 @@ auto LoadWorld()
             OmegaTechSoundData.MusicFound = true;
             PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
         }
+        else if (IsPathFile("GameData/Global/Sounds/Ambience/Music_Atmo_1.wav"))
+        {
+            OmegaTechSoundData.BackgroundMusic = LoadMusicStream("GameData/Global/Sounds/Ambience/Music_Atmo_1.wav");
+            OmegaTechSoundData.MusicFound = true;
+            PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
+        }
 
         SaveGame();
     }
@@ -654,6 +664,7 @@ void OmegaTechInit()
     OmegaTechData.LineShader = LoadShader(0, "GameData/Shaders/Scanlines.fs");
     OmegaTechData.SobelShader = LoadShader(0, "GameData/Shaders/Sobel.fs");
     OmegaTechData.ToonShader = LoadShader(0, "GameData/Shaders/Toon.fs");
+    OmegaTechData.JitterShader = LoadShader(0, "GameData/Shaders/Jitter.fs");
     OmegaTechData.Lights = LoadShader("GameData/Shaders/Lights/Lighting.vs","GameData/Shaders/Lights/Lighting.fs");
     OmegaTechData.GameLights[MAX_LIGHTS] = { 0 };
 
@@ -2216,6 +2227,12 @@ void DrawWorld()
         OmegaTechData.LevelIndex = SetSceneId;
         LoadWorld();
         SetSceneFlag = false;
+
+        // Place player near the new world's collision surface
+        // World3 uses a ClipBox platform at Y=2.0; other worlds use heightmap terrain
+        float sy = (OmegaTechData.LevelIndex == 3) ? 2.0f : 20.0f;
+        OmegaTechData.MainCamera.position.y = sy;
+        OmegaTechData.MainCamera.target.y = sy;
     }
 
     if (SetCameraFlag)

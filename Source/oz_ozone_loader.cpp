@@ -16,31 +16,64 @@ OzoneLoader& OzoneLoader::Instance() {
 }
 
 // ---------------------------------------------------------------------------
-// Generate a colored cube mesh as a Model
+// World texture loading (from worlddir/oztex/tileset/)
+// ---------------------------------------------------------------------------
+void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
+    UnloadTextures();
+    auto load = [&](const char* name) -> Texture2D {
+        char path[512];
+        snprintf(path, sizeof(path), "%soztex/tileset/%s", worldDir.c_str(), name);
+        if (IsPathFile(path))
+            return LoadTexture(path);
+        return Texture2D{0};
+    };
+    m_floorTex  = load("concrete_floor_a1_32x32.png");
+    m_wallTex   = load("concrete_ceiling_a1_32x32.png");
+    m_columnTex = load("industrial_metal_a1_32x32.png");
+    m_ceilTex   = load("industrial_tech_a1_128x128.png");
+    if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id)
+        fprintf(stderr, "OzoneLoader: loaded world textures from %soztex/tileset/\n", worldDir.c_str());
+}
+
+void OzoneLoader::UnloadTextures() {
+    if (m_floorTex.id)  { UnloadTexture(m_floorTex);  m_floorTex  = Texture2D{0}; }
+    if (m_wallTex.id)   { UnloadTexture(m_wallTex);   m_wallTex   = Texture2D{0}; }
+    if (m_columnTex.id) { UnloadTexture(m_columnTex); m_columnTex = Texture2D{0}; }
+    if (m_ceilTex.id)   { UnloadTexture(m_ceilTex);   m_ceilTex   = Texture2D{0}; }
+}
+
+// ---------------------------------------------------------------------------
+// Apply a texture to a model's diffuse map (or flat color fallback)
+// ---------------------------------------------------------------------------
+static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
+    if (tex.id)
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+    else
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Build* — each applies the best texture for its role
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
     Model model = LoadModelFromMesh(mesh);
-    // Apply a basic gray material
-    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = LIGHTGRAY;
+    // Thin boxes (< 1.0 tall) are treated as floors, tall as walls
+    if (h < 1.0f)
+        ApplyTex(model, m_floorTex, LIGHTGRAY);
+    else
+        ApplyTex(model, m_wallTex, LIGHTGRAY);
     return model;
 }
 
-// ---------------------------------------------------------------------------
-// Cylinder
-// ---------------------------------------------------------------------------
 Model OzoneLoader::BuildCylinder(float rTop, float rBot, float h, int slices) {
-    // raylib 5.5 GenMeshCylinder takes (radius, height, slices) — use larger radius
     float r = (rTop > rBot) ? rTop : rBot;
     Mesh mesh = GenMeshCylinder(r, h, slices);
     Model model = LoadModelFromMesh(mesh);
-    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = SKYBLUE;
+    ApplyTex(model, m_columnTex, SKYBLUE);
     return model;
 }
 
-// ---------------------------------------------------------------------------
-// Sphere
-// ---------------------------------------------------------------------------
 Model OzoneLoader::BuildSphere(float r, int segments) {
     Mesh mesh = GenMeshSphere(r, segments, segments);
     Model model = LoadModelFromMesh(mesh);
@@ -48,14 +81,7 @@ Model OzoneLoader::BuildSphere(float r, int segments) {
     return model;
 }
 
-// ---------------------------------------------------------------------------
-// Pyramid — built from custom mesh (GenMeshCube + scale, or manual tris)
-// We'll build a simple 4-sided pyramid via GenMeshHemiSphere or manual.
-// Actually raylib has no built-in pyramid, so we build one.
-// ---------------------------------------------------------------------------
 Model OzoneLoader::BuildPyramid(float w, float d, float h) {
-    // Manual pyramid mesh: 4 side triangles + 1 base quad = 5 faces
-    // 4 triangles per side (2 per tri), 2 for base = 6 triangles = 18 verts
     int triCount = 6;
     int vertCount = triCount * 3;
     Mesh mesh = {0};
@@ -67,25 +93,17 @@ Model OzoneLoader::BuildPyramid(float w, float d, float h) {
     mesh.texcoords = (float*)RL_MALLOC(vertCount * 2 * sizeof(float));
 
     float hw = w / 2.0f, hd = d / 2.0f;
-    // Apex
     float ax = 0, ay = h, az = 0;
-    // Base corners
     float b[4][3] = {
         {-hw, 0, -hd},
         { hw, 0, -hd},
         { hw, 0,  hd},
         {-hw, 0,  hd}
     };
-    // Face indices (triangle pairs): side0, side1, side2, side3, base0, base1
     int faces[6][3] = {
-        {0,1,4}, // side 0-1-apex
-        {1,2,4}, // side 1-2-apex
-        {2,3,4}, // side 2-3-apex
-        {3,0,4}, // side 3-0-apex
-        {3,2,1}, // base lower
-        {1,0,3}  // base upper
+        {0,1,4}, {1,2,4}, {2,3,4}, {3,0,4},
+        {3,2,1}, {1,0,3}
     };
-    // Vertices for indexing: 0-3 = base, 4 = apex
     float verts[5][3] = {
         {b[0][0], b[0][1], b[0][2]},
         {b[1][0], b[1][1], b[1][2]},
@@ -100,7 +118,6 @@ Model OzoneLoader::BuildPyramid(float w, float d, float h) {
             mesh.vertices[vi * 3 + 0] = verts[idx][0];
             mesh.vertices[vi * 3 + 1] = verts[idx][1];
             mesh.vertices[vi * 3 + 2] = verts[idx][2];
-            // Simple face normal (not per-vertex accurate)
             mesh.normals[vi * 3 + 0] = 0;
             mesh.normals[vi * 3 + 1] = (f < 4) ? 0.5f : -1.0f;
             mesh.normals[vi * 3 + 2] = 0;
@@ -116,32 +133,25 @@ Model OzoneLoader::BuildPyramid(float w, float d, float h) {
     return model;
 }
 
-// ---------------------------------------------------------------------------
-// Plane — generate a flat quad
-// ---------------------------------------------------------------------------
 Model OzoneLoader::BuildPlane(float nx, float ny, float nz, float dist) {
-    // Ignore normal/dist — just produce a flat 10x10 quad
     Mesh mesh = GenMeshPlane(10.0f, 10.0f, 1, 1);
     Model model = LoadModelFromMesh(mesh);
-    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = DARKGRAY;
+    ApplyTex(model, m_floorTex, DARKGRAY);
     return model;
 }
 
 // ---------------------------------------------------------------------------
-// BuildFromPrimitive — dispatch to type-specific builder
+// BuildFromPrimitive
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) {
     switch ((OzonePrimitiveType)type) {
         case OzonePrimitiveType::BOX: {
-            // box x y z w h d rot — args = [x,y,z,w,h,d,rot]
-            // We use w, h, d from args[3..5]
             float w = (args.size() > 3) ? args[3] : 2.0f;
             float h = (args.size() > 4) ? args[4] : 2.0f;
             float d = (args.size() > 5) ? args[5] : 2.0f;
             return BuildBox(w, h, d);
         }
         case OzonePrimitiveType::CYLINDER: {
-            // cyl x y z rTop rBot h slices rot — args = [x,y,z,rTop,rBot,h,slices,rot]
             float rTop = (args.size() > 3) ? args[3] : 1.0f;
             float rBot = (args.size() > 4) ? args[4] : 1.0f;
             float h    = (args.size() > 5) ? args[5] : 2.0f;
@@ -149,20 +159,17 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
             return BuildCylinder(rTop, rBot, h, slices);
         }
         case OzonePrimitiveType::SPHERE: {
-            // sph x y z r [segments] — args = [x,y,z,r] or [x,y,z,r,segments]
             float r   = (args.size() > 3) ? args[3] : 1.0f;
             int segs  = (args.size() > 4) ? (int)args[4] : 16;
             return BuildSphere(r, segs);
         }
         case OzonePrimitiveType::PYRAMID: {
-            // pyr x y z w d h — args = [x,y,z,w,d,h]
             float w = (args.size() > 3) ? args[3] : 2.0f;
             float d = (args.size() > 4) ? args[4] : 2.0f;
             float h = (args.size() > 5) ? args[5] : 2.0f;
             return BuildPyramid(w, d, h);
         }
         case OzonePrimitiveType::PLANE: {
-            // pln x y z nx ny nz dist — args = [x,y,z,nx,ny,nz,dist]
             float nx   = (args.size() > 3) ? args[3] : 0.0f;
             float ny   = (args.size() > 4) ? args[4] : 1.0f;
             float nz   = (args.size() > 5) ? args[5] : 0.0f;
@@ -175,9 +182,17 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 }
 
 // ---------------------------------------------------------------------------
-// LoadFile
+// LoadFile — also loads world textures from the .ozone file's directory
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadFile(const char* path) {
+    // Extract world directory from the .ozone path and load textures
+    std::string p(path);
+    size_t slash = p.find_last_of("/\\");
+    if (slash != std::string::npos) {
+        std::string worldDir = p.substr(0, slash + 1);
+        LoadWorldTextures(worldDir);
+    }
+
     auto primitives = OzoneParser::parse_file(path);
     if (primitives.empty()) return false;
 
@@ -185,13 +200,9 @@ bool OzoneLoader::LoadFile(const char* path) {
         OzoneRenderable r;
         r.typeId = (int)prim.type;
 
-        // Position is always args[0..2]
-        if (prim.args.size() >= 3) {
-            // OZONE is Z-up, convert to Y-up: (x, z, y)
+        if (prim.args.size() >= 3)
             r.position = {prim.args[0], prim.args[2], prim.args[1]};
-        }
 
-        // Rotation from type-specific index
         r.scale = 1.0f;
         if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 7)
             r.rotation = prim.args[6] * DEG2RAD;
@@ -245,6 +256,7 @@ void OzoneLoader::Unload() {
         if (r.loaded) UnloadModel(r.model);
     }
     m_renderables.clear();
+    UnloadTextures();
 }
 
 // ---------------------------------------------------------------------------

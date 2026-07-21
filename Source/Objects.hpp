@@ -246,7 +246,7 @@ void InitObjects(){
             return Texture2D{0};
         }
         Texture2D t = LoadTexture(path);
-        if (t.id > 0) SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
+        if (t.id > 0) ApplyTextureFilter(t);
         fprintf(stderr, "ICON %s -> id=%d %dx%d\n", path, t.id, t.width, t.height);
         return t;
     };

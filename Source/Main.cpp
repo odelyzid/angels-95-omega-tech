@@ -316,8 +316,10 @@ static void ExecuteConsoleCommand(const char* cmd) {
             SetSceneId = id;
             SetSceneFlag = true;
             g_demoPickupsReady = false;
-            OmegaTechData.MainCamera.position = (Vector3){0.0f, 20.0f, 0.0f};
-            OmegaTechData.MainCamera.target = (Vector3){0.0f, 20.0f, -10.0f};
+            // World3 test map has no heightmap — spawn near ground
+            float spawnY = (id == 3) ? 0.0f : 20.0f;
+            OmegaTechData.MainCamera.position = (Vector3){0.0f, spawnY, 0.0f};
+            OmegaTechData.MainCamera.target = (Vector3){0.0f, spawnY, -10.0f};
         }
     } else if (strcmp(cmd, "/world") == 0) {
         fprintf(stderr, "WORLD current=%d (use /world N)\n", OmegaTechData.LevelIndex);
@@ -862,7 +864,25 @@ int main(){
 
         ClearBackground(BLACK);
 
-        DrawTexturePro(Target.texture, (Rectangle){ 0, 0, Target.texture.width, -Target.texture.height }, (Rectangle){ 0, 0, float(GetScreenWidth()), float(GetScreenHeight())}, (Vector2){ 0, 0 } , 0.f , WHITE);
+        // Apply post-processing shaders during final blit
+        {
+            bool shaderActive = false;
+            if (PixelShader && OmegaTechData.PixelShader.id > 0) {
+                BeginShaderMode(OmegaTechData.PixelShader);
+                SetShaderValue(OmegaTechData.PixelShader, GetShaderLocation(OmegaTechData.PixelShader, "pixelWidth"), &PixelSize, SHADER_UNIFORM_FLOAT);
+                SetShaderValue(OmegaTechData.PixelShader, GetShaderLocation(OmegaTechData.PixelShader, "pixelHeight"), &PixelSize, SHADER_UNIFORM_FLOAT);
+                shaderActive = true;
+            }
+            if (JitterEnabled && OmegaTechData.JitterShader.id > 0) {
+                if (!shaderActive) BeginShaderMode(OmegaTechData.JitterShader);
+                float t = float(GetTime());
+                SetShaderValue(OmegaTechData.JitterShader, GetShaderLocation(OmegaTechData.JitterShader, "uTime"), &t, SHADER_UNIFORM_FLOAT);
+                SetShaderValue(OmegaTechData.JitterShader, GetShaderLocation(OmegaTechData.JitterShader, "uIntensity"), &JitterIntensity, SHADER_UNIFORM_FLOAT);
+                shaderActive = true;
+            }
+            DrawTexturePro(Target.texture, (Rectangle){ 0, 0, Target.texture.width, -Target.texture.height }, (Rectangle){ 0, 0, float(GetScreenWidth()), float(GetScreenHeight())}, (Vector2){ 0, 0 } , 0.f , WHITE);
+            if (shaderActive) EndShaderMode();
+        }
         UpdateObjectBar();
 
         if (ParticlesEnabled){
@@ -952,6 +972,96 @@ int main(){
 
         // Console overlay (always on top)
         DrawConsole();
+
+        // --- Top window dropdown menu bar (F2 to toggle) ---
+        if (ShowMenuBar) {
+            int sw = GetScreenWidth();
+            int mh = 22;
+            Vector2 mp = GetMousePosition();
+            bool mb = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+
+            // Draw menu bar background
+            DrawRectangle(0, 0, sw, mh, (Color){ 30, 30, 40, 220 });
+
+            // Menu items
+            struct MenuItem { const char* label; };
+            MenuItem items[] = { {"Game"}, {"Settings"}, {"About"} };
+            int nItems = 3;
+            int mx = 4, my = 0, mw = 80;
+
+            // Track if click lands on any menu item to prevent closing
+            bool clickedOnItem = false;
+
+            for (int i = 0; i < nItems; i++) {
+                Rectangle r = { (float)mx, (float)my, (float)mw, (float)mh };
+                bool hover = CheckCollisionPointRec(mp, r);
+                // Highlight hovered or active item
+                Color bc = (i == MenuActiveItem) ? (Color){ 60, 60, 80, 255 } :
+                           hover ? (Color){ 50, 50, 65, 255 } : BLANK;
+                if (bc.a > 0) DrawRectangleRec(r, bc);
+                DrawText(items[i].label, mx + 8, my + 4, 12, RAYWHITE);
+
+                if (mb && hover) {
+                    MenuActiveItem = (MenuActiveItem == i) ? -1 : i;
+                    clickedOnItem = true;
+                }
+                mx += mw;
+            }
+
+            // If mouse clicked outside any menu item, close dropdown
+            if (mb && !clickedOnItem && !CheckCollisionPointRec(mp, (Rectangle){ 0, 0, (float)sw, (float)mh })) {
+                // Check if click is inside any open dropdown panel
+                bool inDropdown = false;
+                if (MenuActiveItem >= 0) {
+                    int dx = 4 + MenuActiveItem * mw, dy = mh, dw = 140, dd = 80;
+                    if (MenuActiveItem == 2) dd = 60; // About is shorter
+                    inDropdown = CheckCollisionPointRec(mp, (Rectangle){ (float)dx, (float)dy, (float)dw, (float)dd });
+                }
+                if (!inDropdown) MenuActiveItem = -1;
+            }
+
+            // Draw active dropdown
+            if (MenuActiveItem >= 0) {
+                int dx = 4 + MenuActiveItem * mw, dy = mh, dw = 140;
+                DrawRectangle(dx, dy, dw, 80, (Color){ 40, 40, 55, 240 });
+
+                if (MenuActiveItem == 0) { // Game
+                    Rectangle rr1 = { (float)dx + 4, (float)dy + 4, (float)dw - 8, 22 };
+                    Rectangle rr2 = { (float)dx + 4, (float)dy + 28, (float)dw - 8, 22 };
+                    if (GuiButton(rr1, "Restart")) {
+                        // Reload current world
+                        SetSceneId = OmegaTechData.LevelIndex;
+                        SetSceneFlag = true;
+                        MenuActiveItem = -1;
+                    }
+                    if (GuiButton(rr2, "Quit")) {
+                        CloseWindow();
+                        MenuActiveItem = -1;
+                    }
+                }
+                else if (MenuActiveItem == 1) { // Settings
+                    Rectangle rr = { (float)dx + 4, (float)dy + 4, (float)dw - 8, 22 };
+                    if (GuiButton(rr, "Open Settings")) {
+                        ShowSettings = true;
+                        ShowCursor();
+                        EnableCursor();
+                        MenuActiveItem = -1;
+                    }
+                }
+                else if (MenuActiveItem == 2) { // About
+                    DrawText("Angels95 v1.0", dx + 8, dy + 6, 12, RAYWHITE);
+                    DrawText("OmegaTech Engine", dx + 8, dy + 22, 11, LIGHTGRAY);
+                    DrawText("TribeWarez 2025", dx + 8, dy + 38, 10, DARKGRAY);
+                }
+            }
+
+        } // end if(ShowMenuBar)
+
+        // Toggle menu bar with F2 (always accessible)
+        if (IsKeyPressed(KEY_F2)) {
+            ShowMenuBar = !ShowMenuBar;
+            MenuActiveItem = -1;
+        }
 
         EndDrawing();
 

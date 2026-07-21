@@ -31,33 +31,29 @@ struct OzoneRenderable {
 
 class OzoneLoader {
 public:
-    // Load and parse a .ozone file, generating meshes for every primitive.
-    // Returns true if at least one primitive was loaded.
     bool LoadFile(const char* path);
-
-    // Same as LoadFile but from an in-memory string.
     bool LoadString(const char* data);
-
-    // Draw all loaded OZONE models into the current 3D frame.
     void Draw(Camera3D& camera);
-
-    // Unload all meshes and models.
     void Unload();
 
-    // Access individual renderables.
     int Count() const { return (int)m_renderables.size(); }
     OzoneRenderable* Get(int index);
 
-    // Singleton
     static OzoneLoader& Instance();
 
 private:
     std::vector<OzoneRenderable> m_renderables;
 
-    // Dispatch to the correct mesh generator based on primitive type.
+    Texture2D m_floorTex{0};
+    Texture2D m_wallTex{0};
+    Texture2D m_columnTex{0};
+    Texture2D m_ceilTex{0};
+
+    void LoadWorldTextures(const std::string& worldDir);
+    void UnloadTextures();
+
     Model BuildFromPrimitive(int type, const std::vector<float>& args);
 
-    // Individual mesh generators (each returns a fully-textured Model).
     Model BuildBox(float w, float h, float d);
     Model BuildCylinder(float rTop, float rBot, float h, int slices);
     Model BuildSphere(float r, int segments);

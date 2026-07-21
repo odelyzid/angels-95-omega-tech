@@ -1,8 +1,32 @@
 #include "Editor.hpp"
 #include "raylib.h"
+#include <string>
+#include <vector>
 
 enum class PlaceMode { MODEL, PICKUP, NODE, ENV };
 static PlaceMode g_placeMode = PlaceMode::MODEL;
+
+// --- Top menu bar state ---
+static int g_menuActive = -1;      // which dropdown is open (-1 = none)
+static bool g_showSoundMgr = false;
+static bool g_showTextureMgr = false;
+static bool g_showPawnMgr = false;
+static bool g_showScriptMgr = false;
+
+struct MenuItem { const char* label; void (*handler)(); };
+struct MenuDef { const char* label; std::vector<MenuItem> items; };
+
+static void ToggleSoundMgr()  { g_showSoundMgr   = !g_showSoundMgr; g_menuActive = -1; }
+static void ToggleTextureMgr(){ g_showTextureMgr = !g_showTextureMgr; g_menuActive = -1; }
+static void TogglePawnMgr()   { g_showPawnMgr   = !g_showPawnMgr; g_menuActive = -1; }
+static void ToggleScriptMgr() { g_showScriptMgr = !g_showScriptMgr; g_menuActive = -1; }
+
+static std::vector<MenuDef> g_menus = {
+    {"Sound",     {{"Sound Manager...", ToggleSoundMgr}}},
+    {"Texture",   {{"Texture Manager...", ToggleTextureMgr}}},
+    {"Pawn",      {{"Pawn Manager...", TogglePawnMgr}}},
+    {"Script",    {{"Script Manager...", ToggleScriptMgr}}}
+};
 
 // Forward declarations for overlay UI functions
 static void DrawOverlay();
@@ -10,6 +34,11 @@ static void RenderPreview();
 static void DrawEnvPanel();
 static void DrawPickupPanel();
 static void DrawNodePanel();
+static void DrawMenuBar();
+static void DrawSoundManager();
+static void DrawTextureManager();
+static void DrawPawnManager();
+static void DrawScriptManager();
 
 int main(int argc, char **argv){
     SetWindowState(FLAG_VSYNC_HINT);
@@ -232,19 +261,27 @@ int main(int argc, char **argv){
         BeginDrawing();
         DrawTexturePro(Target.texture, (Rectangle){0, 0, (float)Target.texture.width, -(float)Target.texture.height},
                        (Rectangle){0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()}, (Vector2){0,0}, 0, WHITE);
-        DrawFPS(10, 10);
-        DrawText(TextFormat("%.1f, %.1f, %.1f", OTEditor.MainCamera.position.x, OTEditor.MainCamera.position.y, OTEditor.MainCamera.position.z), 10, 40, 15, PURPLE);
+        DrawFPS(10, 34);
+        DrawText(TextFormat("%.1f, %.1f, %.1f", OTEditor.MainCamera.position.x, OTEditor.MainCamera.position.y, OTEditor.MainCamera.position.z), 10, 52, 15, PURPLE);
         DrawText(TextFormat("Mode: %s  (1=MODEL 2=PICKUP 3=NODE 4=ENV)",
                 g_placeMode == PlaceMode::MODEL ? "MODEL" :
                 g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
-                g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, 60, 15, WHITE);
-        DrawText("oz_editor (TAB=Overlay H=Help)", 10, 80, 15, WHITE);
+                g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, 72, 15, WHITE);
+
+        // Top menu bar (always visible)
+        DrawMenuBar();
 
         if (OverlayEnabled) {
             DrawOverlay();
             if (!IsMouseButtonReleased(0) && GetCollision(0, 0, 144, 720, GetMouseX(), GetMouseY(), 5, 5))
                 RenderPreview();
         }
+
+        // Manager panels (opened from menu bar)
+        DrawSoundManager();
+        DrawTextureManager();
+        DrawPawnManager();
+        DrawScriptManager();
 
         EndDrawing();
 
@@ -263,6 +300,138 @@ int main(int argc, char **argv){
     }
     
     CloseWindow();
+}
+
+// =====================================================================
+// Top menu bar with dropdowns
+// =====================================================================
+static void DrawMenuBar() {
+    int sw = GetScreenWidth();
+    const int BAR_H = 24;
+    const int ITEM_W = 80;
+
+    // Draw bar background
+    DrawRectangle(0, 0, sw, BAR_H, (Color){40, 40, 40, 255});
+    DrawLine(0, BAR_H, sw, BAR_H, (Color){80, 80, 80, 255});
+
+    int cx = 4;
+    for (int m = 0; m < (int)g_menus.size(); m++) {
+        // Menu label button
+        Rectangle r = {(float)cx, 2, (float)ITEM_W, (float)BAR_H - 4};
+        bool hovered = CheckCollisionPointRec(GetMousePosition(), r);
+        Color bg = (m == g_menuActive) ? (Color){60, 60, 80, 255}
+                  : hovered ? (Color){55, 55, 55, 255}
+                  : (Color){40, 40, 40, 255};
+        DrawRectangleRec(r, bg);
+        DrawText(g_menus[m].label, cx + 8, 5, 12, WHITE);
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered) {
+            g_menuActive = (g_menuActive == m) ? -1 : m;
+        }
+
+        // Draw dropdown if active
+        if (m == g_menuActive) {
+            int dy = BAR_H;
+            for (auto& item : g_menus[m].items) {
+                Rectangle dr = {(float)cx, (float)dy, 180, 22};
+                bool dh = CheckCollisionPointRec(GetMousePosition(), dr);
+                DrawRectangleRec(dr, dh ? (Color){70, 70, 90, 255} : (Color){50, 50, 50, 255});
+                DrawText(item.label, (int)cx + 6, dy + 4, 12, LIGHTGRAY);
+
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && dh) {
+                    if (item.handler) item.handler();
+                }
+                dy += 22;
+            }
+            // Outline the dropdown
+            DrawRectangleLines(cx, BAR_H, 180, (int)g_menus[m].items.size() * 22, (Color){100, 100, 120, 255});
+        }
+        cx += ITEM_W + 2;
+    }
+
+    // Click outside closes menu
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && g_menuActive >= 0) {
+        bool inside = false;
+        for (int m = 0; m < (int)g_menus.size(); m++)
+            if (CheckCollisionPointRec(GetMousePosition(), {4 + (float)m*(ITEM_W+2), 2, (float)ITEM_W, (float)BAR_H-4}))
+                inside = true;
+        if (!inside) {
+            // Also check inside open dropdown:
+            if (g_menuActive >= 0 && g_menuActive < (int)g_menus.size()) {
+                Rectangle dr = {4 + (float)g_menuActive*(ITEM_W+2), (float)BAR_H, 180, (float)g_menus[g_menuActive].items.size() * 22};
+                if (CheckCollisionPointRec(GetMousePosition(), dr))
+                    inside = true;
+            }
+            if (!inside) g_menuActive = -1;
+        }
+    }
+}
+
+// =====================================================================
+// Manager panel windows  (opened from menu bar)
+// =====================================================================
+static void DrawSoundManager() {
+    if (!g_showSoundMgr) return;
+    GuiWindowBox((Rectangle){200, 60, 400, 280}, "Sound Manager");
+    GuiLabel((Rectangle){210, 90, 200, 20}, "Sound resources (WIP)");
+    GuiLabel((Rectangle){210, 120, 360, 40},
+        "Placeholder: list, preview, and manage\nsound assets per world.");
+    if (GuiButton((Rectangle){210, 200, 120, 28}, "Close"))
+        g_showSoundMgr = false;
+}
+
+static void DrawTextureManager() {
+    if (!g_showTextureMgr) return;
+    GuiWindowBox((Rectangle){250, 80, 480, 320}, "Texture Manager");
+    int y = 110;
+    struct { const char* name; Texture2D* tex; } entries[] = {
+        {"Model1", &WDLModels.Model1Texture},
+        {"Model2", &WDLModels.Model2Texture},
+        {"Model3", &WDLModels.Model3Texture},
+        {"Model4", &WDLModels.Model4Texture},
+        {"Model5", &WDLModels.Model5Texture},
+        {"HeightMap", &WDLModels.HeightMapTexture},
+    };
+    for (auto& e : entries) {
+        GuiLabel((Rectangle){260, (float)y, 200, 20},
+            TextFormat("%s: %dx%d", e.name, e.tex->id > 0 ? e.tex->width : 0,
+                                          e.tex->id > 0 ? e.tex->height : 0));
+        y += 22;
+    }
+    GuiLabel((Rectangle){260, (float)y, 200, 20},
+        TextFormat("Total models: %d / loaded: %d", 20, CachedModelCounter));
+    y += 30;
+    if (GuiButton((Rectangle){260, (float)y, 120, 28}, "Close"))
+        g_showTextureMgr = false;
+}
+
+static void DrawPawnManager() {
+    if (!g_showPawnMgr) return;
+    GuiWindowBox((Rectangle){300, 100, 360, 200}, "Pawn Manager");
+    GuiLabel((Rectangle){310, 130, 320, 40},
+        "Pawn system: fully implemented but not yet\n"
+        "wired into the game client.\n"
+        "See oz_pawn_system.h for definitions.");
+    if (GuiButton((Rectangle){310, 200, 120, 28}, "Close"))
+        g_showPawnMgr = false;
+}
+
+static void DrawScriptManager() {
+    if (!g_showScriptMgr) return;
+    GuiWindowBox((Rectangle){350, 120, 420, 300}, "Script Manager");
+    GuiLabel((Rectangle){360, 150, 200, 20}, "Available scripts:");
+    int y = 175;
+    for (int i = 1; i <= 10; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/Scripts/Script%d.ps", OTEditor.Path, i);
+        bool exists = IsPathFile(path);
+        GuiLabel((Rectangle){360, (float)y, 360, 18},
+            TextFormat("Script %d: %s", i, exists ? path : "(not found)"));
+        y += 18;
+    }
+    y += 12;
+    if (GuiButton((Rectangle){360, (float)y, 120, 28}, "Close"))
+        g_showScriptMgr = false;
 }
 
 static void DrawEnvPanel() {

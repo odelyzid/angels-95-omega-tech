@@ -13,8 +13,10 @@ else
   RAYLIB_LIB := $(wildcard C:/raylib/w64devkit/lib/libraylib.a)
   ifneq ($(RAYLIB_LIB),)
     RAYLIB_DIR := -LC:/raylib/w64devkit/lib
+    RAYLIB_INC := -IC:/raylib/w64devkit/include
   else
     RAYLIB_DIR :=
+    RAYLIB_INC :=
   endif
   LDFLAGS := $(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
   RPATH :=
@@ -22,10 +24,10 @@ else
   SERVER_LIBS := -lm -lws2_32
 endif
 
-CFLAGS := -O3 --std=c++20 $(PIC)
+CFLAGS := -O3 --std=c++20 $(PIC) $(RAYLIB_INC)
 COMP := g++
 SERVER_CXX := g++
-SERVER_FLAGS := -O3 --std=c++20
+SERVER_FLAGS := -O3 --std=c++20 $(RAYLIB_INC)
 
 # Object files (OTCustom statically linked to avoid DLL cross-platform issues)
 OBJS := raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \

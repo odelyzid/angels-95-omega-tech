@@ -21,3 +21,6 @@ System/
 
 # Windows executables
 *.exe
+
+# Save files (binary, do not commit)
+*.sav
