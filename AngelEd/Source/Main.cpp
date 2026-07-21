@@ -25,6 +25,17 @@ namespace fs = std::filesystem;
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
 
+// CSG sidebar bridge globals
+int g_csgOpFromSidebar = 0;
+bool g_csgCollisionFromSidebar = false;
+
+void CsgSidebarPlace(float px, float py, float pz, float w, float h, float d, float rot, float scale) {
+    OmegaTechEditor.X = px; OmegaTechEditor.Y = py; OmegaTechEditor.Z = pz;
+    OmegaTechEditor.W = w;  OmegaTechEditor.H = h;  OmegaTechEditor.L = d;
+    OmegaTechEditor.R = rot; OmegaTechEditor.S = scale;
+    OmegaTechEditor.DrawModel = true;
+}
+
 // Editor log file (appended to System/AngelEd.log)
 static FILE* g_editorLog = nullptr;
 static void EditorLog(const char* fmt, ...) {
@@ -61,140 +72,20 @@ static bool g_pendingNew = false;
 static Sound g_previewSound = {0};
 static bool g_previewSoundLoaded = false;
 
-// --- Top menu bar state ---
-static int g_menuActive = -1;      // which dropdown is open (-1 = none)
-
-struct MenuItem { const char* label; void (*handler)(); };
-struct MenuDef { const char* label; std::vector<MenuItem> items; };
-
-static void FileNew();
-static void FileOpen();
-static void FileSaveAs();
-static void ClearScene();
-static bool LoadWorldDocument(const fs::path& path);
-static bool SaveWorldDocument(const fs::path& path);
-
-// --- Menu handler helpers ---
-static void ActionUndo() {
-    if (!g_documentPath.empty() && g_documentPath.extension() == ".wdl")
-        LoadWorldDocument(g_documentPath);
-    g_menuActive = -1;
-}
-static void ActionSave() {
-    if (!g_documentPath.empty() && g_documentPath.extension() == ".wdl")
-        SaveWorldDocument(g_documentPath);
-    else FileSaveAs();
-    g_menuActive = -1;
-}
-static void ActionResetCam() { OTEditor.MainCamera.position = {0, 10, 0}; g_menuActive = -1; }
-static void ActionCamUp()    { OTEditor.MainCamera.position.y += 2;   g_menuActive = -1; }
-static void ActionCamDown()  { OTEditor.MainCamera.position.y -= 2; g_menuActive = -1; }
-
-static void ToggleSoundMgr()    { ShowSoundManager(!g_editorPanels.showSoundMgr);     g_menuActive = -1; }
-static void ToggleTextureMgr()  { ShowTextureManager(!g_editorPanels.showTextureMgr); g_menuActive = -1; }
-static void TogglePawnMgr()     { ShowPawnManager(!g_editorPanels.showPawnMgr);       g_menuActive = -1; }
-static void ToggleScriptMgr()   { ShowScriptManager(!g_editorPanels.showScriptMgr);   g_menuActive = -1; }
-static void ToggleModelBrowser(){ ShowModelBrowser(!g_editorPanels.showModelBrowser); g_menuActive = -1; }
-static void TogglePickupPanel() { ShowPickupPanel(!g_editorPanels.showPickupPanel);   g_menuActive = -1; }
-static void ToggleNodePanel()   { ShowNodePanel(!g_editorPanels.showNodePanel);       g_menuActive = -1; }
-static void ToggleEnvPanel()    { ShowEnvPanel(!g_editorPanels.showEnvPanel);         g_placeMode = PlaceMode::ENV; g_menuActive = -1; }
-
-static void PlaceBoxCollision() {
-    EMID = 100; g_placeMode = PlaceMode::MODEL;
-    OmegaTechEditor.DrawModel = true;
-    OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-    OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-    OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-    OmegaTechEditor.R = 1;
-    g_menuActive = -1;
-}
-static void PlaceAdvCollision() {
-    EMID = -1; g_placeMode = PlaceMode::MODEL;
-    OmegaTechEditor.W = OTEditor.MainCamera.position.x + 5;
-    OmegaTechEditor.H = OTEditor.MainCamera.position.y + 5;
-    OmegaTechEditor.L = OTEditor.MainCamera.position.z + 5;
-    OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-    OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-    OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-    OmegaTechEditor.R = 1;
-    OmegaTechEditor.DrawModel = true;
-    g_menuActive = -1;
-}
-static void PlaceHeightClipBox() {
-    EMID = -2; g_placeMode = PlaceMode::MODEL;
-    OmegaTechEditor.W = OTEditor.MainCamera.position.x + 5;
-    OmegaTechEditor.H = OTEditor.MainCamera.position.y + 5;
-    OmegaTechEditor.L = OTEditor.MainCamera.position.z + 5;
-    OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-    OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-    OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-    OmegaTechEditor.R = 1;
-    OmegaTechEditor.DrawModel = true;
-    g_menuActive = -1;
-}
-static void ToggleCollision() {
-    CollisionToggle = !CollisionToggle;
-    g_menuActive = -1;
-}
-
-static std::vector<MenuDef> g_menus = {
-    {"File", {
-        {"New", FileNew},
-        {"Open...", FileOpen},
-        {"Save As...", FileSaveAs},
-        {"---", nullptr},
-        {"Undo", ActionUndo},
-        {"Save", ActionSave}
-    }},
-    {"Models", {
-        // Items rebuilt dynamically via RebuildModelsMenu()
-    }},
-    {"Pickups", {
-        {"Pickup Panel...", TogglePickupPanel}
-    }},
-    {"Nodes", {
-        {"Node Panel...", ToggleNodePanel}
-    }},
-    {"View", {
-        {"Reset Camera", ActionResetCam},
-        {"Camera Up",    ActionCamUp},
-        {"Camera Down",  ActionCamDown},
-        {"---", nullptr},
-        {"Environment Settings...", ToggleEnvPanel},
-        {"Sound Manager...",        ToggleSoundMgr},
-        {"Texture Manager...",      ToggleTextureMgr},
-        {"Script Manager...",       ToggleScriptMgr}
-    }},
-    {"Pawn", {
-        {"Pawn Manager...", TogglePawnMgr}
-    }}
-};
-
-static void ToggleHeightmapEditor() { ShowHeightmapEditor(!g_editorPanels.showHeightmapEditor); g_menuActive = -1; }
-
-// Rebuild the Models submenu to show loaded model count
-static void RebuildModelsMenu() {
-    if (g_menus.size() < 2) return;
-    MenuDef& modelsMenu = g_menus[1];
-    modelsMenu.items.clear();
-    modelsMenu.items.push_back({"Model Browser...", ToggleModelBrowser});
-    int n = WDLModels.GetModelCount();
-    if (n > 0) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "(%d models loaded)", n);
-        modelsMenu.items.push_back({strdup(buf), nullptr});
-        modelsMenu.items.push_back({"---", nullptr});
-    }
-    modelsMenu.items.push_back({"Box Collision",    PlaceBoxCollision});
-    modelsMenu.items.push_back({"Adv Collision",    PlaceAdvCollision});
-    modelsMenu.items.push_back({"Height Clip Box",  PlaceHeightClipBox});
-    modelsMenu.items.push_back({"Toggle Collision", ToggleCollision});
-    modelsMenu.items.push_back({"---", nullptr});
-    modelsMenu.items.push_back({"Heightmap Editor...", ToggleHeightmapEditor});
-}
-
-// Forward declarations for overlay UI functions
-static void DrawMenuBar();
+// Panel toggle helpers (keyboard-driven, no top menu bar)
+static void ToggleSoundMgr()    { ShowSoundManager(!g_editorPanels.showSoundMgr); }
+static void ToggleTextureMgr()  { ShowTextureManager(!g_editorPanels.showTextureMgr); }
+static void TogglePawnMgr()     { ShowPawnManager(!g_editorPanels.showPawnMgr); }
+static void ToggleScriptMgr()   { ShowScriptManager(!g_editorPanels.showScriptMgr); }
+static void ToggleModelBrowser(){ ShowModelBrowser(!g_editorPanels.showModelBrowser); }
+static void TogglePickupPanel() { ShowPickupPanel(!g_editorPanels.showPickupPanel); }
+static void ToggleNodePanel()   { ShowNodePanel(!g_editorPanels.showNodePanel); }
+static void ToggleEnvPanel()    { ShowEnvPanel(!g_editorPanels.showEnvPanel); g_placeMode = PlaceMode::ENV; }
+static void ToggleHeightmapEditor() { ShowHeightmapEditor(!g_editorPanels.showHeightmapEditor); }
+static void ToggleCollision()   { CollisionToggle = !CollisionToggle; }
+static void ResetCamera()       { OTEditor.MainCamera.position = {0, 10, 0}; }
+static void CamUp()             { OTEditor.MainCamera.position.y += 2; }
+static void CamDown()           { OTEditor.MainCamera.position.y -= 2; }
 
 // Model preview for Win32 dialog (render-to-texture)
 static RenderTexture2D g_previewRT = {0};
@@ -295,7 +186,6 @@ static bool LoadWorldDocument(const fs::path& path) {
             if (WDLModels.GetModelName(i)) names.push_back(WDLModels.GetModelName(i));
         SetTextureTargetNames(names);
     }
-    RebuildModelsMenu();
 
     OTEditor.WorldData = LoadFile(path.string().c_str());
     CacheWDL();
@@ -335,19 +225,16 @@ static bool SaveWorldDocument(const fs::path& path) {
 
 static void FileNew() {
     g_pendingNew = true;
-    g_menuActive = -1;
 }
 
 static void FileOpen() {
     std::string path;
     if (ChooseOpenWorldFile(path)) g_pendingOpenPath = fs::path(path);
-    g_menuActive = -1;
 }
 
 static void FileSaveAs() {
     std::string path;
     if (ChooseSaveWorldFile(path)) SaveWorldDocument(fs::path(path));
-    g_menuActive = -1;
 }
 
 static bool ApplyTextureToModel(int target, const char* path) {
@@ -390,8 +277,8 @@ int main(int argc, char **argv){
             if (WDLModels.GetModelName(i)) names.push_back(WDLModels.GetModelName(i));
         SetTextureTargetNames(names);
     }
-    RebuildModelsMenu();
     CacheWDL();
+    ShowCsgSidebar(true);
 
     // Register default pawn definitions
     {
@@ -695,8 +582,6 @@ int main(int argc, char **argv){
         }
 
         // Top menu bar (always visible)
-        DrawMenuBar();
-
         EndDrawing();
 
     #ifdef _WIN32
@@ -815,6 +700,17 @@ int main(int argc, char **argv){
             EMID = 0; // 0 = user-selected obj
             g_editorPanels.actionPlaceModel = -1;
         }
+        if (g_editorPanels.actionCsgPlace >= 0) {
+            g_placeMode = PlaceMode::MODEL;
+            OmegaTechEditor.CSGOperation = g_csgOpFromSidebar;
+            CollisionToggle = g_csgCollisionFromSidebar;
+            OmegaTechEditor.DrawModel = true;
+            int primType = g_editorPanels.actionCsgPlace;
+            // Map primitive type to EMID
+            // 0=box, 1=cyl, 2=sph, 3=pyr, 4=pln — use 200+ offset for OZONE primitives
+            EMID = 200 + primType;
+            g_editorPanels.actionCsgPlace = -1;
+        }
         if (g_editorPanels.actionRefreshBrowser) {
             ScanModelBrowserFiles();
             g_editorPanels.actionRefreshBrowser = false;
@@ -839,7 +735,20 @@ int main(int argc, char **argv){
             OmegaTechEditor.CSGOperation = (OmegaTechEditor.CSGOperation + 1) % 5;
         }
 
-        if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
+        // Panel keyboard shortcuts (F5-F12 replace old top menu bar)
+        if (IsKeyPressed(KEY_F5))  ToggleModelBrowser();
+        if (IsKeyPressed(KEY_F6))  ToggleSoundMgr();
+        if (IsKeyPressed(KEY_F7))  ToggleTextureMgr();
+        if (IsKeyPressed(KEY_F8))  TogglePawnMgr();
+        if (IsKeyPressed(KEY_F9))  ToggleScriptMgr();
+        if (IsKeyPressed(KEY_F10)) TogglePickupPanel();
+        if (IsKeyPressed(KEY_F11)) ToggleFullscreen();  // supersedes old F11 handling
+        if (IsKeyPressed(KEY_F12)) ToggleEnvPanel();
+
+        // Camera shortcuts
+        if (IsKeyPressed(KEY_HOME)) ResetCamera();
+        if (IsKeyPressed(KEY_PAGE_UP)) CamUp();
+        if (IsKeyPressed(KEY_PAGE_DOWN)) CamDown();
 
     }
 
@@ -859,72 +768,5 @@ int main(int argc, char **argv){
 // =====================================================================
 // Top menu bar with dropdowns
 // =====================================================================
-static void DrawMenuBar() {
-    int sw = GetScreenWidth();
-    const int BAR_H = 24;
-    const int ITEM_W = 80;
-
-    // Draw bar background
-    DrawRectangle(0, 0, sw, BAR_H, (Color){40, 40, 40, 255});
-    DrawLine(0, BAR_H, sw, BAR_H, (Color){80, 80, 80, 255});
-
-    int cx = 4;
-    for (int m = 0; m < (int)g_menus.size(); m++) {
-        // Menu label button
-        Rectangle r = {(float)cx, 2, (float)ITEM_W, (float)BAR_H - 4};
-        bool hovered = CheckCollisionPointRec(GetMousePosition(), r);
-        Color bg = (m == g_menuActive) ? (Color){60, 60, 80, 255}
-                  : hovered ? (Color){55, 55, 55, 255}
-                  : (Color){40, 40, 40, 255};
-        DrawRectangleRec(r, bg);
-        DrawText(g_menus[m].label, cx + 8, 5, 12, WHITE);
-
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered) {
-            g_menuActive = (g_menuActive == m) ? -1 : m;
-        }
-
-        // Draw dropdown if active
-        if (m == g_menuActive) {
-            int dy = BAR_H;
-            for (auto& item : g_menus[m].items) {
-                Rectangle dr = {(float)cx, (float)dy, 180, 22};
-                bool dh = CheckCollisionPointRec(GetMousePosition(), dr);
-                if (item.label == std::string("---")) {
-                    DrawRectangleRec(dr, (Color){50, 50, 50, 255});
-                    DrawLine((int)cx + 4, (int)dy + 11, (int)cx + 176, (int)dy + 11, (Color){100, 100, 100, 255});
-                } else {
-                    DrawRectangleRec(dr, dh ? (Color){70, 70, 90, 255} : (Color){50, 50, 50, 255});
-                    DrawText(item.label, (int)cx + 6, dy + 4, 12, LIGHTGRAY);
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && dh) {
-                        if (item.handler) item.handler();
-                    }
-                }
-                dy += 22;
-            }
-            // Outline the dropdown
-            DrawRectangleLines(cx, BAR_H, 180, (int)g_menus[m].items.size() * 22, (Color){100, 100, 120, 255});
-        }
-        cx += ITEM_W + 2;
-    }
-
-    // Click outside closes menu
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && g_menuActive >= 0) {
-        bool inside = false;
-        for (int m = 0; m < (int)g_menus.size(); m++)
-            if (CheckCollisionPointRec(GetMousePosition(), {4 + (float)m*(ITEM_W+2), 2, (float)ITEM_W, (float)BAR_H-4}))
-                inside = true;
-        if (!inside) {
-            // Also check inside open dropdown:
-            if (g_menuActive >= 0 && g_menuActive < (int)g_menus.size()) {
-                Rectangle dr = {4 + (float)g_menuActive*(ITEM_W+2), (float)BAR_H, 180, (float)g_menus[g_menuActive].items.size() * 22};
-                if (CheckCollisionPointRec(GetMousePosition(), dr))
-                    inside = true;
-            }
-            if (!inside) g_menuActive = -1;
-        }
-    }
-}
-
-// (Manager panel windows are now implemented as Win32 native dialogs
-//  in Win32Dialogs.cpp. The raygui versions have been removed.)
-// In-viewport overlay has been replaced by top menu bar + Win32 dialogs.
+// All panel managers are implemented as Win32 native dialogs
+// in Win32Dialogs.cpp. Panels toggled via keyboard shortcuts (F5-F12).

@@ -30,6 +30,7 @@ struct EditorPanelState {
     bool showNodePanel = false;
     bool showSettingsPanel = false;
     bool showHeightmapEditor = false;
+    bool showCsgSidebar = false;
 
     // Model browser state (used cross-platform)
     std::vector<ModelBrowserEntry> modelEntries;
@@ -45,6 +46,7 @@ struct EditorPanelState {
     int actionTextureTarget = -1;
     std::string actionPreviewSoundPath;
     bool actionStopSoundPreview = false;
+    int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
 
 #ifdef _WIN32
     // Window handles (Windows only)
@@ -58,6 +60,7 @@ struct EditorPanelState {
     void* hNodePanel = nullptr;
     void* hSettingsPanel = nullptr;
     void* hHeightmapEditor = nullptr;
+    void* hCsgSidebar = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -74,6 +77,7 @@ struct EditorPanelState {
     WinPos nodePanelPos  = {290, 400, 200, 200};
     WinPos settingsPos        = {50, 50, 400, 600};
     WinPos heightmapEditorPos = {120, 100, 520, 480};
+    WinPos csgSidebarPos = {0, 0, 200, 720};
 #endif
 };
 
@@ -109,6 +113,7 @@ void ShowEnvPanel(bool show);
 void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
+void ShowCsgSidebar(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
 void SetTextureTargetNames(const std::vector<std::string>& names);
@@ -127,6 +132,7 @@ inline void ShowEnvPanel(bool) {}
 inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void ShowHeightmapEditor(bool) {}
+inline void ShowCsgSidebar(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
 inline void SetTextureTargetNames(const std::vector<std::string>&) {}
