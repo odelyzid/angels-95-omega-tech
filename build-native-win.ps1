@@ -1,4 +1,4 @@
-﻿# build-native-win.ps1 — Native Windows build using C:\raylib w64devkit + raylib
+# build-native-win.ps1 — Native Windows build using C:\raylib w64devkit + raylib
 # Run from repo root: powershell -File build-native-win.ps1
 
 param(
@@ -122,6 +122,8 @@ g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningEntityRegistry.cpp -o
 if ($LASTEXITCODE -ne 0) { Fail "LightningEntityRegistry.cpp compilation failed" }
 
 g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o 2>&1
+g++ @EDITOR_FLAGS @EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail ""EditorIcons.cpp compilation failed"" }
 if ($LASTEXITCODE -ne 0) { Fail "LightningEntityManager.cpp compilation failed" }
 
 # Compile OTCustom stub
@@ -130,11 +132,11 @@ $stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
 # Link editor
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "AngelEd link failed" }
 
 # Cleanup editor objects
-Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, OzBsp.o, WorldChunk.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
+Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, OzBsp.o, WorldChunk.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, EditorIcons.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
 Write-Step "AngelEd.exe built."
 

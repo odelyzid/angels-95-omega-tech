@@ -3,7 +3,7 @@
 #include <vector>
 
 // =====================================================================
-// Win32Dialogs — Real OS-level window panels for AngelEd
+// Win32Dialogs â€” Real OS-level window panels for AngelEd
 // =====================================================================
 // On Windows, these are actual native OS windows.
 // On other platforms, they are stubs (no-ops).
@@ -49,6 +49,13 @@ struct EditorPanelState {
     int actionSoundCategory = 0;    // 0=SFX, 1=Music, 2=Ambience
     int actionSoundLoop = 0;        // 0=no loop, 1=loop
     int actionSoundVolume = 80;     // 0-100
+        // Heightmap editor action flags
+    std::string actionHeightmapImage;
+    std::string actionHeightmapTexture;
+    float actionHmPosX = 0, actionHmPosY = 0, actionHmPosZ = 0;
+    float actionHmSx = 100, actionHmSy = 50, actionHmSz = 100;
+    float actionHmScale = 1.0f;
+    bool actionGenerateHeightmap = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
 
 #ifdef _WIN32
@@ -86,7 +93,7 @@ struct EditorPanelState {
 
 extern EditorPanelState g_editorPanels;
 
-// --- ZoneProperties — replaces old EnvSettings ---
+// --- ZoneProperties â€” replaces old EnvSettings ---
 enum class GameType : uint8_t {
     SINGLEPLAYER,
     COOP,

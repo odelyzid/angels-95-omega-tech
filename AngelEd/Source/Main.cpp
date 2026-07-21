@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "rlgl.h"
 #include "Win32Dialogs.hpp"
+#include "EditorIcons.hpp"
 #include "../../Source/IniConfig.hpp"
 #include "../../Source/OzOzoneLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
@@ -256,6 +257,9 @@ int main(int argc, char **argv){
     SetTargetFPS(60);
     GuiLoadStyleDark();
 
+    // Load editor toolbar icons
+    EditorIcons::Instance().Load();
+
     g_documentPath = argc > 1 && argv[1] ? fs::path(argv[1]) : fs::path("../GameData/World.wdl");
     SetWorldDirectory(g_documentPath.parent_path());
 
@@ -450,7 +454,7 @@ int main(int argc, char **argv){
         // OZONE world geometry
         OzoneLoader::Instance().Draw(OTEditor.MainCamera);
 
-        // Pawn system — draw active pawns as billboards
+        // Pawn system ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â draw active pawns as billboards
         PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
         PawnSystem::Instance().DrawEntities(OTEditor.MainCamera);
 
@@ -564,6 +568,7 @@ int main(int argc, char **argv){
                         case EditorNodeType::SPAWN: nodePrefix = L"Spawn:";   break;
                         case EditorNodeType::NPC:   nodePrefix = L"NPC:";     break;
                         case EditorNodeType::LIGHT: nodePrefix = L"Light:";   break;
+                        case EditorNodeType::ZONE: nodePrefix = L"ZoneInfo:";   break;
                     }
                     // Node format: type:subtype:x:y:z:0:0:
                     WDLCommand += nodePrefix + to_wstring((int)OmegaTechEditor.ActiveNodeType) + L":" +
@@ -604,13 +609,68 @@ int main(int argc, char **argv){
         EndTextureMode();
 
         BeginDrawing();
+        // Top toolbar with icons
+        {
+            int tw = GetScreenWidth();
+            int tbH = 28;
+            DrawRectangle(0, 0, tw, tbH, (Color){35, 35, 40, 220});
+            DrawLine(0, tbH, tw, tbH, (Color){60, 60, 70, 255});
+
+            auto& ico = EditorIcons::Instance();
+            int bx = 4, iy = 4, is = 20;
+
+            auto tBtn = [&](const char* icon, const char* label, int cmd) {
+                int lw = (label ? (int)strlen(label) * 7 + 4 : 0);
+                int bw = (icon ? 24 : 0) + lw + 4;
+                Rectangle r = {(float)bx, 2, (float)bw, (float)tbH - 4};
+                bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+                DrawRectangleRec(r, hover ? (Color){55,55,65,255} : (Color){45,45,50,255});
+                if (icon && ico.Has(icon)) ico.Draw(icon, bx+2, iy, is, WHITE);
+                if (label) DrawText(label, bx+(icon?26:4), 7, 12, LIGHTGRAY);
+                if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    if (cmd==0) ToggleModelBrowser(); else if(cmd==1) ToggleSoundMgr();
+                    else if(cmd==2) ToggleTextureMgr(); else if(cmd==3) TogglePawnMgr();
+                    else if(cmd==4) ToggleScriptMgr(); else if(cmd==5) ToggleEnvPanel();
+                    else if(cmd==6) TogglePickupPanel(); else if(cmd==7) ToggleNodePanel();
+                    else if(cmd==8) ToggleHeightmapEditor();
+                    else if(cmd==10) { FileNew(); } else if(cmd==11) { FileOpen(); }
+                    else if(cmd==12) { FileSaveAs(); }
+                }
+                bx += bw + 2;
+            };
+
+            tBtn(nullptr,"New",10); tBtn(nullptr,"Open",11); tBtn(nullptr,"Save",12);
+            bx += 6;
+            tBtn("BBGeneric","Mod",0); tBtn(nullptr,"Snd",1); tBtn(nullptr,"Tex",2);
+            tBtn(nullptr,"Pawn",3); tBtn(nullptr,"Scr",4); bx += 6;
+
+            for (int li=0;li<3;li++) {
+                const char* labs[]={"Lit","Unlit","Wire"};
+                int lw=38; Color lc=(int)OTEditor.ViewMode==li?(Color){70,90,120,255}:(Color){45,45,50,255};
+                DrawRectangle(bx,2,lw,tbH-4,lc);
+                DrawText(labs[li],bx+4,7,12,(int)OTEditor.ViewMode==li?WHITE:LIGHTGRAY);
+                if(CheckCollisionPointRec(GetMousePosition(),{(float)bx,2,(float)lw,(float)tbH-4})&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                    OTEditor.ViewMode=(LightingMode)li;
+                bx+=lw+2;
+            }
+            bx+=6;
+            tBtn("ModeAdd",nullptr,20); tBtn("ModeSubtract",nullptr,21);
+            tBtn("ModeIntersect",nullptr,22); tBtn("ModeDeintersect",nullptr,23);
+            bx+=4;
+            tBtn("BBCube",nullptr,30); tBtn("BBCylinder",nullptr,31);
+            tBtn("BBSphere",nullptr,32); tBtn("BBSheet",nullptr,33);
+            tBtn("BBTerrain",nullptr,34); bx+=6;
+            tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);
+            tBtn("PolyTexInfo","Pickup",6);
+        }
+
         // Draw the 3D viewport render target (offset by sidebar width)
         int sbW = 200;
         DrawTexturePro(Target.texture, (Rectangle){0, 0, (float)Target.texture.width, -(float)Target.texture.height},
-                       (Rectangle){(float)sbW, 0, (float)(GetScreenWidth() - sbW), (float)GetScreenHeight()}, (Vector2){0,0}, 0, WHITE);
-        DrawFPS(GetScreenWidth() - 60, 10);
+                       (Rectangle){(float)sbW, 28, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - 28)}, (Vector2){0,0}, 0, WHITE);
+        DrawFPS(GetScreenWidth() - 60, 36);
 
-        // Left sidebar overlay (always visible) — CSG brushes + tools
+        // Left sidebar overlay (always visible) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â CSG brushes + tools
         {
             const int sbW = 200;
             Color bg = {25, 25, 30, 220};
@@ -620,18 +680,41 @@ int main(int argc, char **argv){
             int y = 10;
             DrawText("CSG Brushes", 10, y, 16, WHITE); y += 24;
 
-            // Primitive type display
-            const char* primLabels[] = {"Box", "Cylinder", "Sphere", "Pyramid", "Plane"};
-            int prim = g_editorPanels.actionCsgPlace >= 0 ? g_editorPanels.actionCsgPlace : 0;
-            DrawText(TextFormat("Primitive: %s", primLabels[prim]), 10, y, 13, LIGHTGRAY); y += 18;
-            DrawText("(1-5 to change)", 10, y, 11, DARKGRAY); y += 22;
+            // Primitive type display with icons
+            {
+                const char* primLabels[] = {"Box", "Cylinder", "Sphere", "Pyramid", "Plane"};
+                const char* primIcons[] = {"BBCube", "BBCylinder", "BBSphere", "BBGeneric", "BBSheet"};
+                int prim = g_editorPanels.actionCsgPlace >= 0 ? g_editorPanels.actionCsgPlace : 0;
+                auto& ico = EditorIcons::Instance();
+                for (int pi = 0; pi < 5; pi++) {
+                    int px = 10 + pi * 36;
+                    Color pc = (pi == prim) ? (Color){70, 90, 120, 255} : (Color){40, 40, 45, 255};
+                    DrawRectangle(px, y, 32, 24, pc);
+                    if (ico.Has(primIcons[pi])) ico.Draw(primIcons[pi], px + 6, y + 2, 16, WHITE);
+                    else DrawText(primLabels[pi], px + 2, y + 6, 10, LIGHTGRAY);
+                    if (CheckCollisionPointRec(GetMousePosition(), {(float)px, (float)y, 32, 24}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                        { g_editorPanels.actionCsgPlace = pi; g_placeMode = PlaceMode::MODEL; }
+                }
+                y += 28;
+            }
 
-            // CSG operation
-            static const char* csgLabels[] = {"SOLID", "ADD", "SUB", "INTERSECT", "DE_RESC"};
-            int op = OmegaTechEditor.CSGOperation;
-            if (op < 0 || op > 4) op = 0;
-            DrawText(TextFormat("Operation: %s", csgLabels[op]), 10, y, 13, ORANGE); y += 18;
-            DrawText("(G to cycle)", 10, y, 11, DARKGRAY); y += 22;
+            // CSG operation with icons
+            {
+                const char* csgLabels[] = {"SOLID", "ADD", "SUB", "INTERSECT", "DE_RESC"};
+                const char* csgIcons[] = {nullptr, "ModeAdd", "ModeSubtract", "ModeIntersect", "ModeDeintersect"};
+                int op = OmegaTechEditor.CSGOperation;
+                auto& ico = EditorIcons::Instance();
+                for (int oi = 0; oi < 5; oi++) {
+                    int px = 10 + oi * 36;
+                    Color oc = (oi == op) ? (Color){70, 90, 120, 255} : (Color){40, 40, 45, 255};
+                    DrawRectangle(px, y, 32, 24, oc);
+                    if (oi > 0 && ico.Has(csgIcons[oi])) ico.Draw(csgIcons[oi], px + 6, y + 2, 16, WHITE);
+                    else DrawText(csgLabels[oi], px + 2, y + 6, 10, LIGHTGRAY);
+                    if (CheckCollisionPointRec(GetMousePosition(), {(float)px, (float)y, 32, 24}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                        { OmegaTechEditor.CSGOperation = oi; }
+                }
+                y += 28;
+            }
 
             // Placement info
             DrawText(TextFormat("Pos: %.1f %.1f %.1f", OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z),
@@ -795,7 +878,7 @@ int main(int argc, char **argv){
             OmegaTechEditor.DrawModel = true;
             int primType = g_editorPanels.actionCsgPlace;
             // Map primitive type to EMID
-            // 0=box, 1=cyl, 2=sph, 3=pyr, 4=pln — use 200+ offset for OZONE primitives
+            // 0=box, 1=cyl, 2=sph, 3=pyr, 4=pln ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â use 200+ offset for OZONE primitives
             EMID = 200 + primType;
             g_editorPanels.actionCsgPlace = -1;
         }
@@ -852,6 +935,7 @@ int main(int argc, char **argv){
 
     // Cleanup
     EditorLog("=== AngelEd shutting down ===");
+    EditorIcons::Instance().Unload();
     if (g_editorLog) fclose(g_editorLog);
     StopSoundPreview();
     OzoneLoader::Instance().Unload();

@@ -162,7 +162,7 @@ static HWND CreateListBox(HWND hParent, int x, int y, int w, int h, int id) {
 }
 
 // =====================================================================
-// Sound Manager v2 — Category tabs, volume, loop, source info
+// Sound Manager v2 Ã¢â‚¬â€ Category tabs, volume, loop, source info
 // =====================================================================
 static const int ID_SOUND_LIST     = 101;
 static const int ID_SOUND_REFRESH  = 102;
@@ -298,7 +298,7 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Texture Manager v2 — oztex integration, preview, source info
+// Texture Manager v2 Ã¢â‚¬â€ oztex integration, preview, source info
 // =====================================================================
 static const int ID_TEX_LIST       = 101;
 static const int ID_TEX_REFRESH    = 102;
@@ -574,7 +574,7 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Script Manager — Dynamic file scanning (GameData/ + packages)
+// Script Manager Ã¢â‚¬â€ Dynamic file scanning (GameData/ + packages)
 // =====================================================================
 static const int ID_SCRIPT_CLOSE = 100;
 static const int ID_SCRIPT_LIST  = 101;
@@ -672,7 +672,7 @@ void ScanModelBrowserFiles() {
                 if (entry.is_regular_file()) {
                     std::string ext = entry.path().extension().string();
                     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (ext == ".obj") {
+                    if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".iqm" || ext == ".vox" || ext == ".m3d") {
                         ModelBrowserEntry mbe;
                         mbe.name = entry.path().stem().string();
                         mbe.path = entry.path().string();
@@ -689,7 +689,7 @@ void ScanModelBrowserFiles() {
     for (const auto& pkgPath : pkgFiles) {
         std::string ext = pkgPath.substr(pkgPath.rfind('.'));
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".obj") {
+        if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".iqm" || ext == ".vox" || ext == ".m3d") {
             ModelBrowserEntry mbe;
             std::string name = pkgPath;
             size_t slash = name.rfind('/');
@@ -807,7 +807,7 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // Environment Settings
 // =====================================================================
 // =====================================================================
-// ZoneProperties — replaces EnvPanel with Fog/Ambient/GameType/Particles
+// ZoneProperties Ã¢â‚¬â€ replaces EnvPanel with Fog/Ambient/GameType/Particles
 // =====================================================================
 static int g_zoneTab = 0; // 0=Fog, 1=Ambient, 2=GameType, 3=Particles
 
@@ -867,7 +867,7 @@ static const int ID_ZONE_APPLY_PAR   = 168;
 
 static void ShowZoneTab(HWND hwnd, int tab) {
     g_zoneTab = tab;
-    // Hide all tab panels — we use show/hide on groups of controls
+    // Hide all tab panels Ã¢â‚¬â€ we use show/hide on groups of controls
     // For simplicity, re-show all controls and let each WM_CREATE handle layout
     // (Full tab switching with ShowWindow per group would be ideal but
     //  requires storing HWNDs for each control group)
@@ -1157,7 +1157,7 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Heightmap Editor — Load, configure, and preview terrain heightmaps
+// Heightmap Editor Ã¢â‚¬â€ Load, configure, and preview terrain heightmaps
 // =====================================================================
 static const int ID_HM_IMAGE      = 210;
 static const int ID_HM_TEX        = 211;
@@ -1280,7 +1280,7 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// CSG Sidebar — left-side brush tool window (like UnrealEd)
+// CSG Sidebar Ã¢â‚¬â€ left-side brush tool window (like UnrealEd)
 // =====================================================================
 static const int ID_CSG_BOX    = 301;
 static const int ID_CSG_CYL    = 302;
@@ -1438,7 +1438,7 @@ static LRESULT CALLBACK CsgSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
 }
 
 // =====================================================================
-// Public API — Create / Destroy
+// Public API Ã¢â‚¬â€ Create / Destroy
 // =====================================================================
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     g_hInst = (HINSTANCE)hInst;

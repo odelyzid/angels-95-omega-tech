@@ -12,10 +12,13 @@ namespace fs = std::filesystem;
 
 RenderTexture2D Target;
 
+enum class LightingMode : uint8_t { LIT, UNLIT, WIREFRAME, DYNAMIC };
+
 class Editor{
     public:
         Camera3D MainCamera = {0}; 
         Camera3D PreviewCamera = {0}; 
+        LightingMode ViewMode = LightingMode::LIT;
         char Path[512] = {};
         wstring WorldData;
         wstring OtherData;
@@ -26,6 +29,7 @@ class Editor{
         float AmbientIntensity = 0.4f;
         // Window flag
         bool ShowEnvPanel = false;
+        bool ShowWireframe = false;
         // Lit fog shader
         Shader LitFogShader = {0};
         int FogStartLoc = -1;
@@ -108,7 +112,7 @@ class GameModels
             }
         }
 
-        // Get a loaded model by 1-based WDL ModelId (Model1 → 1, Model2 → 2, ...)
+        // Get a loaded model by 1-based WDL ModelId (Model1 â†’ 1, Model2 â†’ 2, ...)
         LoadedModel* GetModelByWDLId(int wdlId) {
             int idx = wdlId - 1;
             if (idx >= 0 && idx < (int)models.size() && models[idx].loaded)

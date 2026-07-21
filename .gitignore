@@ -32,3 +32,10 @@ build/*.DB
 build/*.DB-shm
 build/*.DB-wal
 build/*.db
+
+# Precompiled headers
+*.gch
+# Build cache
+build/*.DB
+build/*.DB-shm
+build/*.DB-wal

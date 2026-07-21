@@ -62,11 +62,13 @@ $(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
 LIGHTNING_OBJS := $(addprefix $(BUILD_DIR)/, \
     LightningScriptContext.o LightningScriptParser.o \
     LightningEntityRegistry.o LightningEntityManager.o)
-EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS)
+$(BUILD_DIR)/EditorIcons.o: Source/EditorIcons.cpp Source/EditorIcons.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/EditorIcons.cpp -o $@
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorIcons.o $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 	$(COMP) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 
 clean:
 	rm -f AngelEd
-	rm -f $(BUILD_DIR)/Main.o $(BUILD_DIR)/Win32Dialogs.o $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Custom.so
+	rm -f $(BUILD_DIR)/Main.o $(BUILD_DIR)/Win32Dialogs.o $(BUILD_DIR)/raygui.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/Custom.so
 	rm -f $(LIGHTNING_OBJS)
