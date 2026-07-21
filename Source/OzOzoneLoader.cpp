@@ -478,6 +478,13 @@ void OzoneLoader::RebuildCollisionVolumes() {
         csg.Apply(brush);
     }
 
+    // Overflow protection: merge adjacent coplanar AABBs
+    int merges = csg.MergePass();
+    if (merges > 0) {
+        OZ_INFO("CSG: merged %d adjacent volumes (count: %d → %d)",
+                merges, csg.Count() + merges, csg.Count());
+    }
+
     // Phase 2: convert CSG-processed volumes to collision volumes
     std::vector<CsgProcessor::Volume> vols;
     csg.GetVolumes(vols);

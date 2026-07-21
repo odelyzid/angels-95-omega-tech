@@ -686,6 +686,14 @@ int main(int argc, char **argv){
             DrawText(TextFormat("CSG: %s", csgLabels[op]), 10, 92, 15, ORANGE);
         }
 
+        // Collision volume count
+        {
+            int volCount = OzoneLoader::Instance().GetCollisionVolumes().size();
+            int chunkCount = OzoneLoader::Instance().GetChunkManager().CellCount();
+            DrawText(TextFormat("Collision: %d volumes / %d chunks", volCount, chunkCount),
+                     10, 112, 14, (volCount > 500) ? RED : DARKGREEN);
+        }
+
         // Top menu bar (always visible)
         DrawMenuBar();
 

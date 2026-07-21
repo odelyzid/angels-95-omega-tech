@@ -30,6 +30,8 @@ struct CsgBrush {
 //               keep only the overlapping portion
 class CsgProcessor {
 public:
+    static constexpr int MAX_SPLITS = 64;  // hard cap on per-brush split count
+
     void Clear();
     void Apply(const CsgBrush& brush);
 
@@ -44,6 +46,10 @@ public:
     // Convenience: fill a vector of BoundingBox-like structs
     struct Volume { float minX, minY, minZ, maxX, maxY, maxZ; };
     void GetVolumes(std::vector<Volume>& out) const;
+
+    // Overflow protection: merge adjacent coplanar AABBs into larger ones.
+    // Returns number of merges performed.
+    int MergePass();
 
 private:
     struct AABB { float minX, minY, minZ, maxX, maxY, maxZ; };

@@ -10,7 +10,7 @@
 | 4 | SkyZoneInfo skybox rendering | ✅ Complete |
 | 5 | Editor UI for CSG + Heightmap | ✅ Complete |
 | 6+7 | Server sync + Large-scale partitioning/chunking | ✅ Complete |
-| 8 | CSG overflow protection | ⏳ Pending |
+| 8 | CSG overflow protection | ✅ Complete |
 | 9 | World migration (World3 → EngineTest.ozone) | ⏳ Pending |
 | 10 | LightningScript — ZoneInfo/SkyZoneInfo pawn | 🔮 Future |
 
@@ -114,12 +114,19 @@ After the CsgProcessor finishes, run a merge pass:
 - Before saving, show estimated collision volume count in the editor
 - If count exceeds threshold (e.g., 500), warn the user about potential performance impact
 
-### Files to modify:
+### Implementation complete:
+- **8.1 MergePass**: Iterative merge of adjacent coplanar AABBs (X, Y, Z adjacency checks with EPS tolerance). Repeats until no more merges possible (max 10 passes).
+- **8.2 Split limit**: `MAX_SPLITS = 64` hard cap in `CsgProcessor::Subtract`. Warns once via stderr if exceeded.
+- **8.3 Editor display**: Collision volume count + chunk count shown in AngelEd HUD (green if ≤ 500, red if exceeded).
+- `MergePass()` called after CSG processing in `OzoneLoader::RebuildCollisionVolumes()`.
+
+### Files modified:
 | File | Changes |
 |---|---|
-| `Source/Physics/OzBsp.hpp` | Add `MergePass()`, max split constant |
-| `Source/Physics/OzBsp.cpp` | Implement merge algorithm, fragment limit |
+| `Source/Physics/OzBsp.hpp` | `MAX_SPLITS` constant, `MergePass()` method |
+| `Source/Physics/OzBsp.cpp` | `MergePass()` implementation, fragment limit check |
 | `Source/OzOzoneLoader.cpp` | Call `MergePass()` after CSG processing |
+| `AngelEd/Source/Main.cpp` | Collision volume + chunk count HUD display |
 
 ---
 

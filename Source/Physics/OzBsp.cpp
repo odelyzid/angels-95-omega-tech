@@ -1,6 +1,8 @@
 #include "OzBsp.hpp"
 #include <algorithm>
 #include <cstring>
+#include <cmath>
+#include <cstdio>
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -63,6 +65,18 @@ void CsgProcessor::Subtract(int idx, const AABB& sub) {
     if (AABB_Contains(sub.minX, sub.minY, sub.minZ, sub.maxX, sub.maxY, sub.maxZ,
                       sx, sy, sz, ex, ey, ez)) {
         RemoveAt(idx);
+        return;
+    }
+
+    // Overflow protection: if this split would push the total over MAX_SPLITS,
+    // skip the split and keep the original solid intact (log via stderr).
+    int currentCount = (int)m_solidMinX.size();
+    if (currentCount + 6 > MAX_SPLITS) {
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr, "[CSG] Overflow: split would exceed %d volumes, aborting split\n", MAX_SPLITS);
+            warned = true;
+        }
         return;
     }
 
@@ -162,4 +176,76 @@ void CsgProcessor::GetVolumes(std::vector<Volume>& out) const {
     for (int i = 0; i < n; i++)
         out.push_back({m_solidMinX[i], m_solidMinY[i], m_solidMinZ[i],
                        m_solidMaxX[i], m_solidMaxY[i], m_solidMaxZ[i]});
+}
+
+// ---------------------------------------------------------------------------
+// MergePass — combine adjacent coplanar AABBs into larger volumes
+// Returns the number of merges performed.
+//
+// Two AABBs can merge if they are adjacent on exactly one axis and have
+// identical min/max on the other two (i.e., they share a complete face).
+// ---------------------------------------------------------------------------
+int CsgProcessor::MergePass() {
+    int totalMerges = 0;
+    const float EPS = 0.001f;  // small tolerance for floating-point comparison
+
+    for (int iter = 0; iter < 10; iter++) {  // max 10 passes
+        bool merged = false;
+        int n = Count();
+        for (int i = n - 1; i >= 0 && !merged; i--) {
+            for (int j = i - 1; j >= 0 && !merged; j--) {
+                // Check adjacency on X axis
+                if (std::fabs(m_solidMaxX[i] - m_solidMinX[j]) < EPS ||
+                    std::fabs(m_solidMaxX[j] - m_solidMinX[i]) < EPS) {
+                    // Same Y and Z extent?
+                    if (std::fabs(m_solidMinY[i] - m_solidMinY[j]) < EPS &&
+                        std::fabs(m_solidMaxY[i] - m_solidMaxY[j]) < EPS &&
+                        std::fabs(m_solidMinZ[i] - m_solidMinZ[j]) < EPS &&
+                        std::fabs(m_solidMaxZ[i] - m_solidMaxZ[j]) < EPS) {
+                        // Merge along X: combine the X ranges
+                        float newMinX = std::min(m_solidMinX[i], m_solidMinX[j]);
+                        float newMaxX = std::max(m_solidMaxX[i], m_solidMaxX[j]);
+                        m_solidMinX[j] = newMinX; m_solidMaxX[j] = newMaxX;
+                        RemoveAt(i);
+                        merged = true;
+                        totalMerges++;
+                    }
+                }
+                // Check adjacency on Z axis
+                else if (std::fabs(m_solidMaxZ[i] - m_solidMinZ[j]) < EPS ||
+                         std::fabs(m_solidMaxZ[j] - m_solidMinZ[i]) < EPS) {
+                    // Same X and Y extent?
+                    if (std::fabs(m_solidMinX[i] - m_solidMinX[j]) < EPS &&
+                        std::fabs(m_solidMaxX[i] - m_solidMaxX[j]) < EPS &&
+                        std::fabs(m_solidMinY[i] - m_solidMinY[j]) < EPS &&
+                        std::fabs(m_solidMaxY[i] - m_solidMaxY[j]) < EPS) {
+                        float newMinZ = std::min(m_solidMinZ[i], m_solidMinZ[j]);
+                        float newMaxZ = std::max(m_solidMaxZ[i], m_solidMaxZ[j]);
+                        m_solidMinZ[j] = newMinZ; m_solidMaxZ[j] = newMaxZ;
+                        RemoveAt(i);
+                        merged = true;
+                        totalMerges++;
+                    }
+                }
+                // Check adjacency on Y axis
+                else if (std::fabs(m_solidMaxY[i] - m_solidMinY[j]) < EPS ||
+                         std::fabs(m_solidMaxY[j] - m_solidMinY[i]) < EPS) {
+                    // Same X and Z extent?
+                    if (std::fabs(m_solidMinX[i] - m_solidMinX[j]) < EPS &&
+                        std::fabs(m_solidMaxX[i] - m_solidMaxX[j]) < EPS &&
+                        std::fabs(m_solidMinZ[i] - m_solidMinZ[j]) < EPS &&
+                        std::fabs(m_solidMaxZ[i] - m_solidMaxZ[j]) < EPS) {
+                        float newMinY = std::min(m_solidMinY[i], m_solidMinY[j]);
+                        float newMaxY = std::max(m_solidMaxY[i], m_solidMaxY[j]);
+                        m_solidMinY[j] = newMinY; m_solidMaxY[j] = newMaxY;
+                        RemoveAt(i);
+                        merged = true;
+                        totalMerges++;
+                    }
+                }
+            }
+        }
+        if (!merged) break;
+    }
+    return totalMerges;
 }
