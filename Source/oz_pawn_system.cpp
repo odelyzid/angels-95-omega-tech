@@ -3,6 +3,7 @@
 #include "EngineBillboard.hpp"
 #include "Player.hpp"
 #include "Items.hpp"
+#include "Log.hpp"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -62,7 +63,7 @@ void PawnSystem::RegisterDef(const PawnDef& def) {
 int PawnSystem::Spawn(Vector3 pos, const char* defName) {
     PawnDef* def = FindDef(defName);
     if (!def) {
-        fprintf(stderr, "PawnSystem: unknown def '%s'\n", defName);
+        OZ_WARN("PawnSystem: unknown def '%s'", defName);
         return -1;
     }
 
@@ -90,6 +91,7 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
     p.scream = {0};
     p.defName = defName;
 
+    OZ_DEBUG("Pawn spawned: id=%d def=%s at (%.1f, %.1f, %.1f)", p.id, defName, pos.x, pos.y, pos.z);
     return (int)p.id;
 }
 
@@ -99,6 +101,7 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
 void PawnSystem::Despawn(int id) {
     for (size_t i = 0; i < m_pawns.size(); i++) {
         if (m_pawns[i].active && m_pawns[i].id == (uint32_t)id) {
+            OZ_DEBUG("Pawn despawned: id=%d def=%s", id, m_pawns[i].defName.c_str());
             m_pawns[i].active = false;
             m_freeIds.push_back((int)i);
             return;
@@ -245,7 +248,7 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                         break;
                 }
             }
-            fprintf(stderr, "Pickup collected: %s (itemId=%d)\n", n.typeName.c_str(), itemId);
+            OZ_INFO("Pickup collected: %s (itemId=%d)", n.typeName.c_str(), itemId);
         }
     }
 }
@@ -340,7 +343,27 @@ void PawnSystem::DrawAll(Camera3D& camera) {
 }
 
 // ---------------------------------------------------------------------------
-// DrawEntities - draw player starts, pickups, zones as billboards
+// Emitter Nodes (Sound / Music markers)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddEmitter(const EmitterNode& node) {
+    EmitterNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_emitters.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveEmitter(int id) {
+    auto it = std::remove_if(m_emitters.begin(), m_emitters.end(),
+        [id](const EmitterNode& n) { return n.id == (uint32_t)id; });
+    m_emitters.erase(it, m_emitters.end());
+}
+
+void PawnSystem::ClearEmitters() {
+    m_emitters.clear();
+}
+
+// ---------------------------------------------------------------------------
+// DrawEntities - draw player starts, pickups, zones, emitters as billboards
 // ---------------------------------------------------------------------------
 void PawnSystem::DrawEntities(Camera3D& camera) {
     // Player start billboards
@@ -368,6 +391,12 @@ void PawnSystem::DrawEntities(Camera3D& camera) {
         else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
         else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
         EngineBillboard::Draw(camera, icon, center, 1.0f);
+    }
+
+    // Sound / music emitter billboards
+    for (auto& n : m_emitters) {
+        const char* icon = (n.type == EmitterType::SOUND) ? "Sound" : "Music";
+        EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f);
     }
 }
 

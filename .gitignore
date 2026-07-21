@@ -24,3 +24,5 @@ System/
 
 # Save files (binary, do not commit)
 *.sav
+
+build.log

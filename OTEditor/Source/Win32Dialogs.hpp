@@ -107,6 +107,7 @@ void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
+void SetTextureTargetNames(const std::vector<std::string>& names);
 bool ChooseOpenWorldFile(std::string& outPath);
 bool ChooseSaveWorldFile(std::string& outPath);
 #else
@@ -123,6 +124,7 @@ inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
+inline void SetTextureTargetNames(const std::vector<std::string>&) {}
 inline bool ChooseOpenWorldFile(std::string&) { return false; }
 inline bool ChooseSaveWorldFile(std::string&) { return false; }
 inline EnvSettings GetEnvSettings() { return {}; }

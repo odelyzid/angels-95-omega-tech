@@ -2,6 +2,8 @@
 #include "oz_assetmapper.h"
 #include "oz_pawn_system.h"
 #include "Server/OzoneParser.hpp"
+#include "Log.hpp"
+#include "PackageAssetLoader.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -88,7 +90,7 @@ void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
     m_columnTex = load("industrial_metal_a1_32x32.png");
     m_ceilTex   = load("industrial_tech_a1_128x128.png");
     if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id)
-        fprintf(stderr, "OzoneLoader: loaded world textures from %soztex/tileset/\n", worldDir.c_str());
+        OZ_INFO("OzoneLoader: loaded world textures from %soztex/tileset/", worldDir.c_str());
 }
 
 void OzoneLoader::UnloadTextures() {
@@ -247,6 +249,7 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 // LoadFile — also loads world textures from the .ozone file's directory
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadFile(const char* path) {
+    OZ_INFO("OzoneLoader: loading %s", path);
     Unload();
     auto& pawns = PawnSystem::Instance();
     pawns.DespawnAll();
@@ -285,7 +288,7 @@ bool OzoneLoader::LoadFile(const char* path) {
         m_renderables.push_back(r);
     }
 
-    fprintf(stderr, "OzoneLoader: loaded %zu primitives from %s\n", primitives.size(), path);
+    OZ_INFO("OzoneLoader: loaded %zu primitives from %s", primitives.size(), path);
     return true;
 }
 

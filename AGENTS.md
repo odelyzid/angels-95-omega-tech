@@ -72,12 +72,12 @@ Universal container with 32-byte header + sorted file index:
 
 ### Runtime Loading
 
-`PackageAssetLoader` (Source/PackageAssetLoader.hpp):
-- Initialized at startup via `PackageAssetLoader::Instance().Init()`
-- Scans `System/Data/*.oz*` and opens all packages
-- Provides `*WithFallback` wrappers: `LoadTextureWithFallback`, `LoadSoundWithFallback`, etc.
+`PackageAssetLoader` (`Source/PackageAssetLoader.hpp`):
+- Call `PackageAssetLoader::Instance().Init()` at startup to scan `System/Data/*.oz*`
+- Provides `*WithFallback` wrappers: `LoadTextureWithFallback`, `LoadSoundWithFallback`, `LoadModelWithFallback`, `LoadShaderWithFallback`, etc.
 - Path resolution: tries exact path → basename → stripped prefix
 - Models use temp-file cache in `System/Cache/` (raylib has no `LoadModelFromMemory`)
+- `ListAllFiles()` enumerates entries across all loaded packages (used by editor)
 
 ### Asset Packaging
 
@@ -89,9 +89,9 @@ Uses `OzPack.exe` to create packages from `GameData/` subdirectories.
 
 ## Architecture
 
-- **Client entrypoint:** `Source/Main.cpp:674` `main()`
-- **Server entrypoint:** `Source/Server/Server.cpp:666` `main()` — no raylib dep, uses raw sockets
-- **Editor entrypoint:** `OTEditor/Source/Main.cpp` — Win32 panels + raylib viewport
+- **Client entrypoint:** `Source/Main.cpp:694` `main()`
+- **Server entrypoint:** `Source/Server/Server.cpp:794` `main()` — no raylib dep, uses raw sockets
+- **Editor entrypoint:** `OTEditor/Source/Main.cpp:363` `main()` — Win32 panels + raylib viewport
 - **Engine core:** `Source/Core.hpp` (~2200 lines, single header) — init, menu, world loading, render loop, shaders
 - **World format:** WDL (colon-delimited plain text) + OZONE (editor format). Parser in `Source/Server/WDLParser.hpp` (standalone, no raylib)
 - **Networking:** Custom UDP protocol (`Source/Network/Network.hpp`). Packed structs (`#pragma pack(push,1)`). Discovery on UDP 27100, game on 27015.
@@ -113,6 +113,7 @@ Replaces the legacy `OmegaEnemy[10]` array with a dynamic, unlimited NPC system.
   PawnSystem::Instance().Update(playerPos, dt);
   PawnSystem::Instance().DrawAll(camera);
   ```
+- **GetDefs()** returns `const std::vector<PawnDef>&` for enumerating registered definitions (used by editor Pawn Manager).
 - **Integration:** WDL "Walker" entries spawn via `PawnSystem::Spawn`. `UpdateEntities()` calls `PawnSystem::Update` + `DrawAll`.
 - **Editor:** Registers same defs (Walker, Skaarj, Brute, Floater). Win32 Pawn Manager panel for spawning.
 
@@ -122,20 +123,22 @@ Win32 native panels + raylib 3D viewport.
 
 - **Source:** `OTEditor/Source/`
 - **Panels:** Model Browser, Environment Settings, Pickups, Nodes, Pawn Manager, Texture Manager, Sound Manager, Script Manager
+- **Top menu bar** replaces old in-viewport raygui overlay. Controls placed in File, Models, Pickups, Nodes, View, Pawn menus.
 - **Win32 API:** `OTEditor/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` in `EditorPanelState` for cross-platform compat. Requires `(HWND)` casts at call sites.
+- **Win32 message loop:** The editor main loop calls `PeekMessage`/`TranslateMessage`/`DispatchMessage` before each raylib frame to process Win32 panel events.
+- **Dynamic file scanning:** All panels now scan `GameData/` recursively + package entries via `PackageAssetLoader`. No hardcoded file stubs.
 - **Unicode:** `Win32Dialogs.cpp` defines `UNICODE` / `_UNICODE` for wide-string Win32 API.
 - **Linked engine objects:** `oz_pawn_system.o`, `oz_ozone_loader.o`, `OzoneParser.o`
-- **Build:** Included in `build-native-win.ps1` and `build.ps1`
+- **Editor build (manual):** See `build-native-win.ps1` or CI workflow for exact g++ flags.
 
 ## Conventions & quirks
 
-- **Windows compat hack:** `Source/WindowsCompat.hpp` `#define CloseWindow __WIN32_CloseWindow` to avoid raylib/winsock2 name collision. Must be included early.
+- **Windows compat hack:** `Source/WindowsCompat.hpp` `#define CloseWindow __WIN32_CloseWindow` to avoid raylib/winsock2 name collision. Must be included early in any file that touches both.
 - **OTCustom statically linked** to avoid DLL issues cross-platform.
 - **Asset paths:** Most loads use `*WithFallback` wrappers that check filesystem first, then packages. Server `--dir` flag overrides for world scanning.
-- **`#include <bits/stdc++.h>`** in `ParticleDemon.hpp` (non-standard, GCC-only, slow).
 - **Game data encryption** (`GameDataEncoded` flag) uses a substitution cipher in `Encoder.hpp`. Currently disabled (`false`).
-- **`using namespace std;`** used in multiple headers.
-- **Legacy EntityCount 10:** Still defined in `Entities.hpp` for backward compat, but `PawnSystem` is the authoritative NPC system.
+- **`using namespace std;`** used in multiple headers (`PPGIO.hpp`, `Data.hpp`, `Encoder.hpp`, `TextSystem.hpp`, `ParasiteScriptData.hpp`).
+- **`Entities.hpp`** retains `EnemyTexture` class for legacy texture/sound handles; the dynamic entity system is `PawnSystem`.
 
 ## CI (.github/workflows/ci.yml)
 

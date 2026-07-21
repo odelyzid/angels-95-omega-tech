@@ -12,39 +12,44 @@ else
 endif
 
 COMP := g++
-OBJS := raygui.o Main.o $(WIN32_OBJS)
+BUILD_DIR := ../build
 
 .PHONY: all clean
 
 all: oz_editor
 
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
 # 1. Compile Main Editor Source
-Main.o: Source/Main.cpp Source/*.hpp
-	$(COMP) $(CFLAGS) -c Source/Main.cpp
+$(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Main.cpp -o $@
 
 # 2. Compile Win32 Dialog support (Windows only)
-Win32Dialogs.o: Source/Win32Dialogs.cpp Source/Win32Dialogs.hpp
-	$(COMP) $(CFLAGS) -c Source/Win32Dialogs.cpp
+$(BUILD_DIR)/Win32Dialogs.o: Source/Win32Dialogs.cpp Source/Win32Dialogs.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Win32Dialogs.cpp -o $@
 
 # 3. Compile Custom Engine Behavior
-Custom.so:
+$(BUILD_DIR)/Custom.so:
 	@if [ -f Source/OTCustom.cpp ]; then \
-		$(COMP) $(CFLAGS) -c Source/OTCustom.cpp -o OTCustom.o; \
+		$(COMP) $(CFLAGS) -c Source/OTCustom.cpp -o $(BUILD_DIR)/OTCustom.o; \
 	elif [ -f Source/Custom.cpp ]; then \
-		$(COMP) $(CFLAGS) -c Source/Custom.cpp -o OTCustom.o; \
+		$(COMP) $(CFLAGS) -c Source/Custom.cpp -o $(BUILD_DIR)/OTCustom.o; \
 	else \
-		echo "int main_custom() { return 0; }" | $(COMP) $(CFLAGS) -x c++ -c - -o OTCustom.o; \
+		echo "int main_custom() { return 0; }" | $(COMP) $(CFLAGS) -x c++ -c - -o $(BUILD_DIR)/OTCustom.o; \
 	fi
-	$(COMP) $(CFLAGS) -shared OTCustom.o -o Custom.so
-	rm -f OTCustom.o
+	$(COMP) $(CFLAGS) -shared $(BUILD_DIR)/OTCustom.o -o $@
+	rm -f $(BUILD_DIR)/OTCustom.o
 
 # 4. Compile raygui layer
-raygui.o: Source/raygui/raygui.c
-	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -shared -DRAYGUI_IMPLEMENTATION -DBUILD_LIBTYPE_SHARED $(LDFLAGS)
+$(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
+	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -shared -DRAYGUI_IMPLEMENTATION -DBUILD_LIBTYPE_SHARED $(LDFLAGS) -o $@
 
 # 5. Link into final oz_editor binary
-oz_editor: $(OBJS) Custom.so
-	$(COMP) $(OBJS) -o oz_editor $(CFLAGS) -L. -l:Custom.so $(LDFLAGS) -Wl,-rpath=.
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS))
+oz_editor: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
+	$(COMP) $(EDITOR_OBJS) -o oz_editor $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 
 clean:
-	rm -f *.o *.so oz_editor OTEditor
+	rm -f oz_editor OTEditor
+	rm -f $(BUILD_DIR)/Main.o $(BUILD_DIR)/Win32Dialogs.o $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Custom.so

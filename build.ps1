@@ -215,11 +215,7 @@ if (-not $SkipData) {
     Write-Step "Skipping asset packaging (-SkipData)"
 }
 
-# --- 7. Cleanup intermediate objects ---
-Remove-Item "$PSScriptRoot\*.o" -Force -ErrorAction SilentlyContinue
-Remove-Item "$PSScriptRoot\OTEditor\*.o" -Force -ErrorAction SilentlyContinue
-
-# --- 8. Verify outputs ---
+# --- 7. Verify outputs ---
 Write-Step "Verifying outputs..."
 $missing = @()
 foreach ($exe in @("Angels95.exe", "oz_server.exe", "oz_editor.exe", "OzPack.exe")) {

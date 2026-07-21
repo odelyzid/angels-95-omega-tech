@@ -4,9 +4,28 @@
 #include <cstring>
 #include <ctime>
 #include <algorithm>
+#include <sys/stat.h>
 
 std::vector<LogLine> Log::s_buffer;
 std::mutex Log::s_mutex;
+static FILE* g_logFile = nullptr;
+
+// Open log file (truncate on first call, append thereafter)
+static void EnsureLogFile() {
+    if (g_logFile) return;
+    g_logFile = fopen("System/angels95.log", "w");
+    if (!g_logFile) {
+        // Fallback: try current directory
+        g_logFile = fopen("angels95.log", "w");
+    }
+    if (g_logFile) {
+        time_t now = time(nullptr);
+        char ts[64];
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        fprintf(g_logFile, "=== Angels95 Log started %s ===\n", ts);
+        fflush(g_logFile);
+    }
+}
 
 void Log::write(LogLevel level, const char* file, int line, const char* fmt, ...) {
     char buf[LOG_WINDOW_MAX_LINE_LENGTH];
@@ -40,7 +59,16 @@ void Log::write(LogLevel level, const char* file, int line, const char* fmt, ...
 
     // Print to stderr
     fprintf(stderr, "%s\n", buf);
-    fflush(stderr);
+
+    // Write to file
+    EnsureLogFile();
+    if (g_logFile) {
+        time_t now = time(nullptr);
+        char ts[64];
+        strftime(ts, sizeof(ts), "%H:%M:%S", localtime(&now));
+        fprintf(g_logFile, "[%s] %s\n", ts, buf);
+        fflush(g_logFile);
+    }
 
     // Store in ring buffer
     const std::lock_guard<std::mutex> lock(s_mutex);
@@ -56,6 +84,16 @@ void Log::write(LogLevel level, const char* file, int line, const char* fmt, ...
 }
 
 void Log::raw(LogLevel level, const char* msg) {
+    // Write to file
+    EnsureLogFile();
+    if (g_logFile) {
+        time_t now = time(nullptr);
+        char ts[64];
+        strftime(ts, sizeof(ts), "%H:%M:%S", localtime(&now));
+        fprintf(g_logFile, "[%s] [RAW] %s\n", ts, msg);
+        fflush(g_logFile);
+    }
+
     const std::lock_guard<std::mutex> lock(s_mutex);
     LogLine ll;
     ll.level = level;

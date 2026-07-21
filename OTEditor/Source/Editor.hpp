@@ -4,12 +4,13 @@
 #include "../../Source/oz_ozone_loader.h"
 #include <cstring>
 #include <cmath>
+#include <filesystem>
+#include <algorithm>
+namespace fs = std::filesystem;
 
 #define MaxCachedModels 200
 
 RenderTexture2D Target;
-RenderTexture2D PreviewTarget;
-Model CurrentModel;
 
 class Editor{
     public:
@@ -37,6 +38,14 @@ class Editor{
 
 static Editor OTEditor;
 
+// Per-model entry in the dynamic model array
+struct LoadedModel {
+    Model model;
+    Texture2D texture;
+    std::string name;
+    bool loaded = false;
+};
+
 class GameModels
 {
     public:
@@ -50,35 +59,71 @@ class GameModels
         Model HeightMap;
         Texture2D HeightMapTexture;
 
-        Model Model1;  Texture2D Model1Texture;
-        Model Model2;  Texture2D Model2Texture;
-        Model Model3;  Texture2D Model3Texture;
-        Model Model4;  Texture2D Model4Texture;
-        Model Model5;  Texture2D Model5Texture;
-        Model Model6;  Texture2D Model6Texture;
-        Model Model7;  Texture2D Model7Texture;
-        Model Model8;  Texture2D Model8Texture;
-        Model Model9;  Texture2D Model9Texture;
-        Model Model10; Texture2D Model10Texture;
-        Model Model11; Texture2D Model11Texture;
-        Model Model12; Texture2D Model12Texture;
-        Model Model13; Texture2D Model13Texture;
-        Model Model14; Texture2D Model14Texture;
-        Model Model15; Texture2D Model15Texture;
-        Model Model16; Texture2D Model16Texture;
-        Model Model17; Texture2D Model17Texture;
-        Model Model18; Texture2D Model18Texture;
-        Model Model19; Texture2D Model19Texture;
-        Model Model20; Texture2D Model20Texture;
+        std::vector<LoadedModel> models;
 
-        Model FastModel1;  Texture2D FastModel1Texture;
-        Model FastModel2;  Texture2D FastModel2Texture;
-        Model FastModel3;  Texture2D FastModel3Texture;
-        Model FastModel4;  Texture2D FastModel4Texture;
-        Model FastModel5;  Texture2D FastModel5Texture;
+        // Dynamically load all .obj files from <worldPath>/Models/
+        void LoadModels(const std::string& worldPath) {
+            for (auto& m : models) {
+                if (m.loaded) {
+                    if (m.texture.id > 0) UnloadTexture(m.texture);
+                    UnloadModel(m.model);
+                }
+            }
+            models.clear();
+
+            fs::path dir = fs::path(worldPath) / "Models";
+            if (!fs::exists(dir)) return;
+
+            std::vector<fs::path> objFiles;
+            for (auto& entry : fs::directory_iterator(dir)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".obj") objFiles.push_back(entry.path());
+                }
+            }
+            std::sort(objFiles.begin(), objFiles.end());
+
+            for (auto& objPath : objFiles) {
+                LoadedModel lm;
+                lm.name = objPath.stem().string();
+                lm.model = LoadModel(objPath.string().c_str());
+                if (lm.model.meshes == nullptr) {
+                    lm.loaded = false;
+                    models.push_back(lm);
+                    continue;
+                }
+                std::string base = objPath.parent_path().string() + "/" + lm.name;
+                std::string texPath = base + "_texture.png";
+                if (!fs::exists(texPath)) texPath = base + ".png";
+                if (fs::exists(texPath)) {
+                    lm.texture = LoadTexture(texPath.c_str());
+                    if (lm.texture.id > 0)
+                        lm.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = lm.texture;
+                }
+                if (OTEditor.LitFogShader.id > 0)
+                    lm.model.materials[0].shader = OTEditor.LitFogShader;
+                lm.loaded = true;
+                models.push_back(lm);
+            }
+        }
+
+        // Get a loaded model by 1-based WDL ModelId (Model1 → 1, Model2 → 2, ...)
+        LoadedModel* GetModelByWDLId(int wdlId) {
+            int idx = wdlId - 1;
+            if (idx >= 0 && idx < (int)models.size() && models[idx].loaded)
+                return &models[idx];
+            return nullptr;
+        }
+
+        int GetModelCount() const { return (int)models.size(); }
+        const char* GetModelName(int index) const {
+            if (index < 0 || index >= (int)models.size()) return nullptr;
+            return models[index].name.c_str();
+        }
 };
 
-static GameModels WDLModels;
+extern GameModels WDLModels;
 
 class GameData{
     public:
@@ -186,7 +231,6 @@ void Init(){
     OTEditor.WorldData = LoadFile(TextFormat("%s/World.wdl", OTEditor.Path));
 
     Target = LoadRenderTexture(320 , 200);
-    PreviewTarget = LoadRenderTexture(256 , 256);
 
     // Initialize lit fog shader for editor
     // Use OTEditor.Path prefix so shaders resolve from ../GameData/ when cwd=System/
@@ -254,226 +298,8 @@ void Init(){
         WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
     }
 
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model1.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model1 = m;
-            WDLModels.Model1Texture = LoadTextureWithFallback(TextFormat("%sModels/Model1Texture.png", OTEditor.Path));
-            WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model1.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model2.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model2 = m;
-            WDLModels.Model2Texture = LoadTextureWithFallback(TextFormat("%sModels/Model2Texture.png", OTEditor.Path));
-            WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model2.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model3.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model3 = m;
-            WDLModels.Model3Texture = LoadTextureWithFallback(TextFormat("%sModels/Model3Texture.png", OTEditor.Path));
-            WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model3.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model4.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model4 = m;
-            WDLModels.Model4Texture = LoadTextureWithFallback(TextFormat("%sModels/Model4Texture.png", OTEditor.Path));
-            WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model4.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model5.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model5 = m;
-            WDLModels.Model5Texture = LoadTextureWithFallback(TextFormat("%sModels/Model5Texture.png", OTEditor.Path));
-            WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model5.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model6.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model6 = m;
-            WDLModels.Model6Texture = LoadTextureWithFallback(TextFormat("%sModels/Model6Texture.png", OTEditor.Path));
-            WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model6.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model7.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model7 = m;
-            WDLModels.Model7Texture = LoadTextureWithFallback(TextFormat("%sModels/Model7Texture.png", OTEditor.Path));
-            WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model7.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model8.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model8 = m;
-            WDLModels.Model8Texture = LoadTextureWithFallback(TextFormat("%sModels/Model8Texture.png", OTEditor.Path));
-            WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model8.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model9.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model9 = m;
-            WDLModels.Model9Texture = LoadTextureWithFallback(TextFormat("%sModels/Model9Texture.png", OTEditor.Path));
-            WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model9.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model10.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model10 = m;
-            WDLModels.Model10Texture = LoadTextureWithFallback(TextFormat("%sModels/Model10Texture.png", OTEditor.Path));
-            WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model10.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model11.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model11 = m;
-            WDLModels.Model11Texture = LoadTextureWithFallback(TextFormat("%sModels/Model11Texture.png", OTEditor.Path));
-            WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model11.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model12.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model12 = m;
-            WDLModels.Model12Texture = LoadTextureWithFallback(TextFormat("%sModels/Model12Texture.png", OTEditor.Path));
-            WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model12.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model13.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model13 = m;
-            WDLModels.Model13Texture = LoadTextureWithFallback(TextFormat("%sModels/Model13Texture.png", OTEditor.Path));
-            WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model13.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model14.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model14 = m;
-            WDLModels.Model14Texture = LoadTextureWithFallback(TextFormat("%sModels/Model14Texture.png", OTEditor.Path));
-            WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model14.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model15.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model15 = m;
-            WDLModels.Model15Texture = LoadTextureWithFallback(TextFormat("%sModels/Model15Texture.png", OTEditor.Path));
-            WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model15.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model16.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model16 = m;
-            WDLModels.Model16Texture = LoadTextureWithFallback(TextFormat("%sModels/Model16Texture.png", OTEditor.Path));
-            WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model16.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model17.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model17 = m;
-            WDLModels.Model17Texture = LoadTextureWithFallback(TextFormat("%sModels/Model17Texture.png", OTEditor.Path));
-            WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model17.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model18.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model18 = m;
-            WDLModels.Model18Texture = LoadTextureWithFallback(TextFormat("%sModels/Model18Texture.png", OTEditor.Path));
-            WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model18.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model19.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model19 = m;
-            WDLModels.Model19Texture = LoadTextureWithFallback(TextFormat("%sModels/Model19Texture.png", OTEditor.Path));
-            WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model19.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
-    {
-        Model m = LoadModelWithFallback(TextFormat("%sModels/Model20.obj", OTEditor.Path));
-        if (m.meshes != nullptr) {
-            WDLModels.Model20 = m;
-            WDLModels.Model20Texture = LoadTextureWithFallback(TextFormat("%sModels/Model20Texture.png", OTEditor.Path));
-            WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
-            if (OTEditor.LitFogShader.id > 0) {
-                WDLModels.Model20.materials[0].shader = OTEditor.LitFogShader;
-            }
-        }
-    }
+    // Dynamically load all .obj models from the world's Models/ directory
+    WDLModels.LoadModels(OTEditor.Path);
 }
 
 static int ScriptTimer = 0;
@@ -575,31 +401,14 @@ void CWDLProcess()
         {
             if (OTEditor.MainCamera.position.x - 1000 < X && OTEditor.MainCamera.position.x + 1000 > X)
             {
-                switch (CachedModels[i].ModelId)
-                {
-                case -2: DrawCubeWires({X, Y, Z}, S, S, S, RED); break;
-                case -1: DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 1:  DrawModelEx(WDLModels.Model1,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 2:  DrawModelEx(WDLModels.Model2,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 3:  DrawModelEx(WDLModels.Model3,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 4:  DrawModelEx(WDLModels.Model4,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 5:  DrawModelEx(WDLModels.Model5,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 6:  DrawModelEx(WDLModels.Model6,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 7:  DrawModelEx(WDLModels.Model7,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 8:  DrawModelEx(WDLModels.Model8,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 9:  DrawModelEx(WDLModels.Model9,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 10: DrawModelEx(WDLModels.Model10, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 11: DrawModelEx(WDLModels.Model11, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 12: DrawModelEx(WDLModels.Model12, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 13: DrawModelEx(WDLModels.Model13, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 14: DrawModelEx(WDLModels.Model14, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 15: DrawModelEx(WDLModels.Model15, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 16: DrawModelEx(WDLModels.Model16, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 17: DrawModelEx(WDLModels.Model17, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 18: DrawModelEx(WDLModels.Model18, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 19: DrawModelEx(WDLModels.Model19, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 20: DrawModelEx(WDLModels.Model20, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                default: break;
+                int mid = CachedModels[i].ModelId;
+                if (mid == -2) {
+                    DrawCubeWires({X, Y, Z}, S, S, S, RED);
+                } else if (mid == -1) {
+                    DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
+                } else if (mid > 0) {
+                    LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
+                    if (lm) DrawModelEx(lm->model, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
                 }
             }
         }
@@ -642,29 +451,8 @@ void WDLProcess()
             if (WReadValue(Instruction, 0, 4) == L"Model")
             {
                 int Identifier = ToFloat(WReadValue(Instruction, 5, 6));
-                switch (Identifier) {
-                case 1:  DrawModelEx(WDLModels.Model1,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 2:  DrawModelEx(WDLModels.Model2,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 3:  DrawModelEx(WDLModels.Model3,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 4:  DrawModelEx(WDLModels.Model4,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 5:  DrawModelEx(WDLModels.Model5,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 6:  DrawModelEx(WDLModels.Model6,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 7:  DrawModelEx(WDLModels.Model7,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 8:  DrawModelEx(WDLModels.Model8,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 9:  DrawModelEx(WDLModels.Model9,  {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 10: DrawModelEx(WDLModels.Model10, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 11: DrawModelEx(WDLModels.Model11, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 12: DrawModelEx(WDLModels.Model12, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 13: DrawModelEx(WDLModels.Model13, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 14: DrawModelEx(WDLModels.Model14, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 15: DrawModelEx(WDLModels.Model15, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 16: DrawModelEx(WDLModels.Model16, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 17: DrawModelEx(WDLModels.Model17, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 18: DrawModelEx(WDLModels.Model18, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 19: DrawModelEx(WDLModels.Model19, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                case 20: DrawModelEx(WDLModels.Model20, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE); break;
-                default: break;
-                }
+                LoadedModel* lm = WDLModels.GetModelByWDLId(Identifier);
+                if (lm) DrawModelEx(lm->model, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
             }
 
             if (Instruction == L"Collision") DrawCubeWires({X, Y, Z}, S, S, S, RED);
@@ -755,7 +543,6 @@ void LoadEditor(const char* File){
 }
 
 int EMID = 1;
-bool OverlayEnabled = false;
 bool CollisionToggle = false;
 
 // --- Helper: draw a WDL instruction line for current placed item ---

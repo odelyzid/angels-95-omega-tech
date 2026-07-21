@@ -70,6 +70,7 @@ class EngineData
             MainCamera.up = (Vector3){0.0f, 1.0f, 0.0f};      
             MainCamera.fovy = 60.0f;                        
             MainCamera.projection = CAMERA_PERSPECTIVE;
+            OZ_INFO("Camera initialized at (0, 20, 0)");
         }
 };
 
@@ -121,10 +122,116 @@ void SpawnWDLProcess(const char *Path)
     }
 }
 
+void LoadEntitiesFromWDL()
+{
+    wstring WData = WorldData;
+    int Size = GetWDLSize(WorldData, L"");
+
+    for (int i = 0; i <= Size; i++)
+    {
+        wstring Instruction = WSplitValue(WData, i);
+
+        if (Instruction.empty() || Instruction[0] == L'#')
+            continue;
+
+        // Pickup: "Pickup:X:Y:Z:S:Rotation:TypeName"
+        if (Instruction.substr(0, 6) == L"Pickup")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            wstring typeName = WSplitValue(WData, i + 6);
+            PickupNode node;
+            node.position = {x, y, z};
+            node.typeName = string(typeName.begin(), typeName.end());
+            PawnSystem::Instance().AddPickup(node);
+        }
+        // Spawn: "Spawn:X:Y:Z:S:Rotation"
+        else if (Instruction.substr(0, 5) == L"Spawn")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            float yaw = ToFloat(WSplitValue(WData, i + 5));
+            PlayerStartNode node;
+            node.position = {x, y, z};
+            node.yaw = yaw;
+            PawnSystem::Instance().AddPlayerStart(node);
+        }
+        // NPC: "NPC<ClassName>:X:Y:Z:S:Rotation" or "NPC:X:Y:Z:S:Rotation:ClassName"
+        else if (Instruction.substr(0, 3) == L"NPC")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            string className;
+            if (Instruction.size() > 3)
+                className = string(Instruction.begin() + 3, Instruction.end());
+            else
+                className = string(WSplitValue(WData, i + 6).begin(), WSplitValue(WData, i + 6).end());
+            PawnSystem::Instance().Spawn({x, y, z}, className.c_str());
+        }
+        // Light: "Light:X:Y:Z"
+        else if (Instruction == L"Light")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            PutLight({x, y, z});
+        }
+        // Sound: "Sound:X:Y:Z:S:Rotation"
+        else if (Instruction.substr(0, 5) == L"Sound")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            EmitterNode node;
+            node.position = {x, y, z};
+            node.type = EmitterType::SOUND;
+            PawnSystem::Instance().AddEmitter(node);
+        }
+        // Music: "Music:X:Y:Z:S:Rotation"
+        else if (Instruction.substr(0, 5) == L"Music")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            EmitterNode node;
+            node.position = {x, y, z};
+            node.type = EmitterType::MUSIC;
+            PawnSystem::Instance().AddEmitter(node);
+        }
+        // ZoneInfo: "ZoneInfo:X:Y:Z:S:Rotation:W:H:L:TypeName"
+        else if (Instruction.substr(0, 8) == L"ZoneInfo")
+        {
+            float x = ToFloat(WSplitValue(WData, i + 1));
+            float y = ToFloat(WSplitValue(WData, i + 2));
+            float z = ToFloat(WSplitValue(WData, i + 3));
+            float w = ToFloat(WSplitValue(WData, i + 6));
+            float h = ToFloat(WSplitValue(WData, i + 7));
+            float l = ToFloat(WSplitValue(WData, i + 8));
+            string zoneTypeName;
+            if (Instruction.size() > 8)
+                zoneTypeName = string(Instruction.begin() + 8, Instruction.end());
+            else
+                zoneTypeName = string(WSplitValue(WData, i + 9).begin(), WSplitValue(WData, i + 9).end());
+            ZoneType zt = ZoneType::ZONE_WATER;
+            if (zoneTypeName == "Ladder") zt = ZoneType::ZONE_LADDER;
+            else if (zoneTypeName == "Sky") zt = ZoneType::ZONE_SKY;
+            else if (zoneTypeName == "Reverb") zt = ZoneType::ZONE_REVERB;
+            ZoneVolumeNode node;
+            node.bounds = {{x, y, z}, {w, h, l}};
+            node.zoneType = zt;
+            PawnSystem::Instance().AddZone(node);
+        }
+    }
+}
+
 bool LoadFlag = false;
 
 auto LoadWorld()
 {
+    OZ_INFO("LoadWorld: loading world %d", OmegaTechData.LevelIndex);
     PlayFade();
     ClearLights();
 
@@ -207,13 +314,16 @@ auto LoadWorld()
             int Z = PullConfigValue(TextFormat("GameData/Worlds/World%i/Models/HeightMapConfig.conf", OmegaTechData.LevelIndex), 2);
             WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
             Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
-            fprintf(stderr, "HM: X=%d Y=%d Z=%d mesh v=%d t=%d tex=%d img=%dx%d\n",
-                    X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount, WDLModels.HeightMapTexture.id,
+            OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
+                    OmegaTechData.LevelIndex, X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount,
+                    WDLModels.HeightMapTexture.id,
                     WDLModels.HeightMapImage.width, WDLModels.HeightMapImage.height);
             WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
             WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
             WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
             WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
+        } else {
+            OZ_INFO("HeightMap: world=%d not found (no heightmap)", OmegaTechData.LevelIndex);
         }
 
         if (IsPathFile(TextFormat("GameData/Worlds/World%i/Models/Model1.obj", OmegaTechData.LevelIndex)))
@@ -565,6 +675,14 @@ auto LoadWorld()
         if (IsPathFile(ozonePath))
             OzoneLoader::Instance().LoadFile(ozonePath);
 
+        // Clear existing entities before loading new world
+        PawnSystem::Instance().ClearPlayerStarts();
+        PawnSystem::Instance().ClearPickups();
+        PawnSystem::Instance().ClearZones();
+        PawnSystem::Instance().ClearEmitters();
+        PawnSystem::Instance().DespawnAll();
+        LoadEntitiesFromWDL();
+
         if (OmegaTechSoundData.MusicFound)StopMusicStream(OmegaTechSoundData.BackgroundMusic);
 
         OmegaTechSoundData.MusicFound = false;
@@ -646,6 +764,7 @@ void DrawLights(){
 
 void OmegaTechInit()
 {
+    OZ_INFO("=== OmegaTech Engine starting ===");
     LoadLaunchConfig();
     ParasiteScriptTFlagWipe();
 
@@ -673,6 +792,10 @@ void OmegaTechInit()
     OmegaTechData.ToonShader = LoadShaderWithFallback(0, "GameData/Shaders/Toon.fs");
     OmegaTechData.JitterShader = LoadShaderWithFallback(0, "GameData/Shaders/Jitter.fs");
     OmegaTechData.Lights = LoadShaderWithFallback("GameData/Shaders/Lights/Lighting.vs","GameData/Shaders/Lights/LitFog.fs");
+    OZ_INFO("Shaders loaded (Pixel=%d, Line=%d, Sobel=%d, Toon=%d, Jitter=%d, Lights=%d)",
+            OmegaTechData.PixelShader.id, OmegaTechData.LineShader.id,
+            OmegaTechData.SobelShader.id, OmegaTechData.ToonShader.id,
+            OmegaTechData.JitterShader.id, OmegaTechData.Lights.id);
     OzoneLoader::Instance().SetLitFogShader(OmegaTechData.Lights);
     
     // Initialize all lights to disabled
@@ -1431,32 +1554,7 @@ void WDLProcess()
                 }
             }
 
-            // Entity rendering (Pickup, Spawn, NPC, Light, etc.)
-            if (Debug)
-            {
-                Camera3D cam = OmegaTechData.MainCamera;
-                if (WReadValue(Instruction, 0, 6) == L"Pickup") {
-                    EngineBillboard::DrawPickup(cam, "HealthVial", {X, Y, Z}, 0.8f);
-                }
-                if (WReadValue(Instruction, 0, 5) == L"Spawn") {
-                    EngineBillboard::Draw(cam, "PlayerStart", {X, Y + 0.5f, Z}, 1.2f);
-                }
-                if (WReadValue(Instruction, 0, 3) == L"NPC") {
-                    EngineBillboard::Draw(cam, "PawnNode", {X, Y + 1.0f, Z}, 1.5f);
-                }
-                if (WReadValue(Instruction, 0, 5) == L"Light") {
-                    EngineBillboard::Draw(cam, "Light", {X, Y + 0.5f, Z}, 1.0f);
-                }
-                if (WReadValue(Instruction, 0, 5) == L"Sound") {
-                    EngineBillboard::Draw(cam, "Sound", {X, Y + 0.5f, Z}, 1.0f);
-                }
-                if (WReadValue(Instruction, 0, 5) == L"Music") {
-                    EngineBillboard::Draw(cam, "Music", {X, Y + 0.5f, Z}, 1.0f);
-                }
-                if (WReadValue(Instruction, 0, 8) == L"ZoneInfo") {
-                    EngineBillboard::Draw(cam, "ZoneInfo", {X, Y + 0.5f, Z}, 1.0f);
-                }
-            }
+
         }
         if (Instruction == L"ClipBox")
         { 
@@ -1572,8 +1670,14 @@ void UpdateEntities()
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
     PawnSystem::Instance().Update(playerPos, dt);
     
+    // Update pickups (respawn timers, player collision)
+    PawnSystem::Instance().UpdatePickups(dt, playerPos, OmegaPlayer.PlayerBounds);
+    
     // Draw all pawns
     PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera);
+    
+    // Draw entity billboards (player starts, pickups, zones)
+    PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera);
     
     // Check if any pawn is attacking the player
     float damage = 0;
@@ -1849,8 +1953,8 @@ void DrawWorld()
         SetSceneFlag = false;
 
         // Place player near the new world's collision surface
-        // World3 uses a ClipBox platform at Y=2.0; other worlds use heightmap terrain
-        float sy = (OmegaTechData.LevelIndex == 3) ? 2.0f : 20.0f;
+        // World3 uses a ClipBox platform; other worlds use heightmap terrain
+        float sy = (OmegaTechData.LevelIndex == 3) ? 8.0f : 20.0f;
         OmegaTechData.MainCamera.position.y = sy;
         OmegaTechData.MainCamera.target.y = sy;
     }

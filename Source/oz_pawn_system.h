@@ -91,6 +91,19 @@ struct PickupNode {
     float respawnTime = 30.0f;  // default respawn time
 };
 
+// Emitter type for sound/music markers
+enum class EmitterType : uint8_t {
+    SOUND = 0,
+    MUSIC = 1
+};
+
+// Emitter node - positional sound/music markers in the world
+struct EmitterNode {
+    uint32_t id = 0;
+    Vector3 position{0, 0, 0};
+    EmitterType type = EmitterType::SOUND;
+};
+
 // Zone volume node - AABB volumes with behavior flags
 struct ZoneVolumeNode {
     uint32_t id = 0;
@@ -153,7 +166,14 @@ public:
     ZoneVolumeNode* GetZone(int id);
     ZoneVolumeNode* CheckZoneCollision(Vector3 pos, BoundingBox bounds);
 
-    // Draw entities (billboards for player starts, pickups, zones)
+    // Sound/music emitter nodes
+    int AddEmitter(const EmitterNode& node);
+    void RemoveEmitter(int id);
+    void ClearEmitters();
+    std::vector<EmitterNode>& GetEmitters() { return m_emitters; }
+    const std::vector<EmitterNode>& GetEmitters() const { return m_emitters; }
+
+    // Draw entities (billboards for player starts, pickups, zones, emitters)
     void DrawEntities(Camera3D& camera);
 
     // Access registered definitions
@@ -172,6 +192,7 @@ private:
     std::vector<PlayerStartNode> m_playerStarts;
     std::vector<PickupNode> m_pickups;
     std::vector<ZoneVolumeNode> m_zones;
+    std::vector<EmitterNode> m_emitters;
     uint32_t m_nextEntityId = 1;
 
     PawnDef* FindDef(const char* name);

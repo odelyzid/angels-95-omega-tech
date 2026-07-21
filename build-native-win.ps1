@@ -41,7 +41,8 @@ if (-not $SkipClean) {
     Write-Step "Cleaning previous build..."
     Push-Location $PSScriptRoot
     & mingw32-make clean 2>&1 | Out-Null
-    if (Test-Path "$PSScriptRoot\OTEditor\*.o") { Remove-Item "$PSScriptRoot\OTEditor\*.o" -Force }
+    Push-Location "$PSScriptRoot\OTEditor"
+    & mingw32-make clean 2>&1 | Out-Null
     Pop-Location
 }
 
@@ -192,11 +193,7 @@ if (Test-Path "$PSScriptRoot\GameData\Shaders") {
     Copy-Item -Recurse -Force "$PSScriptRoot\GameData\Shaders\*" $shaderDest -ErrorAction SilentlyContinue
 }
 
-# --- 7. Cleanup intermediate objects ---
-Remove-Item "$PSScriptRoot\*.o" -Force -ErrorAction SilentlyContinue
-Remove-Item "$PSScriptRoot\OTEditor\*.o" -Force -ErrorAction SilentlyContinue
-
-# --- 8. Verify outputs ---
+# --- 7. Verify outputs ---
 Write-Step "Verifying outputs..."
 $missing = @()
 foreach ($exe in @("Angels95.exe", "oz_server.exe", "oz_editor.exe", "OzPack.exe")) {

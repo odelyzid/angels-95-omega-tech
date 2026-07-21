@@ -1,6 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "OzPackage.hpp"
+#include "Log.hpp"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -31,7 +32,7 @@ public:
                     OzPackageReader reader;
                     if (reader.Open(entry.path().string().c_str())) {
                         m_readers.push_back(std::move(reader));
-                        fprintf(stderr, "PackageLoader: loaded %s (%u entries)\n",
+                        OZ_INFO("PackageLoader: loaded %s (%u entries)",
                                 entry.path().filename().string().c_str(),
                                 m_readers.back().EntryCount());
                     }

@@ -312,12 +312,12 @@ static void ExecuteConsoleCommand(const char* cmd) {
     } else if (strncmp(cmd, "/world ", 7) == 0) {
         int id = atoi(cmd + 7);
         if (id >= 1 && id <= 20) {
-            fprintf(stderr, "WORLD switch -> %d\n", id);
+            OZ_INFO("World switch: %d -> %d", OmegaTechData.LevelIndex, id);
             SetSceneId = id;
             SetSceneFlag = true;
             g_demoPickupsReady = false;
-            // World3 test map has no heightmap — spawn near ground
-            float spawnY = (id == 3) ? 0.0f : 20.0f;
+            // World3 uses a ClipBox floor — spawn well above the platform surface
+            float spawnY = (id == 3) ? 8.0f : 20.0f;
             OmegaTechData.MainCamera.position = (Vector3){0.0f, spawnY, 0.0f};
             OmegaTechData.MainCamera.target = (Vector3){0.0f, spawnY, -10.0f};
         }
@@ -328,18 +328,18 @@ static void ExecuteConsoleCommand(const char* cmd) {
         if (OmegaPlayer.isFlying) {
             OmegaPlayer.onGround = false;
             OmegaPlayer.velocityY = 0.0f;
-            fprintf(stderr, "FLY enabled\n");
+            OZ_INFO("FLY enabled");
         } else {
-            fprintf(stderr, "FLY disabled\n");
+            OZ_INFO("FLY disabled");
         }
     } else if (strcmp(cmd, "/noclip") == 0) {
         OmegaPlayer.isNoClip = !OmegaPlayer.isNoClip;
         if (OmegaPlayer.isNoClip) {
             OmegaPlayer.onGround = false;
             OmegaPlayer.velocityY = 0.0f;
-            fprintf(stderr, "NOCLIP enabled\n");
+            OZ_INFO("NOCLIP enabled");
         } else {
-            fprintf(stderr, "NOCLIP disabled\n");
+            OZ_INFO("NOCLIP disabled");
         }
     }
 }
@@ -452,7 +452,7 @@ static void InitDemoPickupPositions() {
         float gy = SampleHeightmapGroundY(base[i].x, base[i].z);
         if (gy < -50000.0f) gy = 18.0f;
         g_demoPickups[i] = {{ base[i].x, gy + 1.0f, base[i].z }, base[i].type, true };
-        fprintf(stderr, "DEMO pickup %d at %.1f %.1f %.1f type=%d\n",
+        OZ_INFO("Demo pickup %d at (%.1f, %.1f, %.1f) type=%d",
                 i, base[i].x, gy + 1.0f, base[i].z, base[i].type);
     }
     g_demoPickupsReady = true;
@@ -714,7 +714,10 @@ int main(){
         OmegaTechTextSystem.Write(msg);
     });
     g_client.set_on_item_collected([](int item_id, int quantity) {
-        fprintf(stderr, "ITEM collected id=%d qty=%d\n", item_id, quantity);
+        OZ_INFO("Item collected: id=%d qty=%d (slot=%s)", item_id, quantity,
+                item_id == 1 ? "Object1" : item_id == 2 ? "Object2" :
+                item_id == 3 ? "Object3" : item_id == 4 ? "Object4" :
+                item_id == 5 ? "Object5" : "other");
         if (item_id == 13) {
             gInventory.coins += quantity;
         } else if (item_id == 1) {

@@ -1,4 +1,5 @@
 #include "oz_assetmapper.h"
+#include "Log.hpp"
 #include <cstring>
 #include <cctype>
 #include <cstdio>
@@ -185,7 +186,7 @@ Texture2D AssetMapper::GetTexture(const char* alias) {
 
     // Fallback to grid
     if (tex.id == 0) {
-        fprintf(stderr, "AM: missing texture '%s' at '%s' — using grid\n", alias, e->path);
+        OZ_WARN("AssetMapper: missing texture '%s' at '%s' — using grid", alias, e->path);
         tex = MakeGridTexture();
     }
 

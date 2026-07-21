@@ -47,6 +47,9 @@ struct ResourceEntry {
 static std::vector<ResourceEntry> g_textureFiles;
 static std::vector<ResourceEntry> g_soundFiles;
 
+// Texture target model names (set from Main.cpp after model loading)
+static std::vector<std::string> g_textureTargetNames;
+
 // Pawn data (editor-local, distinct from oz_pawn_system.h::PawnDef)
 struct EditorPawnDef {
     std::string name;
@@ -251,6 +254,13 @@ void UpdateTextureManagerList() {
     ScanTextureBrowserFiles();
 }
 
+void SetTextureTargetNames(const std::vector<std::string>& names) {
+    g_textureTargetNames = names;
+    if (g_editorPanels.hTextureMgr) {
+        SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 51, 0, 0);
+    }
+}
+
 static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList;
     static HWND hTarget;
@@ -261,10 +271,18 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         CreateLabel(hwnd, L"Target:", 10, 237, 55, 20, 2);
         hTarget = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
                                  65, 233, 180, 300, hwnd, (HMENU)(INT_PTR)ID_TEX_TARGET, g_hInst, nullptr);
-        for (int model = 1; model <= 20; model++) {
-            wchar_t label[32];
-            swprintf(label, 32, L"Model %d", model);
-            SendMessage(hTarget, CB_ADDSTRING, 0, (LPARAM)label);
+        // Populate from dynamically loaded model names (fallback to "Model N" if empty)
+        if (g_textureTargetNames.empty()) {
+            for (int model = 1; model <= 20; model++) {
+                wchar_t label[32];
+                swprintf(label, 32, L"Model %d", model);
+                SendMessage(hTarget, CB_ADDSTRING, 0, (LPARAM)label);
+            }
+        } else {
+            for (const auto& name : g_textureTargetNames) {
+                std::wstring wname(name.begin(), name.end());
+                SendMessage(hTarget, CB_ADDSTRING, 0, (LPARAM)wname.c_str());
+            }
         }
         SendMessage(hTarget, CB_SETCURSEL, 0, 0);
         CreateButton(hwnd, L"Refresh", 10, 280, 90, 28, ID_TEX_REFRESH);
@@ -277,6 +295,27 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (const auto& tex : g_textureFiles) {
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)tex.name.c_str());
+        }
+        break;
+    }
+    case WM_USER + 51: {
+        // Repopulate target combo from updated model names
+        HWND hTarg = GetDlgItem(hwnd, ID_TEX_TARGET);
+        if (hTarg) {
+            SendMessage(hTarg, CB_RESETCONTENT, 0, 0);
+            if (g_textureTargetNames.empty()) {
+                for (int model = 1; model <= 20; model++) {
+                    wchar_t label[32];
+                    swprintf(label, 32, L"Model %d", model);
+                    SendMessage(hTarg, CB_ADDSTRING, 0, (LPARAM)label);
+                }
+            } else {
+                for (const auto& name : g_textureTargetNames) {
+                    std::wstring wname(name.begin(), name.end());
+                    SendMessage(hTarg, CB_ADDSTRING, 0, (LPARAM)wname.c_str());
+                }
+            }
+            SendMessage(hTarg, CB_SETCURSEL, 0, 0);
         }
         break;
     }
