@@ -12,7 +12,7 @@
 | 6+7 | Server sync + Large-scale partitioning/chunking | ✅ Complete |
 | 8 | CSG overflow protection | ✅ Complete |
 | 9 | World migration (World3 → EngineTest.ozone) | ✅ Complete |
-| 10 | LightningScript — ZoneInfo/SkyZoneInfo pawn | 🔮 Future |
+| 10 | LightningScript — ZoneInfo/SkyZoneInfo pawn | ✅ Complete (v2) |
 
 ---
 
@@ -73,6 +73,21 @@
   - **New**: `Source/Physics/WorldChunk.hpp`, `Source/Physics/WorldChunk.cpp`
   - **Modify**: `Source/Core.hpp` — use chunk query instead of linear scan
   - **Modify**: `Source/Server/GameState.hpp` — server uses same chunk system for partition queries
+
+### LightningScript v2 fixes (commit cec68be..HEAD):
+- **Integration**: Registry::Init(), Manager::Init(), Update(), HandleInput(), DrawHotbar(), all wired into Core.hpp + Main.cpp
+- **Jump labels**: Built in `Load()` not on first `ExecuteNext()` — `FindJumpLabel` works immediately
+- **PawnSystem zone actions**: `UpdateSkyZone()` calls `TriggerZoneAction("zone_name", "on_enter"/"on_exit")`
+- **UncacheResource**: Uses type=0 mark instead of `erase()` — no index corruption
+- **AngelEd Makefile + build scripts**: LightningScript .o files compiled and linked
+- **ParseAction**: Now extracts real block content instead of placeholder comment
+- **Parser fixes**: Whitespace skip in value reader (stats), vec3 parser (`(r,g,b)` after `=`), action name double-read (read in loop, passed to `ParseActionWithName`), variant parsing inlined
+- **Opcode additions**: `play_sound`, `set_fog`, `set_skybox`, `restore_skybox`, unknown opcode warning via `OZ_WARN`
+- **Logging**: `LS_LOG`/`LS_WARN` macros with per-instance `m_debugTag`, `say` uses `LS_LOG` instead of `fprintf`
+- **Tests**: `tests/LightningScriptParser.test.cpp` — 7/7 passing (weapon, skyzone, armor, consumable, variants, error recovery, action content)
+- **Tests**: `tests/LightningScriptContext.test.cpp` — needs Log linking (test_context target updated)
+- **Error handling**: try/catch around `stof`/`stoi` in parser + context, `FindFreeSlot` removed
+- **ZoneVolumeNode**: Added `name` field for LightningScript zone lookups
 
 ### Implementation complete (commit 0c0c1ae..HEAD):
 - `WorldChunkManager` class: uniform grid partitioning, O(1) cell lookup

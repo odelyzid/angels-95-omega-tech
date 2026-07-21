@@ -110,6 +110,7 @@ struct ZoneVolumeNode {
     BoundingBox bounds;
     ZoneType zoneType = ZoneType::ZONE_WATER;
     float intensity = 1.0f;  // e.g., water density, ladder speed
+    std::string name;        // logical name for LightningScript zone lookups
 };
 
 class PawnSystem {

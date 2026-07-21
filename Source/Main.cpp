@@ -1,6 +1,7 @@
 #include "Core.hpp"
 #include "Log.hpp"
 #include "Client/Client.hpp"
+#include "Script/LightningEntityManager.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -900,6 +901,9 @@ int main(){
             DrawTexturePro(Target.texture, (Rectangle){ 0, 0, Target.texture.width, -Target.texture.height }, (Rectangle){ 0, 0, float(GetScreenWidth()), float(GetScreenHeight())}, (Vector2){ 0, 0 } , 0.f , WHITE);
             if (shaderActive) EndShaderMode();
         }
+        // LightningScript dynamic hotbar
+        LightningEntityManager::Instance().DrawHotbar();
+        LightningEntityManager::Instance().HandleInput();
         UpdateObjectBar();
 
         if (ParticlesEnabled){

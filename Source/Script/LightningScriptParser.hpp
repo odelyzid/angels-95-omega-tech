@@ -30,5 +30,5 @@ private:
 
     static EntityStatBlock ParseStatBlock(ParseState& s);
     static EntityAction ParseAction(ParseState& s);
-    static EntityVariant ParseVariant(ParseState& s);
+    static EntityAction ParseActionWithName(const std::string& name, ParseState& s);
 };

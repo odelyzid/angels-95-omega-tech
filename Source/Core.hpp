@@ -6,6 +6,8 @@
 #include "Pawn/OzPawnSystem.hpp"
 #include "Package/PackageAssetLoader.hpp"
 #include "Renderer/EngineBillboard.hpp"
+#include "Script/LightningEntityRegistry.hpp"
+#include "Script/LightningEntityManager.hpp"
 
 #include "raymath.h"
 #include "rlights/rlights.h"
@@ -772,6 +774,10 @@ void OmegaTechInit()
 
     // Initialize package-based asset loading
     PackageAssetLoader::Instance().Init();
+
+    // Initialize LightningScript entity system
+    LightningEntityRegistry::Instance().Init();
+    LightningEntityManager::Instance().Init();
 
     // Initialize engine billboard system
     EngineBillboard::Init();
@@ -2013,6 +2019,12 @@ void DrawWorld()
             OmegaTechData.MainCamera.position.z = OmegaPlayer.OldZ;
         }
         ObjectCollision = false;
+    }
+
+    // LightningScript entity tick
+    {
+        float dt = GetFrameTime();
+        LightningEntityManager::Instance().Update(dt);
     }
 
     UpdateCustom();

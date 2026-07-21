@@ -69,6 +69,9 @@ int LightningEntityManager::Spawn(const std::string& defName) {
             scriptText += line + "\n";
     }
     inst.ctx.Load(scriptText);
+    char tag[128];
+    snprintf(tag, sizeof(tag), "%s:%d", def->name.c_str(), (int)m_instances.size());
+    inst.ctx.SetDebugTag(tag);
 
     inst.owned = true;
     inst.variantIndex = 0;
@@ -181,7 +184,9 @@ void LightningEntityManager::UncacheResource(int idx) {
     if (idx < 0 || idx >= (int)m_resources.size()) return;
     if (m_resources[idx].type == 1) UnloadModel(m_resources[idx].model);
     else if (m_resources[idx].type == 2) UnloadTexture(m_resources[idx].texture);
-    m_resources.erase(m_resources.begin() + idx);
+    m_resources[idx].type = 0; // Mark as unused instead of erasing (avoids index shift)
+    m_resources[idx].model = Model{0};
+    m_resources[idx].texture = Texture2D{0};
 }
 
 void LightningEntityManager::UnloadAllResources() {

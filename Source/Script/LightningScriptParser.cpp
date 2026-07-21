@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cctype>
 #include <algorithm>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -100,6 +101,7 @@ EntityStatBlock LightningScriptParser::ParseStatBlock(ParseState& s) {
             break;
         }
         // Check for vec3: (r, g, b)
+        SkipWhitespace(s);
         if (s.pos < s.content->size() && (*s.content)[s.pos] == '(') {
             s.pos++; // skip (
             float v[3];
@@ -113,6 +115,7 @@ EntityStatBlock LightningScriptParser::ParseStatBlock(ParseState& s) {
             block.vec3s[key][1] = v[1];
             block.vec3s[key][2] = v[2];
         } else {
+            SkipWhitespace(s);
             std::string valStr;
             size_t valStart = s.pos;
             while (s.pos < s.content->size() && !std::isblank((*s.content)[s.pos]) &&
@@ -131,44 +134,46 @@ EntityStatBlock LightningScriptParser::ParseStatBlock(ParseState& s) {
 }
 
 // ---------------------------------------------------------------------------
-// ParseAction — parses on_name { ... lines ... }
+// ParseAction — reads name, then parses block
 // ---------------------------------------------------------------------------
 EntityAction LightningScriptParser::ParseAction(ParseState& s) {
-    EntityAction action;
-    action.name = ReadToken(s);
-    Expect(s, "{");
-    // Read all lines inside the block as raw script
-    int depth = 1;
-    size_t blockStart = s.pos;
-    while (s.pos < s.content->size() && depth > 0) {
-        std::string tok = ReadToken(s);
-        if (tok == "{") depth++;
-        else if (tok == "}") depth--;
-        if (tok.empty()) break;
-    }
-    // Extract the block content (between outer braces)
-    // For simplicity, we store tokens as script lines
-    // In a full impl, we'd re-parse with the script context
-    action.scriptLines.push_back("// action: " + action.name);
-    return action;
+    std::string name = ReadToken(s);
+    return ParseActionWithName(name, s);
 }
 
+// ParseActionWithName — parses { ... lines ... } with name already known
 // ---------------------------------------------------------------------------
-// ParseVariant — parses "name" { mesh_override = ... }
-// ---------------------------------------------------------------------------
-EntityVariant LightningScriptParser::ParseVariant(ParseState& s) {
-    EntityVariant v;
-    v.name = ReadToken(s);
+EntityAction LightningScriptParser::ParseActionWithName(const std::string& name, ParseState& s) {
+    EntityAction action;
+    action.name = name;
     Expect(s, "{");
-    while (s.pos < s.content->size()) {
-        std::string key = ReadToken(s);
-        if (key == "}") break;
-        std::string eq = ReadToken(s);
-        std::string val = ReadToken(s);
-        if (key == "mesh_override") v.meshOverride = val;
-        else if (key == "texture_override") v.textureOverride = val;
+    // Extract raw content between braces as script lines
+    int depth = 1;
+    size_t blockStart = s.pos;
+    // First pass: find the closing brace at matching depth
+    size_t tmp = blockStart;
+    while (tmp < s.content->size() && depth > 0) {
+        char c = (*s.content)[tmp];
+        if (c == '{') depth++;
+        else if (c == '}') depth--;
+        if (depth > 0) tmp++;
     }
-    return v;
+    // Extract the raw block text (excluding outer braces)
+    std::string rawBlock = s.content->substr(blockStart, tmp - blockStart);
+    // Split into lines
+    std::istringstream stream(rawBlock);
+    std::string line;
+    while (std::getline(stream, line)) {
+        size_t a = line.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) continue;
+        size_t b = line.find_last_not_of(" \t\r\n");
+        std::string trimmed = line.substr(a, b - a + 1);
+        if (trimmed.empty() || trimmed[0] == '#') continue;
+        action.scriptLines.push_back(trimmed);
+    }
+    // Advance parser state past the closing brace
+    s.pos = tmp + 1;
+    return action;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,8 +244,8 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
             while (s.pos < s.content->size()) {
                 std::string atok = ReadToken(s);
                 if (atok == "}") break;
-                // Action name like on_fire, on_enter, etc.
-                EntityAction act = ParseAction(s);
+                // atok is the action name (on_fire, on_enter, etc.)
+                EntityAction act = ParseActionWithName(atok, s);
                 def.actions.push_back(act);
             }
         } else if (tok == "variants") {
@@ -248,12 +253,24 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
             while (s.pos < s.content->size()) {
                 std::string vtok = ReadToken(s);
                 if (vtok == "}") break;
-                EntityVariant var = ParseVariant(s);
+                // vtok is the variant name (e.g. "lvl1")
+                EntityVariant var;
+                var.name = vtok;
+                Expect(s, "{");
+                while (s.pos < s.content->size()) {
+                    std::string vkey = ReadToken(s);
+                    if (vkey == "}") break;
+                    std::string veq = ReadToken(s);
+                    std::string vval = ReadToken(s);
+                    if (vkey == "mesh_override") var.meshOverride = vval;
+                    else if (vkey == "texture_override") var.textureOverride = vval;
+                }
                 def.variants.push_back(var);
             }
         } else if (tok == "fog_color" || tok == "ambient_light") {
             // skyzone-specific vec3 fields stored in stats.vec3s
             Expect(s, "=");
+            SkipWhitespace(s);
             if (s.pos < s.content->size() && (*s.content)[s.pos] == '(') {
                 s.pos++;
                 float v[3];

@@ -78,6 +78,4 @@ private:
     int CacheTexture(const std::string& path);
     void UncacheResource(int idx);
     void UnloadAllResources();
-
-    int FindFreeSlot() const;
 };

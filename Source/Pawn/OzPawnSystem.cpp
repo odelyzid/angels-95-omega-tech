@@ -1,6 +1,7 @@
 #include "OzPawnSystem.hpp"
 #include "../Package/OzAssetMapper.hpp"
 #include "../Renderer/EngineBillboard.hpp"
+#include "../Script/LightningEntityManager.hpp"
 #include "Player.hpp"
 #include "Items.hpp"
 #include "../Log.hpp"
@@ -302,6 +303,7 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
 // UpdateSkyZone — detect if player is inside a ZONE_SKY volume
 // ---------------------------------------------------------------------------
 void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
+    bool wasInSky = m_inSkyZone;
     m_inSkyZone = false;
     for (auto& n : m_zones) {
         if (n.zoneType != ZoneType::ZONE_SKY) continue;
@@ -311,8 +313,19 @@ void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
             playerPos.z >= n.bounds.min.z && playerPos.z <= n.bounds.max.z) {
             m_inSkyZone = true;
             m_activeSkyZoneBounds = n.bounds;
+            if (!wasInSky) {
+                // Trigger sky zone enter action (uses configured zone .ozls name)
+                LightningEntityManager::Instance().TriggerZoneAction(
+                    n.name.empty() ? "skyzone_default" : n.name.c_str(), "on_enter");
+            }
             return;
         }
+    }
+    if (wasInSky && !m_inSkyZone) {
+        // Trigger sky zone exit action
+        // Find the last zone we were in
+        LightningEntityManager::Instance().TriggerZoneAction(
+            "skyzone_default", "on_exit");
     }
 }
 

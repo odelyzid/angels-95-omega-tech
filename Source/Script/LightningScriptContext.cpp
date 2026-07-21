@@ -34,9 +34,25 @@ bool LightningScriptContext::Load(const std::string& scriptText) {
             continue;
         }
 
-        m_lines.push_back(trimmed);
-        lineIdx++;
+    m_lines.push_back(trimmed);
+    lineIdx++;
+        }
+
+    // Build jump label index immediately
+    for (int i = 0; i < lineIdx; i++) {
+        const std::string& ln = m_lines[i];
+        size_t colon = ln.find(':');
+        if (colon != std::string::npos && colon > 0 && colon < ln.size() - 1) {
+            bool isLabel = true;
+            for (size_t c = 0; c < colon; c++) {
+                if (!std::isalnum(ln[c]) && ln[c] != '_') { isLabel = false; break; }
+            }
+            if (isLabel && ln[colon+1] == ' ') {
+                m_jumpLabels[ln.substr(0, colon)] = i;
+            }
+        }
     }
+
     return true;
 }
 
@@ -58,24 +74,6 @@ int LightningScriptContext::FindJumpLabel(const std::string& label) const {
 // ---------------------------------------------------------------------------
 bool LightningScriptContext::ExecuteNext() {
     if (m_pc < 0 || m_pc >= (int)m_lines.size()) return false;
-
-    // Build jump label index on first execution
-    if (m_pc == 0 && m_jumpLabels.empty()) {
-        for (int i = 0; i < (int)m_lines.size(); i++) {
-            const std::string& ln = m_lines[i];
-            size_t colon = ln.find(':');
-            if (colon != std::string::npos && colon > 0 && colon < ln.size() - 1) {
-                // Check if it looks like a label (alphanumeric + underscore)
-                bool isLabel = true;
-                for (size_t c = 0; c < colon; c++) {
-                    if (!std::isalnum(ln[c]) && ln[c] != '_') { isLabel = false; break; }
-                }
-                if (isLabel && ln[colon+1] == ' ') {
-                    m_jumpLabels[ln.substr(0, colon)] = i;
-                }
-            }
-        }
-    }
 
     const std::string& line = m_lines[m_pc];
     if (line.empty()) { m_pc++; return true; }
@@ -103,10 +101,14 @@ bool LightningScriptContext::ExecuteNext() {
         ls >> name >> eq;
         if (eq != "=") { m_pc++; return true; }
         ls >> valueStr;
-        if (valueStr.find('.') != std::string::npos)
-            m_floatVars[name] = std::stof(valueStr);
-        else
-            m_intVars[name] = std::stoi(valueStr);
+        try {
+            if (valueStr.find('.') != std::string::npos)
+                m_floatVars[name] = std::stof(valueStr);
+            else
+                m_intVars[name] = std::stoi(valueStr);
+        } catch (...) {
+            m_intVars[name] = 0;
+        }
         m_pc++;
 
     } else if (opcode.rfind("$", 0) == 0) {
@@ -130,7 +132,7 @@ bool LightningScriptContext::ExecuteNext() {
                 if (it2 != m_intVars.end()) return (float)it2->second;
                 return 0;
             }
-            return std::stof(s);
+            try { return std::stof(s); } catch (...) { return 0; }
         };
 
         float val = getVal(valueStr);
@@ -203,7 +205,7 @@ bool LightningScriptContext::ExecuteNext() {
         size_t qe = msg.find_last_not_of(" \t\"\r\n");
         if (qs != std::string::npos && qe != std::string::npos)
             msg = msg.substr(qs, qe - qs + 1);
-        fprintf(stdout, "[Lightning] %s\n", msg.c_str());
+        LS_LOG("say: %s", msg.c_str());
         m_pc++;
 
     } else if (opcode == "stop" || opcode == "end") {
@@ -231,8 +233,42 @@ bool LightningScriptContext::ExecuteNext() {
         if (sec > 0) SetFloat("__cooldown", sec);
         m_pc++;
 
+    } else if (opcode == "play_sound") {
+        std::string name;
+        std::getline(ls, name);
+        {
+            size_t a = name.find_first_not_of(" \t\"");
+            size_t b = name.find_last_not_of(" \t\"\r\n");
+            if (a != std::string::npos && b != std::string::npos) name = name.substr(a, b - a + 1);
+        }
+        // Sound playback handled by caller via message queue; log for now
+        SetStr("__last_sound", name);
+        m_pc++;
+
+    } else if (opcode == "set_fog") {
+        float r, g, b, d;
+        ls >> r >> g >> b >> d;
+        SetFloat("__fog_r", r); SetFloat("__fog_g", g);
+        SetFloat("__fog_b", b); SetFloat("__fog_density", d);
+        m_pc++;
+
+    } else if (opcode == "set_skybox") {
+        std::string name;
+        ls >> name;
+        {
+            size_t a = name.find_first_not_of(" \t\"");
+            size_t b = name.find_last_not_of(" \t\"\r\n");
+            if (a != std::string::npos && b != std::string::npos) name = name.substr(a, b - a + 1);
+        }
+        SetStr("__skybox", name);
+        m_pc++;
+
+    } else if (opcode == "restore_skybox") {
+        SetStr("__skybox", "");
+        m_pc++;
+
     } else {
-        // Unknown opcode — skip
+        OZ_WARN("LightningScript: unknown opcode '%s' at line %d", opcode.c_str(), m_pc);
         m_pc++;
     }
 

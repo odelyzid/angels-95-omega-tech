@@ -37,7 +37,7 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o)
 
-.PHONY: all clean
+.PHONY: all clean test
 all: OTENGINE AngelServ ozpack
 
 $(BUILD_DIR):
@@ -124,5 +124,20 @@ AngelServ: $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp
 	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp -o OzPack$(EXE) $(SERVER_LIBS)
 
+# 9. Unit tests (no raylib dependency)
+TEST_FLAGS := -O0 -g --std=c++20
+test_context: tests/LightningScriptContext.test.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test_parser: tests/LightningScriptParser.test.cpp Source/Script/LightningScriptParser.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test: test_parser
+	@echo "--- LightningScriptParser Tests ---"
+	./test_parser
+
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry

@@ -1,4 +1,5 @@
 #pragma once
+#include "../Log.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -8,12 +9,19 @@
 // Refactored from Source/Parasite/ParasiteScript.hpp
 // Original ParasiteScript by ODeLyZiD / OmegaTech
 
+// Per-instance logger helper
+#define LS_LOG(fmt, ...)  OZ_DEBUG("[LS:%s] " fmt, m_debugTag.c_str(), ##__VA_ARGS__)
+#define LS_WARN(fmt, ...) OZ_WARN("[LS:%s] " fmt, m_debugTag.c_str(), ##__VA_ARGS__)
+
 class LightningScriptContext {
 public:
     static constexpr int MAX_FLAGS = 64;
-    static constexpr int MAX_VARS  = 128;
 
     LightningScriptContext() = default;
+
+    // Set a debug tag (typically "entityName:instanceIdx" or "zone:name")
+    void SetDebugTag(const std::string& tag) { m_debugTag = tag; }
+    const std::string& GetDebugTag() const { return m_debugTag; }
 
     // Load script lines from a text buffer
     bool Load(const std::string& scriptText);
@@ -56,6 +64,7 @@ private:
 
     // Jump labels: label_name → line_index
     std::unordered_map<std::string, int> m_jumpLabels;
+    std::string m_debugTag;
 
     // Internal: evaluate a condition string (e.g. "$x > 5")
     bool EvalCondition(const std::string& cond);
