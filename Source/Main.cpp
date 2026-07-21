@@ -308,6 +308,17 @@ static void ExecuteConsoleCommand(const char* cmd) {
                 return;
             }
         }
+    } else if (strncmp(cmd, "/world ", 7) == 0) {
+        int id = atoi(cmd + 7);
+        if (id >= 1 && id <= 20) {
+            fprintf(stderr, "WORLD switch -> %d\n", id);
+            SetSceneId = id;
+            SetSceneFlag = true;
+            OmegaTechData.MainCamera.position = (Vector3){0.0f, 20.0f, 0.0f};
+            OmegaTechData.MainCamera.target = (Vector3){0.0f, 20.0f, -10.0f};
+        }
+    } else if (strcmp(cmd, "/world") == 0) {
+        fprintf(stderr, "WORLD current=%d (use /world N)\n", OmegaTechData.LevelIndex);
     }
 }
 
