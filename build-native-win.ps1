@@ -41,7 +41,7 @@ if (-not $SkipClean) {
     Write-Step "Cleaning previous build..."
     Push-Location $PSScriptRoot
     & mingw32-make clean 2>&1 | Out-Null
-    Push-Location "$PSScriptRoot\OTEditor"
+    Push-Location "$PSScriptRoot\AngelEd"
     & mingw32-make clean 2>&1 | Out-Null
     Pop-Location
 }
@@ -53,11 +53,11 @@ Push-Location $PSScriptRoot
 if ($LASTEXITCODE -ne 0) { Fail "OTENGINE build failed" }
 Write-Step "Angels95.exe built."
 
-# --- 2. Build oz_server (dedicated server) ---
-Write-Step "Building oz_server..."
-& mingw32-make oz_server 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "oz_server build failed" }
-Write-Step "oz_server.exe built."
+# --- 2. Build AngelServ (dedicated server) ---
+Write-Step "Building AngelServ..."
+& mingw32-make AngelServ 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "AngelServ build failed" }
+Write-Step "AngelServ.exe built."
 
 # --- 3. Build OzPack (asset packer) ---
 Write-Step "Building OzPack..."
@@ -66,9 +66,9 @@ if ($LASTEXITCODE -ne 0) { Fail "OzPack build failed" }
 Write-Step "OzPack.exe built."
 Pop-Location
 
-# --- 4. Build oz_editor (level editor) ---
-Write-Step "Building oz_editor..."
-Push-Location "$PSScriptRoot\OTEditor"
+# --- 4. Build AngelEd (level editor) ---
+Write-Step "Building AngelEd..."
+Push-Location "$PSScriptRoot\AngelEd"
 $EDITOR_FLAGS = @('-O3', '-g', '--std=c++20', '-Wno-narrowing')
 $EDITOR_INC   = @('-I', '../Source', '-I', 'Source', '-I', "$W64DEVKIT\include")
 $EDITOR_LIBS  = @('-lraylib', '-lopengl32', '-lgdi32', '-lwinmm', '-lcomctl32', '-lcomdlg32', '-lws2_32', '-lm')
@@ -110,13 +110,13 @@ $stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
 # Link editor
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o oz_editor.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "oz_editor link failed" }
+g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "AngelEd link failed" }
 
 # Cleanup editor objects
 Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
-Write-Step "oz_editor.exe built."
+Write-Step "AngelEd.exe built."
 
 # --- 5. Assemble System/ directory ---
 Write-Step "Assembling System/ release..."
@@ -128,9 +128,9 @@ New-Item -ItemType Directory -Force -Path "$OUT_DIR\Cache" | Out-Null
 
 # Move EXEs
 if (Test-Path "$PSScriptRoot\Angels95.exe")  { Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe" }
-if (Test-Path "$PSScriptRoot\oz_server.exe") { Move-Item -Force "$PSScriptRoot\oz_server.exe" "$OUT_DIR\oz_server.exe" }
+if (Test-Path "$PSScriptRoot\AngelServ.exe") { Move-Item -Force "$PSScriptRoot\AngelServ.exe" "$OUT_DIR\AngelServ.exe" }
 if (Test-Path "$PSScriptRoot\OzPack.exe")    { Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe" }
-if (Test-Path "$PSScriptRoot\OTEditor\oz_editor.exe") { Move-Item -Force "$PSScriptRoot\OTEditor\oz_editor.exe" "$OUT_DIR\oz_editor.exe" }
+if (Test-Path "$PSScriptRoot\AngelEd\AngelEd.exe") { Move-Item -Force "$PSScriptRoot\AngelEd\AngelEd.exe" "$OUT_DIR\AngelEd.exe" }
 
 # Copy raylib DLL if present
 $raylibDll = "$W64DEVKIT\bin\libraylib.dll"
@@ -165,7 +165,7 @@ ShowGrid=1
 [Video]
 Width=1600
 Height=900
-"@ | Set-Content "$OUT_DIR\oz_editor.ini" -Encoding UTF8
+"@ | Set-Content "$OUT_DIR\AngelEd.ini" -Encoding UTF8
 
  # Create OzServer.ini
 @"
@@ -212,7 +212,7 @@ if (Test-Path "$PSScriptRoot\GameData\Shaders") {
 # --- 7. Verify outputs ---
 Write-Step "Verifying outputs..."
 $missing = @()
-foreach ($exe in @("Angels95.exe", "oz_server.exe", "oz_editor.exe", "OzPack.exe")) {
+foreach ($exe in @("Angels95.exe", "AngelServ.exe", "AngelEd.exe", "OzPack.exe")) {
     if (-not (Test-Path "$OUT_DIR\$exe")) { $missing += $exe }
 }
 if ($missing.Count -gt 0) {
@@ -227,8 +227,8 @@ if ($dataFiles.Count -eq 0 -and -not $SkipData) {
 Write-Step "Build complete."
 Write-Host "System/ release in $OUT_DIR" -ForegroundColor Green
 Write-Host "  Angels95.exe  - Game client" -ForegroundColor Green
-Write-Host "  oz_server.exe - Dedicated server" -ForegroundColor Green
-Write-Host "  oz_editor.exe - Level editor" -ForegroundColor Green
+Write-Host "  AngelServ.exe - Dedicated server" -ForegroundColor Green
+Write-Host "  AngelEd.exe - Level editor" -ForegroundColor Green
 Write-Host "  OzPack.exe    - Asset packer" -ForegroundColor Green
 Write-Host "  libraylib.dll - Raylib runtime (if available)" -ForegroundColor Green
 Write-Host "  Data/*.oz*    - Packaged assets ($($dataFiles.Count) files)" -ForegroundColor Green

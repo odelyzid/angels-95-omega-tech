@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [ "*" ]
+    tags: [ 'b*' ]
   pull_request:
     branches: [ "*" ]
 
@@ -46,8 +47,8 @@ jobs:
             sudo cp -r /tmp/raylib-install/* /usr/local/
           fi
 
-      - name: Build server (oz_server)
-        run: make oz_server
+      - name: Build server (AngelServ)
+        run: make AngelServ
 
       - name: Build client (Angels95)
         run: make OTENGINE
@@ -57,13 +58,13 @@ jobs:
 
       - name: Smoke test server
         run: |
-          timeout 3 ./oz_server --dir GameData --port 27015 --http-port 8080 2>&1 | head -20
+          timeout 3 ./AngelServ --dir GameData --port 27015 --http-port 8080 2>&1 | head -20
 
       - name: Upload server binary
         uses: actions/upload-artifact@v4
         with:
-          name: oz_server-linux
-          path: oz_server
+          name: AngelServ-linux
+          path: AngelServ
 
       - name: Upload client binary
         uses: actions/upload-artifact@v4
@@ -102,8 +103,8 @@ jobs:
           make --version | head -1
           pkg-config --cflags --libs raylib 2>/dev/null || echo "pkg-config not used"
 
-      - name: Build server (oz_server)
-        run: make oz_server SERVER_CXX=g++
+      - name: Build server (AngelServ)
+        run: make AngelServ SERVER_CXX=g++
 
       - name: Build client (Angels95)
         run: make OTENGINE
@@ -111,9 +112,9 @@ jobs:
       - name: Build OzPack
         run: make ozpack
 
-      - name: Build editor (oz_editor)
+      - name: Build editor (AngelEd)
         run: |
-          cd OTEditor
+          cd AngelEd
           EDITOR_FLAGS="-O3 -g --std=c++20 -Wno-narrowing"
           EDITOR_INC="-I ../Source -I Source"
           EDITOR_LIBS="-lraylib -lopengl32 -lgdi32 -lwinmm -lcomctl32 -lcomdlg32 -lws2_32 -lm"
@@ -129,7 +130,7 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Log.cpp -o Log.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o oz_editor.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release
@@ -140,9 +141,9 @@ jobs:
           
           # Move EXEs
           Move-Item -Force Angels95.exe System\
-          Move-Item -Force oz_server.exe System\
+          Move-Item -Force AngelServ.exe System\
           Move-Item -Force OzPack.exe System\
-          Move-Item -Force OTEditor\oz_editor.exe System\
+          Move-Item -Force AngelEd\AngelEd.exe System\
           
           # Copy DLLs
           Copy-Item /mingw64/bin/libraylib*.dll System\ -ErrorAction SilentlyContinue
@@ -175,7 +176,7 @@ jobs:
           [Video]
           Width=1600
           Height=900
-          "@ | Set-Content System\oz_editor.ini -Encoding UTF8
+          "@ | Set-Content System\AngelEd.ini -Encoding UTF8
           
           @"
           [Server]
@@ -215,7 +216,7 @@ jobs:
           Write-Host "=== System/ contents ==="
           Get-ChildItem System -Recurse | Select-Object FullName, Length
           
-          $required = @("Angels95.exe", "oz_server.exe", "oz_editor.exe", "OzPack.exe")
+          $required = @("Angels95.exe", "AngelServ.exe", "AngelEd.exe", "OzPack.exe")
           $missing = @()
           foreach ($exe in $required) {
             if (-not (Test-Path "System\$exe")) { $missing += $exe }
@@ -226,19 +227,23 @@ jobs:
           }
           Write-Host "All required EXEs present"
 
-      - name: Upload System/ release
+      - name: Upload System/ artifact
         uses: actions/upload-artifact@v4
         with:
           name: System-windows
           path: System/
           retention-days: 30
 
-      - name: Upload individual binaries (legacy)
-        uses: actions/upload-artifact@v4
+      - name: Package System/ as zip (tagged release only)
+        if: startsWith(github.ref, 'refs/tags/b')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path System -DestinationPath "System-$tag.zip"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/b')
+        uses: softprops/action-gh-release@v2
         with:
-          name: Angels95-windows
-          path: |
-            Angels95.exe
-            libraylib*.dll
-            libglfw*.dll
-          if-no-files-found: ignore
+          name: Angels95 Build ${{ github.ref_name }}
+          files: System-${{ github.ref_name }}.zip

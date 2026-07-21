@@ -27,17 +27,17 @@ Built on [raylib](https://www.raylib.com/) with PS1-inspired retro aesthetics an
 
 ## Server Hosting
 
-The dedicated server (`oz_server`) has **no raylib dependency** and runs on any Linux or Windows machine (including headless VPS).
+The dedicated server (`AngelServ`) has **no raylib dependency** and runs on any Linux or Windows machine (including headless VPS).
 
 ```
 # Build
-make oz_server
+make AngelServ
 
 # Run (default port 27015, HTTP 8080)
-./oz_server
+./AngelServ
 
 # Custom ports
-./oz_server --port 27015 --http-port 8080 --dir GameData
+./AngelServ --port 27015 --http-port 8080 --dir GameData
 ```
 
 | Flag | Default | Description |
@@ -102,8 +102,8 @@ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-raylib mak
 | Target | Description |
 |---|---|
 | `Angels95` / `Angels95.exe` | Game client (requires raylib) |
-| `oz_server` / `oz_server.exe` | Dedicated server (no raylib) |
-| `oz_editor.exe` | Level editor (Windows only, Win32 panels + raylib viewport) |
+| `AngelServ` / `AngelServ.exe` | Dedicated server (no raylib) |
+| `AngelEd.exe` | Level editor (Windows only, Win32 panels + raylib viewport) |
 | `OzPack.exe` | Asset packer CLI |
 
 All binaries are assembled into `System/` with INI files, run scripts, and packaged assets.
@@ -117,11 +117,11 @@ The `System/` directory contains a complete, runnable release:
 ```
 System/
   Angels95.exe          # Game client
-  oz_server.exe         # Dedicated server
-  oz_editor.exe         # Level editor
+  AngelServ.exe         # Dedicated server
+  AngelEd.exe         # Level editor
   OzPack.exe            # Asset packer
   Angels95.ini          # Client config
-  oz_editor.ini         # Editor config
+  AngelEd.ini         # Editor config
   run.bat / run.ps1     # Launch scripts
   Data/
     *.ozpak             # Generic assets (guns, objects, shaders)
@@ -159,7 +159,7 @@ The engine uses `PackageAssetLoader` with `*WithFallback` wrappers that check th
 
 ---
 
-## Level Editor (oz_editor)
+## Level Editor (AngelEd)
 
 The Windows-only level editor combines Win32 native panels with a raylib 3D viewport:
 
@@ -172,7 +172,7 @@ The Windows-only level editor combines Win32 native panels with a raylib 3D view
 - **Sound Manager** — Configure world sounds
 - **Script Manager** — Edit WDL scripts
 
-Launch with `System\oz_editor.exe`. The editor saves worlds in OZONE format (`.ozone`) alongside the WDL text format.
+Launch with `System\AngelEd.exe`. The editor saves worlds in OZONE format (`.ozone`) alongside the WDL text format.
 
 ---
 

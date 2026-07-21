@@ -6,7 +6,7 @@
 
 ```bash
 make OTENGINE          # game client → Angels95
-make oz_server         # dedicated server (no raylib dep)
+make AngelServ         # dedicated server (no raylib dep)
 make ozpack            # asset packer tool
 make -j$(nproc)        # all targets
 ```
@@ -25,7 +25,7 @@ make -j$(nproc)        # all targets
 
 - Requires `C:\raylib\w64devkit` (GCC 15.2.0) with raylib 5.5 statically linked.
 - **Do NOT use WinGet GCC 16.1.0** — its C++ headers are broken with POSIX UCRT.
-- Builds all targets: Angels95.exe, oz_server.exe, oz_editor.exe, OzPack.exe
+- Builds all targets: Angels95.exe, AngelServ.exe, AngelEd.exe, OzPack.exe
 - Assembles `System/` release with INI files, run scripts, and packaged assets.
 
 ### Windows (MSYS2/MINGW64)
@@ -43,11 +43,11 @@ make -j$(nproc)        # all targets
 ```
 System/
   Angels95.exe          # Game client
-  oz_server.exe         # Dedicated server
-  oz_editor.exe         # Level editor (Win32)
+  AngelServ.exe         # Dedicated server
+  AngelEd.exe         # Level editor (Win32)
   OzPack.exe            # Asset packer CLI
   Angels95.ini          # Client config
-  oz_editor.ini         # Editor config
+  AngelEd.ini         # Editor config
   run.bat / run.ps1     # Launch scripts (set cwd to repo root)
   Data/
     *.ozpak             # Generic asset packages (guns, objects, shaders)
@@ -91,7 +91,7 @@ Uses `OzPack.exe` to create packages from `GameData/` subdirectories.
 
 - **Client entrypoint:** `Source/Main.cpp:694` `main()`
 - **Server entrypoint:** `Source/Server/Server.cpp:794` `main()` — no raylib dep, uses raw sockets
-- **Editor entrypoint:** `OTEditor/Source/Main.cpp:363` `main()` — Win32 panels + raylib viewport
+- **Editor entrypoint:** `AngelEd/Source/Main.cpp:363` `main()` — Win32 panels + raylib viewport
 - **Engine core:** `Source/Core.hpp` (~2200 lines, single header) — init, menu, world loading, render loop, shaders
 - **World format:** WDL (colon-delimited plain text) + OZONE (editor format). Parser in `Source/Server/WDLParser.hpp` (standalone, no raylib)
 - **Networking:** Custom UDP protocol (`Source/Network/Network.hpp`). Packed structs (`#pragma pack(push,1)`). Discovery on UDP 27100, game on 27015.
@@ -117,18 +117,18 @@ Replaces the legacy `OmegaEnemy[10]` array with a dynamic, unlimited NPC system.
 - **Integration:** WDL "Walker" entries spawn via `PawnSystem::Spawn`. `UpdateEntities()` calls `PawnSystem::Update` + `DrawAll`.
 - **Editor:** Registers same defs (Walker, Skaarj, Brute, Floater). Win32 Pawn Manager panel for spawning.
 
-## Editor (oz_editor)
+## Editor (AngelEd)
 
 Win32 native panels + raylib 3D viewport.
 
-- **Source:** `OTEditor/Source/`
+- **Source:** `AngelEd/Source/`
 - **Panels:** Model Browser, Environment Settings, Pickups, Nodes, Pawn Manager, Texture Manager, Sound Manager, Script Manager
 - **Top menu bar** replaces old in-viewport raygui overlay. Controls placed in File, Models, Pickups, Nodes, View, Pawn menus.
-- **Win32 API:** `OTEditor/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` in `EditorPanelState` for cross-platform compat. Requires `(HWND)` casts at call sites.
+- **Win32 API:** `AngelEd/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` in `EditorPanelState` for cross-platform compat. Requires `(HWND)` casts at call sites.
 - **Win32 message loop:** The editor main loop calls `PeekMessage`/`TranslateMessage`/`DispatchMessage` before each raylib frame to process Win32 panel events.
 - **Dynamic file scanning:** All panels now scan `GameData/` recursively + package entries via `PackageAssetLoader`. No hardcoded file stubs.
 - **Unicode:** `Win32Dialogs.cpp` defines `UNICODE` / `_UNICODE` for wide-string Win32 API.
-- **Linked engine objects:** `oz_pawn_system.o`, `oz_ozone_loader.o`, `OzoneParser.o`
+- **Linked engine objects:** `OzPawnSystem.o`, `OzOzoneLoader.o`, `OzoneParser.o`
 - **Editor build (manual):** See `build-native-win.ps1` or CI workflow for exact g++ flags.
 
 ## Conventions & quirks
@@ -146,13 +146,13 @@ Two-job matrix (Linux + Windows MSYS2):
 
 ### Linux
 1. Build raylib from source (cached by version)
-2. `make oz_server`, `make OTENGINE`, `make ozpack`
-3. Smoke test: `timeout 3 ./oz_server --dir GameData --port 27015 --http-port 8080`
-4. Upload binaries: `oz_server-linux`, `Angels95-linux`, `OzPack-linux`
+2. `make AngelServ`, `make OTENGINE`, `make ozpack`
+3. Smoke test: `timeout 3 ./AngelServ --dir GameData --port 27015 --http-port 8080`
+4. Upload binaries: `AngelServ-linux`, `Angels95-linux`, `OzPack-linux`
 
 ### Windows (MSYS2)
 1. Install `mingw-w64-x86_64-{gcc,make,raylib}`
-2. Build all targets: `oz_server`, `OTENGINE`, `ozpack`, `oz_editor`
+2. Build all targets: `AngelServ`, `OTENGINE`, `ozpack`, `AngelEd`
 3. Assemble `System/` release with EXEs, DLLs, INI files, run scripts
 4. Run `build-data.ps1` to package assets
 5. Upload `System-windows` artifact (full release tree)

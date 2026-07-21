@@ -1,7 +1,7 @@
-// oz_server – Dedicated server for OmegaTech / OzWorld
+// AngelServ – Dedicated server for OmegaTech / OzWorld
 // Provides UDP game server + HTTP map API + LAN discovery.
 // Build: g++ -O3 --std=c++20 -fPIC -lpthread -lm
-// Usage: oz_server [--port P] [--http-port P] [--dir GameData]
+// Usage: AngelServ [--port P] [--http-port P] [--dir GameData]
 
 #include "../Network/Network.hpp"
 #include "WDLParser.hpp"
@@ -803,8 +803,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dir") == 0 && i + 1 < argc)
             g_gamedata_dir = argv[++i];
         else if (strcmp(argv[i], "--help") == 0) {
-            printf("oz_server -- OzWorld/OmegaTech dedicated server\n");
-            printf("Usage: oz_server [--port P] [--http-port P] [--dir GameData]\n");
+            printf("AngelServ -- OzWorld/OmegaTech dedicated server\n");
+            printf("Usage: AngelServ [--port P] [--http-port P] [--dir GameData]\n");
             return 0;
         }
     }
@@ -812,7 +812,7 @@ int main(int argc, char** argv) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    printf("oz_server v0.2.0 starting\n");
+    printf("AngelServ build 50 starting\n");
     printf("Game port: UDP %d\n",  game_port);
     printf("HTTP port: %d\n",     http_port);
     printf("Data dir:  %s\n",     g_gamedata_dir.c_str());
@@ -852,7 +852,7 @@ int main(int argc, char** argv) {
     g_game_state.init_worlds(g_gamedata_dir, g_world_list);
     {
         std::lock_guard<std::mutex> lock(g_print_mutex);
-        printf("oz_server ready\n");
+        printf("AngelServ ready\n");
     }
 
     // Main loop

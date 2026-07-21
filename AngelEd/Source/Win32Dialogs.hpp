@@ -3,7 +3,7 @@
 #include <vector>
 
 // =====================================================================
-// Win32Dialogs — Real OS-level window panels for oz_editor
+// Win32Dialogs — Real OS-level window panels for AngelEd
 // =====================================================================
 // On Windows, these are actual native OS windows.
 // On other platforms, they are stubs (no-ops).

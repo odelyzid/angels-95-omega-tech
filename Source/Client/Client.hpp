@@ -51,7 +51,7 @@ struct ClientProjectile {
 };
 
 // Game client networking module.
-// Connects to oz_server and syncs player position / receives updates.
+// Connects to AngelServ and syncs player position / receives updates.
 
 class OmegaClient {
 public:

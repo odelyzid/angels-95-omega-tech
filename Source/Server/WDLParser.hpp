@@ -6,7 +6,7 @@
 #include <cstdint>
 
 // Standalone WDL parser - no raylib dependency.
-// Used by oz_server to serialize .wdl files to JSON.
+// Used by AngelServ to serialize .wdl files to JSON.
 
 enum class WDLElementType : uint8_t {
     MODEL,                 // 1 = Model entity

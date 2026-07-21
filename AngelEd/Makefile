@@ -16,7 +16,7 @@ BUILD_DIR := ../build
 
 .PHONY: all clean
 
-all: oz_editor
+all: AngelEd
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -45,11 +45,11 @@ $(BUILD_DIR)/Custom.so:
 $(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
 	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -shared -DRAYGUI_IMPLEMENTATION -DBUILD_LIBTYPE_SHARED $(LDFLAGS) -o $@
 
-# 5. Link into final oz_editor binary
+# 5. Link into final AngelEd binary
 EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS))
-oz_editor: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
-	$(COMP) $(EDITOR_OBJS) -o oz_editor $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
+AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
+	$(COMP) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 
 clean:
-	rm -f oz_editor OTEditor
+	rm -f AngelEd
 	rm -f $(BUILD_DIR)/Main.o $(BUILD_DIR)/Win32Dialogs.o $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Custom.so

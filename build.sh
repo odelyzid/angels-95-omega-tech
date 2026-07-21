@@ -50,8 +50,8 @@ echo "==> Building Angels95..."
 make -j"$(nproc)" OTENGINE
 
 # --- Server ---
-echo "==> Building oz_server..."
-make -j"$(nproc)" oz_server
+echo "==> Building AngelServ..."
+make -j"$(nproc)" AngelServ
 
 echo ""
-echo "Done. Run ./Angels95 to launch, or ./oz_server to start the server."
+echo "Done. Run ./Angels95 to launch, or ./AngelServ to start the server."

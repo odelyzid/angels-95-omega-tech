@@ -36,7 +36,7 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           OzOzoneLoader.o OzoneParser.o GameState.o)
 
 .PHONY: all clean
-all: OTENGINE oz_server ozpack
+all: OTENGINE AngelServ ozpack
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -90,16 +90,16 @@ $(BUILD_DIR)/OzoneParser.o: Source/Server/OzoneParser.cpp Source/Server/OzonePar
 OTENGINE: $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
-# 7. Build oz_server (dedicated server, no raylib)
+# 7. Build AngelServ (dedicated server, no raylib)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-oz_server: $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o oz_server$(EXE) $(SERVER_LIBS)
+AngelServ: $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp
 	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp -o OzPack$(EXE) $(SERVER_LIBS)
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe oz_server Angels95 OzPack *.o OTEditor/*.o OTEditor/Source/*.o
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o

@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
 
-// Editor log file (appended to System/oz_editor.log)
+// Editor log file (appended to System/AngelEd.log)
 static FILE* g_editorLog = nullptr;
 static void EditorLog(const char* fmt, ...) {
     va_list args;
@@ -34,8 +34,8 @@ static void EditorLog(const char* fmt, ...) {
     fprintf(stderr, "\n");
     va_end(args);
     if (!g_editorLog) {
-        g_editorLog = fopen("System/oz_editor.log", "a");
-        if (!g_editorLog) g_editorLog = fopen("oz_editor.log", "a");
+        g_editorLog = fopen("System/AngelEd.log", "a");
+        if (!g_editorLog) g_editorLog = fopen("AngelEd.log", "a");
     }
     if (g_editorLog) {
         time_t now = time(nullptr);
@@ -358,9 +358,9 @@ static bool ApplyTextureToModel(int target, const char* path) {
 }
 
 int main(int argc, char **argv){
-    EditorLog("=== oz_editor starting ===");
+    EditorLog("=== AngelEd starting ===");
     SetWindowState(FLAG_VSYNC_HINT);
-    InitWindow(1280, 720, "oz_editor");
+    InitWindow(1280, 720, "AngelEd");
     InitAudioDevice();
     SetTargetFPS(60);
     GuiLoadStyleDark();
@@ -369,7 +369,7 @@ int main(int argc, char **argv){
     SetWorldDirectory(g_documentPath.parent_path());
 
     // Load INI config
-    g_config.Load("System/oz_editor.ini");
+    g_config.Load("System/AngelEd.ini");
 
     // Initialize package-based asset loading
     PackageAssetLoader::Instance().Init();
@@ -819,7 +819,7 @@ int main(int argc, char **argv){
     }
 
     // Cleanup
-    EditorLog("=== oz_editor shutting down ===");
+    EditorLog("=== AngelEd shutting down ===");
     if (g_editorLog) fclose(g_editorLog);
     StopSoundPreview();
     OzoneLoader::Instance().Unload();
