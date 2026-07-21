@@ -14,3 +14,10 @@ oz_server
 .DS_Store
 Thumbs.db
 OmegaTech
+
+# Build output directories
+System/
+@System/
+
+# Windows executables
+*.exe
