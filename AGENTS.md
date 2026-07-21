@@ -1,11 +1,11 @@
-# AGENTS.md — Angels95 / OmegaTech Engine
+# AGENTS.md â€” Angels95 / OmegaTech Engine
 
 ## Build
 
 ### Linux / macOS
 
 ```bash
-make OTENGINE          # game client → Angels95
+make OTENGINE          # game client â†’ Angels95
 make AngelServ         # dedicated server (no raylib dep)
 make ozpack            # asset packer tool
 make -j$(nproc)        # all targets
@@ -24,7 +24,7 @@ make -j$(nproc)        # all targets
 ```
 
 - Requires `C:\raylib\w64devkit` (GCC 15.2.0) with raylib 5.5 statically linked.
-- **Do NOT use WinGet GCC 16.1.0** — its C++ headers are broken with POSIX UCRT.
+- **Do NOT use WinGet GCC 16.1.0** â€” its C++ headers are broken with POSIX UCRT.
 - Builds all targets: Angels95.exe, AngelServ.exe, AngelEd.exe, OzPack.exe
 - Assembles `System/` release with INI files, run scripts, and packaged assets.
 
@@ -64,18 +64,18 @@ The game requires `GameData/` as a sibling directory to `System/` for worlds, sa
 ### Format
 
 Universal container with 32-byte header + sorted file index:
-- **OZPK** (`.ozpak`) — generic assets (models, scripts, shaders)
-- **OZTX** (`.oztex`) — textures (PNG)
-- **OZSD** (`.ozsnd`) — sounds (WAV/MP3/OGG)
-- **OZMX** (`.ozmux`) — music (WAV/MP3)
-- **OZWN** (`.ozone`) — world files
+- **OZPK** (`.ozpak`) â€” generic assets (models, scripts, shaders)
+- **OZTX** (`.oztex`) â€” textures (PNG)
+- **OZSD** (`.ozsnd`) â€” sounds (WAV/MP3/OGG)
+- **OZMX** (`.ozmux`) â€” music (WAV/MP3)
+- **OZWN** (`.ozone`) â€” world files
 
 ### Runtime Loading
 
 `PackageAssetLoader` (`Source/PackageAssetLoader.hpp`):
 - Call `PackageAssetLoader::Instance().Init()` at startup to scan `System/Data/*.oz*`
 - Provides `*WithFallback` wrappers: `LoadTextureWithFallback`, `LoadSoundWithFallback`, `LoadModelWithFallback`, `LoadShaderWithFallback`, etc.
-- Path resolution: tries exact path → basename → stripped prefix
+- Path resolution: tries exact path â†’ basename â†’ stripped prefix
 - Models use temp-file cache in `System/Cache/` (raylib has no `LoadModelFromMemory`)
 - `ListAllFiles()` enumerates entries across all loaded packages (used by editor)
 
@@ -90,12 +90,12 @@ Uses `OzPack.exe` to create packages from `GameData/` subdirectories.
 ## Architecture
 
 - **Client entrypoint:** `Source/Main.cpp:694` `main()`
-- **Server entrypoint:** `Source/Server/Server.cpp:794` `main()` — no raylib dep, uses raw sockets
-- **Editor entrypoint:** `AngelEd/Source/Main.cpp:363` `main()` — Win32 panels + raylib viewport
-- **Engine core:** `Source/Core.hpp` (~2200 lines, single header) — init, menu, world loading, render loop, shaders
+- **Server entrypoint:** `Source/Server/Server.cpp:794` `main()` â€” no raylib dep, uses raw sockets
+- **Editor entrypoint:** `AngelEd/Source/Main.cpp:363` `main()` â€” Win32 panels + raylib viewport
+- **Engine core:** `Source/Core.hpp` (~2200 lines, single header) â€” init, menu, world loading, render loop, shaders
 - **World format:** WDL (colon-delimited plain text) + OZONE (editor format). Parser in `Source/Server/WDLParser.hpp` (standalone, no raylib)
 - **Networking:** Custom UDP protocol (`Source/Network/Network.hpp`). Packed structs (`#pragma pack(push,1)`). Discovery on UDP 27100, game on 27015.
-- **Server HTTP API:** raw socket server in `Server.cpp` — routes `GET /map?list` and `GET /map?name=X` on port 8080.
+- **Server HTTP API:** raw socket server in `Server.cpp` â€” routes `GET /map?list` and `GET /map?name=X` on port 8080.
 - **Inventory:** 20 backpack slots + 8 equipment slots + 5 weapon hotbar slots. Items defined in `Source/Items.hpp`. Server maps pickup types to item_id.
 - **Save files (binary, do not commit):** `GameData/Saves/TF.sav` (flags), `POS.sav` (position), `Script.sav` (WDL scripts).
 
@@ -103,9 +103,9 @@ Uses `OzPack.exe` to create packages from `GameData/` subdirectories.
 
 Replaces the legacy `OmegaEnemy[10]` array with a dynamic, unlimited NPC system.
 
-- **Header:** `Source/oz_pawn_system.h`
-- **Implementation:** `Source/oz_pawn_system.cpp`
-- **FSM states:** IDLE → PATROL → CHASE → RETURN → DEAD
+- **Header:** `Source/Pawn/OzPawnSystem.hpp`
+- **Implementation:** `Source/Pawn/OzPawnSystem.cpp`
+- **FSM states:** IDLE â†’ PATROL â†’ CHASE â†’ RETURN â†’ DEAD
 - **Usage:**
   ```cpp
   PawnSystem::Instance().RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
@@ -124,11 +124,11 @@ Win32 native panels + raylib 3D viewport.
 - **Source:** `AngelEd/Source/`
 - **Panels:** Model Browser, Environment Settings, Pickups, Nodes, Pawn Manager, Texture Manager, Sound Manager, Script Manager
 - **Top menu bar** replaces old in-viewport raygui overlay. Controls placed in File, Models, Pickups, Nodes, View, Pawn menus.
-- **Win32 API:** `AngelEd/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` in `EditorPanelState` for cross-platform compat. Requires `(HWND)` casts at call sites.
+- **Win32 API:** `AngelEd/Source/Win32Dialogs.cpp` â€” uses `HWND` handles stored as `void*` in `EditorPanelState` for cross-platform compat. Requires `(HWND)` casts at call sites.
 - **Win32 message loop:** The editor main loop calls `PeekMessage`/`TranslateMessage`/`DispatchMessage` before each raylib frame to process Win32 panel events.
 - **Dynamic file scanning:** All panels now scan `GameData/` recursively + package entries via `PackageAssetLoader`. No hardcoded file stubs.
 - **Unicode:** `Win32Dialogs.cpp` defines `UNICODE` / `_UNICODE` for wide-string Win32 API.
-- **Linked engine objects:** `OzPawnSystem.o`, `OzOzoneLoader.o`, `OzoneParser.o`
+- **Linked engine objects:** `OzPawnSystem.o`, `OzOzoneLoader.o`, `OzoneParser.o`, `OzBsp.o`, `WorldChunk.o`
 - **Editor build (manual):** See `build-native-win.ps1` or CI workflow for exact g++ flags.
 
 ## Conventions & quirks

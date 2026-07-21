@@ -1,4 +1,4 @@
-#include "OzPawnSystem.hpp"
+﻿#include "OzPawnSystem.hpp"
 #include "../Package/OzAssetMapper.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Script/LightningEntityManager.hpp"
@@ -36,7 +36,7 @@ PawnDef* PawnSystem::FindDef(const char* name) {
 }
 
 // ---------------------------------------------------------------------------
-// AllocSlot — find a free slot or grow the vector
+// AllocSlot â€” find a free slot or grow the vector
 // ---------------------------------------------------------------------------
 int PawnSystem::AllocSlot() {
     if (!m_freeIds.empty()) {
@@ -134,7 +134,7 @@ Pawn* PawnSystem::Get(int id) {
 }
 
 // ---------------------------------------------------------------------------
-// IsPlayerAttacked — check if any pawn is close enough to damage the player
+// IsPlayerAttacked â€” check if any pawn is close enough to damage the player
 // ---------------------------------------------------------------------------
 bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
     outDamage = 0.0f;
@@ -300,7 +300,7 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
 }
 
 // ---------------------------------------------------------------------------
-// UpdateSkyZone — detect if player is inside a ZONE_SKY volume
+// UpdateSkyZone â€” detect if player is inside a ZONE_SKY volume
 // ---------------------------------------------------------------------------
 void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
     bool wasInSky = m_inSkyZone;
@@ -420,6 +420,7 @@ void PawnSystem::DrawEntities(Camera3D& camera) {
         if (n.zoneType == ZoneType::ZONE_WATER) icon = "ZoneWater";
         else if (n.zoneType == ZoneType::ZONE_LADDER) icon = "ZoneLadder";
         else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
+    else if (n.zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) icon = "ZoneSound";
         else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
         EngineBillboard::Draw(camera, icon, center, 1.0f);
     }
@@ -489,3 +490,4 @@ PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {
     static std::unordered_map<uint32_t, PatrolState> states;
     return states[p.id];
 }
+

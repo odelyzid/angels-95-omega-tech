@@ -1,4 +1,4 @@
-﻿#include "Data.hpp"
+#include "Data.hpp"
 #include "Log.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Audio/OzSoundLoader.hpp"

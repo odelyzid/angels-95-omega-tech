@@ -1,4 +1,4 @@
-#include "OzOzoneLoader.hpp"
+﻿#include "OzOzoneLoader.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Server/OzoneParser.hpp"
@@ -16,6 +16,7 @@ static ZoneType ParseZoneType(std::string name) {
     if (name == "ladder") return ZoneType::ZONE_LADDER;
     if (name == "sky") return ZoneType::ZONE_SKY;
     if (name == "reverb") return ZoneType::ZONE_REVERB;
+    if (name == "gameplay_sound") return ZoneType::ZONE_GAMEPLAY_SOUND;
     return ZoneType::ZONE_WATER;
 }
 
@@ -114,7 +115,7 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
 }
 
 // ---------------------------------------------------------------------------
-// Build* — each applies the best texture for its role
+// Build* â€” each applies the best texture for its role
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
@@ -206,7 +207,7 @@ Model OzoneLoader::BuildPlane(float nx, float ny, float nz, float dist) {
 }
 
 // ---------------------------------------------------------------------------
-// BuildHeightmap — load grayscale PNG, generate terrain mesh
+// BuildHeightmap â€” load grayscale PNG, generate terrain mesh
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
                                   const std::string& texPath,
@@ -222,7 +223,7 @@ Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
     // Load texture overlay
     m_hmTexture = LoadTexture(texPath.c_str());
 
-    // Position (Z-up → Y-up swap: args[1]=OZONE Y becomes raylib Z)
+    // Position (Z-up â†’ Y-up swap: args[1]=OZONE Y becomes raylib Z)
     m_hmPosition = {args[0], args[2], args[1]};
     m_hmScale = (args.size() > 3) ? args[3] : 1.0f;
     m_hmSize = {(args.size() > 4) ? args[4] : 100.0f,
@@ -283,7 +284,7 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 }
 
 // ---------------------------------------------------------------------------
-// LoadFile — also loads world textures from the .ozone file's directory
+// LoadFile â€” also loads world textures from the .ozone file's directory
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadFile(const char* path) {
     OZ_INFO("OzoneLoader: loading %s", path);
@@ -308,7 +309,7 @@ bool OzoneLoader::LoadFile(const char* path) {
     for (auto& prim : primitives) {
         if (LoadOzoneEntity(prim)) continue;
 
-        // Heightmap is handled specially — builds its own model from image path
+        // Heightmap is handled specially â€” builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
         OzoneRenderable r;
         r.typeId = (int)prim.type;
@@ -406,7 +407,7 @@ void OzoneLoader::Draw(Camera3D& camera) {
 }
 
 // ---------------------------------------------------------------------------
-// ComputeCollisionAABB — generate world-space AABB from primitive params
+// ComputeCollisionAABB â€” generate world-space AABB from primitive params
 // ---------------------------------------------------------------------------
 void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
                                        Vector3 position, BoundingBox& out) {
@@ -449,7 +450,7 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
 }
 
 // ---------------------------------------------------------------------------
-// RebuildCollisionVolumes — iterate renderables and generate AABBs
+// RebuildCollisionVolumes â€” iterate renderables and generate AABBs
 // ---------------------------------------------------------------------------
 void OzoneLoader::RebuildCollisionVolumes() {
     m_collisionVolumes.clear();
@@ -458,7 +459,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
     CsgProcessor csg;
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        // Skip entity types — handled by PawnSystem
+        // Skip entity types â€” handled by PawnSystem
         if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
@@ -481,7 +482,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
     // Overflow protection: merge adjacent coplanar AABBs
     int merges = csg.MergePass();
     if (merges > 0) {
-        OZ_INFO("CSG: merged %d adjacent volumes (count: %d → %d)",
+        OZ_INFO("CSG: merged %d adjacent volumes (count: %d â†’ %d)",
                 merges, csg.Count() + merges, csg.Count());
     }
 
@@ -506,7 +507,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
 }
 
 // ---------------------------------------------------------------------------
-// DrawZoneGeometry — draw renderables whose AABBs overlap the given zone
+// DrawZoneGeometry â€” draw renderables whose AABBs overlap the given zone
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
     for (auto& r : m_renderables) {
@@ -555,7 +556,7 @@ void OzoneLoader::UnloadHeightmap() {
 }
 
 // ---------------------------------------------------------------------------
-// SampleHeightmapY — bilinear sample the OZONE-loaded heightmap
+// SampleHeightmapY â€” bilinear sample the OZONE-loaded heightmap
 // Returns -99999.0f if no heightmap loaded or out of bounds.
 // ---------------------------------------------------------------------------
 float OzoneLoader::SampleHeightmapY(float px, float pz) const {
@@ -612,3 +613,4 @@ OzoneRenderable* OzoneLoader::Get(int index) {
     if (index < 0 || index >= (int)m_renderables.size()) return nullptr;
     return &m_renderables[index];
 }
+

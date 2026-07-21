@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "raylib.h"
 #include <cstdint>
 #include <string>
@@ -6,13 +6,13 @@
 #include <unordered_map>
 
 // ---------------------------------------------------------------------------
-// PawnSystem — dynamic entity / NPC manager
+// PawnSystem â€” dynamic entity / NPC manager
 //
 // Replaces the hard-coded EntityCount=10 / Enemys[10] array with a
 // growable vector of Pawn objects, each with its own FSM state.
 //
-// States: IDLE → PATROL (circle around spawn) → CHASE (follow player) →
-//         RETURN (go back to spawn) → PATROL
+// States: IDLE â†’ PATROL (circle around spawn) â†’ CHASE (follow player) â†’
+//         RETURN (go back to spawn) â†’ PATROL
 //
 // Usage:
 //   PawnSystem::Instance().Spawn({10,0,10}, "Walker");
@@ -33,7 +33,18 @@ enum class ZoneType : uint8_t {
     ZONE_WATER = 0,
     ZONE_LADDER = 1,
     ZONE_SKY = 2,
-    ZONE_REVERB = 3
+    ZONE_REVERB = 3,
+    ZONE_GAMEPLAY_SOUND = 4
+};
+
+// Sound profile - maps game types to music/sound actions
+struct GameplaySoundProfile {
+    std::string music_on_enter;   // Music to crossfade to on zone enter
+    std::string music_on_exit;    // Music to restore on zone exit
+    std::string sfx_on_enter;     // One-shot sound played on enter
+    std::string sfx_on_combat;    // Combat stinger (DM/TDM modes)
+    std::string ambience_loop;    // Ambience loop while inside zone
+    float volume_mult = 1.0f;     // Volume multiplier for this zone
 };
 
 // Template definition shared between spawn calls; stored in an internal
@@ -177,7 +188,7 @@ public:
     // Draw entities (billboards for player starts, pickups, zones, emitters)
     void DrawEntities(Camera3D& camera);
 
-    // Sky zone tracking — returns true if player is inside a ZONE_SKY volume
+    // Sky zone tracking â€” returns true if player is inside a ZONE_SKY volume
     bool IsInSkyZone() const { return m_inSkyZone; }
     BoundingBox GetSkyZoneBounds() const { return m_activeSkyZoneBounds; }
     void UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds);
