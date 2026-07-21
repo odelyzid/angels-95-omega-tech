@@ -170,6 +170,8 @@ static std::vector<MenuDef> g_menus = {
     }}
 };
 
+static void ToggleHeightmapEditor() { ShowHeightmapEditor(!g_editorPanels.showHeightmapEditor); g_menuActive = -1; }
+
 // Rebuild the Models submenu to show loaded model count
 static void RebuildModelsMenu() {
     if (g_menus.size() < 2) return;
@@ -187,6 +189,8 @@ static void RebuildModelsMenu() {
     modelsMenu.items.push_back({"Adv Collision",    PlaceAdvCollision});
     modelsMenu.items.push_back({"Height Clip Box",  PlaceHeightClipBox});
     modelsMenu.items.push_back({"Toggle Collision", ToggleCollision});
+    modelsMenu.items.push_back({"---", nullptr});
+    modelsMenu.items.push_back({"Heightmap Editor...", ToggleHeightmapEditor});
 }
 
 // Forward declarations for overlay UI functions
@@ -674,6 +678,14 @@ int main(int argc, char **argv){
                 g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
                 g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, 72, 15, WHITE);
 
+        // CSG operation display
+        {
+            static const char* csgLabels[] = {"SOLID", "ADD", "SUB", "INTERSECT", "DE_RESC"};
+            int op = OmegaTechEditor.CSGOperation;
+            if (op < 0 || op > 4) op = 0;
+            DrawText(TextFormat("CSG: %s", csgLabels[op]), 10, 92, 15, ORANGE);
+        }
+
         // Top menu bar (always visible)
         DrawMenuBar();
 
@@ -813,6 +825,11 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_TWO))   g_placeMode = PlaceMode::PICKUP;
         if (IsKeyPressed(KEY_THREE)) g_placeMode = PlaceMode::NODE;
         if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; ShowEnvPanel(!g_editorPanels.showEnvPanel); }
+
+        // CSG operation cycling (G key)
+        if (IsKeyPressed(KEY_G) && g_placeMode == PlaceMode::MODEL) {
+            OmegaTechEditor.CSGOperation = (OmegaTechEditor.CSGOperation + 1) % 5;
+        }
 
         if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
 

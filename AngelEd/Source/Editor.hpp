@@ -522,6 +522,8 @@ class InEditor{
         float X = 0, Y = 0, Z = 0, S = 1, R = 0, L = 0, H = 0, W = 0;
         EditorPickupType ActivePickupType = EditorPickupType::HEALTH_VIAL;
         EditorNodeType ActiveNodeType = EditorNodeType::SPAWN;
+        // CSG operation for OZONE brush placement: 0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC
+        int CSGOperation = 0;
 };
 
 static InEditor OmegaTechEditor;

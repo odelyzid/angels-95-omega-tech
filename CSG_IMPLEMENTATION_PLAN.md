@@ -8,7 +8,7 @@
 | 2 | Heightmap as OZONE element | ✅ Complete |
 | 3 | AABB CSG brushes (add/sub/intersect/deresc) | ✅ Complete |
 | 4 | SkyZoneInfo skybox rendering | ✅ Complete |
-| 5 | Editor UI for CSG + Heightmap | ⏳ Pending |
+| 5 | Editor UI for CSG + Heightmap | ✅ Complete |
 | 6+7 | Server sync + Large-scale partitioning/chunking | ⏳ Pending |
 | 8 | CSG overflow protection | ⏳ Pending |
 | 9 | World migration (World3 → EngineTest.ozone) | ⏳ Pending |
@@ -37,14 +37,21 @@
   - Export as OZONE `heightmap` primitive line
 - **Implementation**: Reuse existing `Win32Dialogs` pattern for native window panels; raylib render texture for heightmap preview
 
-### Files to modify:
+### Implementation complete (commit d83ec91..HEAD):
+- CSG operation field (`CSGOperation`) added to `InEditor` class in `Editor.hpp`
+- CSG display in HUD (SOLID/ADD/SUB/INTERSECT/DE_RESC) with `G` key to cycle
+- CSG prefix written to OZONE on model placement
+- Heightmap Editor window: `Models > Heightmap Editor` menu item
+- Native Win32 dialog with image/texture path, browse buttons, position/size/scale spinners, Generate button
+- Window registered, created, destroyed via standard panel lifecycle
+
+### Files modified:
 | File | Changes |
 |---|---|
-| `AngelEd/Source/Main.cpp` | Add menu items, panel toggles, CSG UI handling |
-| `AngelEd/Source/Win32Dialogs.cpp` | New window creation for Heightmap Editor |
-| `AngelEd/Source/Win32Dialogs.hpp` | Heightmap Editor window state |
-| `AngelEd/Source/Editor.hpp` | CSG operation field on element data |
-| `Source/OzOzoneLoader.cpp` | (references for preview rendering) |
+| `AngelEd/Source/Main.cpp` | CSG display, keybind (G), Heightmap Editor menu item |
+| `AngelEd/Source/Win32Dialogs.cpp` | `HmEditorProc`, `ShowHeightmapEditor`, registration |
+| `AngelEd/Source/Win32Dialogs.hpp` | `showHeightmapEditor`, `hHeightmapEditor`, `heightmapEditorPos` |
+| `AngelEd/Source/Editor.hpp` | `CSGOperation` field on `InEditor` |
 
 ---
 
@@ -135,13 +142,15 @@ After the CsgProcessor finishes, run a merge pass:
 
 ---
 
-## Phase 10 — LightningScript (Future)
+## Phase 10 — LightningScript [TRIGGERS: Implementation of  './PLAN_LIGHTNING_SCRIPT_INTEGRATION.md before' proceeding the Integration of the Sky ZoneInfo]
 
 - **SkyZoneInfo** pawn type will be implemented as a LightningScript script, not hardcoded
 - ZoneInfo scripts can react to player enter/exit, control sky color, fog settings, ambient light
+- SkyZoneInfo can be specifically placed into a substractive Brush like in Unreal to build Skyboxes using 
+- different Brushes, Textures and Lights working like a camera.
+- surfaces of Brushes can be edited with own properties like U-Pan/V-Pan (scrolling Textures) aswell as SkyZoneInfo Property that maps the Surface to show the "camera-view" of the SkyZoneInfo
 - `zone sky` continues to work as the zone trigger; its behavior becomes scriptable
-- PawnSystem will expose zone events to the LightningScript runtime when it's built
-
+- PawnSystem will expose zone events to the LightningScript runtime when we are at this specific Phase -> 
 ---
 
 ## Dependency Graph
@@ -153,7 +162,7 @@ Phase 6+7 (Server) ─┘
                    │
 Phase 8 (Overflow) ─┘
                        
-Phase 10 (Script) ───→ (future, independent)
+Phase 10 (Script) ───→ Depends on full implementation of './PLAN_LIGHTNING_SCRIPT_INTEGRATION.md'
 ```
 
 Phases 5, 6+7, and 8 can be worked on in parallel. Phase 9 depends on 5, 6+7, and 8 being complete.

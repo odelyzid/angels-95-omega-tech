@@ -29,6 +29,7 @@ struct EditorPanelState {
     bool showPickupPanel = false;
     bool showNodePanel = false;
     bool showSettingsPanel = false;
+    bool showHeightmapEditor = false;
 
     // Model browser state (used cross-platform)
     std::vector<ModelBrowserEntry> modelEntries;
@@ -56,6 +57,7 @@ struct EditorPanelState {
     void* hPickupPanel = nullptr;
     void* hNodePanel = nullptr;
     void* hSettingsPanel = nullptr;
+    void* hHeightmapEditor = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -70,7 +72,8 @@ struct EditorPanelState {
     WinPos envPanelPos   = {60, 60, 420, 360};
     WinPos pickPanelPos  = {60, 400, 200, 280};
     WinPos nodePanelPos  = {290, 400, 200, 200};
-    WinPos settingsPos   = {50, 50, 400, 600};
+    WinPos settingsPos        = {50, 50, 400, 600};
+    WinPos heightmapEditorPos = {120, 100, 520, 480};
 #endif
 };
 
@@ -105,6 +108,7 @@ void ShowModelBrowser(bool show);
 void ShowEnvPanel(bool show);
 void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
+void ShowHeightmapEditor(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
 void SetTextureTargetNames(const std::vector<std::string>& names);
@@ -122,6 +126,7 @@ inline void ShowModelBrowser(bool) {}
 inline void ShowEnvPanel(bool) {}
 inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
+inline void ShowHeightmapEditor(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
 inline void SetTextureTargetNames(const std::vector<std::string>&) {}
