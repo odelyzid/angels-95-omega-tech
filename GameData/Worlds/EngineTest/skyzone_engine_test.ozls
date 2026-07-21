@@ -1,0 +1,14 @@
+entity "skyzone_engine_test" : skyzone {
+    fog_color = (0.7, 0.75, 0.8)
+    fog_density = 0.002
+    ambient_light = (0.5, 0.5, 0.6)
+    skybox = "skybox_default"
+    actions {
+        on_enter {
+            say "Entered EngineTest sky zone"
+        }
+        on_exit {
+            say "Exited EngineTest sky zone"
+        }
+    }
+}

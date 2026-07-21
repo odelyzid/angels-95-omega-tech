@@ -33,7 +33,9 @@ BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o \
-          OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o GameState.o)
+          OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o GameState.o \
+          LightningScriptContext.o LightningScriptParser.o \
+          LightningEntityRegistry.o LightningEntityManager.o)
 
 .PHONY: all clean
 all: OTENGINE AngelServ ozpack
@@ -94,8 +96,21 @@ $(BUILD_DIR)/OzBsp.o: Source/Physics/OzBsp.cpp Source/Physics/OzBsp.hpp | $(BUIL
 $(BUILD_DIR)/WorldChunk.o: Source/Physics/WorldChunk.cpp Source/Physics/WorldChunk.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Physics/WorldChunk.cpp -o $@
 
+# 5h. Compile LightningScript system
+$(BUILD_DIR)/LightningScriptContext.o: Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptContext.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Script/LightningScriptContext.cpp -o $@
+
+$(BUILD_DIR)/LightningScriptParser.o: Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptParser.hpp Source/Script/LightningEntityDef.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Script/LightningScriptParser.cpp -o $@
+
+$(BUILD_DIR)/LightningEntityRegistry.o: Source/Script/LightningEntityRegistry.cpp Source/Script/LightningEntityRegistry.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Script/LightningEntityRegistry.cpp -o $@
+
+$(BUILD_DIR)/LightningEntityManager.o: Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityManager.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Script/LightningEntityManager.cpp -o $@
+
 # 6. Build Game Binary
-OTENGINE: $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o)
+OTENGINE: $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib)
