@@ -4,6 +4,7 @@
 #include "Server/OzoneParser.hpp"
 #include "Log.hpp"
 #include "Package/PackageAssetLoader.hpp"
+#include "Physics/OzBsp.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -309,31 +310,33 @@ bool OzoneLoader::LoadFile(const char* path) {
 
         // Heightmap is handled specially — builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
-            OzoneRenderable r;
-            r.typeId = (int)prim.type;
-            r.position = {0,0,0};
-            r.scale = 1.0f;
-            r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
-            r.loaded = m_hmReady;
-            m_renderables.push_back(r);
-            continue;
-        }
-
         OzoneRenderable r;
         r.typeId = (int)prim.type;
-
-        if (prim.args.size() >= 3)
-            r.position = {prim.args[0], prim.args[2], prim.args[1]};
-
+        r.position = {0,0,0};
         r.scale = 1.0f;
-        if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 7)
-            r.rotation = prim.args[6] * DEG2RAD;
-        else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 8)
-            r.rotation = prim.args[7] * DEG2RAD;
-
-        r.model = BuildFromPrimitive((int)prim.type, prim.args);
-        r.loaded = (r.model.meshCount > 0);
+        r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+        r.loaded = m_hmReady;
+        r.csgOp = 0;
         m_renderables.push_back(r);
+        continue;
+    }
+
+    OzoneRenderable r;
+    r.typeId = (int)prim.type;
+    r.csgOp = prim.csgOp;
+
+    if (prim.args.size() >= 3)
+        r.position = {prim.args[0], prim.args[2], prim.args[1]};
+
+    r.scale = 1.0f;
+    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 7)
+        r.rotation = prim.args[6] * DEG2RAD;
+    else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 8)
+        r.rotation = prim.args[7] * DEG2RAD;
+
+    r.model = BuildFromPrimitive((int)prim.type, prim.args);
+    r.loaded = (r.model.meshCount > 0);
+    m_renderables.push_back(r);
     }
 
     RebuildCollisionVolumes();
@@ -361,24 +364,26 @@ bool OzoneLoader::LoadString(const char* data) {
 
         // Heightmap is handled specially
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
-            OzoneRenderable r;
-            r.typeId = (int)prim.type;
-            r.position = {0,0,0};
-            r.scale = 1.0f;
-            r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
-            r.loaded = m_hmReady;
-            m_renderables.push_back(r);
-            continue;
-        }
-
         OzoneRenderable r;
         r.typeId = (int)prim.type;
-        if (prim.args.size() >= 3)
-            r.position = {prim.args[0], prim.args[2], prim.args[1]};
+        r.position = {0,0,0};
         r.scale = 1.0f;
-        r.model = BuildFromPrimitive((int)prim.type, prim.args);
-        r.loaded = (r.model.meshCount > 0);
+        r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+        r.loaded = m_hmReady;
+        r.csgOp = 0;
         m_renderables.push_back(r);
+        continue;
+    }
+
+    OzoneRenderable r;
+    r.typeId = (int)prim.type;
+    r.csgOp = prim.csgOp;
+    if (prim.args.size() >= 3)
+        r.position = {prim.args[0], prim.args[2], prim.args[1]};
+    r.scale = 1.0f;
+    r.model = BuildFromPrimitive((int)prim.type, prim.args);
+    r.loaded = (r.model.meshCount > 0);
+    m_renderables.push_back(r);
     }
     RebuildCollisionVolumes();
     return true;
@@ -448,33 +453,75 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
 // ---------------------------------------------------------------------------
 void OzoneLoader::RebuildCollisionVolumes() {
     m_collisionVolumes.clear();
+
+    // Phase 1: collect all brush AABBs with their CSG operations
+    CsgProcessor csg;
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        // Only brush primitives have collision; entity types (playerstart,
-        // pickup, zone, npc) are handled by PawnSystem separately.
+        // Skip entity types — handled by PawnSystem
         if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC)
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
             continue;
 
-        OzoneCollisionVolume vol;
-        // We need the original args to compute the AABB — store a placeholder
-        // and compute from the model's bounding box as fallback.
-        BoundingBox meshBounds = GetMeshBoundingBox(r.model.meshes[0]);
-        // Transform mesh-local bounds to world space
-        vol.aabb.min = {
-            r.position.x + meshBounds.min.x * r.scale,
-            r.position.y + meshBounds.min.y * r.scale,
-            r.position.z + meshBounds.min.z * r.scale
-        };
-        vol.aabb.max = {
-            r.position.x + meshBounds.max.x * r.scale,
-            r.position.y + meshBounds.max.y * r.scale,
-            r.position.z + meshBounds.max.z * r.scale
-        };
-        vol.typeId = r.typeId;
-        m_collisionVolumes.push_back(vol);
+        BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
+        CsgBrush brush;
+        brush.minX = r.position.x + mb.min.x * r.scale;
+        brush.minY = r.position.y + mb.min.y * r.scale;
+        brush.minZ = r.position.z + mb.min.z * r.scale;
+        brush.maxX = r.position.x + mb.max.x * r.scale;
+        brush.maxY = r.position.y + mb.max.y * r.scale;
+        brush.maxZ = r.position.z + mb.max.z * r.scale;
+        brush.op   = (CsgOp)r.csgOp;
+        csg.Apply(brush);
+    }
+
+    // Phase 2: convert CSG-processed volumes to collision volumes
+    std::vector<CsgProcessor::Volume> vols;
+    csg.GetVolumes(vols);
+    m_collisionVolumes.reserve(vols.size());
+    for (auto& v : vols) {
+        OzoneCollisionVolume cv;
+        cv.aabb.min = {v.minX, v.minY, v.minZ};
+        cv.aabb.max = {v.maxX, v.maxY, v.maxZ};
+        cv.typeId = 0;
+        m_collisionVolumes.push_back(cv);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DrawZoneGeometry — draw renderables whose AABBs overlap the given zone
+// ---------------------------------------------------------------------------
+void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
+    for (auto& r : m_renderables) {
+        if (!r.loaded) continue;
+        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+            continue;
+
+        // Compute world-space AABB for this renderable
+        BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
+        BoundingBox worldBounds;
+        worldBounds.min = {r.position.x + mb.min.x * r.scale,
+                           r.position.y + mb.min.y * r.scale,
+                           r.position.z + mb.min.z * r.scale};
+        worldBounds.max = {r.position.x + mb.max.x * r.scale,
+                           r.position.y + mb.max.y * r.scale,
+                           r.position.z + mb.max.z * r.scale};
+
+        // Check overlap with sky zone
+        if (CheckCollisionBoxes(worldBounds, zoneBounds)) {
+            if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady)
+                DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
+                            (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
+            else
+                DrawModel(r.model, r.position, r.scale, WHITE);
+        }
     }
 }
 

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <stdexcept>
 namespace fs = std::filesystem;
 
 static uint32_t ParseMagic(const char* s) {
@@ -38,13 +39,17 @@ static const char* MagicLabel(uint32_t m) {
 static uint32_t AutoDetectMagic(const fs::path& dir) {
     // Check contents of directory to determine best magic
     bool hasObj = false, hasPng = false, hasWav = false, hasMp3 = false, hasOzone = false;
-    for (auto& p : fs::recursive_directory_iterator(dir)) {
-        auto ext = p.path().extension().string();
-        if (ext == ".obj" || ext == ".mtl" || ext == ".ps") hasObj = true;
-        if (ext == ".png" || ext == ".jpg" || ext == ".bmp") hasPng = true;
-        if (ext == ".wav") hasWav = true;
-        if (ext == ".mp3" || ext == ".ogg") hasMp3 = true;
-        if (ext == ".ozone") hasOzone = true;
+    try {
+        for (auto& p : fs::recursive_directory_iterator(dir)) {
+            auto ext = p.path().extension().string();
+            if (ext == ".obj" || ext == ".mtl" || ext == ".ps") hasObj = true;
+            if (ext == ".png" || ext == ".jpg" || ext == ".bmp") hasPng = true;
+            if (ext == ".wav") hasWav = true;
+            if (ext == ".mp3" || ext == ".ogg") hasMp3 = true;
+            if (ext == ".ozone") hasOzone = true;
+        }
+    } catch (const fs::filesystem_error&) {
+        // Fall through to return default
     }
     if (hasOzone) return OZ_PACKAGE_MAGIC_WN;
     if (hasObj)   return OZ_PACKAGE_MAGIC_PK;

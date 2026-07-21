@@ -33,7 +33,7 @@ BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o \
-          OzOzoneLoader.o OzoneParser.o GameState.o)
+          OzOzoneLoader.o OzoneParser.o OzBsp.o GameState.o)
 
 .PHONY: all clean
 all: OTENGINE AngelServ ozpack
@@ -86,8 +86,12 @@ $(BUILD_DIR)/OzOzoneLoader.o: Source/OzOzoneLoader.cpp Source/OzOzoneLoader.hpp 
 $(BUILD_DIR)/OzoneParser.o: Source/Server/OzoneParser.cpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Server/OzoneParser.cpp -o $@
 
+# 5f. Compile CSG/BSP processor
+$(BUILD_DIR)/OzBsp.o: Source/Physics/OzBsp.cpp Source/Physics/OzBsp.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Physics/OzBsp.cpp -o $@
+
 # 6. Build Game Binary
-OTENGINE: $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o)
+OTENGINE: $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib)

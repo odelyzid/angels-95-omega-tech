@@ -176,6 +176,11 @@ public:
     // Draw entities (billboards for player starts, pickups, zones, emitters)
     void DrawEntities(Camera3D& camera);
 
+    // Sky zone tracking — returns true if player is inside a ZONE_SKY volume
+    bool IsInSkyZone() const { return m_inSkyZone; }
+    BoundingBox GetSkyZoneBounds() const { return m_activeSkyZoneBounds; }
+    void UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds);
+
     // Access registered definitions
     const std::vector<PawnDef>& GetDefs() const { return m_defs; }
 
@@ -194,6 +199,10 @@ private:
     std::vector<ZoneVolumeNode> m_zones;
     std::vector<EmitterNode> m_emitters;
     uint32_t m_nextEntityId = 1;
+
+    // Sky zone state
+    bool m_inSkyZone = false;
+    BoundingBox m_activeSkyZoneBounds = {{0,0,0},{0,0,0}};
 
     PawnDef* FindDef(const char* name);
     int AllocSlot();

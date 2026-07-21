@@ -29,6 +29,18 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
 
         OzonePrimitive prim;
         prim.type = OzonePrimitiveType::UNKNOWN;
+        prim.csgOp = 0;
+
+        // Check for CSG operation prefix: add/sub/intersect/deresc
+        if (type_name == "add" || type_name == "sub" ||
+            type_name == "intersect" || type_name == "deresc") {
+            if (type_name == "add")        prim.csgOp = 1;
+            else if (type_name == "sub")         prim.csgOp = 2;
+            else if (type_name == "intersect")   prim.csgOp = 3;
+            else if (type_name == "deresc")      prim.csgOp = 4;
+            // Read the actual primitive type after the operation
+            if (!(ls >> type_name)) continue;
+        }
 
         if (type_name == "box") {
             prim.type = OzonePrimitiveType::BOX;

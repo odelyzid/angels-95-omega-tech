@@ -204,8 +204,20 @@ jobs:
       - name: Package assets
         shell: pwsh
         run: |
-          if (Test-Path .\build-data.ps1) {
+          # Clear MSYSTEM env var that may interfere with native Windows executables
+          $env:MSYSTEM = $null
+          # Verify OzPack exists
+          if (-not (Test-Path "System\OzPack.exe" -PathType Leaf)) {
+            Write-Error "OzPack.exe not found in System\"
+            exit 1
+          }
+          Write-Host "OzPack.exe found at: $(Resolve-Path System\OzPack.exe)"
+          if (Test-Path .\build-data.ps1 -PathType Leaf) {
             & .\build-data.ps1
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Asset packaging failed with exit code $LASTEXITCODE"
+              exit 1
+            }
           } else {
             Write-Host "build-data.ps1 not found, skipping"
           }

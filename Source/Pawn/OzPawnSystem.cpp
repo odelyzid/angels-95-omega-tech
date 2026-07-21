@@ -299,6 +299,24 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
 }
 
 // ---------------------------------------------------------------------------
+// UpdateSkyZone — detect if player is inside a ZONE_SKY volume
+// ---------------------------------------------------------------------------
+void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
+    m_inSkyZone = false;
+    for (auto& n : m_zones) {
+        if (n.zoneType != ZoneType::ZONE_SKY) continue;
+        // Check if player position is inside the sky zone
+        if (playerPos.x >= n.bounds.min.x && playerPos.x <= n.bounds.max.x &&
+            playerPos.y >= n.bounds.min.y && playerPos.y <= n.bounds.max.y &&
+            playerPos.z >= n.bounds.min.z && playerPos.z <= n.bounds.max.z) {
+            m_inSkyZone = true;
+            m_activeSkyZoneBounds = n.bounds;
+            return;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Update - tick AI for all pawns
 // ---------------------------------------------------------------------------
 void PawnSystem::Update(Vector3 playerPos, float dt) {

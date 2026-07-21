@@ -15,10 +15,62 @@ function Run-OzPack { param($magic, $dir, $out)
     $dir = $dir.Replace("/", "\")
     $out = $out.Replace("/", "\")
     Write-Step "[$magic] $dir -> $out"
-    $output = & $OZPACK pack $magic $dir $out 2>&1 | Out-String
-    $global:LastExitCode = $LASTEXITCODE
-    if ($global:LastExitCode -ne 0) { Write-Host "ERROR: OzPack failed`n$output" -ForegroundColor Red; exit 1 }
-    Write-Host "  $output"
+
+    # Validate input directory
+    if (-not (Test-Path $dir -PathType Container)) {
+        Write-Host "ERROR: Input directory not found: $dir" -ForegroundColor Red
+        exit 1
+    }
+
+    # Ensure output directory exists
+    $outDir = Split-Path $out -Parent
+    if (-not (Test-Path $outDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    }
+
+    # Verify OzPack exists
+    if (-not (Test-Path $OZPACK -PathType Leaf)) {
+        Write-Host "ERROR: OzPack not found at $OZPACK" -ForegroundColor Red
+        exit 1
+    }
+
+    # Run OzPack and capture output robustly
+    $stdout = [System.Collections.Generic.List[string]]::new()
+    $stderr = [System.Collections.Generic.List[string]]::new()
+    $global:LastExitCode = -1
+
+    try {
+        $process = Start-Process -FilePath $OZPACK -ArgumentList @("pack", $magic, $dir, $out) -NoNewWindow -RedirectStandardOutput "stdout.tmp" -RedirectStandardError "stderr.tmp" -Wait -PassThru
+        $global:LastExitCode = $process.ExitCode
+        if (Test-Path "stdout.tmp") {
+            $stdout.AddRange([System.IO.File]::ReadAllLines("stdout.tmp"))
+            Remove-Item "stdout.tmp" -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path "stderr.tmp") {
+            $stderr.AddRange([System.IO.File]::ReadAllLines("stderr.tmp"))
+            Remove-Item "stderr.tmp" -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Host "ERROR: Failed to execute OzPack: $_" -ForegroundColor Red
+        exit 1
+    }
+
+    $allOutput = @($stdout) + @($stderr)
+    if ($allOutput.Count -gt 0) {
+        Write-Host "  $($allOutput -join "`n  ")"
+    }
+
+    if ($global:LastExitCode -ne 0) {
+        Write-Host "ERROR: OzPack failed with exit code $global:LastExitCode" -ForegroundColor Red
+        if ($stderr.Count -gt 0) {
+            Write-Host "Stderr output:" -ForegroundColor Yellow
+            $stderr | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        }
+        if ($stdout.Count -eq 0 -and $stderr.Count -eq 0) {
+            Write-Host "No output was produced. Possible crash or missing dependency." -ForegroundColor Yellow
+        }
+        exit 1
+    }
 }
 
 # Ensure output directories

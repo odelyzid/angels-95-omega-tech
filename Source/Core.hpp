@@ -1894,10 +1894,23 @@ void DrawWorld()
 {
     BeginTextureMode(Target);
     ClearBackground(BLACK);
-    // Skybox disabled — was drawn as 2D overlay causing blue rectangle covering HUD
+
+    // Detect sky zone for skybox rendering
+    PawnSystem::Instance().UpdateSkyZone(
+        OmegaTechData.MainCamera.position,
+        OmegaPlayer.PlayerBounds);
+    bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
+
     BeginMode3D(OmegaTechData.MainCamera);
 
-    // BeginShaderMode(OmegaTechData.ToonShader);
+    // Sky zone geometry — drawn first as backdrop (unlit background)
+    if (inSkyZone) {
+        rlDisableDepthMask();
+        OzoneLoader::Instance().DrawZoneGeometry(
+            OmegaTechData.MainCamera,
+            PawnSystem::Instance().GetSkyZoneBounds());
+        rlEnableDepthMask();
+    }
 
     if (OmegaTechSoundData.MusicFound)
     {

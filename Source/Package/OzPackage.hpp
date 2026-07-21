@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <filesystem>
 
 // ============================================================================
 // OzPackage — universal asset container format for Angels95 / OmegaTech
@@ -76,6 +77,13 @@ public:
     }
 
     bool WriteToFile(const char* path) {
+        // Ensure parent directory exists
+        std::string pathStr(path);
+        auto slash = pathStr.find_last_of("/\\");
+        if (slash != std::string::npos) {
+            std::string dir = pathStr.substr(0, slash);
+            std::filesystem::create_directories(dir);
+        }
         FILE* f = fopen(path, "wb");
         if (!f) return false;
 

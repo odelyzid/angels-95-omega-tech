@@ -27,6 +27,7 @@ struct OzoneRenderable {
     float rotation = 0.0f;
     Model model;                 // generated raylib Model (meshes + materials)
     bool loaded = false;
+    int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
 };
 
 // Collision AABB for an OZONE brush primitive.
@@ -55,6 +56,10 @@ public:
     const Model& GetHeightmapModel() const { return m_hmModel; }
     Vector3 GetHeightmapPosition() const { return m_hmPosition; }
     float GetHeightmapScale() const { return m_hmScale; }
+
+    // Draw only the renderables whose AABBs intersect the given zone bounds
+    // (used for skybox rendering from ZONE_SKY brushes)
+    void DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds);
 
     // Editor integration
     void LoadWorldTextures(const std::string& worldDir);
