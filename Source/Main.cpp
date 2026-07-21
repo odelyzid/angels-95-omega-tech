@@ -125,8 +125,10 @@ static void DrawPlayerHUD() {
              rx, 10, 14, LIGHTGRAY);
     DrawText(TextFormat("Rot: %.0f %.0f", yaw, pitch),
              rx, 28, 14, LIGHTGRAY);
-    fprintf(stderr, "POS: %.1f %.1f %.1f  ROT: %.0f %.0f\n",
-            cam.position.x, cam.position.y, cam.position.z, yaw, pitch);
+    if ((OmegaTechData.Ticker % 60) == 0) {
+        fprintf(stderr, "POS: %.1f %.1f %.1f  ROT: %.0f %.0f\n",
+                cam.position.x, cam.position.y, cam.position.z, yaw, pitch);
+    }
 }
 
 static Color unpack_color(uint32_t packed) {
@@ -375,28 +377,79 @@ static void HandleConsoleInput() {
 
 // ---- Pickup ground rendering ----
 // Server-side PickupType values: HEALTH=0, MANA=1, PSYCHIC=2, ARMOR=3, WEAPON=4, AMMO=5, KEY=6, COIN=7, POWERUP=8
-static void DrawGroundPickups() {
-    if (!g_network_enabled || !g_client.is_connected()) return;
-    const auto& pickups = g_client.pickups();
-    for (const auto& p : pickups) {
-        if (!p.active) continue;
-        Texture2D* icon = nullptr;
-        switch (p.type) {
-            case 0: icon = &OmegaTechGameObjects.HealthVialIcon; break;      // HEALTH
-            case 1: icon = &OmegaTechGameObjects.ManaVialIcon; break;        // MANA
-            case 2: icon = &OmegaTechGameObjects.EnergyCrystalIcon; break;   // PSYCHIC
-            case 7: icon = &OmegaTechGameObjects.CoinIcon; break;            // COIN
-            case 6: icon = &OmegaTechGameObjects.KeyIcon; break;             // KEY
-            case 8: icon = &OmegaTechGameObjects.PowerupIcon; break;         // POWERUP
+static Texture2D* IconForPickupType(int type) {
+    switch (type) {
+        case 0: return &OmegaTechGameObjects.HealthVialIcon;
+        case 1: return &OmegaTechGameObjects.ManaVialIcon;
+        case 2: return &OmegaTechGameObjects.EnergyCrystalIcon;
+        case 6: return &OmegaTechGameObjects.KeyIcon;
+        case 7: return &OmegaTechGameObjects.CoinIcon;
+        case 8: return &OmegaTechGameObjects.PowerupIcon;
+        default: return nullptr;
+    }
+}
+
+static void DrawPickupBillboard(Texture2D* icon, Vector3 pos) {
+    if (!icon || icon->id == 0) return;
+    float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
+    Vector3 p = {pos.x, pos.y + 0.9f + bob, pos.z};
+    float sz = 1.2f;
+    DrawBillboardPro(OmegaTechData.MainCamera, *icon,
+        (Rectangle){0, 0, (float)icon->width, (float)icon->height},
+        p, (Vector3){0, 1, 0}, (Vector2){sz, sz}, (Vector2){0.5f, 0.5f}, 0, WHITE);
+}
+
+// Offline demo pickups near spawn so sprites can be verified without a server
+struct LocalDemoPickup { Vector3 pos; int type; bool active; };
+static LocalDemoPickup g_demoPickups[] = {
+    {{  4.0f, 18.0f, -8.0f}, 0, true},  // health
+    {{  6.0f, 18.0f, -8.0f}, 1, true},  // mana
+    {{  8.0f, 18.0f, -8.0f}, 2, true},  // psychic
+    {{ 10.0f, 18.0f, -8.0f}, 6, true},  // key
+    {{ 12.0f, 18.0f, -8.0f}, 7, true},  // coin
+    {{ 14.0f, 18.0f, -8.0f}, 8, true},  // powerup
+};
+static constexpr int g_demoPickupCount = 6;
+
+static void UpdateDemoPickupCollect() {
+    if (g_network_enabled && g_client.is_connected()) return;
+    Vector3 cam = OmegaTechData.MainCamera.position;
+    for (int i = 0; i < g_demoPickupCount; i++) {
+        if (!g_demoPickups[i].active) continue;
+        float dx = cam.x - g_demoPickups[i].pos.x;
+        float dz = cam.z - g_demoPickups[i].pos.z;
+        if (dx * dx + dz * dz > 2.25f) continue;
+        g_demoPickups[i].active = false;
+        int itemId = 1;
+        switch (g_demoPickups[i].type) {
+            case 0: itemId = 1; break;
+            case 1: itemId = 2; break;
+            case 2: itemId = 3; break;
+            case 6: itemId = 12; break;
+            case 7: itemId = 13; gInventory.coins += 1; break;
+            case 8: itemId = 14; break;
             default: break;
         }
-        if (icon && icon->id > 0) {
-            Vector3 pos = {p.position.x, p.position.y + 0.8f, p.position.z};
-            float sz = 0.5f;
-            DrawBillboardPro(OmegaTechData.MainCamera, *icon,
-                (Rectangle){0,0,(float)icon->width,(float)icon->height},
-                pos, (Vector3){0,1,0}, (Vector2){sz, sz}, (Vector2){0,0}, 0, WHITE);
+        if (g_demoPickups[i].type != 7)
+            gInventory.AddToBackpack(itemId, 1);
+        PlaySound(OmegaTechSoundData.UIClick);
+        fprintf(stderr, "DEMO pickup type=%d -> item %d\n", g_demoPickups[i].type, itemId);
+    }
+}
+
+static void DrawGroundPickups() {
+    if (g_network_enabled && g_client.is_connected()) {
+        const auto& pickups = g_client.pickups();
+        for (const auto& p : pickups) {
+            if (!p.active) continue;
+            DrawPickupBillboard(IconForPickupType(p.type),
+                (Vector3){p.position.x, p.position.y, p.position.z});
         }
+        return;
+    }
+    for (int i = 0; i < g_demoPickupCount; i++) {
+        if (!g_demoPickups[i].active) continue;
+        DrawPickupBillboard(IconForPickupType(g_demoPickups[i].type), g_demoPickups[i].pos);
     }
 }
 
@@ -694,6 +747,8 @@ int main(){
         FadeColor = (Color){R, G, B, 255};
     
         DrawWorld();
+
+        UpdateDemoPickupCollect();
 
         // Draw ground pickups in a second 3D pass to the render target
         BeginTextureMode(Target);

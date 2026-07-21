@@ -239,13 +239,23 @@ void InitObjects(){
     OmegaTechGameObjects.Accessory2Owned = false;
     OmegaTechGameObjects.Accessory2Name = L"Accessory 2";
 
-    // Load consumable item icons
-    OmegaTechGameObjects.HealthVialIcon      = LoadTexture(ItemDB[0].iconPath);
-    OmegaTechGameObjects.ManaVialIcon        = LoadTexture(ItemDB[1].iconPath);
-    OmegaTechGameObjects.EnergyCrystalIcon   = LoadTexture(ItemDB[2].iconPath);
-    OmegaTechGameObjects.KeyIcon             = LoadTexture(ItemDB[11].iconPath);
-    OmegaTechGameObjects.CoinIcon            = LoadTexture(ItemDB[12].iconPath);
-    OmegaTechGameObjects.PowerupIcon         = LoadTexture(ItemDB[13].iconPath);
+    // Load consumable item icons (PNG)
+    auto loadIcon = [](const char* path) -> Texture2D {
+        if (!IsPathFile(path)) {
+            fprintf(stderr, "ICON missing: %s\n", path);
+            return Texture2D{0};
+        }
+        Texture2D t = LoadTexture(path);
+        if (t.id > 0) SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
+        fprintf(stderr, "ICON %s -> id=%d %dx%d\n", path, t.id, t.width, t.height);
+        return t;
+    };
+    OmegaTechGameObjects.HealthVialIcon    = loadIcon(ItemDB[0].iconPath);
+    OmegaTechGameObjects.ManaVialIcon      = loadIcon(ItemDB[1].iconPath);
+    OmegaTechGameObjects.EnergyCrystalIcon = loadIcon(ItemDB[2].iconPath);
+    OmegaTechGameObjects.KeyIcon           = loadIcon(ItemDB[11].iconPath);
+    OmegaTechGameObjects.CoinIcon          = loadIcon(ItemDB[12].iconPath);
+    OmegaTechGameObjects.PowerupIcon       = loadIcon(ItemDB[13].iconPath);
 }
 
 static int SelectedObject = 1;
@@ -262,7 +272,12 @@ static void DrawHotbarSlot(int index, int x, int y, Texture2D* icon, const char*
     }
 
     if (icon && icon->id > 0) {
-        DrawTextureEx(*icon, (Vector2){(float)x + 6, (float)y + 6}, 0, 2.5f, WHITE);
+        float pad = 10.0f;
+        float maxSide = 96.0f - pad * 2.0f;
+        float scale = maxSide / (float)((icon->width > icon->height) ? icon->width : icon->height);
+        float dw = icon->width * scale;
+        float dh = icon->height * scale;
+        DrawTextureEx(*icon, (Vector2){(float)x + (96.0f - dw) * 0.5f, (float)y + (96.0f - dh) * 0.5f - 4.0f}, 0, scale, WHITE);
     }
 
     if (label) {

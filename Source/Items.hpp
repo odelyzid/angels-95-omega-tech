@@ -58,20 +58,20 @@ struct ItemDBEntry {
 };
 
 static const ItemDBEntry ItemDB[ITEM_DB_SIZE] = {
-    {1, ItemCategory::HEALTH_VIAL,     EquipSlotType::NONE, "Health Vial",          "GameData/Global/Items/HealthVial.gif",     25,  "Restores 25 HP",                 10},
-    {2, ItemCategory::MANA_VIAL,       EquipSlotType::NONE, "Mana Vial",            "GameData/Global/Items/ManaVial.gif",       25,  "Restores 25 Mana",               10},
-    {3, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (111)", "GameData/Global/Items/EnergyCrystal.gif",  111, "Grants 111 Psychic Energy",      5},
-    {4, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (222)", "GameData/Global/Items/EnergyCrystal.gif",  222, "Grants 222 Psychic Energy",      5},
-    {5, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (333)", "GameData/Global/Items/EnergyCrystal.gif",  333, "Grants 333 Psychic Energy",      5},
-    {6, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (444)", "GameData/Global/Items/EnergyCrystal.gif",  444, "Grants 444 Psychic Energy",      5},
-    {7, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (555)", "GameData/Global/Items/EnergyCrystal.gif",  555, "Grants 555 Psychic Energy",      5},
-    {8, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (666)", "GameData/Global/Items/EnergyCrystal.gif",  666, "Grants 666 Psychic Energy",      5},
-    {9, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (777)", "GameData/Global/Items/EnergyCrystal.gif",  777, "Grants 777 Psychic Energy",      5},
-    {10,ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (888)", "GameData/Global/Items/EnergyCrystal.gif",  888, "Grants 888 Psychic Energy",      5},
-    {11,ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (999)", "GameData/Global/Items/EnergyCrystal.gif",  999, "Grants 999 Psychic Energy",      5},
-    {12,ItemCategory::KEY,             EquipSlotType::NONE, "Key",                  "GameData/Global/Items/Key.gif",            1,   "Opens locked doors and chests",  20},
-    {13,ItemCategory::COIN,            EquipSlotType::NONE, "Coin",                 "GameData/Global/Items/Coin.gif",           1,   "Currency",                        99},
-    {14,ItemCategory::POWERUP,         EquipSlotType::NONE, "Powerup",              "GameData/Global/Items/Powerup.gif",        0,   "Mysterious power",                5},
+    {1, ItemCategory::HEALTH_VIAL,     EquipSlotType::NONE, "Health Vial",          "GameData/Global/Items/HealthVial.png",     25,  "Restores 25 HP",                 10},
+    {2, ItemCategory::MANA_VIAL,       EquipSlotType::NONE, "Mana Vial",            "GameData/Global/Items/ManaVial.png",       25,  "Restores 25 Mana",               10},
+    {3, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (111)", "GameData/Global/Items/EnergyCrystal.png",  111, "Grants 111 Psychic Energy",      5},
+    {4, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (222)", "GameData/Global/Items/EnergyCrystal.png",  222, "Grants 222 Psychic Energy",      5},
+    {5, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (333)", "GameData/Global/Items/EnergyCrystal.png",  333, "Grants 333 Psychic Energy",      5},
+    {6, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (444)", "GameData/Global/Items/EnergyCrystal.png",  444, "Grants 444 Psychic Energy",      5},
+    {7, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (555)", "GameData/Global/Items/EnergyCrystal.png",  555, "Grants 555 Psychic Energy",      5},
+    {8, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (666)", "GameData/Global/Items/EnergyCrystal.png",  666, "Grants 666 Psychic Energy",      5},
+    {9, ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (777)", "GameData/Global/Items/EnergyCrystal.png",  777, "Grants 777 Psychic Energy",      5},
+    {10,ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (888)", "GameData/Global/Items/EnergyCrystal.png",  888, "Grants 888 Psychic Energy",      5},
+    {11,ItemCategory::ENERGY_CRYSTAL,  EquipSlotType::NONE, "Energy Crystal (999)", "GameData/Global/Items/EnergyCrystal.png",  999, "Grants 999 Psychic Energy",      5},
+    {12,ItemCategory::KEY,             EquipSlotType::NONE, "Key",                  "GameData/Global/Items/Key.png",            1,   "Opens locked doors and chests",  20},
+    {13,ItemCategory::COIN,            EquipSlotType::NONE, "Coin",                 "GameData/Global/Items/Coin.png",           1,   "Currency",                        99},
+    {14,ItemCategory::POWERUP,         EquipSlotType::NONE, "Powerup",              "GameData/Global/Items/Powerup.png",        0,   "Mysterious power",                5},
 };
 
 inline const ItemDBEntry* GetItemDef(int id) {
