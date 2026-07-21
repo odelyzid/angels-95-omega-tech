@@ -134,6 +134,13 @@ if ($LASTEXITCODE -ne 0) { Fail "WDLParser.cpp compilation failed" }
 g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Log.cpp -o Log.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "Log.cpp compilation failed" }
 
+# Compile Physics system (CSG + Chunking)
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Physics/OzBsp.cpp -o OzBsp.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "OzBsp.cpp compilation failed" }
+
+g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Physics/WorldChunk.cpp -o WorldChunk.o 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "WorldChunk.cpp compilation failed" }
+
 # Compile LightningScript system
 g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "LightningScriptContext.cpp compilation failed" }
@@ -153,11 +160,11 @@ $stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
 
 # Link editor
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
+g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "AngelEd link failed" }
 
 # Cleanup editor objects
-Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
+Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, OzBsp.o, WorldChunk.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
 Pop-Location
 Write-Step "AngelEd.exe built."
 
