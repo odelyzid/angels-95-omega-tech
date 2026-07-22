@@ -937,121 +937,35 @@ void PlaySplashScreen()
     if (splash.id > 0) UnloadTexture(splash);
 }
 
+#include "Menu/TitleMenu.hpp"
+
 void PlayHomeScreen()
 {
-    static char JoinIP[32] = "127.0.0.1";
-    static bool ShowJoinInput = false;
-    static bool StartServerMode = false;
+    TitleMenu menu;
 
-    Rectangle LayoutRecs[6] = {
-        (Rectangle){583, 320, 120, 24},
-        (Rectangle){583, 355, 120, 24},
-        (Rectangle){583, 390, 120, 24},
-        (Rectangle){583, 425, 120, 24},
-        (Rectangle){583, 460, 120, 24},
-        (Rectangle){583, 495, 120, 24},
-    };
+    while (!menu.Tick() && !WindowShouldClose()) {}
 
-    while (true && !WindowShouldClose())
-    {
-        BeginTextureMode(Target);
-        UpdateMusicStream(OmegaTechData.HomeScreenMusic);
-
-        ClearBackground(BLACK);
-
-        if (IsPathFile("GameData/Global/Title/Title.mpg"))ray_video_update(&OmegaTechData.HomeScreenVideo, GetFrameTime());
-
-        DrawTextureEx(OmegaTechData.HomeScreenVideo.texture, {0, 0}, 0, 5, WHITE);
-        DrawTexture(OmegaTechData.HomeScreen, 0, 0, WHITE);
-
-        if (OmegaInputController.InteractPressed)
-        {
-            PlaySound(OmegaTechSoundData.UIClick);
-        }
-
-        if (!ShowJoinInput && !StartServerMode) {
-            if (GuiButton(LayoutRecs[0], "Start New Game"))
-            {
-                UnloadRenderTexture(Target);
-                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
-                break;
-            }
-
-            if (GuiButton(LayoutRecs[1], "Join Game"))
-            {
-                ShowJoinInput = true;
-            }
-
-            if (GuiButton(LayoutRecs[2], "Start Game"))
-            {
-                StartServerMode = true;
-            }
-
-            GuiLine(LayoutRecs[3], NULL);
-
-            if (GuiButton(LayoutRecs[4], "Load Game"))
-            {
-                UnloadRenderTexture(Target);
-                Target = LoadRenderTexture(320 , 240);
-
-                if (IsPathFile("GameData/Saves/TF.sav"))
-                {
-                    LoadSave();
-                    LoadFlag = true;
-                }
-                break;
-            }
-
-            if (GuiButton(LayoutRecs[5], "Settings"))
-            {
-                MenuSettings = !MenuSettings;
-            }
-
-            if (MenuSettings)
-            {
-                ShowMenuSetiings();
-            }
-        } else if (ShowJoinInput) {
-            // Join Game: show IP input
-            DrawText("Enter Server IP:", 560, 280, 20, WHITE);
-            GuiTextBox((Rectangle){540, 310, 200, 30}, JoinIP, 32, true);
-
-            if (GuiButton((Rectangle){540, 350, 90, 24}, "Connect")) {
-                UnloadRenderTexture(Target);
-                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
-                SetServerJoinIP = JoinIP;
-                SetServerJoinFlag = true;
-                break;
-            }
-            if (GuiButton((Rectangle){640, 350, 90, 24}, "Cancel")) {
-                ShowJoinInput = false;
-            }
-        } else if (StartServerMode) {
-            DrawText("Starting Server...", 560, 280, 20, GREEN);
-            DrawText("Connect to 127.0.0.1:27015", 560, 310, 16, LIGHTGRAY);
-
-            if (GuiButton((Rectangle){540, 380, 120, 24}, "Launch Game")) {
-                UnloadRenderTexture(Target);
-                Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
-                SetServerJoinIP = "127.0.0.1";
-                SetServerJoinFlag = true;
-                break;
-            }
-            if (GuiButton((Rectangle){540, 420, 120, 24}, "Cancel")) {
-                StartServerMode = false;
-            }
-        }
-
-        EndTextureMode();
-        BeginDrawing();
-
-        DrawTexturePro(Target.texture, (Rectangle){0, 0, Target.texture.width, -Target.texture.height}, (Rectangle){0, 0, GetScreenWidth(), GetScreenHeight()}, (Vector2){0, 0}, 0.f, WHITE);
-
-        EndDrawing();
-
-        if (IsKeyPressed(KEY_ESCAPE)) break;
-    }
     StopMusicStream(OmegaTechData.HomeScreenMusic);
+
+    if (menu.ShouldLoadGame() || menu.GetSelectedWorld()) {
+        UnloadRenderTexture(Target);
+        Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
+    }
+
+    if (menu.GetSelectedWorld()) {
+        g_world_to_load = menu.GetSelectedWorld();
+    }
+
+    if (menu.ShouldJoinServer()) {
+        SetServerJoinIP = menu.GetJoinIP();
+        SetServerJoinFlag = true;
+    }
+
+    if (menu.ShouldStartServer()) {
+        SetServerJoinIP = "127.0.0.1";
+        SetServerJoinFlag = true;
+    }
+
     OmegaTechData.Deaths = 1;
 }
 

@@ -8,171 +8,16 @@ Built on [raylib](https://www.raylib.com/) with PS1-inspired retro aesthetics an
 
 ---
 
-## Angels95 — Core Game Mechanics
+## Quick Links
 
-| Feature | Description |
+| Topic | Wiki Page |
 |---|---|
-| **Persistent Worlds** | Server-hosted 32–64 player partitioned worlds. Each world is an 8×8 grid of partitions (area-of-interest) for scalable multiplayer. |
-| **Level & XP System** | Exponential XP curve (`XP_BASE_TO_NEXT=100`, growth `1.3×` per level). XP is gained from pickups, NPC kills, and exploration. |
-| **Health / Mana / Psychic Energy** | Three resource pools with automatic regeneration (tick-based). Max values default to 100. |
-| **9 Pickup Types** | Health, Mana, Psychic, Armor, Weapon, Ammo, Key, Coin, Powerup — each with per-type respawn timers and values. |
-| **NPC AI** | Four-state finite state machine (`IDLE → PATROL → CHASE → RETURN`). NPCs patrol spawn points, aggro nearby players, chase, and return if the target strays too far. |
-| **5 Inventory Slots** | Object1–Object5 can be collected in-world. Slot 1 is the default **Wand / Energy Bolt** weapon. |
-| **Armory & Jewelry** | Equipment slots beyond the 5 hotbar items. Armory1/2 and Jewelry1/2 tracked in save data. |
-| **Weapon Fire** | Left-click fires an energy projectile from slot 1. Projectiles are synced over the network and visible to all connected players. |
-| **1–8 Hotkeys** | Number keys 1–8 directly select inventory or equipment slots. |
-| **Save System** | `TF.sav` (toggle flags + object ownership), `POS.sav` (position + level), `Script.sav` (dynamic WDL instructions). |
-
----
-
-## Server Hosting
-
-The dedicated server (`AngelServ`) has **no raylib dependency** and runs on any Linux or Windows machine (including headless VPS).
-
-```
-# Build
-make AngelServ
-
-# Run (default port 27015, HTTP 8080)
-./AngelServ
-
-# Custom ports
-./AngelServ --port 27015 --http-port 8080 --dir GameData
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--port` | `27015` | UDP game server port |
-| `--http-port` | `8080` | HTTP map API port (`GET /map?name=X`, `GET /map?list`) |
-| `--dir` | `GameData` | Path to game data directory |
-
-The server scans `GameData/Worlds/` for any subdirectory containing `World.wdl`. Each discovered world is served to connecting clients.
-
-### HTTP Map API
-
-```
-GET /map?list         → {"ok":true,"worlds":["EtheralTestRealm","World1","World2"]}
-GET /map?name=World1  → {"ok":true,"world":"World1","elements":[...]}
-```
-
-### LAN Discovery
-
-The server announces itself on UDP port `27100`. Clients can discover local servers without manual IP entry.
-
----
-
-## Building
-
-### Linux
-
-```
-sudo apt install g++ make cmake libgl1-mesa-dev \
-  libx11-dev libxrandr-dev libxcursor-dev \
-  libxi-dev libxinerama-dev libxext-dev \
-  libasound2-dev libpulse-dev
-
-# raylib 5.5 (built from source)
-git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib
-cmake -S /tmp/raylib -B /tmp/raylib/build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_GAMES=OFF
-cmake --build /tmp/raylib/build --parallel && sudo cmake --install /tmp/raylib/build
-
-make -j$(nproc)
-```
-
-### Windows (Native w64devkit)
-
-```powershell
-# Requires C:\raylib\w64devkit with raylib 5.5 statically linked
-.\build-native-win.ps1              # full System/ release
-.\build-native-win.ps1 -SkipData    # skip asset packaging
-```
-
-**Note:** Do NOT use WinGet GCC 16.1.0 — its C++ headers are broken with POSIX UCRT. Use w64devkit GCC 15.2.0.
-
-### Windows (MSYS2 / MINGW64)
-
-```
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-raylib make
-.\build.ps1                         # full System/ release
-.\build.ps1 -SkipData               # skip asset packaging
-```
-
-### Outputs
-
-| Target | Description |
-|---|---|
-| `Angels95` / `Angels95.exe` | Game client (requires raylib) |
-| `AngelServ` / `AngelServ.exe` | Dedicated server (no raylib) |
-| `AngelEd.exe` | Level editor (Windows only, Win32 panels + raylib viewport) |
-| `OzPack.exe` | Asset packer CLI |
-
-All binaries are assembled into `System/` with INI files, run scripts, and packaged assets.
-
----
-
-## System/ Release
-
-The `System/` directory contains a complete, runnable release:
-
-```
-System/
-  Angels95.exe          # Game client
-  AngelServ.exe         # Dedicated server
-  AngelEd.exe         # Level editor
-  OzPack.exe            # Asset packer
-  Angels95.ini          # Client config
-  AngelEd.ini         # Editor config
-  run.bat / run.ps1     # Launch scripts
-  Data/
-    *.ozpak             # Generic assets (guns, objects, shaders)
-    *.oztex             # Textures
-    *.ozsnd             # Sounds
-    *.ozmux             # Music
-    *.ozone             # Worlds
-```
-
-Run the game from `System/` using `run.bat` or `run.ps1`. The game expects `GameData/` as a sibling directory for worlds, saves, and loose assets.
-
----
-
-## Package System (OzPackage)
-
-Assets are packaged into `.oz*` containers for efficient distribution:
-
-| Extension | Type | Contents |
-|---|---|---|
-| `.ozpak` | OZPK | Generic assets (models, scripts, shaders) |
-| `.oztex` | OZTX | Textures (PNG) |
-| `.ozsnd` | OZSD | Sounds (WAV/MP3/OGG) |
-| `.ozmux` | OZMX | Music (WAV/MP3) |
-| `.ozone` | OZWN | World files |
-
-### Packaging Assets
-
-```powershell
-.\build-data.ps1        # packages all GameData assets into System/Data/
-```
-
-### Runtime Loading
-
-The engine uses `PackageAssetLoader` with `*WithFallback` wrappers that check the filesystem first, then search packages. This allows seamless transition from loose files to packaged assets.
-
----
-
-## Level Editor (AngelEd)
-
-The Windows-only level editor combines Win32 native panels with a raylib 3D viewport:
-
-- **Model Browser** — Browse and place 3D models
-- **Environment Settings** — Fog, ambient light, skybox
-- **Pickups** — Place health, mana, keys, etc.
-- **Nodes** — Player spawns, NPC spawns, lights
-- **Pawn Manager** — Spawn and configure NPCs
-- **Texture Manager** — Manage world textures
-- **Sound Manager** — Configure world sounds
-- **Script Manager** — Edit WDL scripts
-
-Launch with `System\AngelEd.exe`. The editor saves worlds in OZONE format (`.ozone`) alongside the WDL text format.
+| Gameplay, controls, HUD, mechanics | [Core Game](Wiki/Core-Game.md) |
+| Architecture, source tree, key classes | [Engine Overview](Wiki/Engine-Overview.md) |
+| AngelEd editor panels and workflow | [Editor Usage](Wiki/Editor-Usage.md) |
+| LightningScript scripting reference | [LightningScript](Wiki/LightningScript.md) |
+| WDL / OZONE world format | [World Format](Wiki/World-Format-WDL.md) |
+| Build instructions, prerequisites, CI | [Building](Wiki/Building.md) |
 
 ---
 
@@ -187,24 +32,26 @@ Launch with `System\AngelEd.exe`. The editor saves worlds in OZONE format (`.ozo
 | Mouse Wheel / Arrow Keys | Cycle slots |
 | E | Collect nearby pickup |
 | Tab | Toggle inventory overlay |
+| Escape | Pause menu (Resume / Settings / Main Menu / Quit) |
 | F11 | Toggle fullscreen |
-| Escape | Quit (on start menu) |
 
 ---
 
-## World Format (WDL)
+## Server Hosting
 
-OmegaTech uses the **W**orld **D**escription **L**anguage — a compact, colon-delimited plain-text format.
+The dedicated server (`AngelServ`) has **no raylib dependency** and runs on any Linux or Windows machine.
 
 ```
-HeightMap:-100.0:-10.0:-100.0:4.0:0.0:
-Model1:0:0:0:1:0:0:0:1:
-Object1:10:0:10:1:0:0:0:
+./AngelServ --port 27015 --http-port 8080 --dir GameData
 ```
 
-Instructions include `HeightMap`, `Model1`–`Model20`, `Object1`–`Object5`, `Walker` (NPC spawn), `Light`, `ClipBox`, `Collision`, `Script`, and `NE1`–`NE3` (noise emitters).
+| Flag | Default | Description |
+|---|---|---|
+| `--port` | `27015` | UDP game server port |
+| `--http-port` | `8080` | HTTP map API (`GET /map?list`, `GET /map?name=X`) |
+| `--dir` | `GameData` | Path to game data directory |
 
-Worlds are stored in `GameData/Worlds/<WorldName>/World.wdl` alongside optional `Models/`, `Scripts/`, `Music/`, and `NoiseEmitter/` subdirectories.
+The server scans `GameData/Worlds/` for subdirectories containing `World.wdl`. LAN discovery on UDP `27100`.
 
 ---
 

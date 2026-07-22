@@ -404,6 +404,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             Image img = LoadImageWithFallback(tex.path.c_str());
             if (img.data) {
                 ImageResize(&img, 64, 64);
+                ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
                 // Convert to BGRA for HBITMAP
                 unsigned char* px = (unsigned char*)img.data;
                 for (int i = 0; i < img.width * img.height; i++) {
@@ -431,14 +432,14 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     }
     case WM_MEASUREITEM: {
         LPMEASUREITEMSTRUCT mis = (LPMEASUREITEMSTRUCT)l;
-        if (mis->CtlID == ID_TEX_LIST) mis->itemHeight = 68; // 64px + 4 margin
+        if (mis->CtlID == ID_TEX_LIST) { mis->itemHeight = 68; return TRUE; }
         break;
     }
     case WM_DRAWITEM: {
         LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)l;
         if (dis->CtlID == ID_TEX_LIST) {
             int idx = dis->itemID;
-            if (idx < 0 || idx >= (int)g_textureFiles.size()) break;
+            if (idx < 0 || idx >= (int)g_textureFiles.size()) return TRUE;
             // Draw background
             FillRect(dis->hDC, &dis->rcItem, GetSysColorBrush(COLOR_WINDOW));
             // Draw thumbnail at left
@@ -501,6 +502,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                     int pw = pr.right - pr.left - 4, ph = pr.bottom - pr.top - 4;
                     Image rs = ImageCopy(tmp);
                     ImageResize(&rs, pw > 0 ? pw : 100, ph > 0 ? ph : 60);
+                    ImageFormat(&rs, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
                     // Swap R/B for HBITMAP
                     unsigned char* px = (unsigned char*)rs.data;
                     for (int i = 0; i < rs.width * rs.height; i++) {
@@ -515,7 +517,10 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                     HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
                     if (bits && rs.data) memcpy(bits, rs.data, rs.width * rs.height * 4);
                     ReleaseDC(hwnd, hdc);
-                    if (hBmp) SendMessage(hPreview, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+                    if (hBmp) {
+                        HBITMAP oldBmp = (HBITMAP)SendMessage(hPreview, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+                        if (oldBmp) DeleteObject(oldBmp);
+                    }
                     if (tmp.data) UnloadImage(tmp);
                     if (rs.data != tmp.data) UnloadImage(rs);
                 }
