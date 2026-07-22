@@ -65,7 +65,10 @@ public:
     // (used for skybox rendering from ZONE_SKY brushes)
     void DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds);
 
-    // Editor integration
+    // Editor integration — heightmap generation (called from editor main loop)
+    Model BuildHeightmap(const std::string& imagePath, const std::string& texPath,
+                         const std::vector<float>& args);
+
     void LoadWorldTextures(const std::string& worldDir);
     void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
 
@@ -104,6 +107,4 @@ private:
     Model BuildSphere(float r, int segments);
     Model BuildPyramid(float w, float d, float h);
     Model BuildPlane(float nx, float ny, float nz, float dist);
-    Model BuildHeightmap(const std::string& imagePath, const std::string& texPath,
-                         const std::vector<float>& args);
 };

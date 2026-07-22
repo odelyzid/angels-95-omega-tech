@@ -250,9 +250,19 @@ static bool ApplyTextureToModel(int target, const char* path) {
 }
 
 int main(int argc, char **argv){
+    // Auto-detect repo root: if cwd ends with /System, go up one level
+    {
+        auto cwd = fs::current_path();
+        std::string dir = cwd.filename().string();
+        std::transform(dir.begin(), dir.end(), dir.begin(), ::tolower);
+        if (dir == "system")
+            fs::current_path(cwd.parent_path());
+    }
+
     EditorLog("=== AngelEd starting ===");
     SetWindowState(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "AngelEd");
+    SetTraceLogLevel(LOG_WARNING);
     InitAudioDevice();
     SetTargetFPS(60);
     GuiLoadStyleDark();
@@ -638,6 +648,11 @@ int main(int argc, char **argv){
                     else if(cmd==8) ToggleHeightmapEditor();
                     else if(cmd==10) { FileNew(); } else if(cmd==11) { FileOpen(); }
                     else if(cmd==12) { FileSaveAs(); }
+                    // CSG operations (toolbar icons 20-23)
+                    else if (cmd >= 20 && cmd <= 23) { OmegaTechEditor.CSGOperation = cmd - 19; }
+                    // Brush primitives (toolbar icons 30-34)
+                    else if (cmd >= 30 && cmd <= 33) { g_editorPanels.actionCsgPlace = cmd - 30; g_placeMode = PlaceMode::MODEL; }
+                    else if (cmd == 34) { ToggleHeightmapEditor(); }
                 }
                 bx += bw + 2;
             };
@@ -677,10 +692,10 @@ int main(int argc, char **argv){
         {
             const int sbW = 200;
             Color bg = {25, 25, 30, 220};
-            DrawRectangle(0, 0, sbW, GetScreenHeight(), bg);
-            DrawRectangleLines(0, 0, sbW, GetScreenHeight(), (Color){60, 60, 70, 255});
+            DrawRectangle(0, 28, sbW, GetScreenHeight() - 28, bg);
+            DrawRectangleLines(0, 28, sbW, GetScreenHeight() - 28, (Color){60, 60, 70, 255});
 
-            int y = 10;
+            int y = 36;
             DrawText("CSG Brushes", 10, y, 16, WHITE); y += 24;
 
             // Primitive type display with icons
@@ -888,6 +903,21 @@ int main(int argc, char **argv){
         if (g_editorPanels.actionRefreshBrowser) {
             ScanModelBrowserFiles();
             g_editorPanels.actionRefreshBrowser = false;
+        }
+        // Heightmap generate handler
+        if (g_editorPanels.actionGenerateHeightmap) {
+            auto& img = g_editorPanels.actionHeightmapImage;
+            auto& tex = g_editorPanels.actionHeightmapTexture;
+            if (!img.empty()) {
+                std::vector<float> args = {
+                    g_editorPanels.actionHmPosX, g_editorPanels.actionHmPosY, g_editorPanels.actionHmPosZ,
+                    g_editorPanels.actionHmScale,
+                    g_editorPanels.actionHmSx, g_editorPanels.actionHmSy, g_editorPanels.actionHmSz
+                };
+                OzoneLoader::Instance().BuildHeightmap(img, tex, args);
+                EditorLog("Heightmap generated from %s", img.c_str());
+            }
+            g_editorPanels.actionGenerateHeightmap = false;
         }
         if (g_editorPanels.actionSpawnPawn >= 0) {
             int idx = g_editorPanels.actionSpawnPawn;
