@@ -23,6 +23,9 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
+// Forward declarations
+static void EditorLog(const char* fmt, ...);
+
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
 
@@ -35,6 +38,143 @@ void CsgSidebarPlace(float px, float py, float pz, float w, float h, float d, fl
     OmegaTechEditor.W = w;  OmegaTechEditor.H = h;  OmegaTechEditor.L = d;
     OmegaTechEditor.R = rot; OmegaTechEditor.S = scale;
     OmegaTechEditor.DrawModel = true;
+}
+
+// ---------------------------------------------------------------------------
+// Entity selection system (right-click raycast)
+// ---------------------------------------------------------------------------
+enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE };
+struct EditorSelection {
+    SelType type = SelType::NONE;
+    int index = -1;
+    std::string name;
+    Vector3 pos{0,0,0};
+    float scale = 1.0f;
+    float rotation = 0.0f;
+};
+static EditorSelection g_sel;
+
+// Right-click state: drag vs click detection
+static bool g_rbDown = false;
+static Vector2 g_rbDownPos{0,0};
+static bool g_showContextMenu = false;
+static int g_contextMenuChoice = -1;
+
+static RayCollision RaycastTestBrushes(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+    for (size_t i = 0; i < vols.size(); i++) {
+        RayCollision hit = GetRayCollisionBox(ray, vols[i].aabb);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::BRUSH, (int)i, "Brush", 
+                      {(vols[i].aabb.min.x + vols[i].aabb.max.x)/2,
+                       (vols[i].aabb.min.y + vols[i].aabb.max.y)/2,
+                       (vols[i].aabb.min.z + vols[i].aabb.max.z)/2} };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestModels(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    for (size_t i = 0; i < WDLModels.models.size(); i++) {
+        auto& m = WDLModels.models[i];
+        if (!m.loaded || m.model.meshCount == 0) continue;
+        BoundingBox box = GetMeshBoundingBox(m.model.meshes[0]);
+        box.min = Vector3Add(box.min, (Vector3){0,0,0}); // model position offset if stored
+        box.max = Vector3Add(box.max, (Vector3){0,0,0});
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::MODEL, (int)i, m.name.empty() ? "Model" : m.name, {0,0,0} };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPawns(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& pawns = PawnSystem::Instance().GetPawns();
+    for (auto& p : pawns) {
+        if (!p.active) continue;
+        BoundingBox box = { {p.position.x - 1, p.position.y - 1, p.position.z - 1},
+                            {p.position.x + 1, p.position.y + 1, p.position.z + 1} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::NPC, (int)p.id, p.defName, p.position };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPickups(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& pickups = PawnSystem::Instance().GetPickups();
+    for (auto& pk : pickups) {
+        if (!pk.active) continue;
+        BoundingBox box = { {pk.position.x - 0.3f, pk.position.y - 0.3f, pk.position.z - 0.3f},
+                            {pk.position.x + 0.3f, pk.position.y + 0.3f, pk.position.z + 0.3f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::PICKUP, (int)pk.id, pk.typeName, pk.position };
+        }
+    }
+    return best;
+}
+
+static void EditorPickEntity() {
+    Ray ray = GetMouseRay(GetMousePosition(), OTEditor.MainCamera);
+    g_sel = { SelType::NONE, -1, "", {0,0,0} };
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+
+    auto test = [&](RayCollision hit) {
+        if (hit.hit && hit.distance < best.distance) { best = hit; }
+    };
+    test(RaycastTestBrushes(ray));
+    test(RaycastTestModels(ray));
+    test(RaycastTestPawns(ray));
+    test(RaycastTestPickups(ray));
+
+    if (best.hit) {
+        EditorLog("Selected: %s (type=%d idx=%d dist=%.1f)",
+                  g_sel.name.c_str(), (int)g_sel.type, g_sel.index, best.distance);
+    }
+}
+
+static void DrawContextMenu() {
+    if (!g_showContextMenu) return;
+    int sw = GetScreenWidth(), sh = GetScreenHeight();
+    int mw = 180, mh = 140;
+    int mx = (sw - mw) / 2, my = (sh - mh) / 2;
+    DrawRectangle(mx, my, mw, mh, (Color){40,40,50,240});
+    DrawRectangleLines(mx, my, mw, mh, (Color){100,100,120,255});
+
+    const char* title = g_sel.name.empty() ? "Entity" : g_sel.name.c_str();
+    DrawText(title, mx + 8, my + 6, 12, WHITE);
+    DrawLine(mx, my + 22, mx + mw, my + 22, (Color){80,80,100,255});
+
+    struct CmItem { const char* label; int action; };
+    CmItem items[] = {
+        {"Properties", 1},
+        {"Delete", 2},
+        {"Duplicate", 3},
+        {"Cancel", 0}
+    };
+    int yy = my + 28;
+    for (auto& item : items) {
+        Rectangle r = {(float)mx + 4, (float)yy, (float)mw - 8, 22};
+        Color c = (CheckCollisionPointRec(GetMousePosition(), r)) ? (Color){60,70,100,255} : (Color){0,0,0,0};
+        DrawRectangleRec(r, c);
+        DrawText(item.label, mx + 10, yy + 4, 11, LIGHTGRAY);
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(GetMousePosition(), r)) {
+            g_contextMenuChoice = item.action;
+            g_showContextMenu = false;
+        }
+        yy += 24;
+    }
 }
 
 // Editor log file (appended to System/AngelEd.log)
@@ -363,10 +503,26 @@ int main(int argc, char **argv){
             g_editorPanels.actionTexturePath.clear();
         }
 
-        if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON))
-        {
+        // Right-click: drag resizes placement ghost; click picks entity + context menu
+        if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+            g_rbDown = true;
+            g_rbDownPos = GetMousePosition();
             if (LastClickTime != 0) DoubleClick = true;
             else LastClickTime = 1;
+        }
+        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && g_rbDown) {
+            Vector2 delta = GetMouseDelta();
+            if (fabsf(delta.x) > 3 || fabsf(delta.y) > 3) g_rbDown = false; // started dragging
+        }
+        if (IsMouseButtonReleased(MOUSE_RIGHT_BUTTON) && g_rbDown) {
+            g_rbDown = false;
+            // If not placing and not dragging, pick entity + show context menu
+            if (!OmegaTechEditor.DrawModel) {
+                EditorPickEntity();
+                if (g_sel.type != SelType::NONE) {
+                    g_showContextMenu = true;
+                }
+            }
         }
         if (LastClickTime != 0){
             LastClickTime ++;
@@ -634,6 +790,38 @@ int main(int argc, char **argv){
             }
         }
 
+        // Selection highlight (right-click picked entity)
+        if (g_sel.type != SelType::NONE) {
+            BoundingBox selBox = {{0,0,0},{0,0,0}};
+            if (g_sel.type == SelType::NPC) {
+                auto& pawns = PawnSystem::Instance().GetPawns();
+                for (auto& p : pawns) {
+                    if ((int)p.id == g_sel.index && p.active) {
+                        selBox = {{p.position.x-1,p.position.y-1,p.position.z-1},
+                                  {p.position.x+1,p.position.y+1,p.position.z+1}};
+                        break;
+                    }
+                }
+            } else if (g_sel.type == SelType::PICKUP) {
+                auto& pickups = PawnSystem::Instance().GetPickups();
+                for (auto& pk : pickups) {
+                    if ((int)pk.id == g_sel.index && pk.active) {
+                        selBox = {{pk.position.x-0.4f,pk.position.y-0.4f,pk.position.z-0.4f},
+                                  {pk.position.x+0.4f,pk.position.y+0.4f,pk.position.z+0.4f}};
+                        break;
+                    }
+                }
+            } else if (g_sel.type == SelType::BRUSH) {
+                auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+                if (g_sel.index >= 0 && g_sel.index < (int)vols.size())
+                    selBox = vols[g_sel.index].aabb;
+            }
+            if (selBox.min.x != selBox.max.x || selBox.min.y != selBox.max.y) {
+                float pulse = 0.5f + 0.5f * sinf(GetTime() * 4);
+                DrawBoundingBox(selBox, (Color){255,(unsigned char)(200*pulse),0,255});
+            }
+        }
+
         // Terrain-following camera
         {
             float gy = SampleHeightmapGroundY(OTEditor.MainCamera.position.x, OTEditor.MainCamera.position.z);
@@ -823,6 +1011,22 @@ int main(int argc, char **argv){
                      10, y, 11, PURPLE); y += 14;
             DrawText("MMB=Pan S+MMB=Y Alt+MMB=Orbit", 10, y, 9, DARKGRAY); y += 12;
             DrawText("Scroll=Dolly Home=Reset", 10, y, 9, DARKGRAY);
+        }
+
+        // Context menu overlay (right-click entity)
+        DrawContextMenu();
+        if (g_contextMenuChoice >= 0) {
+            int action = g_contextMenuChoice;
+            g_contextMenuChoice = -1;
+            if (action == 2 && g_sel.type == SelType::NPC) {
+                PawnSystem::Instance().Despawn(g_sel.index);
+                EditorLog("Deleted NPC %d", g_sel.index);
+            }
+            if (action == 2 && g_sel.type == SelType::PICKUP) {
+                PawnSystem::Instance().RemovePickup(g_sel.index);
+                EditorLog("Deleted pickup %d", g_sel.index);
+            }
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
         }
 
         EndDrawing();

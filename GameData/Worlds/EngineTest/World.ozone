@@ -1,109 +1,103 @@
 OZONE
-# EngineTest — Primary test world for CSG brushes + heightmap + skybox
+# EngineTest — Primary test world for CSG brushes + skybox
 # OZONE Z-up convention: x=east, y=north, z=up
-# Uses CSG add/sub operations for collision geometry
-
-# ==============================================================================
-# Heightmap terrain (large outdoor area in positive-x region)
-# ==============================================================================
-# heightmap imagePath texturePath x y z scale sizeX sizeY sizeZ
-heightmap Models/HeightMap.png Models/HeightMapTexture.png 10 -10 -1 1.0 40 8 40
+# Scaled up for player dimensions (Height=10, Width=2)
 
 # ==============================================================================
 # Sky zone — defines the skybox volume
 # ==============================================================================
-zone sky -60 -60 -20 60 60 60
+zone sky -80 -80 -30 80 80 80
 
 # ==============================================================================
 # Ground plane (everything sits on)
 # ==============================================================================
-add box 10 -10 -0.5 36 0.5 48 0
+add box 10 -10 -0.5 60 0.5 85 0
 
 # ==============================================================================
 # ROOM 1 (top-left, connects to Room2 via CorridorA, Room4 via CorridorD)
 # ==============================================================================
-add box 0 10 -0.25 7.5 0.5 7.5 0           # floor
-add box 0 13.75 1.5 7.5 3 0.5 0            # north wall
-add box -2.75 6.25 1.5 2.5 3 0.5 0         # south wall left
-add box 2.75 6.25 1.5 2.5 3 0.5 0          # south wall right
-add box 3.75 12.75 1.5 0.5 3 2.5 0         # east wall upper
-add box 3.75 7.25 1.5 0.5 3 2.5 0          # east wall lower
-add box -3.75 10 1.5 0.5 3 7.5 0           # west wall
-add cyl 0 10 0 0.4 0.4 3 16 0              # column
+add box 0 10 -0.25 15 0.5 15 0           # floor
+add box 0 17.75 5 15 10 0.5 0            # north wall
+add box -5 2.25 5 5 10 0.5 0             # south wall left
+add box 5 2.25 5 5 10 0.5 0              # south wall right
+add box 7.75 15 5 0.5 10 5 0             # east wall upper
+add box 7.75 5 5 0.5 10 5 0              # east wall lower
+add box -7.75 10 5 0.5 10 15 0           # west wall
+add cyl 0 10 5 0.6 0.6 10 16 0           # column
 
 # ==============================================================================
 # ROOM 2 (top-right, connects to Room1 via CorridorA, Room3 via CorridorB)
 # ==============================================================================
-add box 20 10 -0.25 7.5 0.5 7.5 0
-add box 20 13.75 1.5 7.5 3 0.5 0
-add box 17.25 6.25 1.5 2.5 3 0.5 0
-add box 22.75 6.25 1.5 2.5 3 0.5 0
-add box 23.75 10 1.5 0.5 3 7.5 0
-add box 16.25 12.75 1.5 0.5 3 2.5 0
-add box 16.25 7.25 1.5 0.5 3 2.5 0
-add cyl 20 10 0 0.4 0.4 3 16 0
+add box 20 10 -0.25 15 0.5 15 0
+add box 20 17.75 5 15 10 0.5 0
+add box 15 2.25 5 5 10 0.5 0
+add box 25 2.25 5 5 10 0.5 0
+add box 27.75 10 5 0.5 10 15 0
+add box 12.25 15 5 0.5 10 5 0
+add box 12.25 5 5 0.5 10 5 0
+add cyl 20 10 5 0.6 0.6 10 16 0
 
 # ==============================================================================
 # ROOM 4 (bottom-left, connects to Room1 via CorridorD, Room3 via CorridorC)
 # ==============================================================================
-add box 0 -10 -0.25 7.5 0.5 7.5 0
-add box -2.75 -6.25 1.5 2.5 3 0.5 0
-add box 2.75 -6.25 1.5 2.5 3 0.5 0
-add box 0 -13.75 1.5 7.5 3 0.5 0
-add box 3.75 -8.75 1.5 0.5 3 2.5 0
-add box 3.75 -13.75 1.5 0.5 3 2.5 0
-add box -3.75 -10 1.5 0.5 3 7.5 0
-add cyl 0 -10 0 0.4 0.4 3 16 0
+add box 0 -10 -0.25 15 0.5 15 0
+add box -5 -2.75 5 5 10 0.5 0
+add box 5 -2.75 5 5 10 0.5 0
+add box 0 -17.75 5 15 10 0.5 0
+add box 7.75 -5 5 0.5 10 5 0
+add box 7.75 -15 5 0.5 10 5 0
+add box -7.75 -10 5 0.5 10 15 0
+add cyl 0 -10 5 0.6 0.6 10 16 0
 
 # ==============================================================================
 # ROOM 3 (bottom-right hub, connects to Room2, Room4, LargeRoom)
 # ==============================================================================
-add box 20 -10 -0.25 7.5 0.5 7.5 0
-add box 17.25 -6.25 1.5 2.5 3 0.5 0
-add box 22.75 -6.25 1.5 2.5 3 0.5 0
-add box 17.25 -13.75 1.5 2.5 3 0.5 0
-add box 22.75 -13.75 1.5 2.5 3 0.5 0
-add box 23.75 -10 1.5 0.5 3 7.5 0
-add box 16.25 -8.75 1.5 0.5 3 2.5 0
-add box 16.25 -13.75 1.5 0.5 3 2.5 0
-add cyl 20 -10 0 0.4 0.4 3 16 0
+add box 20 -10 -0.25 15 0.5 15 0
+add box 15 -2.75 5 5 10 0.5 0
+add box 25 -2.75 5 5 10 0.5 0
+add box 15 -17.75 5 5 10 0.5 0
+add box 25 -17.75 5 5 10 0.5 0
+add box 27.75 -10 5 0.5 10 15 0
+add box 12.25 -5 5 0.5 10 5 0
+add box 12.25 -15 5 0.5 10 5 0
+add cyl 20 -10 5 0.6 0.6 10 16 0
 
 # ==============================================================================
 # LARGE ROOM (connects to Room3 via CorridorE)
 # ==============================================================================
-add box 20 -28 -0.25 11.5 0.5 11.5 0
-add box 16.375 -22.25 1.5 4.25 3 0.5 0
-add box 23.625 -22.25 1.5 4.25 3 0.5 0
-add box 20 -33.75 1.5 11.5 3 0.5 0
-add box 25.75 -28 1.5 0.5 3 11.5 0
-add box 14.25 -28 1.5 0.5 3 11.5 0
-add cyl 16 -24 0 0.4 0.4 3 16 0
-add cyl 24 -24 0 0.4 0.4 3 16 0
-add cyl 16 -32 0 0.4 0.4 3 16 0
-add cyl 24 -32 0 0.4 0.4 3 16 0
+add box 20 -38 -0.25 23 0.5 23 0
+add box 13 -26.75 5 9 10 0.5 0
+add box 27 -26.75 5 9 10 0.5 0
+add box 20 -49.75 5 23 10 0.5 0
+add box 31.75 -38 5 0.5 10 23 0
+add box 8.25 -38 5 0.5 10 23 0
+add cyl 12 -30 5 0.6 0.6 10 16 0
+add cyl 28 -30 5 0.6 0.6 10 16 0
+add cyl 12 -46 5 0.6 0.6 10 16 0
+add cyl 28 -46 5 0.6 0.6 10 16 0
 
 # ==============================================================================
 # Corridors connecting rooms
 # ==============================================================================
-add box 10 10 -0.25 12 0.5 2.5 0        # Corridor A (Room1-Room2)
-add box 10 11.5 1.5 12 3 0.5 0
-add box 10 8.5 1.5 12 3 0.5 0
+add box 10 10 -0.25 5 0.5 5 0            # Corridor A (Room1-Room2)
+add box 10 12.75 5 5 10 0.5 0
+add box 10 7.25 5 5 10 0.5 0
 
-add box 20 0 -0.25 2.5 0.5 12 0         # Corridor B (Room2-Room3)
-add box 21.5 0 1.5 0.5 3 12 0
-add box 18.5 0 1.5 0.5 3 12 0
+add box 20 0 -0.25 5 0.5 5 0             # Corridor B (Room2-Room3)
+add box 22.75 0 5 0.5 10 5 0
+add box 17.25 0 5 0.5 10 5 0
 
-add box 10 -10 -0.25 12 0.5 2.5 0       # Corridor C (Room4-Room3)
-add box 10 -8.5 1.5 12 3 0.5 0
-add box 10 -11.5 1.5 12 3 0.5 0
+add box 10 -10 -0.25 5 0.5 5 0           # Corridor C (Room4-Room3)
+add box 10 -7.25 5 5 10 0.5 0
+add box 10 -12.75 5 5 10 0.5 0
 
-add box 0 0 -0.25 2.5 0.5 12 0          # Corridor D (Room1-Room4)
-add box 1.5 0 1.5 0.5 3 12 0
-add box -1.5 0 1.5 0.5 3 12 0
+add box 0 0 -0.25 5 0.5 5 0              # Corridor D (Room1-Room4)
+add box 2.75 0 5 0.5 10 5 0
+add box -2.75 0 5 0.5 10 5 0
 
-add box 20 -18 -0.25 2.5 0.5 8 0        # Corridor E (Room3-LargeRoom)
-add box 21.5 -18 1.5 0.5 3 8 0
-add box 18.5 -18 1.5 0.5 3 8 0
+add box 20 -22 -0.25 5 0.5 9 0           # Corridor E (Room3-LargeRoom)
+add box 22.75 -22 5 0.5 10 9 0
+add box 17.25 -22 5 0.5 10 9 0
 
 # ==============================================================================
 # Player start
@@ -116,4 +110,4 @@ playerstart 0 8 0 0
 npc Walker 10 10 0
 npc Walker 0 -10 0
 npc Skaarj 20 -10 0
-npc Brute 20 -28 0
+npc Brute 20 -38 0
