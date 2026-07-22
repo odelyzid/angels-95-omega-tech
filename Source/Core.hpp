@@ -51,6 +51,10 @@ class EngineData
 
         ParticleSystem RainParticles;
         Texture HomeScreen;
+        Texture PauseHeading;
+        Texture BtnNormal;
+        Texture BtnHover;
+        Texture BtnClicked;
         ray_video_t HomeScreenVideo;
         Music HomeScreenMusic;
 
@@ -837,6 +841,10 @@ void OmegaTechInit()
 
 
     OmegaTechData.HomeScreen = LoadTextureWithFallback("GameData/Global/Title/Title.png");
+    OmegaTechData.PauseHeading = LoadTexture("GameData/Global/Title/menu_heading.png");
+    OmegaTechData.BtnNormal = LoadTexture("GameData/Global/Title/menu_button.png");
+    OmegaTechData.BtnHover = LoadTexture("GameData/Global/Title/menu_button_hover.png");
+    OmegaTechData.BtnClicked = LoadTexture("GameData/Global/Title/menu_button_clicked.png");
     if (IsPathFile("GameData/Global/Title/Title.mpg"))OmegaTechData.HomeScreenVideo = ray_video_open("GameData/Global/Title/Title.mpg");
     OmegaTechData.HomeScreenMusic = LoadMusicWithFallback("GameData/Global/Title/Title.mp3");
 

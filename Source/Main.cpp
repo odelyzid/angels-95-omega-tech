@@ -786,11 +786,16 @@ int main(int argc, char** argv){
     OmegaTechInit();
     CreateNativeMenuBar();
     PlaySplashScreen();
+
+    static bool g_returnToMenu = false;
+
+    // Outer loop: return to menu after gameplay
+    while (!WindowShouldClose()) {
     PlayHomeScreen();
+    if (WindowShouldClose()) break;
+    g_returnToMenu = false;
     
     LoadWorld();
-
-    // Connect to server (if Join Game was selected, use custom IP)
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
@@ -832,7 +837,7 @@ int main(int argc, char** argv){
     HideCursor(); 
     DisableCursor();  
     
-    while (!WindowShouldClose())
+    while (!WindowShouldClose() && !g_returnToMenu)
     {
         PumpWin32Messages();
 
@@ -865,6 +870,70 @@ int main(int argc, char** argv){
         // Console input processing
         if (g_consoleOpen) {
             HandleConsoleInput();
+        }
+
+        // Pause menu state
+        static bool g_gamePaused = false;
+        {
+            static bool pauseKeyWasDown = false;
+            bool pauseKeyNow = IsKeyPressed(KEY_ESCAPE);
+            if (pauseKeyNow && !pauseKeyWasDown) {
+                g_gamePaused = !g_gamePaused;
+                if (g_gamePaused) { ShowCursor(); EnableCursor(); }
+                else if (!ShowSettings && !ShowInventory && !g_consoleOpen) { HideCursor(); DisableCursor(); }
+            }
+            pauseKeyWasDown = pauseKeyNow;
+        }
+
+        // Skip game input/update when paused
+        if (g_gamePaused) {
+            // Draw pause menu overlay
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            DrawRectangle(0, 0, sw, sh, (Color){0,0,0,180});
+
+            Texture2D heading = OmegaTechData.PauseHeading;
+            if (heading.id > 0) {
+                float hx = (sw - heading.width) / 2.0f;
+                DrawTexture(heading, (int)hx, sh/2 - heading.height - 80, WHITE);
+            }
+
+            const char* labels[] = {"Resume", "Settings", "Main Menu", "Quit"};
+            int btnCount = 4;
+            int btnW = 220, btnH = 50, gap = 10;
+            int totalH = btnCount * btnH + (btnCount - 1) * gap;
+            int startY = sh/2 - totalH/2;
+
+            for (int i = 0; i < btnCount; i++) {
+                int bx = (sw - btnW) / 2;
+                int by = startY + i * (btnH + gap);
+                Rectangle r = {(float)bx, (float)by, (float)btnW, (float)btnH};
+                bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+                bool clicked = hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+
+                Texture2D tex = clicked ? OmegaTechData.BtnClicked :
+                                hover ? OmegaTechData.BtnHover : OmegaTechData.BtnNormal;
+                // Draw button background
+                if (tex.id > 0) {
+                    DrawTexturePro(tex,
+                        (Rectangle){0,0,(float)tex.width,(float)tex.height},
+                        r, (Vector2){0,0}, 0, WHITE);
+                } else {
+                    DrawRectangleRec(r, (Color){50,50,70,220});
+                    DrawRectangleLinesEx(r, 2, (Color){100,100,140,255});
+                }
+                DrawText(labels[i], bx + (btnW - MeasureText(labels[i], 18)) / 2,
+                         by + (btnH - 18) / 2, 18, WHITE);
+
+                    if (clicked) {
+                    if (i == 0) { g_gamePaused = false; HideCursor(); DisableCursor(); }
+                    else if (i == 1) { ToggleSettings(); g_gamePaused = false; }
+                    else if (i == 2) { g_gamePaused = false; g_returnToMenu = true; }
+                    else if (i == 3) { CloseWindow(); return 0; }
+                    }
+            }
+
+            EndDrawing();
+            continue;
         }
 
         // Capture left-mouse state before camera (handle after)
@@ -1082,9 +1151,18 @@ int main(int argc, char** argv){
 
         if (IsKeyPressed(KEY_F11))ToggleFullscreen();
 
-    }
-    
+    } // end inner game loop
+
+    // Cleanup before returning to menu
     g_client.disconnect();
+    if (OmegaTechSoundData.MusicFound) {
+        StopMusicStream(OmegaTechSoundData.BackgroundMusic);
+        UnloadMusicStream(OmegaTechSoundData.BackgroundMusic);
+        OmegaTechSoundData.MusicFound = false;
+    }
+
+    } // end outer menu/game loop
+    
     UnloadRenderTexture(Target);
     EngineBillboard::Shutdown();
     CloseWindow();

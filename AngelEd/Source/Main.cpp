@@ -901,6 +901,30 @@ int main(int argc, char **argv){
             };
 
             tBtn(nullptr,"New",10); tBtn(nullptr,"Open",11); tBtn(nullptr,"Save",12);
+            // Play button
+            {
+                const char* lbl = "Play";
+                int bw = (int)strlen(lbl) * 7 + 10;
+                Rectangle r = {(float)bx, 2, (float)bw, (float)tbH - 4};
+                bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+                DrawRectangleRec(r, hover ? (Color){50,100,50,255} : (Color){35,80,35,255});
+                DrawText(lbl, bx + 4, 7, 12, WHITE);
+                if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    // Save world to temp file and launch client
+                    std::string tempPath = "System/Cache/editor_test.wdl";
+                    std::wstring wstr = OTEditor.WorldData;
+                    std::string worldData(wstr.begin(), wstr.end());
+                    std::ofstream f(tempPath);
+                    if (f.is_open()) {
+                        f << worldData;
+                        f.close();
+                        std::string cmd = std::string("start \"\" Angels95.exe --world ") + tempPath;
+                        system(cmd.c_str());
+                        EditorLog("Launched: %s", cmd.c_str());
+                    }
+                }
+                bx += bw + 2;
+            }
             bx += 6;
             tBtn("BBGeneric","Mod",0); tBtn(nullptr,"Snd",1); tBtn(nullptr,"Tex",2);
             tBtn(nullptr,"Pawn",3); tBtn(nullptr,"Scr",4); bx += 6;
