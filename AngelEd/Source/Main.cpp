@@ -469,7 +469,7 @@ int main(int argc, char **argv){
 
         // UNLIT mode: render without lit shader (default raylib unlit)
         if (OTEditor.ViewMode == LightingMode::UNLIT) {
-            // Default raylib shader is already unlit - just skip LitFogShader
+            BeginShaderMode(Shader{0});
         }
 
         DrawGrid(1000, 10.0f);
@@ -648,6 +648,11 @@ int main(int argc, char **argv){
 
         EndMode3D();
 
+        // End shader override if UNLIT
+        if (OTEditor.ViewMode == LightingMode::UNLIT) {
+            EndShaderMode();
+        }
+
         // Reset lighting mode state
         if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
             rlEnableBackfaceCulling();
@@ -702,8 +707,25 @@ int main(int argc, char **argv){
                 int lw=38; Color lc=(int)OTEditor.ViewMode==li?(Color){70,90,120,255}:(Color){45,45,50,255};
                 DrawRectangle(bx,2,lw,tbH-4,lc);
                 DrawText(labs[li],bx+4,7,12,(int)OTEditor.ViewMode==li?WHITE:LIGHTGRAY);
-                if(CheckCollisionPointRec(GetMousePosition(),{(float)bx,2,(float)lw,(float)tbH-4})&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                if(CheckCollisionPointRec(GetMousePosition(),{(float)bx,2,(float)lw,(float)tbH-4})&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    LightingMode prev = OTEditor.ViewMode;
                     OTEditor.ViewMode=(LightingMode)li;
+                    // Apply shader swap on toggle
+                    if (prev != OTEditor.ViewMode) {
+                        if (OTEditor.ViewMode == LightingMode::UNLIT) {
+                            // Save and replace shader on all cached models
+                            for (auto& m : WDLModels.models) {
+                                if (m.loaded && m.model.materials[0].shader.id > 0) {
+                                    m.model.materials[0].shader = Shader{0};
+                                }
+                            }
+                            OzoneLoader::Instance().SetLitFogShaderEnabled(false);
+                        } else if (prev == LightingMode::UNLIT) {
+                            // Restore shaders from OzoneLoader cache (models will re-acquire on next world load)
+                            OzoneLoader::Instance().SetLitFogShaderEnabled(true);
+                        }
+                    }
+                }
                 bx+=lw+2;
             }
             bx+=6;

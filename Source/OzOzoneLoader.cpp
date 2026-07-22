@@ -74,6 +74,7 @@ OzoneLoader& OzoneLoader::Instance() {
 }
 
 Shader OzoneLoader::s_litFogShader = {0};
+Shader OzoneLoader::s_backupLitFogShader = {0};
 
 // ---------------------------------------------------------------------------
 // World texture loading (from worlddir/oztex/tileset/)

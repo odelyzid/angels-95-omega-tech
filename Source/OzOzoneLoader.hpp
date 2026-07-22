@@ -71,6 +71,10 @@ public:
 
     void LoadWorldTextures(const std::string& worldDir);
     void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
+    void SetLitFogShaderEnabled(bool enabled) {
+        if (enabled) s_litFogShader = s_backupLitFogShader;
+        else { if (s_litFogShader.id > 0) s_backupLitFogShader = s_litFogShader; s_litFogShader = {0}; }
+    }
 
     static OzoneLoader& Instance();
     
@@ -78,6 +82,7 @@ public:
 
 private:
     static Shader s_litFogShader;
+    static Shader s_backupLitFogShader;
     std::vector<OzoneRenderable> m_renderables;
     std::vector<OzoneCollisionVolume> m_collisionVolumes;
     WorldChunkManager m_chunkManager;
