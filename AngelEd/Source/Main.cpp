@@ -15,6 +15,7 @@
 #include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Server/WDLParser.hpp"
+#include "../../Source/Physics/OzBsp.hpp"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -32,6 +33,9 @@ GameModels WDLModels;
 // CSG sidebar bridge globals
 int g_csgOpFromSidebar = 0;
 bool g_csgCollisionFromSidebar = false;
+
+// CSG processor — accumulates brush operations for collision geometry
+static CsgProcessor g_csgProc;
 
 void CsgSidebarPlace(float px, float py, float pz, float w, float h, float d, float rot, float scale) {
     OmegaTechEditor.X = px; OmegaTechEditor.Y = py; OmegaTechEditor.Z = pz;
@@ -775,6 +779,27 @@ int main(int argc, char **argv){
                 }
                 OTEditor.WorldData += WDLCommand;
                 OmegaTechEditor.DrawModel = false;
+
+                // CSG: push brush through processor for OZONE primitives (EMID >= 200)
+                if (EMID >= 200 && g_placeMode == PlaceMode::MODEL) {
+                    CsgBrush brush;
+                    brush.op = (CsgOp)OmegaTechEditor.CSGOperation;
+                    brush.minX = OmegaTechEditor.X;
+                    brush.minY = OmegaTechEditor.Y;
+                    brush.minZ = OmegaTechEditor.Z;
+                    brush.maxX = OmegaTechEditor.X + OmegaTechEditor.W;
+                    brush.maxY = OmegaTechEditor.Y + OmegaTechEditor.H;
+                    brush.maxZ = OmegaTechEditor.Z + OmegaTechEditor.L;
+                    g_csgProc.Apply(brush);
+                    int merges = g_csgProc.MergePass();
+                    // Rebuild OzoneLoader collision volumes from CSG result
+                    OzoneLoader::Instance().RebuildCollisionVolumes();
+                    std::vector<CsgProcessor::Volume> vols;
+                    g_csgProc.GetVolumes(vols);
+                    EditorLog("CSG: op=%d volumes=%d merges=%d",
+                              (int)brush.op, (int)vols.size(), merges);
+                }
+
                 CacheWDL();
             }
 
