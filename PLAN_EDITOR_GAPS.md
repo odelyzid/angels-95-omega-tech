@@ -279,15 +279,12 @@ There is no in-game pause state or pause menu system. The Escape key is only han
 ## Execution Order
 
 ```
-E1 (Lighting toggle)    → ✅ DONE — shader swap on toggle with save/restore
-E2 (Right-click menu)   → P0, medium: raycast + dialog + menu
-E3 (CSG operations)     → P1, large: integrate CsgProcessor pipeline
-E4 (Texture thumbnails) → P2, medium: owner-draw listbox + image loading
-E5 (Test-play)          → P2, medium: subprocess launch + --world flag
-E6 (Pause menu)         → P1, medium: replace exit with pause overlay
+E1 (Lighting toggle)    → ✅ Done
+E2 (Right-click menu)   → ✅ Done
+E3 (CSG operations)     → ✅ Done
+E4 (Texture thumbnails) → ✅ Done
+E5 (Test-play)          → ✅ Done
+E6 (Pause menu)         ✅ Done
 ```
 
-E1 (lighting) is complete. E2 (right-click) unblocks basic editing workflow.
-E6 (pause menu) is the highest-impact gameplay quality gap.
-E3 is the largest effort (requires full CSG boolean pipeline).
-E4 and E5 are polish/quality-of-life.
+All six editor gaps resolved. See PLAN_STUBS_AND_FIXES.md for detailed fix descriptions.

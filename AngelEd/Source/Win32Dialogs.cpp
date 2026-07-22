@@ -45,6 +45,7 @@ static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
 struct ResourceEntry {
     std::string name;
     std::string path;
+    HBITMAP thumbnail = nullptr; // cached 64x64 preview
 };
 
 static std::vector<ResourceEntry> g_textureFiles;
@@ -344,7 +345,11 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     case WM_CREATE: {
         int x = 10, y = 10, bw = 460;
 
-        hList = CreateListBox(hwnd, x, y, bw, 160, ID_TEX_LIST);
+        // Owner-drawn listbox with 64px thumbnail items
+        hList = CreateWindowEx(0, L"LISTBOX", L"",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY |
+            LBS_OWNERDRAWFIXED | LBS_HASSTRINGS,
+            x, y, bw, 160, hwnd, (HMENU)(INT_PTR)ID_TEX_LIST, g_hInst, nullptr);
         y += 166;
 
         // Source + dimensions info
@@ -353,9 +358,11 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         hDims = CreateLabel(hwnd, L"Select a texture to preview", x, y, bw, 16, ID_TEX_DIMS_LABEL);
         y += 22;
 
-        // Preview area (static rectangle)
-        hPreview = CreateLabel(hwnd, L"(preview)", x + 150, y, 100, 60, ID_TEX_PREVIEW);
-        y += 66;
+        // Preview area (static bitmap control)
+        hPreview = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"",
+            WS_CHILD | WS_VISIBLE | SS_BITMAP,
+            x + 120, y, 220, 120, hwnd, (HMENU)(INT_PTR)ID_TEX_PREVIEW, g_hInst, nullptr);
+        y += 126;
 
         // Target combo
         CreateLabel(hwnd, L"Target:", x, y, 55, 20, 20);
@@ -387,9 +394,69 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         break;
     }
     case WM_USER + 50: {
+        // Free old thumbnails
+        for (auto& tex : g_textureFiles) {
+            if (tex.thumbnail) { DeleteObject(tex.thumbnail); tex.thumbnail = nullptr; }
+        }
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (const auto& tex : g_textureFiles) {
+        for (auto& tex : g_textureFiles) {
+            // Load and scale thumbnail via raylib
+            Image img = LoadImageWithFallback(tex.path.c_str());
+            if (img.data) {
+                ImageResize(&img, 64, 64);
+                // Convert to BGRA for HBITMAP
+                unsigned char* px = (unsigned char*)img.data;
+                for (int i = 0; i < img.width * img.height; i++) {
+                    unsigned char tmp = px[i*4];
+                    px[i*4] = px[i*4+2];
+                    px[i*4+2] = tmp;
+                }
+                HDC hdc = GetDC(hwnd);
+                BITMAPINFO bmi = {};
+                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bmi.bmiHeader.biWidth = img.width;
+                bmi.bmiHeader.biHeight = -img.height;
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                void* bits = nullptr;
+                tex.thumbnail = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+                if (bits && img.data) memcpy(bits, img.data, img.width * img.height * 4);
+                ReleaseDC(hwnd, hdc);
+                UnloadImage(img);
+            }
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)tex.name.c_str());
+        }
+        break;
+    }
+    case WM_MEASUREITEM: {
+        LPMEASUREITEMSTRUCT mis = (LPMEASUREITEMSTRUCT)l;
+        if (mis->CtlID == ID_TEX_LIST) mis->itemHeight = 68; // 64px + 4 margin
+        break;
+    }
+    case WM_DRAWITEM: {
+        LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)l;
+        if (dis->CtlID == ID_TEX_LIST) {
+            int idx = dis->itemID;
+            if (idx < 0 || idx >= (int)g_textureFiles.size()) break;
+            // Draw background
+            FillRect(dis->hDC, &dis->rcItem, GetSysColorBrush(COLOR_WINDOW));
+            // Draw thumbnail at left
+            if (g_textureFiles[idx].thumbnail) {
+                HDC hdcMem = CreateCompatibleDC(dis->hDC);
+                SelectObject(hdcMem, g_textureFiles[idx].thumbnail);
+                StretchBlt(dis->hDC, dis->rcItem.left + 2, dis->rcItem.top + 2,
+                           64, 64, hdcMem, 0, 0, 64, 64, SRCCOPY);
+                DeleteDC(hdcMem);
+            }
+            // Draw filename to the right of thumbnail
+            RECT tr = {dis->rcItem.left + 72, dis->rcItem.top,
+                       dis->rcItem.right, dis->rcItem.bottom};
+            SetTextColor(dis->hDC, RGB(200,200,200));
+            SetBkMode(dis->hDC, TRANSPARENT);
+            DrawTextA(dis->hDC, g_textureFiles[idx].name.c_str(), -1, &tr,
+                      DT_VCENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+            return TRUE;
         }
         break;
     }
@@ -419,6 +486,40 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             ShowTextureManager(false);
         } else if (id == ID_TEX_REFRESH) {
             ScanTextureBrowserFiles();
+        } else if (id == ID_TEX_LIST && HIWORD(w) == LBN_SELCHANGE) {
+            // Update preview on selection change
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_textureFiles.size()) {
+                std::string& p = g_textureFiles[sel].path;
+                SetWindowTextA(hSrc, TextFormat("Source: %s", p.c_str()));
+                Image tmp = LoadImageWithFallback(p.c_str());
+                if (tmp.data) {
+                    SetWindowTextA(hDims, TextFormat("%dx%d %s", tmp.width, tmp.height,
+                        IsPathFile(p.c_str()) ? "filesystem" : "package"));
+                    // Create preview HBITMAP from the full image, scaled to preview area
+                    RECT pr; GetWindowRect(hPreview, &pr);
+                    int pw = pr.right - pr.left - 4, ph = pr.bottom - pr.top - 4;
+                    Image rs = ImageCopy(tmp);
+                    ImageResize(&rs, pw > 0 ? pw : 100, ph > 0 ? ph : 60);
+                    // Swap R/B for HBITMAP
+                    unsigned char* px = (unsigned char*)rs.data;
+                    for (int i = 0; i < rs.width * rs.height; i++) {
+                        unsigned char t = px[i*4]; px[i*4] = px[i*4+2]; px[i*4+2] = t;
+                    }
+                    HDC hdc = GetDC(hwnd);
+                    BITMAPINFO bmi = {}; bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                    bmi.bmiHeader.biWidth = rs.width; bmi.bmiHeader.biHeight = -rs.height;
+                    bmi.bmiHeader.biPlanes = 1; bmi.bmiHeader.biBitCount = 32;
+                    bmi.bmiHeader.biCompression = BI_RGB;
+                    void* bits = nullptr;
+                    HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+                    if (bits && rs.data) memcpy(bits, rs.data, rs.width * rs.height * 4);
+                    ReleaseDC(hwnd, hdc);
+                    if (hBmp) SendMessage(hPreview, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+                    if (tmp.data) UnloadImage(tmp);
+                    if (rs.data != tmp.data) UnloadImage(rs);
+                }
+            }
         } else if (id == ID_TEX_APPLY || (id == ID_TEX_LIST && HIWORD(w) == LBN_DBLCLK)) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_textureFiles.size()) {
@@ -426,16 +527,6 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 if (target >= 0) {
                     g_editorPanels.actionTexturePath = g_textureFiles[sel].path;
                     g_editorPanels.actionTextureTarget = target + 1;
-                    // Update source info
-                    std::string& p = g_textureFiles[sel].path;
-                    SetWindowTextA(hSrc, TextFormat("Source: %s", p.c_str()));
-                    // Try to get image dimensions via raylib (lazy load)
-                    Image tmp = LoadImageWithFallback(p.c_str());
-                    if (tmp.data) {
-                        SetWindowTextA(hDims, TextFormat("%dx%d %s", tmp.width, tmp.height,
-                            IsPathFile(p.c_str()) ? "filesystem" : "package"));
-                        UnloadImage(tmp);
-                    }
                 }
             }
         }
