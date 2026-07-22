@@ -17,6 +17,7 @@
 
 bool FloorCollision = true;
 bool ObjectCollision = false;
+extern bool g_showCollisionDebug;
 
 const char* g_world_to_load = "EngineTest";
 
@@ -1656,6 +1657,8 @@ void WDLProcess()
                 OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
                 OmegaPlayer.velocityY = 0.0f;
                 OmegaPlayer.onGround = true;
+            } else {
+                OmegaPlayer.onGround = false;
             }
         } else if (FoundPlatform) {
             const float eyeHeight = 2.0f;
@@ -1663,7 +1666,11 @@ void WDLProcess()
                 OmegaTechData.MainCamera.position.y = PlatformHeight + eyeHeight;
                 OmegaPlayer.velocityY = 0.0f;
                 OmegaPlayer.onGround = true;
+            } else {
+                OmegaPlayer.onGround = false;
             }
+        } else {
+            OmegaPlayer.onGround = false;
         }
     }
 }
@@ -2000,6 +2007,8 @@ void DrawWorld()
                 OmegaTechData.MainCamera.position.y = hmY + eyeHeight;
                 OmegaPlayer.velocityY = 0.0f;
                 OmegaPlayer.onGround = true;
+            } else {
+                OmegaPlayer.onGround = false;
             }
         } else {
             // Fallback: stand on top of OZONE brush primitives (chunk-accelerated)
@@ -2024,14 +2033,48 @@ void DrawWorld()
                     OmegaTechData.MainCamera.position.y = brushTop + eyeHeight;
                     OmegaPlayer.velocityY = 0.0f;
                     OmegaPlayer.onGround = true;
+                } else {
+                    OmegaPlayer.onGround = false;
                 }
+            } else {
+                OmegaPlayer.onGround = false;
             }
         }
     }
 
     UpdatePlayer();
 
+    // Collision debug overlay (/showcollisions)
+    if (g_showCollisionDebug)
+    {
+        // OZONE brush collision volumes
+        auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+        for (auto& cv : vols)
+            DrawBoundingBox(cv.aabb, PURPLE);
 
+        // Heightmap bounds
+        if (OzoneLoader::Instance().HasHeightmap()) {
+            auto& hmModel = OzoneLoader::Instance().GetHeightmapModel();
+            Vector3 hmPos = OzoneLoader::Instance().GetHeightmapPosition();
+            float hmScale = OzoneLoader::Instance().GetHeightmapScale();
+            BoundingBox hmBox = GetMeshBoundingBox(hmModel.meshes[0]);
+            hmBox.min.x = hmPos.x + hmBox.min.x * hmScale;
+            hmBox.min.y = hmPos.y + hmBox.min.y * hmScale;
+            hmBox.min.z = hmPos.z + hmBox.min.z * hmScale;
+            hmBox.max.x = hmPos.x + hmBox.max.x * hmScale;
+            hmBox.max.y = hmPos.y + hmBox.max.y * hmScale;
+            hmBox.max.z = hmPos.z + hmBox.max.z * hmScale;
+            DrawBoundingBox(hmBox, ORANGE);
+        }
+
+        // Zone volumes
+        for (auto& zone : PawnSystem::Instance().GetZones())
+            DrawBoundingBox(zone.bounds, BLUE);
+
+        // Player start markers
+        for (auto& ps : PawnSystem::Instance().GetPlayerStarts())
+            DrawCubeWires(ps.position, 0.5f, 1.0f, 0.5f, GREEN);
+    }
 
     if (Debug)
     {

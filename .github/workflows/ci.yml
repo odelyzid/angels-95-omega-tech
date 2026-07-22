@@ -209,25 +209,14 @@ jobs:
           "@ | Set-Content System\run.ps1 -Encoding UTF8
 
       - name: Package assets
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          # Clear MSYSTEM env var that may interfere with native Windows executables
-          $env:MSYSTEM = $null
-          # Verify OzPack exists
-          if (-not (Test-Path "System\OzPack.exe" -PathType Leaf)) {
-            Write-Error "OzPack.exe not found in System\"
-            exit 1
-          }
-          Write-Host "OzPack.exe found at: $(Resolve-Path System\OzPack.exe)"
-          if (Test-Path .\build-data.ps1 -PathType Leaf) {
-            & .\build-data.ps1
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Asset packaging failed with exit code $LASTEXITCODE"
-              exit 1
-            }
-          } else {
-            Write-Host "build-data.ps1 not found, skipping"
-          }
+          # Run packaging in MSYS2 shell so MinGW DLLs are on PATH
+          if [ -f ./build-data.ps1 ]; then
+            powershell -File ./build-data.ps1
+          else
+            echo "build-data.ps1 not found, skipping"
+          fi
 
       - name: Verify System/ contents
         shell: pwsh

@@ -250,6 +250,7 @@ static void FireWeapon() {
 // Inventory overlay (draw when Tab pressed)
 // ---------------------------------------------------------------------------
 // ---- Debug Console ----
+bool g_showCollisionDebug = false;
 static bool g_consoleOpen = false;
 static char g_consoleBuf[256] = "";
 static int g_consoleCursor = 0;
@@ -342,6 +343,9 @@ static void ExecuteConsoleCommand(const char* cmd) {
         } else {
             OZ_INFO("NOCLIP disabled");
         }
+    } else if (strcmp(cmd, "/showcollisions") == 0) {
+        g_showCollisionDebug = !g_showCollisionDebug;
+        OZ_INFO("Collision debug %s", g_showCollisionDebug ? "ON" : "OFF");
     }
 }
 

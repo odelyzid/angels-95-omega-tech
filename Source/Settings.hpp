@@ -21,10 +21,6 @@ static bool  FogEnabled = false;         // fog post-process toggle
 static float FogIntensity = 0.3f;        // fog blend amount
 static Color FogTint = {200, 200, 210, 255}; // fog color (R,G,B,A)
 
-// --- Menu bar state ---
-static bool ShowMenuBar = false;         // top menu bar visibility
-static int  MenuActiveItem = -1;         // which dropdown is open (-1 = none)
-
 static RenderTexture2D Target;
 
 static const char* FilterNames[] = { "Point (Nearest)", "Bilinear", "Trilinear", "Aniso x4", "Aniso x8", "Aniso x16" };
