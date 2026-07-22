@@ -76,6 +76,30 @@ OzoneLoader& OzoneLoader::Instance() {
 Shader OzoneLoader::s_litFogShader = {0};
 Shader OzoneLoader::s_backupLitFogShader = {0};
 
+void OzoneLoader::SetLitFogShaderEnabled(bool enabled) {
+    if (enabled) {
+        s_litFogShader = s_backupLitFogShader;
+        // Re-apply restored shader to all existing renderables
+        Shader sh = s_litFogShader;
+        for (auto& r : m_renderables) {
+            if (r.loaded && r.model.meshCount > 0 && sh.id > 0)
+                r.model.materials[0].shader = sh;
+        }
+        if (m_hmReady && m_hmModel.meshCount > 0 && sh.id > 0)
+            m_hmModel.materials[0].shader = sh;
+    } else {
+        if (s_litFogShader.id > 0)
+            s_backupLitFogShader = s_litFogShader;
+        for (auto& r : m_renderables) {
+            if (r.loaded && r.model.meshCount > 0)
+                r.model.materials[0].shader = Shader{0};
+        }
+        if (m_hmReady && m_hmModel.meshCount > 0)
+            m_hmModel.materials[0].shader = Shader{0};
+        s_litFogShader = Shader{0};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // World texture loading (from worlddir/oztex/tileset/)
 // ---------------------------------------------------------------------------

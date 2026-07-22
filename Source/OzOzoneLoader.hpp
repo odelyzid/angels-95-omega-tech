@@ -71,10 +71,7 @@ public:
 
     void LoadWorldTextures(const std::string& worldDir);
     void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
-    void SetLitFogShaderEnabled(bool enabled) {
-        if (enabled) s_litFogShader = s_backupLitFogShader;
-        else { if (s_litFogShader.id > 0) s_backupLitFogShader = s_litFogShader; s_litFogShader = {0}; }
-    }
+    void SetLitFogShaderEnabled(bool enabled);
 
     static OzoneLoader& Instance();
     

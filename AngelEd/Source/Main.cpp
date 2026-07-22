@@ -467,11 +467,6 @@ int main(int argc, char **argv){
 
         BeginMode3D(OTEditor.MainCamera);
 
-        // UNLIT mode: render without lit shader (default raylib unlit)
-        if (OTEditor.ViewMode == LightingMode::UNLIT) {
-            BeginShaderMode(Shader{0});
-        }
-
         DrawGrid(1000, 10.0f);
 
         CWDLProcess();
@@ -648,11 +643,6 @@ int main(int argc, char **argv){
 
         EndMode3D();
 
-        // End shader override if UNLIT
-        if (OTEditor.ViewMode == LightingMode::UNLIT) {
-            EndShaderMode();
-        }
-
         // Reset lighting mode state
         if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
             rlEnableBackfaceCulling();
@@ -709,19 +699,26 @@ int main(int argc, char **argv){
                 DrawText(labs[li],bx+4,7,12,(int)OTEditor.ViewMode==li?WHITE:LIGHTGRAY);
                 if(CheckCollisionPointRec(GetMousePosition(),{(float)bx,2,(float)lw,(float)tbH-4})&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     LightingMode prev = OTEditor.ViewMode;
-                    OTEditor.ViewMode=(LightingMode)li;
-                    // Apply shader swap on toggle
+                    OTEditor.ViewMode = (LightingMode)li;
                     if (prev != OTEditor.ViewMode) {
+                        static std::vector<Shader> savedModelShaders;
                         if (OTEditor.ViewMode == LightingMode::UNLIT) {
-                            // Save and replace shader on all cached models
-                            for (auto& m : WDLModels.models) {
-                                if (m.loaded && m.model.materials[0].shader.id > 0) {
+                            savedModelShaders.resize(WDLModels.models.size());
+                            for (size_t i = 0; i < WDLModels.models.size(); i++) {
+                                auto& m = WDLModels.models[i];
+                                savedModelShaders[i] = (m.loaded && m.model.meshCount > 0)
+                                    ? m.model.materials[0].shader : Shader{0};
+                                if (m.loaded && m.model.meshCount > 0)
                                     m.model.materials[0].shader = Shader{0};
-                                }
                             }
                             OzoneLoader::Instance().SetLitFogShaderEnabled(false);
                         } else if (prev == LightingMode::UNLIT) {
-                            // Restore shaders from OzoneLoader cache (models will re-acquire on next world load)
+                            for (size_t i = 0; i < WDLModels.models.size() && i < savedModelShaders.size(); i++) {
+                                auto& m = WDLModels.models[i];
+                                if (m.loaded && m.model.meshCount > 0 && savedModelShaders[i].id > 0)
+                                    m.model.materials[0].shader = savedModelShaders[i];
+                            }
+                            savedModelShaders.clear();
                             OzoneLoader::Instance().SetLitFogShaderEnabled(true);
                         }
                     }

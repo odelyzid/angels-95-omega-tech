@@ -226,14 +226,68 @@ The editor is purely a world editing tool with no integration to the game client
 
 ---
 
+## E6 — Escape Key: Pause Menu Instead of Quit — P1
+
+**File:** `Source/Main.cpp:1044-1048` (homescreen), `Source/Core.hpp:1044` (render loop)
+
+### Problem
+Pressing Escape in the home screen **immediately exits the game** via `break` (was previously `exit(0)`). During gameplay, there is no pause menu — no way to return to the main menu, adjust settings, or quit gracefully. The only way to exit is Alt+F4 or closing the window.
+
+### Root cause
+There is no in-game pause state or pause menu system. The Escape key is only handled in `PlayHomeScreen()` and `PlaySplashScreen()`. During gameplay, `WindowShouldClose()` (close button / Alt+F4) is the only exit path.
+
+### Fix steps
+
+1. **Add pause state** — a global `static bool g_gamePaused = false;` in `Core.hpp` or `Settings.hpp`. When Escape is pressed during gameplay, set `g_gamePaused = true`.
+
+2. **Pause menu overlay** — in the main render loop, when `g_gamePaused` is true:
+   - Draw a semi-transparent overlay (`DrawRectangle(0,0,w,h, {0,0,0,180})`)
+   - Draw three centered buttons: **Resume** (unpause), **Settings** (open settings panel), **Main Menu** (quit to title screen), **Quit** (close window)
+   - Disable camera movement / player input while paused
+
+3. **Main Menu transition** — "Main Menu" button should:
+   - Save game state
+   - Unload world
+   - Call `PlayHomeScreen()` again (which is an infinite loop, so need to restructure)
+
+   Alternative: simpler approach — "Main Menu" sets a quit flag and the game loop restarts from the top. Restructure `main()` to loop between homescreen and gameplay:
+   ```cpp
+   while (!WindowShouldClose()) {
+       PlayHomeScreen();
+       LoadWorld();
+       // game loop
+       while (!WindowShouldClose() && !g_returnToMenu) {
+           g_returnToMenu = false;
+           // ... existing game loop ...
+           if (Escape) { g_gamePaused = true; }
+       }
+       if (WindowShouldClose()) break;
+   }
+   ```
+
+4. **Settings button** — reuse the existing `ToggleSettings()` / `ShowMenuSetiings()` function, but render it over the pause overlay instead of from the homescreen.
+
+### Verification
+- Press Escape during gameplay → pause menu overlay appears
+- Click "Resume" → game continues from where it left off
+- Click "Settings" → settings panel opens on top of pause screen
+- Click "Main Menu" → returns to title screen (worlds/music unloaded)
+- Click "Quit" → game exits cleanly
+
+---
+
 ## Execution Order
 
 ```
-E1 (Lighting toggle)    → P0, quick: shader swap on toggle
-E2 (Right-click menu)    → P0, medium: raycast + dialog + menu
+E1 (Lighting toggle)    → ✅ DONE — shader swap on toggle with save/restore
+E2 (Right-click menu)   → P0, medium: raycast + dialog + menu
 E3 (CSG operations)     → P1, large: integrate CsgProcessor pipeline
 E4 (Texture thumbnails) → P2, medium: owner-draw listbox + image loading
 E5 (Test-play)          → P2, medium: subprocess launch + --world flag
+E6 (Pause menu)         → P1, medium: replace exit with pause overlay
 ```
 
-E1 and E2 unblock basic editing workflow. E3 is the largest effort (requires full CSG boolean pipeline). E4 and E5 are polish/quality-of-life.
+E1 (lighting) is complete. E2 (right-click) unblocks basic editing workflow.
+E6 (pause menu) is the highest-impact gameplay quality gap.
+E3 is the largest effort (requires full CSG boolean pipeline).
+E4 and E5 are polish/quality-of-life.
