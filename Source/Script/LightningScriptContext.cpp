@@ -106,7 +106,8 @@ bool LightningScriptContext::ExecuteNext() {
                 m_floatVars[name] = std::stof(valueStr);
             else
                 m_intVars[name] = std::stoi(valueStr);
-        } catch (...) {
+        } catch (const std::exception& e) {
+            LS_WARN("Failed to parse value for '%s': %s", name.c_str(), e.what());
             m_intVars[name] = 0;
         }
         m_pc++;
@@ -355,4 +356,43 @@ bool LightningScriptContext::EvalCondition(const std::string& cond) {
     if (op == ">=") return lv >= rv;
     if (op == "<=") return lv <= rv;
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// PopPendingSound — return and clear __last_sound
+// ---------------------------------------------------------------------------
+std::string LightningScriptContext::PopPendingSound() {
+    auto it = m_strVars.find("__last_sound");
+    if (it == m_strVars.end() || it->second.empty()) return {};
+    std::string name = it->second;
+    m_strVars.erase(it);
+    return name;
+}
+
+// ---------------------------------------------------------------------------
+// PopPendingFog — read and clear pending fog values
+// Returns true if fog values are available.
+// ---------------------------------------------------------------------------
+bool LightningScriptContext::PopPendingFog(float& r, float& g, float& b, float& density) {
+    auto it_r = m_floatVars.find("__fog_r");
+    if (it_r == m_floatVars.end()) return false;
+    r = it_r->second; m_floatVars.erase(it_r);
+    auto it_g = m_floatVars.find("__fog_g");
+    auto it_b = m_floatVars.find("__fog_b");
+    auto it_d = m_floatVars.find("__fog_density");
+    if (it_g != m_floatVars.end()) { g = it_g->second; m_floatVars.erase(it_g); }
+    if (it_b != m_floatVars.end()) { b = it_b->second; m_floatVars.erase(it_b); }
+    if (it_d != m_floatVars.end()) { density = it_d->second; m_floatVars.erase(it_d); }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// PopPendingSkybox — return and clear __skybox
+// ---------------------------------------------------------------------------
+std::string LightningScriptContext::PopPendingSkybox() {
+    auto it = m_strVars.find("__skybox");
+    if (it == m_strVars.end()) return {};
+    std::string name = it->second;
+    m_strVars.erase(it);
+    return name;
 }

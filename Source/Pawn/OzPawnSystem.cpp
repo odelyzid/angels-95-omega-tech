@@ -88,11 +88,33 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
 
     p.patrolTimer = 0.0f;
     p.stateTimer = 0.0f;
-    p.sprite = {0};
-    p.scream = {0};
     p.defName = defName;
 
-    OZ_DEBUG("Pawn spawned: id=%d def=%s at (%.1f, %.1f, %.1f)", p.id, defName, pos.x, pos.y, pos.z);
+    // Load sprite and scream using def paths or convention
+    {
+        const char* spritePath = def->sprite_path;
+        std::string fallbackSprite = std::string("GameData/Global/Pawn/") + defName + ".png";
+        std::string spriteToLoad;
+        if (spritePath && IsPathFile(spritePath))
+            spriteToLoad = spritePath;
+        else if (IsPathFile(fallbackSprite.c_str()))
+            spriteToLoad = fallbackSprite;
+        if (!spriteToLoad.empty())
+            p.sprite = LoadTexture(spriteToLoad.c_str());
+
+        const char* screamPath = def->scream_path;
+        std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
+        std::string soundToLoad;
+        if (screamPath && IsPathFile(screamPath))
+            soundToLoad = screamPath;
+        else if (IsPathFile(fallbackScream.c_str()))
+            soundToLoad = fallbackScream;
+        if (!soundToLoad.empty())
+            p.scream = LoadSound(soundToLoad.c_str());
+    }
+
+    OZ_DEBUG("Pawn spawned: id=%d def=%s sprite=%d scream=%d at (%.1f, %.1f, %.1f)",
+             p.id, defName, p.sprite.id, p.scream.frameCount, pos.x, pos.y, pos.z);
     return (int)p.id;
 }
 
@@ -103,6 +125,8 @@ void PawnSystem::Despawn(int id) {
     for (size_t i = 0; i < m_pawns.size(); i++) {
         if (m_pawns[i].active && m_pawns[i].id == (uint32_t)id) {
             OZ_DEBUG("Pawn despawned: id=%d def=%s", id, m_pawns[i].defName.c_str());
+            if (m_pawns[i].sprite.id != 0) UnloadTexture(m_pawns[i].sprite);
+            if (m_pawns[i].scream.frameCount != 0) UnloadSound(m_pawns[i].scream);
             m_pawns[i].active = false;
             m_freeIds.push_back((int)i);
             return;
@@ -115,6 +139,8 @@ void PawnSystem::Despawn(int id) {
 // ---------------------------------------------------------------------------
 void PawnSystem::DespawnAll() {
     for (auto& p : m_pawns) {
+        if (p.sprite.id != 0) UnloadTexture(p.sprite);
+        if (p.scream.frameCount != 0) UnloadSound(p.scream);
         p.active = false;
     }
     m_freeIds.clear();
@@ -369,7 +395,11 @@ void PawnSystem::DrawAll(Camera3D& camera) {
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
 
-        EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f);
+        if (p.sprite.id != 0) {
+            DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
+        } else {
+            EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f);
+        }
     }
 }
 

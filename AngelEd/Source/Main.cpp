@@ -150,7 +150,9 @@ static void SyncWDLNodes() {
             try {
                 int type = std::stoi(node.typeName);
                 if (type >= 0 && type < 6) node.typeName = pickupNames[type];
-            } catch (...) {}
+            } catch (...) {
+                EditorLog("WARN: Failed to parse pickup type '%s', using as-is", node.typeName.c_str());
+            }
             pawns.AddPickup(node);
         } else if (element.type == WDLElementType::NPC && element.args.size() >= 3) {
             pawns.Spawn({element.args[0], element.args[1], element.args[2]}, element.entityType.c_str());

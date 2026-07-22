@@ -680,7 +680,7 @@ auto CycleInstruction(){
                     }
 
                     if (Operator == "<="){
-                        if (Value1 >= Value2){
+                        if (Value1 <= Value2){
                             ParasiteScriptCoreData.ContinueFlag = true;
                         }
                         else {
@@ -785,10 +785,10 @@ auto CycleInstruction(){
                             OmegaTechGameObjects.Object3Owned = true;
                             break;
                         case 4:
-                            OmegaTechGameObjects.Object3Owned = true;
+                            OmegaTechGameObjects.Object4Owned = true;
                             break;
                         case 5:
-                            OmegaTechGameObjects.Object3Owned = true;
+                            OmegaTechGameObjects.Object5Owned = true;
                             break;
                     }
 

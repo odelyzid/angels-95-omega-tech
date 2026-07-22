@@ -88,7 +88,11 @@ static void ScanFilesAndPackages(const std::string& subdir,
                 }
             }
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+            fprintf(stderr, "WARN: Exception during file scan: %s\n", e.what());
+        } catch (...) {
+            fprintf(stderr, "WARN: Unknown exception during file scan\n");
+        }
 
     // Package entries
     std::vector<std::string> pkgFiles;
@@ -683,7 +687,11 @@ void ScanModelBrowserFiles() {
                 }
             }
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        fprintf(stderr, "WARN: Exception during model scan: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "WARN: Unknown exception during model scan\n");
+    }
 
     // Package scan for .obj files
     std::vector<std::string> pkgFiles;

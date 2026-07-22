@@ -52,6 +52,11 @@ public:
     void RegisterJumpLabel(const std::string& label, int line);
     int  FindJumpLabel(const std::string& label) const;
 
+    // Pop pending side-effects (called by host after script execution)
+    std::string PopPendingSound();              // returns __last_sound and clears it
+    bool PopPendingFog(float& r, float& g, float& b, float& density);
+    std::string PopPendingSkybox();             // returns __skybox name or empty
+
 private:
     std::vector<std::string> m_lines;
     int m_pc = 0;

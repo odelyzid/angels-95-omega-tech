@@ -297,10 +297,20 @@ bool OzoneLoader::LoadFile(const char* path) {
 
     // Extract world directory from the .ozone path and load textures
     std::string p(path);
+    std::string worldDir;
+    std::string gameDataWorldDir;
     size_t slash = p.find_last_of("/\\");
     if (slash != std::string::npos) {
-        std::string worldDir = p.substr(0, slash + 1);
+        worldDir = p.substr(0, slash + 1);
         LoadWorldTextures(worldDir);
+        // Extract world name for GameData path resolution (e.g. "world_EngineTest.ozone" → "EngineTest")
+        std::string fname = p.substr(slash + 1);
+        std::string prefix = "world_";
+        std::string suffix = ".ozone";
+        if (fname.rfind(prefix, 0) == 0 && fname.size() > prefix.size() + suffix.size()) {
+            std::string worldName = fname.substr(prefix.size(), fname.size() - prefix.size() - suffix.size());
+            gameDataWorldDir = std::string("GameData/Worlds/") + worldName + "/";
+        }
     }
 
     auto primitives = OzoneParser::parse_file(path);
@@ -309,13 +319,23 @@ bool OzoneLoader::LoadFile(const char* path) {
     for (auto& prim : primitives) {
         if (LoadOzoneEntity(prim)) continue;
 
-        // Heightmap is handled specially â€” builds its own model from image path
+        // Heightmap is handled specially — builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
         OzoneRenderable r;
         r.typeId = (int)prim.type;
         r.position = {0,0,0};
         r.scale = 1.0f;
-        r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+        // Resolve relative paths: prefer GameData/Worlds/<name>/, fall back to package directory
+        std::string imgPath = prim.entityType;
+        std::string texPath = prim.entitySubType;
+        if (!gameDataWorldDir.empty()) {
+            imgPath = gameDataWorldDir + imgPath;
+            if (!texPath.empty()) texPath = gameDataWorldDir + texPath;
+        } else if (!worldDir.empty()) {
+            imgPath = worldDir + imgPath;
+            if (!texPath.empty()) texPath = worldDir + texPath;
+        }
+        r.model = BuildHeightmap(imgPath, texPath, prim.args);
         r.loaded = m_hmReady;
         r.csgOp = 0;
         m_renderables.push_back(r);

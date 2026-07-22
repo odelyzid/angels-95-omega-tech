@@ -28,8 +28,32 @@ void LightningEntityManager::Update(float dt) {
             // Run up to 10 instructions per frame to avoid stalls
             for (int step = 0; step < 10 && inst.ctx.HasMore(); step++)
                 inst.ctx.ExecuteNext();
+
+            // Check for pending side-effects after each tick batch
+            std::string sound = inst.ctx.PopPendingSound();
+            if (!sound.empty()) {
+                if (CacheSound(sound) >= 0) {
+                    auto it = m_soundCache.find(sound);
+                    if (it != m_soundCache.end() && it->second.sound.frameCount > 0)
+                        PlaySound(it->second.sound);
+                }
+            }
+
+            float fr=0, fg=0, fb=0, fd=0;
+            if (inst.ctx.PopPendingFog(fr, fg, fb, fd)) {
+                m_pendingFog = true;
+                m_fogR = fr; m_fogG = fg; m_fogB = fb; m_fogDensity = fd;
+            }
+
+            std::string sky = inst.ctx.PopPendingSkybox();
+            if (!sky.empty()) {
+                m_pendingSkybox = sky;
+            }
         }
     }
+
+    // Clean up finished one-shot sounds
+    PruneSoundCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +188,33 @@ int LightningEntityManager::CacheTexture(const std::string& path) {
     res.texture = tex;
     m_resources.push_back(res);
     return (int)m_resources.size() - 1;
+}
+
+int LightningEntityManager::CacheSound(const std::string& path) {
+    auto it = m_soundCache.find(path);
+    if (it != m_soundCache.end()) {
+        // Reset timer so it isn't pruned
+        it->second.timer = 0.0f;
+        return 0; // arbitrary non-negative = success
+    }
+    Sound snd = LoadSound(path.c_str());
+    if (snd.frameCount == 0) return -1;
+    m_soundCache[path] = { snd, 0.0f };
+    return 0;
+}
+
+void LightningEntityManager::PruneSoundCache() {
+    auto it = m_soundCache.begin();
+    while (it != m_soundCache.end()) {
+        it->second.timer += GetFrameTime();
+        // Unload after 5 seconds past playback
+        if (it->second.timer > 5.0f) {
+            UnloadSound(it->second.sound);
+            it = m_soundCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void* LightningEntityManager::GetModel(int idx) const {

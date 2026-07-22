@@ -33,7 +33,7 @@ float SampleHeightmapGroundY(float px, float pz);
 void PutLight(Vector3 Position);
 void ClearLights();
 
-class ParticleSystem;
+#include "ParticleDemon/ParticleDemon.hpp"
 
 class EngineData
 {
@@ -369,7 +369,7 @@ auto LoadWorld()
         }
         else {
             if (WDLModels.Model3.meshCount != 0){
-                UnloadModel(WDLModels.Model13);
+                UnloadModel(WDLModels.Model3);
             }
             if (WDLModels.Model3Texture.id != 0){
                 UnloadTexture(WDLModels.Model3Texture);
@@ -1041,7 +1041,7 @@ void PlayHomeScreen()
 
         EndDrawing();
 
-        if (IsKeyPressed(KEY_ESCAPE))exit(0);
+        if (IsKeyPressed(KEY_ESCAPE)) break;
     }
     StopMusicStream(OmegaTechData.HomeScreenMusic);
     OmegaTechData.Deaths = 1;
@@ -1930,9 +1930,13 @@ void DrawWorld()
         Vector3 pp = OmegaTechData.MainCamera.position;
         ZoneVolumeNode* soundZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
         static std::string prevSoundZone;
+        static Music defaultWorldMusic;
         if (soundZone && soundZone->zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) {
             auto& sp = soundZone->soundProfile;
             if (!sp.music_on_enter.empty() && prevSoundZone != soundZone->name) {
+                // Save default world music before crossfading
+                if (prevSoundZone.empty() && OmegaTechSoundData.MusicFound)
+                    defaultWorldMusic = OmegaTechSoundData.BackgroundMusic;
                 StopMusicStream(OmegaTechSoundData.BackgroundMusic);
                 Music newMusic = LoadMusicWithFallback(sp.music_on_enter.c_str());
                 if (newMusic.ctxData != nullptr) {
@@ -1942,11 +1946,23 @@ void DrawWorld()
                 }
             }
             if (!sp.ambience_loop.empty()) {
-                // Ambience loop handling would go here
+                OZ_DEBUG("SoundZone '%s': ambience_loop='%s' (not yet implemented)",
+                         soundZone->name.c_str(), sp.ambience_loop.c_str());
+            }
+            if (!sp.sfx_on_enter.empty() && prevSoundZone != soundZone->name) {
+                OZ_DEBUG("SoundZone '%s': sfx_on_enter='%s' (not yet implemented)",
+                         soundZone->name.c_str(), sp.sfx_on_enter.c_str());
             }
             prevSoundZone = soundZone->name;
         } else if (!soundZone && !prevSoundZone.empty()) {
-            // Exited sound zone — could restore default music
+            // Exited sound zone — restore default world music
+            if (defaultWorldMusic.ctxData != nullptr) {
+                StopMusicStream(OmegaTechSoundData.BackgroundMusic);
+                OmegaTechSoundData.BackgroundMusic = defaultWorldMusic;
+                OmegaTechSoundData.MusicFound = true;
+                PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
+                defaultWorldMusic = Music{0};
+            }
             prevSoundZone.clear();
         }
     }
@@ -2099,6 +2115,29 @@ void DrawWorld()
     {
         float dt = GetFrameTime();
         LightningEntityManager::Instance().Update(dt);
+
+        // Apply pending Fog changes from script contexts
+        auto& lem = LightningEntityManager::Instance();
+        if (lem.HasPendingFog()) {
+            static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+            static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+            float density = lem.PendingFogDensity();
+            float color[3] = { lem.PendingFogR(), lem.PendingFogG(), lem.PendingFogB() };
+            SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &density, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(OmegaTechData.Lights, fogColorLoc, color, SHADER_UNIFORM_VEC3);
+            FogEnabled = true;
+            FogIntensity = (density > 0) ? density : 0.3f;
+            FogTint = { (unsigned char)(color[0]*255), (unsigned char)(color[1]*255),
+                        (unsigned char)(color[2]*255), 255 };
+            lem.ClearPendingFog();
+        }
+
+        // Apply pending Skybox changes from script contexts
+        if (lem.HasPendingSkybox()) {
+            OZ_INFO("LightningScript: skybox change to '%s' (loading deferred)",
+                    lem.PendingSkybox().c_str());
+            lem.ClearPendingSkybox();
+        }
     }
 
     UpdateCustom();

@@ -42,3 +42,9 @@ build/*.DB-wal
 
 build/VSCODE-BROWSE.DB*
 build/cmake*
+
+# Docs scratch
+.docs/
+
+# Scratch plan files
+PLAN_STUBS_*

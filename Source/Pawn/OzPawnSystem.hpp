@@ -56,6 +56,8 @@ struct PawnDef {
     float attackRange = 1.5f;
     float damage = 10.0f;
     int maxHealth = 100;
+    const char* sprite_path = nullptr;  // texture path (convention: GameData/Global/Pawn/<name>.png)
+    const char* scream_path = nullptr;  // sound path (convention: GameData/Global/Pawn/<name>.wav)
 };
 
 // A single spawned pawn instance.
