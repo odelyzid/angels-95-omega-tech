@@ -743,12 +743,12 @@ void UpdateLightSources(){
     OmegaTechData.GameLights[0].position = { OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z };
     OmegaTechData.GameLights[0].target = { OmegaTechData.MainCamera.target.x, OmegaTechData.MainCamera.target.y - 5, OmegaTechData.MainCamera.target.z };
     SetShaderValue(OmegaTechData.Lights, OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
-    for (int i = 0; i < MAX_LIGHTS - 1; i++) UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[i]);
+    for (int i = 0; i < MAX_LIGHTS; i++) UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[i]);
 }
 
 void ClearLights(){
     LightCounter = 1;
-    OmegaTechData.GameLights[MAX_LIGHTS] = { 0 };
+    for (int i = 0; i < MAX_LIGHTS; i++) OmegaTechData.GameLights[i] = { 0 };
 }
 
 void PutLight(Vector3 Position){
@@ -1918,6 +1918,32 @@ void DrawWorld()
         rlEnableDepthMask();
     }
 
+    // GameplaySoundZone — trigger zone-specific music/sound profiles
+    {
+        Vector3 pp = OmegaTechData.MainCamera.position;
+        ZoneVolumeNode* soundZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
+        static std::string prevSoundZone;
+        if (soundZone && soundZone->zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) {
+            auto& sp = soundZone->soundProfile;
+            if (!sp.music_on_enter.empty() && prevSoundZone != soundZone->name) {
+                StopMusicStream(OmegaTechSoundData.BackgroundMusic);
+                Music newMusic = LoadMusicWithFallback(sp.music_on_enter.c_str());
+                if (newMusic.ctxData != nullptr) {
+                    OmegaTechSoundData.BackgroundMusic = newMusic;
+                    OmegaTechSoundData.MusicFound = true;
+                    PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
+                }
+            }
+            if (!sp.ambience_loop.empty()) {
+                // Ambience loop handling would go here
+            }
+            prevSoundZone = soundZone->name;
+        } else if (!soundZone && !prevSoundZone.empty()) {
+            // Exited sound zone — could restore default music
+            prevSoundZone.clear();
+        }
+    }
+
     if (OmegaTechSoundData.MusicFound)
     {
         UpdateMusicStream(OmegaTechSoundData.BackgroundMusic);
@@ -1940,6 +1966,7 @@ void DrawWorld()
     // OZONE brush collision - chunk-accelerated query
     {
         Vector3 cp = OmegaTechData.MainCamera.position;
+        float playerFeet = cp.y - 2.0f; // eyeHeight
         auto& chunkMgr = OzoneLoader::Instance().GetChunkManager();
         std::vector<int> nearIndices;
         chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
@@ -1947,6 +1974,10 @@ void DrawWorld()
         for (int idx : nearIndices) {
             if (idx >= 0 && idx < (int)vols.size() &&
                 CheckCollisionBoxes(OmegaPlayer.PlayerBounds, vols[idx].aabb)) {
+                // Skip volumes whose top is at or below the player's feet —
+                // these are floors/surfaces the player stands on, not obstacles.
+                if (vols[idx].aabb.max.y <= playerFeet + 0.1f)
+                    continue;
                 ObjectCollision = true;
                 break;
             }

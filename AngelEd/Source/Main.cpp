@@ -241,7 +241,7 @@ static void FileSaveAs() {
 static bool ApplyTextureToModel(int target, const char* path) {
     LoadedModel* lm = WDLModels.GetModelByWDLId(target);
     if (!lm || lm->model.materialCount == 0) return false;
-    Texture2D texture = LoadTexture(path);
+    Texture2D texture = LoadTextureWithFallback(path);
     if (texture.id == 0) return false;
     if (lm->texture.id > 0) UnloadTexture(lm->texture);
     lm->texture = texture;
@@ -457,7 +457,18 @@ int main(int argc, char **argv){
 
         ClearBackground(BLACK);
 
+        // Apply lighting mode before 3D rendering
+        if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
+            rlDisableBackfaceCulling();
+            rlDisableDepthMask();
+        }
+
         BeginMode3D(OTEditor.MainCamera);
+
+        // UNLIT mode: render without lit shader (default raylib unlit)
+        if (OTEditor.ViewMode == LightingMode::UNLIT) {
+            // Default raylib shader is already unlit - just skip LitFogShader
+        }
 
         DrawGrid(1000, 10.0f);
 
@@ -466,6 +477,21 @@ int main(int argc, char **argv){
 
         // OZONE world geometry
         OzoneLoader::Instance().Draw(OTEditor.MainCamera);
+
+        // Sky zone rendering in editor
+        {
+            PawnSystem::Instance().UpdateSkyZone(
+                OTEditor.MainCamera.position,
+                (BoundingBox){{OTEditor.MainCamera.position.x-1,OTEditor.MainCamera.position.y-10,OTEditor.MainCamera.position.z-1},
+                              {OTEditor.MainCamera.position.x+1,OTEditor.MainCamera.position.y,OTEditor.MainCamera.position.z+1}});
+            if (PawnSystem::Instance().IsInSkyZone()) {
+                rlDisableDepthMask();
+                OzoneLoader::Instance().DrawZoneGeometry(
+                    OTEditor.MainCamera,
+                    PawnSystem::Instance().GetSkyZoneBounds());
+                rlEnableDepthMask();
+            }
+        }
 
         // Pawn system ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â draw active pawns as billboards
         PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
@@ -619,6 +645,13 @@ int main(int argc, char **argv){
         }
 
         EndMode3D();
+
+        // Reset lighting mode state
+        if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
+            rlEnableBackfaceCulling();
+            rlEnableDepthMask();
+        }
+
         EndTextureMode();
 
         BeginDrawing();
@@ -785,14 +818,15 @@ int main(int argc, char **argv){
             g_lastPreviewSel < (int)g_editorPanels.modelEntries.size()) {
             auto& entry = g_editorPanels.modelEntries[g_lastPreviewSel];
             if (!entry.loaded) {
-                Model mdl = LoadModel(entry.path.c_str());
+                Model mdl = LoadModelWithFallback(entry.path.c_str());
                 std::string texPath = entry.path;
                 texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
                 std::string texPath2 = entry.path;
                 texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
                 Texture2D tex = {0};
-                if (fs::exists(texPath)) tex = LoadTexture(texPath.c_str());
-                else if (fs::exists(texPath2)) tex = LoadTexture(texPath2.c_str());
+                if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
+                else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
+                else tex = LoadTextureWithFallback(entry.path.c_str());
                 if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
                 if (mdl.meshes != nullptr) {
                     entry.triangles = mdl.meshes[0].triangleCount;
@@ -813,14 +847,15 @@ int main(int argc, char **argv){
             ClearBackground((Color){40, 40, 50, 255});
             BeginMode3D(prevCam);
             DrawGrid(10, 1.0f);
-            Model mdl = LoadModel(entry.path.c_str());
+            Model mdl = LoadModelWithFallback(entry.path.c_str());
             std::string texPath = entry.path;
             texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
             std::string texPath2 = entry.path;
             texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
             Texture2D tex = {0};
-            if (fs::exists(texPath)) tex = LoadTexture(texPath.c_str());
-            else if (fs::exists(texPath2)) tex = LoadTexture(texPath2.c_str());
+            if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
+            else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
+            else tex = LoadTextureWithFallback(entry.path.c_str());
             if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
             if (mdl.meshes != nullptr) {
                 rlDisableBackfaceCulling();
@@ -919,6 +954,15 @@ int main(int argc, char **argv){
             }
             g_editorPanels.actionGenerateHeightmap = false;
         }
+        // Light Properties apply handler — stores properties for export
+        if (g_editorPanels.actionApplyLight) {
+            EditorLog("Light properties set: color=(%.0f,%.0f,%.0f) intensity=%.1f radius=%.0f type=%d effect=%d",
+                g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
+                g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
+                g_editorPanels.lightType, g_editorPanels.lightEffect);
+            g_editorPanels.actionApplyLight = false;
+        }
+
         if (g_editorPanels.actionSpawnPawn >= 0) {
             int idx = g_editorPanels.actionSpawnPawn;
             if (idx >= 0 && idx < GetPawnCount()) {

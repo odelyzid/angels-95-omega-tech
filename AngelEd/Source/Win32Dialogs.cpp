@@ -36,6 +36,7 @@ static const wchar_t* CLASS_PICKUPPANEL = L"OzPickupPanel";
 static const wchar_t* CLASS_NODEPANEL   = L"OzNodePanel";
 static const wchar_t* CLASS_HMEDITOR   = L"OzHmEditor";
 static const wchar_t* CLASS_CSGSIDEBAR = L"OzCsgSidebar";
+static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
 
 // Zone properties (read by editor rendering loop)
 // g_zoneProps is defined in the ZoneProperties section below
@@ -126,6 +127,7 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK CsgSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
 // Helper functions
@@ -424,7 +426,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                     std::string& p = g_textureFiles[sel].path;
                     SetWindowTextA(hSrc, TextFormat("Source: %s", p.c_str()));
                     // Try to get image dimensions via raylib (lazy load)
-                    Image tmp = LoadImage(p.c_str());
+                    Image tmp = LoadImageWithFallback(p.c_str());
                     if (tmp.data) {
                         SetWindowTextA(hDims, TextFormat("%dx%d %s", tmp.width, tmp.height,
                             IsPathFile(p.c_str()) ? "filesystem" : "package"));
@@ -1438,7 +1440,116 @@ static LRESULT CALLBACK CsgSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
 }
 
 // =====================================================================
-// Public API Ã¢â‚¬â€ Create / Destroy
+// Light Properties panel — color, type, effect, flare, corona
+// =====================================================================
+static const int ID_LP_CLOSE  = 400;
+static const int ID_LP_APPLY  = 401;
+static const int ID_LP_R      = 402;
+static const int ID_LP_G      = 403;
+static const int ID_LP_B      = 404;
+static const int ID_LP_INTENS = 405;
+static const int ID_LP_RADIUS = 406;
+static const int ID_LP_TYPE   = 407;
+static const int ID_LP_EFFECT = 408;
+static const int ID_LP_FLARE  = 409;
+static const int ID_LP_CORONA = 410;
+static const int ID_LP_INNER  = 411;
+static const int ID_LP_OUTER  = 412;
+
+void ShowLightProps(bool show) {
+    g_editorPanels.showLightProps = show;
+    if (g_editorPanels.hLightProps)
+        ShowWindow((HWND)g_editorPanels.hLightProps, show ? SW_SHOW : SW_HIDE);
+}
+
+static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+    case WM_CREATE: {
+        int x = 10, y = 10, gap = 26;
+        CreateLabel(hwnd, L"Light Properties", x, y, 200, 20, 1); y += 26;
+
+        auto addSlider = [&](int id, const wchar_t* label, int minv, int maxv, int def) {
+            CreateLabel(hwnd, label, x, y, 70, 20, id + 1000);
+            CreateWindowEx(0, L"SCROLLBAR", L"", WS_CHILD | WS_VISIBLE | SBS_HORZ,
+                x + 75, y, 180, 18, hwnd, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+            SetScrollRange(GetDlgItem(hwnd, id), SB_CTL, minv, maxv, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, id), SB_CTL, def, TRUE);
+            y += gap;
+        };
+
+        addSlider(ID_LP_R, L"Red:", 0, 255, 255);
+        addSlider(ID_LP_G, L"Green:", 0, 255, 255);
+        addSlider(ID_LP_B, L"Blue:", 0, 255, 255);
+        addSlider(ID_LP_INTENS, L"Intensity:", 0, 100, 100);
+        addSlider(ID_LP_RADIUS, L"Radius:", 1, 200, 50);
+        y += 4;
+
+        // Light type combo
+        CreateLabel(hwnd, L"Type:", x, y, 50, 20, 100);
+        HWND hType = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+            x + 55, y, 150, 100, hwnd, (HMENU)(INT_PTR)ID_LP_TYPE, g_hInst, nullptr);
+        SendMessage(hType, CB_ADDSTRING, 0, (LPARAM)L"Directional");
+        SendMessage(hType, CB_ADDSTRING, 0, (LPARAM)L"Point");
+        SendMessage(hType, CB_ADDSTRING, 0, (LPARAM)L"Spot");
+        SendMessage(hType, CB_SETCURSEL, 1, 0);
+        y += 28;
+
+        // Effect combo
+        CreateLabel(hwnd, L"Effect:", x, y, 50, 20, 101);
+        HWND hEff = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+            x + 55, y, 150, 100, hwnd, (HMENU)(INT_PTR)ID_LP_EFFECT, g_hInst, nullptr);
+        const wchar_t* effects[] = { L"None", L"Watery", L"Torch", L"Fire", L"Lamp" };
+        for (auto& e : effects) SendMessage(hEff, CB_ADDSTRING, 0, (LPARAM)e);
+        SendMessage(hEff, CB_SETCURSEL, 0, 0);
+        y += 28;
+
+        // Spot light angles
+        CreateLabel(hwnd, L"Inner Angle:", x, y, 80, 20, 102);
+        CreateCtrl(hwnd, L"EDIT", L"15", x + 85, y, 50, 20, ID_LP_INNER, WS_BORDER);
+        y += 26;
+        CreateLabel(hwnd, L"Outer Angle:", x, y, 80, 20, 103);
+        CreateCtrl(hwnd, L"EDIT", L"45", x + 85, y, 50, 20, ID_LP_OUTER, WS_BORDER);
+        y += 30;
+
+        // Flare/Corona checkboxes
+        CreateCtrl(hwnd, L"BUTTON", L"Lens Flare", x, y, 120, 22, ID_LP_FLARE, BS_AUTOCHECKBOX);
+        y += 26;
+        CreateCtrl(hwnd, L"BUTTON", L"Corona", x, y, 100, 22, ID_LP_CORONA, BS_AUTOCHECKBOX);
+        y += 34;
+
+        CreateButton(hwnd, L"Apply", x, y, 80, 26, ID_LP_APPLY);
+        CreateButton(hwnd, L"Close", x + 90, y, 80, 26, ID_LP_CLOSE);
+        break;
+    }
+    case WM_HSCROLL: {
+        g_editorPanels.lightColorR = (float)SendDlgItemMessage(hwnd, ID_LP_R, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightColorG = (float)SendDlgItemMessage(hwnd, ID_LP_G, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightColorB = (float)SendDlgItemMessage(hwnd, ID_LP_B, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightIntensity = SendDlgItemMessage(hwnd, ID_LP_INTENS, SBM_GETPOS, 0, 0) / 100.0f;
+        g_editorPanels.lightRadius = (float)SendDlgItemMessage(hwnd, ID_LP_RADIUS, SBM_GETPOS, 0, 0);
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_LP_CLOSE) { ShowLightProps(false); break; }
+        if (id == ID_LP_APPLY) {
+            g_editorPanels.lightType = (int)SendMessage(GetDlgItem(hwnd, ID_LP_TYPE), CB_GETCURSEL, 0, 0);
+            g_editorPanels.lightEffect = (int)SendMessage(GetDlgItem(hwnd, ID_LP_EFFECT), CB_GETCURSEL, 0, 0);
+            g_editorPanels.lightFlare = SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_GETCHECK, 0, 0) != 0;
+            g_editorPanels.lightCorona = SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_GETCHECK, 0, 0) != 0;
+            g_editorPanels.actionApplyLight = true;
+        }
+        break;
+    }
+    case WM_CLOSE: ShowLightProps(false); break;
+    case WM_DESTROY: g_editorPanels.hLightProps = nullptr; break;
+    default: return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+// =====================================================================
+// Public API — Create / Destroy
 // =====================================================================
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     g_hInst = (HINSTANCE)hInst;
@@ -1454,6 +1565,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_HMEDITOR, HmEditorProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_CSGSIDEBAR, CsgSidebarProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_LIGHTPROPS, LightPropsProc, (HINSTANCE)hInst);
 
     auto create = [&](const wchar_t* cls, const wchar_t* title,
                       EditorPanelState::WinPos& pos, void*& out) {
@@ -1476,6 +1588,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_NODEPANEL,   L"Nodes",               g_editorPanels.nodePanelPos,  g_editorPanels.hNodePanel);
     create(CLASS_HMEDITOR,    L"Heightmap Editor",     g_editorPanels.heightmapEditorPos, g_editorPanels.hHeightmapEditor);
     create(CLASS_CSGSIDEBAR,  L"CSG Brushes",          g_editorPanels.csgSidebarPos,      g_editorPanels.hCsgSidebar);
+    create(CLASS_LIGHTPROPS,  L"Light Properties",     g_editorPanels.lightPropsPos,       g_editorPanels.hLightProps);
 
     ScanTextureBrowserFiles();
     ScanSoundBrowserFiles();
@@ -1497,6 +1610,7 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hNodePanel);
     destroy(g_editorPanels.hHeightmapEditor);
     destroy(g_editorPanels.hCsgSidebar);
+    destroy(g_editorPanels.hLightProps);
     if (g_editorPanels.hPreviewBitmap) {
         DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
         g_editorPanels.hPreviewBitmap = nullptr;

@@ -56,6 +56,16 @@ struct EditorPanelState {
     float actionHmSx = 100, actionHmSy = 50, actionHmSz = 100;
     float actionHmScale = 1.0f;
     bool actionGenerateHeightmap = false;
+
+    // Light properties panel
+    bool showLightProps = false;
+    int lightPropTarget = -1;   // index into GameLights
+    float lightColorR = 255, lightColorG = 255, lightColorB = 255;
+    float lightIntensity = 1.0f, lightRadius = 50.0f;
+    int lightType = 1;         // 0=directional, 1=point, 2=spot
+    int lightEffect = 0;       // 0=none, 1=watery, 2=torch, 3=fire, 4=lamp
+    bool lightFlare = false, lightCorona = false;
+    bool actionApplyLight = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
 
 #ifdef _WIN32
@@ -71,6 +81,7 @@ struct EditorPanelState {
     void* hSettingsPanel = nullptr;
     void* hHeightmapEditor = nullptr;
     void* hCsgSidebar = nullptr;
+    void* hLightProps = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -88,6 +99,7 @@ struct EditorPanelState {
     WinPos settingsPos        = {50, 50, 400, 600};
     WinPos heightmapEditorPos = {120, 100, 520, 480};
     WinPos csgSidebarPos = {0, 0, 200, 720};
+    WinPos lightPropsPos = {400, 100, 340, 480};
 #endif
 };
 
@@ -161,6 +173,7 @@ void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
 void ShowCsgSidebar(bool show);
+void ShowLightProps(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
 void SetTextureTargetNames(const std::vector<std::string>& names);
@@ -179,6 +192,7 @@ inline void ShowEnvPanel(bool) {}
 inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void ShowHeightmapEditor(bool) {}
+inline void ShowLightProps(bool) {}
 inline void ShowCsgSidebar(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
