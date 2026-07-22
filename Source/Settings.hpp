@@ -55,7 +55,13 @@ void ToggleSettings(){
 
 void UpdateSettings(){
     if (ShowSettings){
-        GuiWindowBox((Rectangle){ 20, 20, 360, 520 }, "Angels95 Developer Settings");
+        static int s_filterDropdown = -1;
+        if (GuiWindowBox((Rectangle){ 20, 20, 360, 520 }, "Angels95 Developer Settings")) {
+            ShowSettings = false;
+            HideCursor();
+            DisableCursor();
+            return;
+        }
         int x = 40, y = 50, w = 100, h = 30, gap = 5;
 
         // Row 1 - Debug / HeadBob / PixelShader toggle
@@ -84,7 +90,9 @@ void UpdateSettings(){
 
         // Log window
         if (ShowLogWindow){
-            GuiWindowBox((Rectangle){ 380, 20, 500, 500 }, "Log Output");
+            if (GuiWindowBox((Rectangle){ 380, 20, 500, 500 }, "Log Output")) {
+                ShowLogWindow = false;
+            }
             int log_line_y = 50;
             for (const auto& ll : Log::get_buffer()) {
                 if (log_line_y > 500) break;
@@ -100,8 +108,8 @@ void UpdateSettings(){
         y += 18;
         GuiLabel((Rectangle){ x + 5, y, 100, 20 }, "Mode:");
         Rectangle filterRect = { x + 60, y, 200, 22 };
-        if (GuiDropdownBox(filterRect, "Point (Nearest);Bilinear;Trilinear;Aniso x4;Aniso x8;Aniso x16", &TextureFilterMode, MenuActiveItem == 0)){
-            MenuActiveItem = (MenuActiveItem == 0) ? -1 : 0;
+        if (GuiDropdownBox(filterRect, "Point (Nearest);Bilinear;Trilinear;Aniso x4;Aniso x8;Aniso x16", &TextureFilterMode, s_filterDropdown == 0)){
+            s_filterDropdown = (s_filterDropdown == 0) ? -1 : 0;
         }
 
         // --- Pixelation group ---

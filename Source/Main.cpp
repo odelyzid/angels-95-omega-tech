@@ -6,6 +6,73 @@
 #include <algorithm>
 #include <vector>
 
+// ---------------------------------------------------------------------------
+// Native Win32 menu bar — replaces the old raygui F2 menu
+// ---------------------------------------------------------------------------
+#define IDM_FILE_LOAD   1001
+#define IDM_FILE_SAVE   1002
+#define IDM_FILE_QUIT   1003
+#define IDM_SETTINGS    2001
+#define IDM_ABOUT       3001
+
+static void PumpWin32Messages() {
+    MSG msg;
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_COMMAND) {
+            switch (LOWORD(msg.wParam)) {
+                case IDM_FILE_LOAD:
+                    // Reload current world
+                    SetSceneId = OmegaTechData.LevelIndex;
+                    SetSceneFlag = true;
+                    break;
+                case IDM_FILE_SAVE:
+                    SaveGame();
+                    break;
+                case IDM_FILE_QUIT:
+                    CloseWindow();
+                    break;
+                case IDM_SETTINGS:
+                    ShowSettings = !ShowSettings;
+                    if (ShowSettings) {
+                        ShowCursor();
+                        EnableCursor();
+                    } else {
+                        HideCursor();
+                        DisableCursor();
+                    }
+                    break;
+                case IDM_ABOUT:
+                    MessageBoxA(NULL,
+                        "Angels95 v1.0\nOmegaTech Engine\nTribeWarez 2025",
+                        "About Angels95", MB_OK | MB_ICONINFORMATION);
+                    break;
+            }
+        } else {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+}
+
+static void CreateNativeMenuBar() {
+    HWND hWnd = (HWND)GetWindowHandle();
+    if (!hWnd) return;
+    HMENU hMenuBar = CreateMenu();
+    HMENU hFileMenu = CreatePopupMenu();
+    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_LOAD, "&Load World...");
+    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_SAVE, "&Save Game");
+    AppendMenuA(hFileMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_QUIT, "&Quit");
+    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hFileMenu, "&File");
+    HMENU hSettingsMenu = CreatePopupMenu();
+    AppendMenuA(hSettingsMenu, MF_STRING, IDM_SETTINGS, "&Developer Settings...");
+    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hSettingsMenu, "&Settings");
+    HMENU hAboutMenu = CreatePopupMenu();
+    AppendMenuA(hAboutMenu, MF_STRING, IDM_ABOUT, "&About Angels95...");
+    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hAboutMenu, "&?");
+    SetMenu(hWnd, hMenuBar);
+}
+
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
@@ -709,6 +776,7 @@ int main(){
     }
 
     OmegaTechInit();
+    CreateNativeMenuBar();
     PlaySplashScreen();
     PlayHomeScreen();
     
@@ -758,6 +826,8 @@ int main(){
     
     while (!WindowShouldClose())
     {
+        PumpWin32Messages();
+
         // Console toggle with ^ (grave) key
         if (IsKeyPressed(KEY_GRAVE)) {
             g_consoleOpen = !g_consoleOpen;
@@ -999,96 +1069,6 @@ int main(){
 
         // Console overlay (always on top)
         DrawConsole();
-
-        // --- Top window dropdown menu bar (F2 to toggle) ---
-        if (ShowMenuBar) {
-            int sw = GetScreenWidth();
-            int mh = 22;
-            Vector2 mp = GetMousePosition();
-            bool mb = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-
-            // Draw menu bar background
-            DrawRectangle(0, 0, sw, mh, (Color){ 30, 30, 40, 220 });
-
-            // Menu items
-            struct MenuItem { const char* label; };
-            MenuItem items[] = { {"Game"}, {"Settings"}, {"About"} };
-            int nItems = 3;
-            int mx = 4, my = 0, mw = 80;
-
-            // Track if click lands on any menu item to prevent closing
-            bool clickedOnItem = false;
-
-            for (int i = 0; i < nItems; i++) {
-                Rectangle r = { (float)mx, (float)my, (float)mw, (float)mh };
-                bool hover = CheckCollisionPointRec(mp, r);
-                // Highlight hovered or active item
-                Color bc = (i == MenuActiveItem) ? (Color){ 60, 60, 80, 255 } :
-                           hover ? (Color){ 50, 50, 65, 255 } : BLANK;
-                if (bc.a > 0) DrawRectangleRec(r, bc);
-                DrawText(items[i].label, mx + 8, my + 4, 12, RAYWHITE);
-
-                if (mb && hover) {
-                    MenuActiveItem = (MenuActiveItem == i) ? -1 : i;
-                    clickedOnItem = true;
-                }
-                mx += mw;
-            }
-
-            // If mouse clicked outside any menu item, close dropdown
-            if (mb && !clickedOnItem && !CheckCollisionPointRec(mp, (Rectangle){ 0, 0, (float)sw, (float)mh })) {
-                // Check if click is inside any open dropdown panel
-                bool inDropdown = false;
-                if (MenuActiveItem >= 0) {
-                    int dx = 4 + MenuActiveItem * mw, dy = mh, dw = 140, dd = 80;
-                    if (MenuActiveItem == 2) dd = 60; // About is shorter
-                    inDropdown = CheckCollisionPointRec(mp, (Rectangle){ (float)dx, (float)dy, (float)dw, (float)dd });
-                }
-                if (!inDropdown) MenuActiveItem = -1;
-            }
-
-            // Draw active dropdown
-            if (MenuActiveItem >= 0) {
-                int dx = 4 + MenuActiveItem * mw, dy = mh, dw = 140;
-                DrawRectangle(dx, dy, dw, 80, (Color){ 40, 40, 55, 240 });
-
-                if (MenuActiveItem == 0) { // Game
-                    Rectangle rr1 = { (float)dx + 4, (float)dy + 4, (float)dw - 8, 22 };
-                    Rectangle rr2 = { (float)dx + 4, (float)dy + 28, (float)dw - 8, 22 };
-                    if (GuiButton(rr1, "Restart")) {
-                        // Reload current world
-                        SetSceneId = OmegaTechData.LevelIndex;
-                        SetSceneFlag = true;
-                        MenuActiveItem = -1;
-                    }
-                    if (GuiButton(rr2, "Quit")) {
-                        CloseWindow();
-                        MenuActiveItem = -1;
-                    }
-                }
-                else if (MenuActiveItem == 1) { // Settings
-                    Rectangle rr = { (float)dx + 4, (float)dy + 4, (float)dw - 8, 22 };
-                    if (GuiButton(rr, "Open Settings")) {
-                        ShowSettings = true;
-                        ShowCursor();
-                        EnableCursor();
-                        MenuActiveItem = -1;
-                    }
-                }
-                else if (MenuActiveItem == 2) { // About
-                    DrawText("Angels95 v1.0", dx + 8, dy + 6, 12, RAYWHITE);
-                    DrawText("OmegaTech Engine", dx + 8, dy + 22, 11, LIGHTGRAY);
-                    DrawText("TribeWarez 2025", dx + 8, dy + 38, 10, DARKGRAY);
-                }
-            }
-
-        } // end if(ShowMenuBar)
-
-        // Toggle menu bar with F2 (always accessible)
-        if (IsKeyPressed(KEY_F2)) {
-            ShowMenuBar = !ShowMenuBar;
-            MenuActiveItem = -1;
-        }
 
         EndDrawing();
 
