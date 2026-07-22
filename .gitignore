@@ -46,5 +46,5 @@ build/cmake*
 # Docs scratch
 .docs/
 
-# Scratch plan files
-PLAN_STUBS_*
+# Scratch plan files (keep main plan files tracked)
+PLAN_STUBS_*.scratch
