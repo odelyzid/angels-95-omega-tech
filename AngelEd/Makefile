@@ -1,6 +1,7 @@
 # Detect OS
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
+  $(error AngelEd requires Win32 API (native panels). Build on Windows with w64devkit or MSYS2.)
   CFLAGS   = -O3 -g --std=c++20 -fPIC -Wno-narrowing
   LDFLAGS  = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
   WIN32_OBJS :=

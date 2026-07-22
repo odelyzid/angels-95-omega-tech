@@ -390,7 +390,7 @@ static int http_listen(int port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(0x7F000001); // 127.0.0.1
+    addr.sin_addr.s_addr = INADDR_ANY; // 0.0.0.0 — all interfaces
     addr.sin_port = htons(port);
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { close(fd); return -1; }
     if (listen(fd, 8) < 0) { close(fd); return -1; }

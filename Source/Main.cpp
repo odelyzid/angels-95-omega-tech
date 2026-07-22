@@ -763,7 +763,15 @@ static void DrawInventoryOverlay() {
              px + 20, py + panel_h - 22, 12, DARKGRAY);
 }
 
-int main(){
+int main(int argc, char** argv){
+    // CLI args
+    for (int i = 1; i + 1 < argc; i++) {
+        if (strcmp(argv[i], "--world") == 0) {
+            g_world_to_load = argv[i + 1];
+            i++;
+        }
+    }
+
     SetConfigFlags(FLAG_VSYNC_HINT);
 
     InitWindow(1280 , 720 , "Angels95");

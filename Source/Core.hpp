@@ -2111,6 +2111,15 @@ void DrawWorld()
         ObjectCollision = false;
     }
 
+    // Zone reverb check (raylib has no built-in reverb — log for awareness)
+    {
+        ZoneVolumeNode* reverbZone = PawnSystem::Instance().CheckZoneCollision(
+            OmegaTechData.MainCamera.position, OmegaPlayer.PlayerBounds);
+        if (reverbZone && reverbZone->zoneType == ZoneType::ZONE_REVERB)
+            OZ_DEBUG("Player entered ZONE_REVERB '%s' (no DSP effect available)",
+                     reverbZone->name.c_str());
+    }
+
     // LightningScript entity tick
     {
         float dt = GetFrameTime();

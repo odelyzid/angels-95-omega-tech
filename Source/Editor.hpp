@@ -1,3 +1,7 @@
+// Legacy editor state — unused in the client, superseded by AngelEd.
+// Kept for reference; the fields are placement coordinates for the
+// old embedded-editor mode that was never finished.
+#ifdef OMEGA_INCLUDE_LEGACY_EDITOR
 class Editor{
     public:
         bool DrawModel = false;
@@ -7,11 +11,9 @@ class Editor{
         float Z = 0;
         float S = 1;
         float R = 0;
-        
         float L = 0;
         float H = 0;
         float W = 0;
-
 };
-
 static Editor OmegaTechEditor;
+#endif

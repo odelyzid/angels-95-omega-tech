@@ -135,9 +135,14 @@ test_parser: tests/LightningScriptParser.test.cpp Source/Script/LightningScriptP
 test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser
+test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
+	$(COMP) $(TEST_FLAGS) -ISource $^ -o $@ $(LDFLAGS)
+
+test: test_parser test_entity_manager
 	@echo "--- LightningScriptParser Tests ---"
 	./test_parser
+	@echo "--- LightningEntityManager Tests ---"
+	./test_entity_manager
 
 clean:
 	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry
