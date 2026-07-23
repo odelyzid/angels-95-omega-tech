@@ -57,6 +57,11 @@ public:
     void HandleInput();
     void DrawHotbar();
 
+    // --- Projectile spawning (for weapon entities) ---
+    // Spawns a projectile from the selected weapon's entity stats.
+    // Returns the projectile index in PawnSystem, or -1.
+    int FireSelectedWeapon(const Vector3& origin, const Vector3& direction);
+
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
 

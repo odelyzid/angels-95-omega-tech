@@ -132,7 +132,7 @@ ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp
 	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp -o OzPack$(EXE) $(SERVER_LIBS)
 
 # 9. Unit tests (no raylib dependency)
-TEST_FLAGS := -O0 -g --std=c++20
+TEST_FLAGS := -O0 -g --std=c++20 -DOMEGA_TEST_ENV
 test_context: tests/LightningScriptContext.test.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 

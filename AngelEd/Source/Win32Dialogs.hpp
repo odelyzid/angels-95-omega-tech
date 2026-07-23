@@ -30,8 +30,6 @@ struct EditorPanelState {
     bool showNodePanel = false;
     bool showSettingsPanel = false;
     bool showHeightmapEditor = false;
-    bool showCsgSidebar = false;
-
     // Model browser state (used cross-platform)
     std::vector<ModelBrowserEntry> modelEntries;
     int selectedModel = -1;
@@ -80,7 +78,6 @@ struct EditorPanelState {
     void* hNodePanel = nullptr;
     void* hSettingsPanel = nullptr;
     void* hHeightmapEditor = nullptr;
-    void* hCsgSidebar = nullptr;
     void* hLightProps = nullptr;
 
     // Preview bitmap (Windows only)
@@ -98,7 +95,6 @@ struct EditorPanelState {
     WinPos nodePanelPos  = {290, 400, 200, 200};
     WinPos settingsPos        = {50, 50, 400, 600};
     WinPos heightmapEditorPos = {120, 100, 520, 480};
-    WinPos csgSidebarPos = {0, 0, 200, 720};
     WinPos lightPropsPos = {400, 100, 340, 480};
 #endif
 };
@@ -149,6 +145,8 @@ struct ZoneProperties {
     int particleColorR = 200, particleColorG = 200, particleColorB = 200;
     float particleWindX = 0.0f, particleWindZ = 0.0f;
     bool applyParticles = false;
+    // Skybox
+    std::string skyboxTexturePath;  // path to skybox texture, empty = world default
 };
 
 ZoneProperties GetZoneProperties();
@@ -183,7 +181,6 @@ void ShowEnvPanel(bool show);
 void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
-void ShowCsgSidebar(bool show);
 void ShowLightProps(bool show);
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
@@ -204,7 +201,6 @@ inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void ShowHeightmapEditor(bool) {}
 inline void ShowLightProps(bool) {}
-inline void ShowCsgSidebar(bool) {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
 inline void SetTextureTargetNames(const std::vector<std::string>&) {}

@@ -225,7 +225,58 @@ PlayerStartNode* PawnSystem::GetFirstPlayerStart() {
 }
 
 // ---------------------------------------------------------------------------
-// Pickup Nodes
+// Projectile nodes
+// ---------------------------------------------------------------------------
+int PawnSystem::SpawnProjectile(const ProjectileNode& node) {
+    ProjectileNode p = node;
+    p.id = m_nextEntityId++;
+    p.active = true;
+    p.age = 0.0f;
+    m_projectiles.push_back(p);
+    return (int)m_projectiles.size() - 1;
+}
+
+void PawnSystem::UpdateProjectiles(float dt) {
+    for (auto& p : m_projectiles) {
+        if (!p.active) continue;
+        p.age += dt;
+        if (p.age >= p.lifetime) {
+            p.active = false;
+            continue;
+        }
+        p.position.x += p.velocity.x * dt;
+        p.position.y += p.velocity.y * dt;
+        p.position.z += p.velocity.z * dt;
+        // Simple gravity on projectiles
+        p.velocity.y -= 5.0f * dt;
+    }
+    // Remove inactive projectiles
+    m_projectiles.erase(
+        std::remove_if(m_projectiles.begin(), m_projectiles.end(),
+                       [](const ProjectileNode& p) { return !p.active; }),
+        m_projectiles.end());
+}
+
+void PawnSystem::DrawProjectiles(Camera3D& camera) {
+    for (auto& p : m_projectiles) {
+        if (!p.active) continue;
+        // Draw as small glowing spheres
+        Color c = {255, 200, 50, 255};
+        float radius = 0.3f;
+        DrawSphere(p.position, radius, c);
+        // Optional glow sprite
+        if (p.sprite && p.sprite->id > 0) {
+            DrawBillboard(camera, *p.sprite, p.position, 0.5f, WHITE);
+        }
+    }
+}
+
+void PawnSystem::ClearProjectiles() {
+    m_projectiles.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Pickup nodes
 // ---------------------------------------------------------------------------
 int PawnSystem::AddPickup(const PickupNode& node) {
     PickupNode n = node;

@@ -29,6 +29,23 @@ enum class PawnState : uint8_t {
     DEAD
 };
 
+// Zone environment overrides — fog/ambient/reverb applied on zone entry at runtime.
+// Separate from the editor's ZoneProperties (which has GameType/Particle fields too).
+struct ZoneEnvOverrides {
+    // Fog
+    int fogR = 200, fogG = 200, fogB = 210;
+    float fogDensity = 0.02f;
+    float fogStart = 10.0f, fogEnd = 100.0f;
+    bool applyFog = false;
+    // Ambient
+    int ambR = 180, ambG = 180, ambB = 200;
+    float ambIntensity = 0.4f;
+    bool applyAmbient = false;
+    // Reverb
+    float reverbMix = 0.0f;
+    float reverbDecay = 0.0f;
+};
+
 // Zone volume types
 enum class ZoneType : uint8_t {
     ZONE_WATER = 0,
@@ -95,6 +112,20 @@ struct PlayerStartNode {
     float yaw = 0.0f;
 };
 
+// Projectile node - fired by weapons
+struct ProjectileNode {
+    uint32_t id = 0;
+    Vector3 position{0, 0, 0};
+    Vector3 velocity{0, 0, 0};
+    float lifetime = 2.0f;
+    float age = 0.0f;
+    float damage = 10.0f;
+    float speed = 20.0f;
+    int ownerId = -1;          // pawn or player id that fired it
+    bool active = true;
+    Texture2D* sprite = nullptr; // optional trail/glow texture
+};
+
 // Pickup node - collectible items in the world
 struct PickupNode {
     uint32_t id = 0;
@@ -126,6 +157,7 @@ struct ZoneVolumeNode {
     float intensity = 1.0f;  // e.g., water density, ladder speed
     std::string name;        // logical name for LightningScript zone lookups
     GameplaySoundProfile soundProfile; // game-type-specific audio profile
+    ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
 };
 
 class PawnSystem {
@@ -163,6 +195,14 @@ public:
     void ClearPlayerStarts();
     const std::vector<PlayerStartNode>& GetPlayerStarts() const { return m_playerStarts; }
     PlayerStartNode* GetFirstPlayerStart();
+
+    // Projectile nodes
+    int SpawnProjectile(const ProjectileNode& node);
+    void UpdateProjectiles(float dt);
+    void DrawProjectiles(Camera3D& camera);
+    void ClearProjectiles();
+    std::vector<ProjectileNode>& GetProjectiles() { return m_projectiles; }
+    const std::vector<ProjectileNode>& GetProjectiles() const { return m_projectiles; }
 
     // Pickup nodes
     int AddPickup(const PickupNode& node);
@@ -220,6 +260,7 @@ private:
 
     // Entity node storage
     std::vector<PlayerStartNode> m_playerStarts;
+    std::vector<ProjectileNode> m_projectiles;
     std::vector<PickupNode> m_pickups;
     std::vector<ZoneVolumeNode> m_zones;
     std::vector<EmitterNode> m_emitters;

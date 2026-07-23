@@ -49,6 +49,7 @@ public:
 
     // Collision volumes for OZONE brush primitives
     const std::vector<OzoneCollisionVolume>& GetCollisionVolumes() const { return m_collisionVolumes; }
+    std::vector<OzoneCollisionVolume>& GetCollisionVolumesMutable() { return m_collisionVolumes; }
     void RebuildCollisionVolumes();
 
     // Spatial partitioning for efficient collision queries

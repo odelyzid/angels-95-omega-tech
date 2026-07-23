@@ -25,25 +25,42 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
+// Menu command IDs
+enum EditorMenuCmd {
+    IDM_NEW = 1001,
+    IDM_OPEN,
+    IDM_SAVE,
+    IDM_SAVE_AS,
+    IDM_PLAY_TEST,
+    IDM_EXIT,
+    IDM_MODEL_BRW = 1100,
+    IDM_SOUND_MGR,
+    IDM_TEXTURE_MGR,
+    IDM_PAWN_MGR,
+    IDM_SCRIPT_MGR,
+    IDM_ZONE_PROPS,
+    IDM_NODE_PANEL,
+    IDM_PICKUP_PANEL,
+    IDM_LIGHT_PROPS,
+    IDM_HEIGHTMAP,
+    IDM_FULLSCREEN,
+    IDM_RESET_CAM,
+    IDM_VIEW_TOP,
+    IDM_VIEW_BOTTOM,
+    IDM_VIEW_RIGHT,
+    IDM_VIEW_LEFT,
+    IDM_VIEW_PERSPECTIVE,
+    IDM_ABOUT,
+};
+
 // Forward declarations
 static void EditorLog(const char* fmt, ...);
 
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
 
-// CSG sidebar bridge globals
-int g_csgOpFromSidebar = 0;
-bool g_csgCollisionFromSidebar = false;
-
 // CSG processor — accumulates brush operations for collision geometry
 static CsgProcessor g_csgProc;
-
-void CsgSidebarPlace(float px, float py, float pz, float w, float h, float d, float rot, float scale) {
-    OmegaTechEditor.X = px; OmegaTechEditor.Y = py; OmegaTechEditor.Z = pz;
-    OmegaTechEditor.W = w;  OmegaTechEditor.H = h;  OmegaTechEditor.L = d;
-    OmegaTechEditor.R = rot; OmegaTechEditor.S = scale;
-    OmegaTechEditor.DrawModel = true;
-}
 
 // ---------------------------------------------------------------------------
 // Entity selection system (right-click raycast)
@@ -298,11 +315,91 @@ static void DrawPropertiesPanel() {
                 }
             }
         } else if (g_sel.type == SelType::BRUSH && g_propsFieldCount >= 6) {
-            EditorLog("Brush property apply not yet implemented");
+            auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
+            if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
+                Vector3 center = {vals[0], vals[1], vals[2]};
+                Vector3 size = {vals[3], vals[4], vals[5]};
+                vols[g_sel.index].aabb.min = {
+                    center.x - size.x * 0.5f,
+                    center.y - size.y * 0.5f,
+                    center.z - size.z * 0.5f
+                };
+                vols[g_sel.index].aabb.max = {
+                    center.x + size.x * 0.5f,
+                    center.y + size.y * 0.5f,
+                    center.z + size.z * 0.5f
+                };
+                OzoneLoader::Instance().RebuildCollisionVolumes();
+                EditorLog("Applied brush properties idx=%d (pos=%.1f,%.1f,%.1f size=%.1f,%.1f,%.1f)",
+                          g_sel.index,
+                          vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
+            }
         }
         EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), g_sel.index);
         g_showPropsPanel = false;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Native Win32 Menu Bar
+// ---------------------------------------------------------------------------
+static void CreateEditorMenuBar() {
+#ifdef _WIN32
+    HWND hWnd = (HWND)GetWindowHandle();
+    if (!hWnd) return;
+
+    HMENU hMenu = CreateMenu();
+
+    // File menu
+    HMENU hFile = CreatePopupMenu();
+    AppendMenuA(hFile, MF_STRING, IDM_NEW, "&New\tN");
+    AppendMenuA(hFile, MF_STRING, IDM_OPEN, "&Open...\tO");
+    AppendMenuA(hFile, MF_STRING, IDM_SAVE, "&Save\tS");
+    AppendMenuA(hFile, MF_STRING, IDM_SAVE_AS, "Save &As...");
+    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hFile, MF_STRING, IDM_PLAY_TEST, "&Play Test\tP");
+    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hFile, MF_STRING, IDM_EXIT, "E&xit\tQ");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hFile, "&File");
+
+    // View menu (panels)
+    HMENU hView = CreatePopupMenu();
+    AppendMenuA(hView, MF_STRING, IDM_MODEL_BRW, "Model &Browser\tF5");
+    AppendMenuA(hView, MF_STRING, IDM_SOUND_MGR, "&Sound Manager\tF6");
+    AppendMenuA(hView, MF_STRING, IDM_TEXTURE_MGR, "&Texture Manager\tF7");
+    AppendMenuA(hView, MF_STRING, IDM_PAWN_MGR, "&Pawn Manager\tF8");
+    AppendMenuA(hView, MF_STRING, IDM_SCRIPT_MGR, "&Script Manager\tF9");
+    AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hView, MF_STRING, IDM_ZONE_PROPS, "&Zone Properties\tF12");
+    AppendMenuA(hView, MF_STRING, IDM_NODE_PANEL, "&Node Panel");
+    AppendMenuA(hView, MF_STRING, IDM_PICKUP_PANEL, "&Pickups\tF10");
+    AppendMenuA(hView, MF_STRING, IDM_LIGHT_PROPS, "&Light Properties");
+    AppendMenuA(hView, MF_STRING, IDM_HEIGHTMAP, "&Heightmap Editor\tH");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hView, "&View");
+
+    // Camera menu
+    HMENU hCam = CreatePopupMenu();
+    AppendMenuA(hCam, MF_STRING, IDM_RESET_CAM, "&Reset Camera\tHome");
+    AppendMenuA(hCam, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_TOP, "&Top\tNumpad 7");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_BOTTOM, "&Bottom\tNumpad 1");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_RIGHT, "&Right\tNumpad 3");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_LEFT, "&Left\tNumpad 9");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_PERSPECTIVE, "&Perspective\tNumpad 5");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hCam, "&Camera");
+
+    // Settings menu
+    HMENU hSettings = CreatePopupMenu();
+    AppendMenuA(hSettings, MF_STRING, IDM_FULLSCREEN, "Toggle &Fullscreen\tF11");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hSettings, "&Settings");
+
+    // Help menu
+    HMENU hHelp = CreatePopupMenu();
+    AppendMenuA(hHelp, MF_STRING, IDM_ABOUT, "&About AngelEd");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hHelp, "&Help");
+
+    SetMenu(hWnd, hMenu);
+#endif
 }
 
 // Editor log file (appended to System/AngelEd.log)
@@ -598,7 +695,17 @@ static void ExportToOzone(std::ostream& output) {
         output << "zone " << zt
                << " " << zone.bounds.min.x << " " << zone.bounds.min.y << " " << zone.bounds.min.z
                << " " << zone.bounds.max.x << " " << zone.bounds.max.y << " " << zone.bounds.max.z
-               << " " << zone.intensity << "\n";
+               << " " << zone.intensity;
+        // Export env overrides if any are set
+        auto& eo = zone.envOverrides;
+        if (eo.applyFog || eo.applyAmbient || eo.reverbMix > 0.0f) {
+            output << " " << eo.fogR << " " << eo.fogG << " " << eo.fogB
+                   << " " << eo.fogDensity << " " << eo.fogStart << " " << eo.fogEnd
+                   << " " << eo.ambR << " " << eo.ambG << " " << eo.ambB
+                   << " " << eo.ambIntensity
+                   << " " << eo.reverbMix << " " << eo.reverbDecay;
+        }
+        output << "\n";
     }
 
     // Emitters
@@ -671,6 +778,7 @@ int main(int argc, char **argv){
     EditorLog("=== AngelEd starting ===");
     SetWindowState(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "AngelEd");
+    CreateEditorMenuBar();
     SetTraceLogLevel(LOG_WARNING);
     InitAudioDevice();
     SetTargetFPS(60);
@@ -701,7 +809,6 @@ int main(int argc, char **argv){
         SetTextureTargetNames(names);
     }
     CacheWDL();
-    ShowCsgSidebar(true);
 
     // Load pawn definitions from config files (data-driven)
     {
@@ -792,11 +899,43 @@ int main(int argc, char **argv){
 
     while (!WindowShouldClose())
     {
-        // Process Win32 messages for child panels
+        // Process Win32 messages for child panels + menu bar
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            if (msg.message == WM_COMMAND) {
+                int id = LOWORD(msg.wParam);
+                switch (id) {
+                    case IDM_NEW:           FileNew(); break;
+                    case IDM_OPEN:          { std::string p; if (ChooseOpenWorldFile(p)) g_pendingOpenPath = fs::path(p); } break;
+                    case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); break;
+                    case IDM_SAVE_AS:       FileSaveAs(); break;
+                    case IDM_PLAY_TEST:     { /* launch test */ std::string tempPath = "System/Cache/editor_test.wdl";
+                        std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
+                        std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" Angels95.exe --world " + tempPath).c_str()); } } break;
+                    case IDM_EXIT:          CloseWindow(); break;
+                    case IDM_MODEL_BRW:     ToggleModelBrowser(); break;
+                    case IDM_SOUND_MGR:     ToggleSoundMgr(); break;
+                    case IDM_TEXTURE_MGR:   ToggleTextureMgr(); break;
+                    case IDM_PAWN_MGR:      TogglePawnMgr(); break;
+                    case IDM_SCRIPT_MGR:    ToggleScriptMgr(); break;
+                    case IDM_ZONE_PROPS:    ToggleEnvPanel(); break;
+                    case IDM_NODE_PANEL:    ToggleNodePanel(); break;
+                    case IDM_PICKUP_PANEL:  TogglePickupPanel(); break;
+                    case IDM_LIGHT_PROPS:   ShowLightProps(true); break;
+                    case IDM_HEIGHTMAP:     ToggleHeightmapEditor(); break;
+                    case IDM_FULLSCREEN:    ToggleFullscreen(); break;
+                    case IDM_RESET_CAM:     SetViewPerspective(); ResetCamera(); break;
+                    case IDM_VIEW_TOP:      { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y+80,c.z+0.1f},c,{0,0,-1}); } break;
+                    case IDM_VIEW_BOTTOM:   { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y-80,c.z+0.1f},c,{0,0,1}); } break;
+                    case IDM_VIEW_RIGHT:    { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x+80,c.y,c.z},c,{0,1,0}); } break;
+                    case IDM_VIEW_LEFT:     { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x-80,c.y,c.z},c,{0,1,0}); } break;
+                    case IDM_VIEW_PERSPECTIVE: SetViewPerspective(); break;
+                    case IDM_ABOUT:         MessageBoxA(NULL, "AngelEd v1.0\nOzWorld Editor\nBased on OmegaTech\nTribeWarez 2026", "About AngelEd", MB_OK | MB_ICONINFORMATION); break;
+                }
+            } else {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
         }
 
         if (g_pendingNew) {
@@ -1227,11 +1366,6 @@ int main(int argc, char **argv){
                     else if(cmd==8) ToggleHeightmapEditor();
                     else if(cmd==10) { FileNew(); } else if(cmd==11) { FileOpen(); }
                     else if(cmd==12) { FileSaveAs(); }
-                    // CSG operations (toolbar icons 20-23)
-                    else if (cmd >= 20 && cmd <= 23) { OmegaTechEditor.CSGOperation = cmd - 19; }
-                    // Brush primitives (toolbar icons 30-34)
-                    else if (cmd >= 30 && cmd <= 33) { g_editorPanels.actionCsgPlace = cmd - 30; g_placeMode = PlaceMode::MODEL; }
-                    else if (cmd == 34) { ToggleHeightmapEditor(); }
                 }
                 bx += bw + 2;
             };
@@ -1299,12 +1433,6 @@ int main(int argc, char **argv){
                 bx+=lw+2;
             }
             bx+=6;
-            tBtn("ModeAdd",nullptr,20); tBtn("ModeSubtract",nullptr,21);
-            tBtn("ModeIntersect",nullptr,22); tBtn("ModeDeintersect",nullptr,23);
-            bx+=4;
-            tBtn("BBCube",nullptr,30); tBtn("BBCylinder",nullptr,31);
-            tBtn("BBSphere",nullptr,32); tBtn("BBSheet",nullptr,33);
-            tBtn("BBTerrain",nullptr,34); bx+=6;
             tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);
             tBtn("PolyTexInfo","Pickup",6);
         }
@@ -1456,8 +1584,14 @@ int main(int argc, char **argv){
                 else if (g_sel.type == SelType::PICKUP)
                     PawnSystem::Instance().RemovePickup(g_sel.index);
                 else if (g_sel.type == SelType::BRUSH) {
-                    // Remove brush collision volume (clear and rebuild without this one)
-                    EditorLog("Brush deletion not yet implemented (vol index %d)", g_sel.index);
+                    auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
+                    if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
+                        vols.erase(vols.begin() + g_sel.index);
+                        OzoneLoader::Instance().RebuildCollisionVolumes();
+                        EditorLog("Deleted brush volume idx=%d", g_sel.index);
+                    } else {
+                        EditorLog("Brush deletion failed: invalid index %d", g_sel.index);
+                    }
                 }
                 g_sel = { SelType::NONE, -1, "", {0,0,0} };
             }
@@ -1622,8 +1756,6 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionCsgPlace >= 0) {
             g_placeMode = PlaceMode::MODEL;
-            OmegaTechEditor.CSGOperation = g_csgOpFromSidebar;
-            CollisionToggle = g_csgCollisionFromSidebar;
             OmegaTechEditor.DrawModel = true;
             int primType = g_editorPanels.actionCsgPlace;
             // Map primitive type to EMID

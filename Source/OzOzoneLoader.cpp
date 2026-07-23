@@ -59,6 +59,26 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
                 std::string typeKey = prim.entitySubType;
                 auto& counter = zoneCounters[typeKey];
                 node.name = "zone_" + typeKey + "_" + std::to_string(counter++);
+                // Extended env override args (optional, after intensity):
+                // fogR fogG fogB fogDensity fogStart fogEnd ambR ambG ambB ambIntensity reverbMix reverbDecay
+                if (prim.args.size() >= 16) {
+                    node.envOverrides.applyFog = true;
+                    node.envOverrides.fogR = (int)prim.args[7];
+                    node.envOverrides.fogG = (int)prim.args[8];
+                    node.envOverrides.fogB = (int)prim.args[9];
+                    node.envOverrides.fogDensity = prim.args[10];
+                    node.envOverrides.fogStart = prim.args[11];
+                    node.envOverrides.fogEnd = prim.args[12];
+                    node.envOverrides.applyAmbient = true;
+                    node.envOverrides.ambR = (int)prim.args[13];
+                    node.envOverrides.ambG = (int)prim.args[14];
+                    node.envOverrides.ambB = (int)prim.args[15];
+                    node.envOverrides.ambIntensity = prim.args[16];
+                    if (prim.args.size() >= 18) {
+                        node.envOverrides.reverbMix = prim.args[17];
+                        node.envOverrides.reverbDecay = prim.args[18];
+                    }
+                }
                 pawns.AddZone(node);
             }
             return true;

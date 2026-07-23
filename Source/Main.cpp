@@ -2,6 +2,9 @@
 #include "Log.hpp"
 #include "Client/Client.hpp"
 #include "Script/LightningEntityManager.hpp"
+#include "Script/LightningEntityRegistry.hpp"
+#include "Script/LightningEntityDef.hpp"
+#include "Pawn/OzPawnSystem.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -149,34 +152,18 @@ static void DrawPlayerHUD() {
     DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
     y += 14 + bar_h + pad;
 
-    // Current selected item/weapon
-    const char* slotLabel = nullptr;
-    if (SelectedObject >= 1 && SelectedObject <= 5) {
-        switch (SelectedObject) {
-            case 1: slotLabel = OmegaTechGameObjects.Object1Owned ? "Weapon 1" : "Empty"; break;
-            case 2: slotLabel = OmegaTechGameObjects.Object2Owned ? "Weapon 2" : "Empty"; break;
-            case 3: slotLabel = OmegaTechGameObjects.Object3Owned ? "Weapon 3" : "Empty"; break;
-            case 4: slotLabel = OmegaTechGameObjects.Object4Owned ? "Weapon 4" : "Empty"; break;
-            case 5: slotLabel = OmegaTechGameObjects.Object5Owned ? "Weapon 5" : "Empty"; break;
-        }
-    } else if (SelectedObject >= 6 && SelectedObject <= 8) {
-        int bpIdx = SelectedObject - 6;
-        int count = 0;
-        for (int b = 0; b < BACKPACK_SLOTS; b++) {
-            if (gInventory.backpack[b].itemId != -1) {
-                if (count == bpIdx) {
-                    const ItemDBEntry* def = GetItemDef(gInventory.backpack[b].itemId);
-                    slotLabel = def ? def->name : "Item";
-                    break;
-                }
-                count++;
-            }
-        }
-        if (!slotLabel) slotLabel = "Empty";
+    // Current selected item/weapon (from EntityManager hotbar)
+    {
+        auto& lem = LightningEntityManager::Instance();
+        EntityInstance* selEnt = lem.SelectedEntity();
+        int selSlot = lem.SelectedSlot() + 1;
+        const char* label = "Empty";
+        if (selEnt && selEnt->def)
+            label = selEnt->def->name.c_str();
+        DrawText(TextFormat("Slot %d: %s", selSlot, label),
+                 x, y, 12, YELLOW);
+        y += 16;
     }
-    DrawText(TextFormat("Slot %d: %s", SelectedObject, slotLabel ? slotLabel : "None"),
-             x, y, 12, YELLOW);
-    y += 16;
 
     // Weapon fire indicator (brief pulse)
     static double lastFireTime = 0;
@@ -250,12 +237,8 @@ static void FireWeapon() {
     Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
     Vector3 origin = Vector3Add(cam.position, Vector3Scale(forward, 2.0f));
 
-    // Fire via selected weapon entity if available
-    EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
-    if (ent && ent->def && ent->def->type == EntityType::WEAPON) {
-        // Execute weapon's LightningScript on_fire action (future)
-        // For now: entity system will handle projectile spawning via script
-    }
+    // Fire via entity system
+    LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
 
     // Send to server
     if (g_network_enabled && g_client.is_connected()) {
@@ -302,33 +285,31 @@ static void ExecuteConsoleCommand(const char* cmd) {
             return;
         }
 
-        // Try matching weapon name
-        struct { const char* name; int slot; } weapons[] = {
-            {"wand", 1}, {"weapon1", 1}, {"object1", 1},
-            {"weapon2", 2}, {"object2", 2},
-            {"weapon3", 3}, {"object3", 3},
-            {"weapon4", 4}, {"object4", 4},
-            {"weapon5", 5}, {"object5", 5},
-        };
-        for (auto& w : weapons) {
-            const char* a = arg;
-            const char* b = w.name;
-            bool match = true;
-            while (*a && *b) {
-                char ca = (*a >= 'A' && *a <= 'Z') ? *a + 32 : *a;
-                char cb = *b;
-                if (ca != cb) { match = false; break; }
-                a++; b++;
-            }
-            if (match && *a == *b) {
-                switch (w.slot) {
-                    case 1: OmegaTechGameObjects.Object1Owned = true; break;
-                    case 2: OmegaTechGameObjects.Object2Owned = true; break;
-                    case 3: OmegaTechGameObjects.Object3Owned = true; break;
-                    case 4: OmegaTechGameObjects.Object4Owned = true; break;
-                    case 5: OmegaTechGameObjects.Object5Owned = true; break;
+        // Try matching weapon/entity name (LightningEntityRegistry)
+        {
+            auto& regAll = LightningEntityRegistry::Instance().GetAll();
+            for (auto& [regName, def] : regAll) {
+                const char* a = arg;
+                const char* b = regName.c_str();
+                bool match = true;
+                while (*a && *b) {
+                    char ca = (*a >= 'A' && *a <= 'Z') ? *a + 32 : *a;
+                    char cb = (*b >= 'A' && *b <= 'Z') ? *b + 32 : *b;
+                    if (ca != cb) { match = false; break; }
+                    a++; b++;
                 }
-                return;
+                if (match && *a == *b) {
+                    int instIdx = LightningEntityManager::Instance().Spawn(def.name);
+                    if (instIdx >= 0) {
+                        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
+                            if (LightningEntityManager::Instance().HotbarAt(s) < 0) {
+                                LightningEntityManager::Instance().HotbarAssign(s, instIdx);
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
             }
         }
     } else if (strncmp(cmd, "/world ", 7) == 0) {
@@ -580,26 +561,23 @@ static void DrawInventoryOverlay() {
         }
     }
 
-    // Hotbar preview at bottom
+    // Hotbar preview at bottom (from EntityManager)
     int hx = px + 20;
     int hy = py + panel_h - 48;
     DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
     hx += 60;
-    for (int i = 0; i < 5; i++) {
-        bool owned = false;
-        Texture2D* icon = nullptr;
-        switch (i) {
-            case 0: owned = OmegaTechGameObjects.Object1Owned; icon = &OmegaTechGameObjects.Object1Icon; break;
-            case 1: owned = OmegaTechGameObjects.Object2Owned; icon = &OmegaTechGameObjects.Object2Icon; break;
-            case 2: owned = OmegaTechGameObjects.Object3Owned; icon = &OmegaTechGameObjects.Object3Icon; break;
-            case 3: owned = OmegaTechGameObjects.Object4Owned; icon = &OmegaTechGameObjects.Object4Icon; break;
-            case 4: owned = OmegaTechGameObjects.Object5Owned; icon = &OmegaTechGameObjects.Object5Icon; break;
-        }
-        Color c = owned ? WHITE : (Color){50, 50, 50, 255};
+    auto& lem = LightningEntityManager::Instance();
+    for (int i = 0; i < LightningEntityManager::HOTBAR_SIZE && i < 8; i++) {
+        int idx = lem.HotbarAt(i);
+        bool hasItem = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->def);
+        Color c = hasItem ? WHITE : (Color){50, 50, 50, 255};
         DrawRectangle(hx, hy, 32, 32, (Color){20, 20, 30, 255});
         DrawRectangleLines(hx, hy, 32, 32, c);
-        if (owned && icon && icon->id > 0)
-            DrawTextureEx(*icon, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
+        if (hasItem && lem.Get(idx)->iconIdx >= 0) {
+            Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
+            if (iconTex && iconTex->id > 0)
+                DrawTextureEx(*iconTex, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
+        }
         hx += 36;
     }
 
@@ -887,8 +865,8 @@ int main(int argc, char** argv){
 
         // Weapon fire AFTER camera so left-click does not disrupt movement
         if (!ShowInventory && !g_consoleOpen && left_just_pressed) {
-            if (SelectedObject == 1 &&
-                OmegaTechGameObjects.Object1Owned) {
+            EntityInstance* wep = LightningEntityManager::Instance().SelectedEntity();
+            if (wep && wep->def && wep->def->type == EntityType::WEAPON) {
                 FireWeapon();
             }
         }

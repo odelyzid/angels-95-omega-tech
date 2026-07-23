@@ -224,6 +224,37 @@ void GameState::update_player_position(uint32_t id, float x, float y, float z,
 }
 
 // ---------------------------------------------------------------------------
+// NPC state update from network
+// ---------------------------------------------------------------------------
+void GameState::update_npc_state(int world_index, int npc_index,
+                                 const NetVec3& position, float yaw,
+                                 NpcState state, int health, bool active) {
+    WorldState* ws = get_world(world_index);
+    if (!ws) return;
+    // Check partition NPCs first, then global NPCs
+    for (auto& part : ws->partitions) {
+        if (npc_index >= 0 && npc_index < (int)part.npcs.size()) {
+            ServerNPC& npc = part.npcs[npc_index];
+            npc.position = position;
+            npc.yaw = yaw;
+            npc.state = state;
+            npc.health = health;
+            npc.active = active;
+            return;
+        }
+    }
+    // Try global NPCs
+    if (npc_index >= 0 && npc_index < (int)ws->global_npcs.size()) {
+        ServerNPC& npc = ws->global_npcs[npc_index];
+        npc.position = position;
+        npc.yaw = yaw;
+        npc.state = state;
+        npc.health = health;
+        npc.active = active;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Partition helpers
 // ---------------------------------------------------------------------------
 int GameState::get_partition_index(const WorldState& ws, float x, float z) const {

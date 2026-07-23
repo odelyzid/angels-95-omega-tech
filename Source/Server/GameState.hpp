@@ -240,6 +240,11 @@ public:
     }
     int world_count() const { return (int)m_worlds.size(); }
 
+    // NPC state update from network
+    void update_npc_state(int world_index, int npc_index,
+                          const NetVec3& position, float yaw,
+                          NpcState state, int health, bool active);
+
     // XP
     void add_xp(uint32_t player_id, int amount);
     int xp_needed_for_level(int level) const;

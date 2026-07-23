@@ -756,7 +756,91 @@ static void on_server_message(const net::NetworkMessage& msg,
             }
             break;
         }
+        case net::MessageType::FILE_TRANSFER: {
+            OZ_INFO("FILE_TRANSFER from player %u (size=%u) — not yet supported",
+                    sender.id, msg.size);
+            break;
+        }
+        case net::MessageType::SCENE_UPDATE: {
+            if (msg.size < sizeof(net::SceneUpdateData)) break;
+            OZ_INFO("SCENE_UPDATE from player %u (data_size=%u) — relaying",
+                    sender.id, msg.size);
+            g_game_server->broadcast_message(msg);
+            break;
+        }
+        case net::MessageType::NPC_STATE_UPDATE: {
+            if (msg.size < sizeof(net::NpcStateUpdateData)) break;
+            net::NpcStateUpdateData nsu;
+            memcpy(&nsu, msg.payload, sizeof(nsu));
+            // Update NPC state in GameState
+            g_game_state.update_npc_state(nsu.world_index, nsu.npc_index,
+                                          nsu.position, nsu.yaw,
+                                          (NpcState)nsu.state, nsu.health, nsu.active);
+            // Relay NPC state to all clients
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
+            relay.size = sizeof(nsu);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &nsu, sizeof(nsu));
+            g_game_server->broadcast_message(relay);
+            break;
+        }
+        case net::MessageType::XP_UPDATE: {
+            OZ_WARN("XP_UPDATE from player %u — server sends these, ignoring incoming",
+                    sender.id);
+            break;
+        }
+        case net::MessageType::PLAYER_HURT: {
+            if (msg.size < sizeof(net::PlayerHurtData)) break;
+            net::PlayerHurtData phd;
+            memcpy(&phd, msg.payload, sizeof(phd));
+            ServerPlayer* victim = g_game_state.get_player(phd.player_id);
+            if (victim) {
+                victim->health = phd.remaining_health;
+                OZ_INFO("PLAYER_HURT: victim=%u damage=%d health=%.0f",
+                        phd.player_id, phd.damage, phd.remaining_health);
+            }
+            // Broadcast hurt event to all players (for HUD/audio feedback)
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_HURT);
+            relay.size = sizeof(phd);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &phd, sizeof(phd));
+            g_game_server->broadcast_message(relay);
+            break;
+        }
+        case net::MessageType::PLAYER_KILL: {
+            if (msg.size < sizeof(net::PlayerKillData)) break;
+            net::PlayerKillData pkd;
+            memcpy(&pkd, msg.payload, sizeof(pkd));
+            OZ_INFO("PLAYER_KILL: killer=%u victim=%u", pkd.killer_id, pkd.victim_id);
+            ServerPlayer* victim = g_game_state.get_player(pkd.victim_id);
+            if (victim) {
+                victim->health = 0.0f;
+            }
+            // Broadcast kill to all players
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_KILL);
+            relay.size = sizeof(pkd);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &pkd, sizeof(pkd));
+            g_game_server->broadcast_message(relay);
+            break;
+        }
+        case net::MessageType::PICKUP_COLLECTED: {
+            // Already handled via PICKUP_COLLECT handler above — just relay
+            g_game_server->broadcast_message(msg);
+            break;
+        }
         default:
+            OZ_WARN("Unhandled message type %s (%u) from player %u",
+                    net::message_type_string(type), (unsigned)type, sender.id);
             break;
     }
 }

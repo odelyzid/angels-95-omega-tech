@@ -1,8 +1,90 @@
 #include "LightningEntityManager.hpp"
 #include "LightningEntityRegistry.hpp"
 #include "../Log.hpp"
+#ifndef OMEGA_TEST_ENV
+#include "../Pawn/OzPawnSystem.hpp"
+#endif
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+
+// ---------------------------------------------------------------------------
+// FireSelectedWeapon — spawn projectiles from the selected hotbar entity
+// ---------------------------------------------------------------------------
+int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vector3& direction) {
+    EntityInstance* ent = SelectedEntity();
+    if (!ent || !ent->def) return -1;
+    if (ent->def->type != EntityType::WEAPON) return -1;
+
+    // Check cooldown
+    if (ent->cooldownRemaining > 0.0f) return -1;
+
+    // Read weapon stats from entity def
+    auto& stats = ent->def->stats.floats;
+    float projectileSpeed = 20.0f;
+    float projectileDamage = 10.0f;
+    float lifetime = 2.0f;
+    int projectileCount = 1;
+    float spreadDeg = 0.0f;
+    float fireRate = 0.25f;  // seconds between shots
+
+    auto readStat = [&](const std::string& key, float defVal) -> float {
+        auto it = stats.find(key);
+        return (it != stats.end()) ? it->second : defVal;
+    };
+    projectileSpeed = readStat("projectile_speed", 20.0f);
+    projectileDamage = readStat("damage", 10.0f);
+    lifetime = readStat("lifetime", 2.0f);
+    projectileCount = (int)readStat("projectile_count", 1.0f);
+    spreadDeg = readStat("spread", 0.0f);
+    fireRate = readStat("fire_rate", 0.25f);
+
+    // Set cooldown
+    ent->cooldownRemaining = fireRate;
+
+    // Trigger on_fire script action if defined
+    int labelLine = ent->ctx.FindJumpLabel("on_fire");
+    if (labelLine >= 0) {
+        ent->ctx.Reset();
+        while (ent->ctx.ProgramCounter() < labelLine && ent->ctx.HasMore())
+            ent->ctx.ExecuteNext();
+        for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
+            ent->ctx.ExecuteNext();
+    }
+
+#ifndef OMEGA_TEST_ENV
+    // Spawn projectiles
+    for (int i = 0; i < projectileCount; i++) {
+        // Apply spread
+        float spreadRad = spreadDeg * DEG2RAD;
+        float angleOffset = (i - (projectileCount - 1) * 0.5f) * spreadRad;
+        float yawOffset = (float)(rand() % 1000 - 500) / 500.0f * spreadRad * 0.5f;
+
+        Vector3 dir = direction;
+        // Rotate around up vector for horizontal spread
+        float cosA = cosf(angleOffset);
+        float sinA = sinf(angleOffset);
+        Vector3 up = {0, 1, 0};
+        Vector3 right = Vector3CrossProduct(dir, up);
+        right = Vector3Normalize(right);
+        dir = Vector3Normalize(Vector3Add(dir, Vector3Scale(right, sinA)));
+
+        // Small random vertical spread
+        dir.y += yawOffset * 0.3f;
+        dir = Vector3Normalize(dir);
+
+        ProjectileNode p;
+        p.position = origin;
+        p.velocity = Vector3Scale(dir, projectileSpeed);
+        p.damage = projectileDamage;
+        p.lifetime = lifetime;
+        p.speed = projectileSpeed;
+        p.ownerId = -1;  // player
+        PawnSystem::Instance().SpawnProjectile(p);
+    }
+#endif
+    return projectileCount;
+}
 
 // ---------------------------------------------------------------------------
 // Init — called at startup after registry is populated

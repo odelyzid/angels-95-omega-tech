@@ -57,14 +57,21 @@ const char* message_type_string(MessageType type) {
     switch (type) {
         case MessageType::PING:  return "PING";
         case MessageType::PONG:  return "PONG";
-        case MessageType::PLAYER_JOIN:   return "PLAYER_JOIN";
-        case MessageType::PLAYER_LEAVE:  return "PLAYER_LEAVE";
-        case MessageType::PLAYER_UPDATE: return "PLAYER_UPDATE";
-        case MessageType::GAME_STATE:    return "GAME_STATE";
-        case MessageType::CHAT:          return "CHAT";
-        case MessageType::COMMAND:       return "COMMAND";
-        case MessageType::FILE_TRANSFER: return "FILE_TRANSFER";
-        case MessageType::SCENE_UPDATE:  return "SCENE_UPDATE";
+        case MessageType::PLAYER_JOIN:    return "PLAYER_JOIN";
+        case MessageType::PLAYER_LEAVE:   return "PLAYER_LEAVE";
+        case MessageType::PLAYER_UPDATE:  return "PLAYER_UPDATE";
+        case MessageType::GAME_STATE:     return "GAME_STATE";
+        case MessageType::CHAT:           return "CHAT";
+        case MessageType::COMMAND:        return "COMMAND";
+        case MessageType::FILE_TRANSFER:  return "FILE_TRANSFER";
+        case MessageType::SCENE_UPDATE:   return "SCENE_UPDATE";
+        case MessageType::PICKUP_COLLECT: return "PICKUP_COLLECT";
+        case MessageType::PICKUP_RESPAWN: return "PICKUP_RESPAWN";
+        case MessageType::NPC_STATE_UPDATE: return "NPC_STATE_UPDATE";
+        case MessageType::XP_UPDATE:      return "XP_UPDATE";
+        case MessageType::PLAYER_HURT:    return "PLAYER_HURT";
+        case MessageType::PLAYER_KILL:    return "PLAYER_KILL";
+        case MessageType::PLAYER_ACTION:  return "PLAYER_ACTION";
         case MessageType::PICKUP_COLLECTED: return "PICKUP_COLLECTED";
         default: return "UNKNOWN";
     }

@@ -36,7 +36,7 @@ static const wchar_t* CLASS_ENVPANEL    = L"OzZoneProperties";
 static const wchar_t* CLASS_PICKUPPANEL = L"OzPickupPanel";
 static const wchar_t* CLASS_NODEPANEL   = L"OzNodePanel";
 static const wchar_t* CLASS_HMEDITOR   = L"OzHmEditor";
-static const wchar_t* CLASS_CSGSIDEBAR = L"OzCsgSidebar";
+
 static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
 
 // Zone properties (read by editor rendering loop)
@@ -133,7 +133,6 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
 static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
-static LRESULT CALLBACK CsgSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
@@ -1344,6 +1343,7 @@ static const int ID_ZONE_CLOSE   = 199;
 static const int ID_SB_FOG_R = 110, ID_SB_FOG_G = 111, ID_SB_FOG_B = 112;
 static const int ID_SB_FOG_DENSITY = 113;
 static const int ID_SF_FOG_START = 114, ID_SF_FOG_END = 115;
+static const int ID_SF_SKYBOX_PATH = 116;
 static const int ID_ZONE_APPLY_FOG = 140;
 
 // Ambient controls
@@ -1374,6 +1374,11 @@ static const int ID_ZONE_APPLY_PAR   = 168;
 // Tab control groups: 0=Fog, 1=Ambient, 2=GameType, 3=Particles
 static std::vector<HWND> g_zoneControlGroups[4];
 
+static void SyncScrollPos(HWND hwnd, int id, int value) {
+    HWND hSB = GetDlgItem(hwnd, id);
+    if (hSB) SetScrollPos(hSB, SB_CTL, value, TRUE);
+}
+
 static void ShowZoneTab(HWND hwnd, int tab) {
     if (tab < 0 || tab > 3) return;
     g_zoneTab = tab;
@@ -1381,6 +1386,24 @@ static void ShowZoneTab(HWND hwnd, int tab) {
         for (auto& h : g_zoneControlGroups[t]) {
             ShowWindow(h, (t == tab) ? SW_SHOW : SW_HIDE);
         }
+    }
+    // Sync scrollbar positions from current g_zoneProps values
+    if (tab == 0) {
+        SyncScrollPos(hwnd, ID_SB_FOG_R, g_zoneProps.fogR);
+        SyncScrollPos(hwnd, ID_SB_FOG_G, g_zoneProps.fogG);
+        SyncScrollPos(hwnd, ID_SB_FOG_B, g_zoneProps.fogB);
+        SyncScrollPos(hwnd, ID_SB_FOG_DENSITY, (int)(g_zoneProps.fogDensity * 1000));
+    } else if (tab == 1) {
+        SyncScrollPos(hwnd, ID_SB_AMB_R, g_zoneProps.ambR);
+        SyncScrollPos(hwnd, ID_SB_AMB_G, g_zoneProps.ambG);
+        SyncScrollPos(hwnd, ID_SB_AMB_B, g_zoneProps.ambB);
+        SyncScrollPos(hwnd, ID_SB_AMB_INT, (int)(g_zoneProps.ambIntensity * 100));
+    } else if (tab == 3) {
+        SyncScrollPos(hwnd, ID_SB_PAR_DENSITY, (int)g_zoneProps.particleDensity);
+        SyncScrollPos(hwnd, ID_SB_PAR_SPEED, (int)(g_zoneProps.particleSpeed * 10));
+        SyncScrollPos(hwnd, ID_SB_PAR_R, g_zoneProps.particleColorR);
+        SyncScrollPos(hwnd, ID_SB_PAR_G, g_zoneProps.particleColorG);
+        SyncScrollPos(hwnd, ID_SB_PAR_B, g_zoneProps.particleColorB);
     }
 }
 
@@ -1431,6 +1454,15 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         g_zoneControlGroups[0].push_back(hFogStart);
         g_zoneControlGroups[0].push_back(GetDlgItem(hwnd, 12));
         g_zoneControlGroups[0].push_back(hFogEnd);
+        y += 26;
+
+        // Skybox texture path (on Fog tab for visual co-location)
+        CreateLabel(hwnd, L"Skybox Tex:", x, y, 75, 20, 13);
+        HWND hSkyboxPath = CreateCtrl(hwnd, L"EDIT",
+            std::wstring(g_zoneProps.skyboxTexturePath.begin(), g_zoneProps.skyboxTexturePath.end()).c_str(),
+            x + 78, y, 180, 20, ID_SF_SKYBOX_PATH, WS_BORDER);
+        g_zoneControlGroups[0].push_back(GetDlgItem(hwnd, 13));
+        g_zoneControlGroups[0].push_back(hSkyboxPath);
         y += 26;
 
         // --- Ambient tab (1) ---
@@ -1507,22 +1539,27 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         break;
     }
     case WM_HSCROLL: {
+        // Only read sliders from the active tab to avoid cross-tab contamination
         auto getPos = [hwnd](int id) -> int {
             return (int)SendDlgItemMessage(hwnd, id, SBM_GETPOS, 0, 0);
         };
-        g_zoneProps.fogR = getPos(ID_SB_FOG_R);
-        g_zoneProps.fogG = getPos(ID_SB_FOG_G);
-        g_zoneProps.fogB = getPos(ID_SB_FOG_B);
-        g_zoneProps.fogDensity = getPos(ID_SB_FOG_DENSITY) / 1000.0f;
-        g_zoneProps.ambR = getPos(ID_SB_AMB_R);
-        g_zoneProps.ambG = getPos(ID_SB_AMB_G);
-        g_zoneProps.ambB = getPos(ID_SB_AMB_B);
-        g_zoneProps.ambIntensity = getPos(ID_SB_AMB_INT) / 100.0f;
-        g_zoneProps.particleDensity = (float)getPos(ID_SB_PAR_DENSITY);
-        g_zoneProps.particleSpeed = getPos(ID_SB_PAR_SPEED) / 10.0f;
-        g_zoneProps.particleColorR = getPos(ID_SB_PAR_R);
-        g_zoneProps.particleColorG = getPos(ID_SB_PAR_G);
-        g_zoneProps.particleColorB = getPos(ID_SB_PAR_B);
+        if (g_zoneTab == 0) {
+            g_zoneProps.fogR = getPos(ID_SB_FOG_R);
+            g_zoneProps.fogG = getPos(ID_SB_FOG_G);
+            g_zoneProps.fogB = getPos(ID_SB_FOG_B);
+            g_zoneProps.fogDensity = getPos(ID_SB_FOG_DENSITY) / 1000.0f;
+        } else if (g_zoneTab == 1) {
+            g_zoneProps.ambR = getPos(ID_SB_AMB_R);
+            g_zoneProps.ambG = getPos(ID_SB_AMB_G);
+            g_zoneProps.ambB = getPos(ID_SB_AMB_B);
+            g_zoneProps.ambIntensity = getPos(ID_SB_AMB_INT) / 100.0f;
+        } else if (g_zoneTab == 3) {
+            g_zoneProps.particleDensity = (float)getPos(ID_SB_PAR_DENSITY);
+            g_zoneProps.particleSpeed = getPos(ID_SB_PAR_SPEED) / 10.0f;
+            g_zoneProps.particleColorR = getPos(ID_SB_PAR_R);
+            g_zoneProps.particleColorG = getPos(ID_SB_PAR_G);
+            g_zoneProps.particleColorB = getPos(ID_SB_PAR_B);
+        }
         break;
     }
     case WM_COMMAND: {
@@ -1585,6 +1622,21 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         g_zoneProps.respawnTime = readFloat(ID_SF_RESPAWN, 5);
         g_zoneProps.timeLimitMinutes = readFloat(ID_SF_TIMELIMIT, 10);
         g_zoneProps.scoreLimit = (int)readFloat(ID_SF_SCORELIMIT, 50);
+
+        // Read skybox texture path
+        {
+            wchar_t wbuf[512] = {0};
+            HWND hSky = GetDlgItem(hwnd, ID_SF_SKYBOX_PATH);
+            if (hSky) {
+                GetWindowTextW(hSky, wbuf, 512);
+                int len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    std::string mbuf((size_t)len, '\0');
+                    WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, &mbuf[0], len, nullptr, nullptr);
+                    g_zoneProps.skyboxTexturePath = mbuf.c_str();
+                }
+            }
+        }
         break;
     }
     case WM_CLOSE:
@@ -1836,164 +1888,6 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// CSG Sidebar Ã¢â‚¬â€ left-side brush tool window (like UnrealEd)
-// =====================================================================
-static const int ID_CSG_BOX    = 301;
-static const int ID_CSG_CYL    = 302;
-static const int ID_CSG_SPH    = 303;
-static const int ID_CSG_PYR    = 304;
-static const int ID_CSG_PLN    = 305;
-static const int ID_CSG_ADD    = 310;
-static const int ID_CSG_SUB    = 311;
-static const int ID_CSG_INTERSECT = 312;
-static const int ID_CSG_DERESC = 313;
-static const int ID_CSG_PLACE  = 320;
-static const int ID_CSG_COLLISION = 321;
-static const int ID_CSG_POSX   = 330;
-static const int ID_CSG_POSY   = 331;
-static const int ID_CSG_POSZ   = 332;
-static const int ID_CSG_WIDTH  = 333;
-static const int ID_CSG_HEIGHT = 334;
-static const int ID_CSG_DEPTH  = 335;
-static const int ID_CSG_ROT    = 336;
-static const int ID_CSG_SCALE  = 337;
-static const int ID_CSG_CLOSE  = 399;
-
-void ShowCsgSidebar(bool show) {
-    g_editorPanels.showCsgSidebar = show;
-    if (g_editorPanels.hCsgSidebar)
-        ShowWindow((HWND)g_editorPanels.hCsgSidebar, show ? SW_SHOW : SW_HIDE);
-}
-
-static LRESULT CALLBACK CsgSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    switch (msg) {
-    case WM_CREATE: {
-        int x = 8, y = 8, bw = 180, rowH = 24, gap = 4;
-
-        CreateLabel(hwnd, L"CSG Brushes", x, y, bw, 20, 1); y += 26;
-
-        // Primitive type buttons
-        CreateButton(hwnd, L"Box",     x, y, 80, rowH, ID_CSG_BOX);
-        CreateButton(hwnd, L"Cylinder", x + 84, y, 88, rowH, ID_CSG_CYL);
-        y += rowH + gap;
-        CreateButton(hwnd, L"Sphere",  x, y, 80, rowH, ID_CSG_SPH);
-        CreateButton(hwnd, L"Pyramid", x + 84, y, 88, rowH, ID_CSG_PYR);
-        y += rowH + gap;
-        CreateButton(hwnd, L"Plane",   x, y, 80, rowH, ID_CSG_PLN);
-        y += rowH + 8;
-
-        // CSG operation buttons
-        CreateLabel(hwnd, L"Operation:", x, y, bw, 18, 2); y += 20;
-        CreateButton(hwnd, L"Add",        x, y, 80, rowH, ID_CSG_ADD);
-        CreateButton(hwnd, L"Sub",        x + 84, y, 88, rowH, ID_CSG_SUB);
-        y += rowH + gap;
-        CreateButton(hwnd, L"Intersect",  x, y, 80, rowH, ID_CSG_INTERSECT);
-        CreateButton(hwnd, L"De-Resc",    x + 84, y, 88, rowH, ID_CSG_DERESC);
-        y += rowH + 8;
-
-        // Dimensions
-        CreateLabel(hwnd, L"Position:", x, y, 60, rowH, 3);
-        CreateCtrl(hwnd, L"EDIT", L"0", x + 60, y, 35, 20, ID_CSG_POSX, WS_BORDER);
-        CreateCtrl(hwnd, L"EDIT", L"0", x + 100, y, 35, 20, ID_CSG_POSY, WS_BORDER);
-        CreateCtrl(hwnd, L"EDIT", L"0", x + 140, y, 35, 20, ID_CSG_POSZ, WS_BORDER);
-        y += 22;
-        CreateLabel(hwnd, L"Size:", x, y, 40, rowH, 4);
-        CreateCtrl(hwnd, L"EDIT", L"4", x + 40, y, 45, 20, ID_CSG_WIDTH, WS_BORDER);
-        CreateCtrl(hwnd, L"EDIT", L"4", x + 90, y, 45, 20, ID_CSG_HEIGHT, WS_BORDER);
-        CreateCtrl(hwnd, L"EDIT", L"4", x + 140, y, 35, 20, ID_CSG_DEPTH, WS_BORDER);
-        y += 22;
-        CreateLabel(hwnd, L"Rot:", x, y, 30, rowH, 5);
-        CreateCtrl(hwnd, L"EDIT", L"0", x + 30, y, 50, 20, ID_CSG_ROT, WS_BORDER);
-        CreateLabel(hwnd, L"Scale:", x + 85, y, 40, rowH, 6);
-        CreateCtrl(hwnd, L"EDIT", L"1", x + 125, y, 50, 20, ID_CSG_SCALE, WS_BORDER);
-        y += 28;
-
-        CreateButton(hwnd, L"Place Brush", x, y, bw, 30, ID_CSG_PLACE);
-        y += 36;
-        CreateCtrl(hwnd, L"BUTTON", L"Enable Collision", x, y, bw, rowH, ID_CSG_COLLISION, BS_AUTOCHECKBOX);
-
-        CreateButton(hwnd, L"Close", x, y + 40, bw, 28, ID_CSG_CLOSE);
-        break;
-    }
-    case WM_COMMAND: {
-        int id = LOWORD(w);
-        if (id == ID_CSG_CLOSE) { ShowCsgSidebar(false); break; }
-
-        int primType = -1;
-        if (id == ID_CSG_BOX) primType = 0;
-        else if (id == ID_CSG_CYL) primType = 1;
-        else if (id == ID_CSG_SPH) primType = 2;
-        else if (id == ID_CSG_PYR) primType = 3;
-        else if (id == ID_CSG_PLN) primType = 4;
-
-        if (primType >= 0) {
-            g_editorPanels.actionCsgPlace = primType;
-            break;
-        }
-
-        int csgOp = -1;
-        if (id == ID_CSG_ADD) csgOp = 1;
-        else if (id == ID_CSG_SUB) csgOp = 2;
-        else if (id == ID_CSG_INTERSECT) csgOp = 3;
-        else if (id == ID_CSG_DERESC) csgOp = 4;
-
-        if (csgOp >= 0) {
-            // Store CSG operation for next place
-            // (read by main loop via actionCsgPlace processing)
-            extern int g_csgOpFromSidebar;
-            g_csgOpFromSidebar = csgOp;
-            break;
-        }
-
-        if (id == ID_CSG_PLACE) {
-            // Read position/dimension values from edit controls
-            wchar_t buf[64];
-            float px = 0, py = 0, pz = 0;
-            float w = 4, h = 4, d = 4;
-            float rot = 0, scale = 1.0f;
-            HWND hPX = GetDlgItem(hwnd, ID_CSG_POSX);
-            HWND hPY = GetDlgItem(hwnd, ID_CSG_POSY);
-            HWND hPZ = GetDlgItem(hwnd, ID_CSG_POSZ);
-            HWND hW  = GetDlgItem(hwnd, ID_CSG_WIDTH);
-            HWND hH  = GetDlgItem(hwnd, ID_CSG_HEIGHT);
-            HWND hD  = GetDlgItem(hwnd, ID_CSG_DEPTH);
-            HWND hR  = GetDlgItem(hwnd, ID_CSG_ROT);
-            HWND hSC = GetDlgItem(hwnd, ID_CSG_SCALE);
-            if (hPX) { GetWindowTextW(hPX, buf, 64); px = (float)wcstod(buf, nullptr); }
-            if (hPY) { GetWindowTextW(hPY, buf, 64); py = (float)wcstod(buf, nullptr); }
-            if (hPZ) { GetWindowTextW(hPZ, buf, 64); pz = (float)wcstod(buf, nullptr); }
-            if (hW)  { GetWindowTextW(hW, buf, 64);  w  = (float)wcstod(buf, nullptr); }
-            if (hH)  { GetWindowTextW(hH, buf, 64);  h  = (float)wcstod(buf, nullptr); }
-            if (hD)  { GetWindowTextW(hD, buf, 64);  d  = (float)wcstod(buf, nullptr); }
-            if (hR)  { GetWindowTextW(hR, buf, 64);  rot = (float)wcstod(buf, nullptr); }
-            if (hSC) { GetWindowTextW(hSC, buf, 64); scale = (float)wcstod(buf, nullptr); }
-            // Store placement params via editor state
-            extern void CsgSidebarPlace(float x, float y, float z, float w, float h, float d, float rot, float scale);
-            CsgSidebarPlace(px, py, pz, w, h, d, rot, scale);
-            // Trigger placement
-            if (g_editorPanels.actionCsgPlace < 0)
-                g_editorPanels.actionCsgPlace = 0; // default: box
-        }
-
-        if (id == ID_CSG_COLLISION) {
-            extern bool g_csgCollisionFromSidebar;
-            g_csgCollisionFromSidebar = IsDlgButtonChecked(hwnd, ID_CSG_COLLISION) == BST_CHECKED;
-        }
-        break;
-    }
-    case WM_CLOSE:
-        ShowCsgSidebar(false);
-        break;
-    case WM_DESTROY:
-        g_editorPanels.hCsgSidebar = nullptr;
-        break;
-    default:
-        return DefWindowProc(hwnd, msg, w, l);
-    }
-    return 0;
-}
-
-// =====================================================================
 // Light Properties panel — color, type, effect, flare, corona
 // =====================================================================
 static const int ID_LP_CLOSE  = 400;
@@ -2137,7 +2031,6 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_PICKUPPANEL, PickupPanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_HMEDITOR, HmEditorProc, (HINSTANCE)hInst);
-    RegisterPanelClass(CLASS_CSGSIDEBAR, CsgSidebarProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_LIGHTPROPS, LightPropsProc, (HINSTANCE)hInst);
 
     auto create = [&](const wchar_t* cls, const wchar_t* title,
@@ -2160,7 +2053,6 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_PICKUPPANEL, L"Pickups",             g_editorPanels.pickPanelPos,  g_editorPanels.hPickupPanel);
     create(CLASS_NODEPANEL,   L"Nodes",               g_editorPanels.nodePanelPos,  g_editorPanels.hNodePanel);
     create(CLASS_HMEDITOR,    L"Heightmap Editor",     g_editorPanels.heightmapEditorPos, g_editorPanels.hHeightmapEditor);
-    create(CLASS_CSGSIDEBAR,  L"CSG Brushes",          g_editorPanels.csgSidebarPos,      g_editorPanels.hCsgSidebar);
     create(CLASS_LIGHTPROPS,  L"Light Properties",     g_editorPanels.lightPropsPos,       g_editorPanels.hLightProps);
 
     ScanTextureBrowserFiles();
@@ -2182,7 +2074,6 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hPickupPanel);
     destroy(g_editorPanels.hNodePanel);
     destroy(g_editorPanels.hHeightmapEditor);
-    destroy(g_editorPanels.hCsgSidebar);
     destroy(g_editorPanels.hLightProps);
     if (g_editorPanels.hPreviewBitmap) {
         DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);

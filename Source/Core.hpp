@@ -2,6 +2,7 @@
 #include "Log.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Audio/OzSoundLoader.hpp"
+#include "Audio/DspReverb.hpp"
 #include "OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Package/PackageAssetLoader.hpp"
@@ -1846,6 +1847,19 @@ void DrawWorld()
     BeginTextureMode(Target);
     ClearBackground(BLACK);
 
+    // Skybox background texture (full-screen 2D, drawn behind 3D scene)
+    if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
+        float sw = (float)Target.texture.width;
+        float sh = (float)Target.texture.height;
+        float tx = (float)WDLModels.Skybox.width;
+        float ty = (float)WDLModels.Skybox.height;
+        float scale = (tx > 0 && ty > 0) ? fmaxf(sw/tx, sh/ty) : 1.0f;
+        DrawTexturePro(WDLModels.Skybox,
+            (Rectangle){0, 0, tx, ty},
+            (Rectangle){sw*0.5f, sh*0.5f, tx*scale, ty*scale},
+            (Vector2){tx*scale*0.5f, ty*scale*0.5f}, 0, WHITE);
+    }
+
     // Detect sky zone for skybox rendering
     PawnSystem::Instance().UpdateSkyZone(
         OmegaTechData.MainCamera.position,
@@ -1869,6 +1883,8 @@ void DrawWorld()
         ZoneVolumeNode* soundZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
         static std::string prevSoundZone;
         static Music defaultWorldMusic;
+        static Sound ambienceHandle = {0};
+        static std::string ambienceZoneName;
         if (soundZone && soundZone->zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) {
             auto& sp = soundZone->soundProfile;
             if (!sp.music_on_enter.empty() && prevSoundZone != soundZone->name) {
@@ -1884,16 +1900,34 @@ void DrawWorld()
                 }
             }
             if (!sp.ambience_loop.empty()) {
-                OZ_DEBUG("SoundZone '%s': ambience_loop='%s' (not yet implemented)",
-                         soundZone->name.c_str(), sp.ambience_loop.c_str());
+                if (ambienceZoneName != soundZone->name) {
+                    if (ambienceHandle.frameCount > 0) {
+                        StopSound(ambienceHandle);
+                        UnloadSound(ambienceHandle);
+                        ambienceHandle = {0};
+                    }
+                    ambienceHandle = LoadSoundWithFallback(sp.ambience_loop.c_str());
+                    if (ambienceHandle.frameCount > 0)
+                        PlaySound(ambienceHandle);
+                    ambienceZoneName = soundZone->name;
+                }
+                if (ambienceHandle.frameCount > 0 && !IsSoundPlaying(ambienceHandle))
+                    PlaySound(ambienceHandle);
             }
             if (!sp.sfx_on_enter.empty() && prevSoundZone != soundZone->name) {
-                OZ_DEBUG("SoundZone '%s': sfx_on_enter='%s' (not yet implemented)",
-                         soundZone->name.c_str(), sp.sfx_on_enter.c_str());
+                Sound sfx = LoadSoundWithFallback(sp.sfx_on_enter.c_str());
+                if (sfx.frameCount > 0)
+                    PlaySound(sfx);
             }
             prevSoundZone = soundZone->name;
         } else if (!soundZone && !prevSoundZone.empty()) {
-            // Exited sound zone — restore default world music
+            // Exited sound zone — stop ambience loop, restore default music
+            if (ambienceHandle.frameCount > 0) {
+                StopSound(ambienceHandle);
+                UnloadSound(ambienceHandle);
+                ambienceHandle = {0};
+            }
+            ambienceZoneName.clear();
             if (defaultWorldMusic.ctxData != nullptr) {
                 StopMusicStream(OmegaTechSoundData.BackgroundMusic);
                 OmegaTechSoundData.BackgroundMusic = defaultWorldMusic;
@@ -2028,6 +2062,9 @@ void DrawWorld()
         // Player start markers
         for (auto& ps : PawnSystem::Instance().GetPlayerStarts())
             DrawCubeWires(ps.position, 0.5f, 1.0f, 0.5f, GREEN);
+
+        // Projectiles
+        PawnSystem::Instance().DrawProjectiles(OmegaTechData.MainCamera);
     }
 
     if (Debug)
@@ -2037,6 +2074,9 @@ void DrawWorld()
     else
     {
         UpdateEntities();
+        // Update projectiles (age, movement, gravity)
+        float dt = GetFrameTime();
+        PawnSystem::Instance().UpdateProjectiles(dt);
     }
     if (ObjectCollision)
     {
@@ -2049,13 +2089,32 @@ void DrawWorld()
         ObjectCollision = false;
     }
 
-    // Zone reverb check (raylib has no built-in reverb — log for awareness)
+    // Zone reverb — apply simulated DSP (volume/muffle) while inside reverb zone
     {
         ZoneVolumeNode* reverbZone = PawnSystem::Instance().CheckZoneCollision(
             OmegaTechData.MainCamera.position, OmegaPlayer.PlayerBounds);
-        if (reverbZone && reverbZone->zoneType == ZoneType::ZONE_REVERB)
-            OZ_DEBUG("Player entered ZONE_REVERB '%s' (no DSP effect available)",
-                     reverbZone->name.c_str());
+        static bool wasInReverb = false;
+        bool inReverb = (reverbZone && reverbZone->zoneType == ZoneType::ZONE_REVERB);
+        if (inReverb && !wasInReverb) {
+            float mix = reverbZone->envOverrides.reverbMix > 0.0f ? reverbZone->envOverrides.reverbMix : 0.35f;
+            float decay = reverbZone->envOverrides.reverbDecay > 0.0f ? reverbZone->envOverrides.reverbDecay : 0.5f;
+            float vol = 1.0f - mix * 0.5f;
+            OZ_INFO("ZONE_REVERB entered '%s' — mix=%.2f decay=%.2f vol=%.2f",
+                    reverbZone->name.c_str(), mix, decay, vol);
+            if (OmegaTechSoundData.MusicFound) {
+                SetMusicVolume(OmegaTechSoundData.BackgroundMusic, vol);
+            }
+            DspReverb::SetMix(mix);
+            DspReverb::SetDecay(decay);
+        } else if (!inReverb && wasInReverb) {
+            OZ_INFO("ZONE_REVERB exited — restoring audio");
+            if (OmegaTechSoundData.MusicFound) {
+                SetMusicVolume(OmegaTechSoundData.BackgroundMusic, 1.0f);
+            }
+            DspReverb::SetMix(0.0f);
+            DspReverb::SetDecay(0.5f);
+        }
+        wasInReverb = inReverb;
     }
 
     // LightningScript entity tick
@@ -2081,9 +2140,76 @@ void DrawWorld()
 
         // Apply pending Skybox changes from script contexts
         if (lem.HasPendingSkybox()) {
-            OZ_INFO("LightningScript: skybox change to '%s' (loading deferred)",
-                    lem.PendingSkybox().c_str());
+            std::string path = lem.PendingSkybox();
+            OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
+            Texture2D newSky = LoadTextureWithFallback(path.c_str());
+            if (newSky.id > 0) {
+                if (WDLModels.Skybox.id > 0)
+                    UnloadTexture(WDLModels.Skybox);
+                WDLModels.Skybox = newSky;
+                OmegaTechData.SkyboxEnabled = true;
+            } else {
+                OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
+            }
             lem.ClearPendingSkybox();
+        }
+
+        // Zone environment override application
+        {
+            static std::string activeEnvZone;
+            Vector3 pp = OmegaTechData.MainCamera.position;
+            ZoneVolumeNode* envZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
+            if (envZone && (envZone->envOverrides.applyFog || envZone->envOverrides.applyAmbient)) {
+                if (activeEnvZone != envZone->name) {
+                    auto& eo = envZone->envOverrides;
+                    OZ_DEBUG("Zone env: '%s' applyFog=%d applyAmbient=%d",
+                             envZone->name.c_str(), eo.applyFog, eo.applyAmbient);
+                    if (eo.applyFog && OmegaTechData.Lights.id > 0) {
+                        float fc[3] = {eo.fogR/255.0f, eo.fogG/255.0f, eo.fogB/255.0f};
+                        float fd = eo.fogDensity;
+                        static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+                        static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+                        static int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
+                        static int fogEndLoc = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
+                        SetShaderValue(OmegaTechData.Lights, fogColorLoc, fc, SHADER_UNIFORM_VEC3);
+                        SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &fd, SHADER_UNIFORM_FLOAT);
+                        float fs = eo.fogStart, fe = eo.fogEnd;
+                        SetShaderValue(OmegaTechData.Lights, fogStartLoc, &fs, SHADER_UNIFORM_FLOAT);
+                        SetShaderValue(OmegaTechData.Lights, fogEndLoc, &fe, SHADER_UNIFORM_FLOAT);
+                        FogEnabled = true;
+                        FogIntensity = (fd > 0) ? fd : 0.3f;
+                        FogTint = {(unsigned char)eo.fogR, (unsigned char)eo.fogG, (unsigned char)eo.fogB, 255};
+                    }
+                    if (eo.applyAmbient && OmegaTechData.Lights.id > 0) {
+                        float amb[4] = {eo.ambR/255.0f * eo.ambIntensity,
+                                        eo.ambG/255.0f * eo.ambIntensity,
+                                        eo.ambB/255.0f * eo.ambIntensity, 1.0f};
+                        static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
+                        SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
+                    }
+                    activeEnvZone = envZone->name;
+                }
+            } else if (!activeEnvZone.empty()) {
+                // Exited env zone — restore defaults
+                OZ_DEBUG("Zone env: restoring defaults");
+                if (OmegaTechData.Lights.id > 0) {
+                    float defFogColor[3] = {0.7f, 0.7f, 0.8f};
+                    float defFogDensity = 1.0f;
+                    float defFogStart = 10.0f, defFogEnd = 100.0f;
+                    static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+                    static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+                    static int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
+                    static int fogEndLoc = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
+                    SetShaderValue(OmegaTechData.Lights, fogColorLoc, defFogColor, SHADER_UNIFORM_VEC3);
+                    SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &defFogDensity, SHADER_UNIFORM_FLOAT);
+                    SetShaderValue(OmegaTechData.Lights, fogStartLoc, &defFogStart, SHADER_UNIFORM_FLOAT);
+                    SetShaderValue(OmegaTechData.Lights, fogEndLoc, &defFogEnd, SHADER_UNIFORM_FLOAT);
+                }
+                FogEnabled = false;
+                FogIntensity = 0.3f;
+                FogTint = {200, 200, 210, 255};
+                activeEnvZone.clear();
+            }
         }
     }
 
