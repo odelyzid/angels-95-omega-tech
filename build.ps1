@@ -20,11 +20,19 @@ function Fail { Write-Host "ERROR: $args" -ForegroundColor Red; exit 1 }
 Write-Step "Checking prerequisites..."
 
 $haveGpp = Get-Command g++ -ErrorAction SilentlyContinue
+$haveWindres = Get-Command windres -ErrorAction SilentlyContinue
+$haveMake = Get-Command mingw32-make -ErrorAction SilentlyContinue
 $haveCmake = Get-Command cmake -ErrorAction SilentlyContinue
 $haveGit = Get-Command git -ErrorAction SilentlyContinue
 
 if (-not $haveGpp) {
     Fail "g++ not found in PATH. Install MinGW-w64 (https://winlibs.com) and add to PATH."
+}
+if (-not $haveWindres) {
+    Fail "windres not found (required for .ico embedding). Install GNU Binutils."
+}
+if (-not $haveMake) {
+    Fail "mingw32-make not found. Install MinGW-w64 with make."
 }
 if (-not $haveCmake) {
     Fail "cmake not found. Install from https://cmake.org/download/"
@@ -34,6 +42,7 @@ if (-not $haveGit) {
 }
 
 Write-Step "g++: $($haveGpp.Source)"
+Write-Step "windres: $($haveWindres.Source)"
 Write-Step "cmake: $($haveCmake.Source)"
 Write-Step "git: $($haveGit.Source)"
 
@@ -96,76 +105,11 @@ Write-Step "Building OzPack..."
 if ($LASTEXITCODE -ne 0) { Fail "OzPack build failed" }
 Pop-Location
 
-# --- 4. Build AngelEd (level editor) ---
+# --- 4. Build AngelEd (level editor) via Makefile ---
 Write-Step "Building AngelEd..."
 Push-Location "$PSScriptRoot\AngelEd"
-$EDITOR_FLAGS = @('-O3', '-g', '--std=c++20', '-Wno-narrowing')
-$EDITOR_INC   = @('-I', '../Source', '-I', 'Source')
-$EDITOR_LIBS  = @('-lraylib', '-lopengl32', '-lgdi32', '-lwinmm', '-lcomctl32', '-lcomdlg32', '-lws2_32', '-lm')
-
-# Compile raygui
-g++ -fpermissive @EDITOR_FLAGS @EDITOR_INC -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "raygui compilation failed" }
-
-# Compile editor sources
-g++ @EDITOR_FLAGS @EDITOR_INC -c Source/Main.cpp -o Main.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "Editor Main.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "Editor Win32Dialogs.cpp compilation failed" }
-
-# Compile engine sources needed by editor
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OzPawnSystem.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Package/OzAssetMapper.cpp -o OzAssetMapper.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OzAssetMapper.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/OzOzoneLoader.cpp -o OzOzoneLoader.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OzOzoneLoader.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OzoneParser.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Server/WDLParser.cpp -o WDLParser.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "WDLParser.cpp compilation failed" }
-
-# Compile Log system (used by engine modules)
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Log.cpp -o Log.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "Log.cpp compilation failed" }
-
-# Compile Physics system (CSG + Chunking)
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Physics/OzBsp.cpp -o OzBsp.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OzBsp.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Physics/WorldChunk.cpp -o WorldChunk.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "WorldChunk.cpp compilation failed" }
-
-# Compile LightningScript system
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "LightningScriptContext.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningScriptParser.cpp -o LightningScriptParser.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "LightningScriptParser.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningEntityRegistry.cpp -o LightningEntityRegistry.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "LightningEntityRegistry.cpp compilation failed" }
-
-g++ @EDITOR_FLAGS @EDITOR_INC -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o 2>&1g++ @EDITOR_FLAGS @EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail ""EditorIcons.cpp compilation failed"" }
-if ($LASTEXITCODE -ne 0) { Fail "LightningEntityManager.cpp compilation failed" }
-
-# Compile OTCustom stub
-$stub = 'int main_custom() { return 0; }'
-$stub | g++ @EDITOR_FLAGS @EDITOR_INC -x c++ -c - -o OTCustom_stub.o 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "OTCustom stub compilation failed" }
-
-# Link editor
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o raygui.o OTCustom_stub.o -o AngelEd.exe @EDITOR_FLAGS @EDITOR_INC @EDITOR_LIBS 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "AngelEd link failed" }
-
-# Cleanup editor objects
-Remove-Item Main.o, Win32Dialogs.o, OzPawnSystem.o, OzAssetMapper.o, OzOzoneLoader.o, OzoneParser.o, WDLParser.o, Log.o, OzBsp.o, WorldChunk.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, EditorIcons.o, raygui.o, OTCustom_stub.o -Force -ErrorAction SilentlyContinue
+& mingw32-make -j $env:NUMBER_OF_PROCESSORS AngelEd 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "AngelEd build failed" }
 Pop-Location
 Write-Step "AngelEd.exe built."
 
@@ -174,7 +118,11 @@ Write-Step "Assembling System/ release..."
 if (-not (Test-Path $OUT_DIR)) { New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null }
 if (-not (Test-Path "$OUT_DIR\Data")) { New-Item -ItemType Directory -Force -Path "$OUT_DIR\Data" | Out-Null }
 
-# Move EXEs
+# Move EXEs (fail if any missing)
+if (-not (Test-Path "$PSScriptRoot\Angels95.exe"))  { Fail "Angels95.exe not found" }
+if (-not (Test-Path "$PSScriptRoot\AngelServ.exe")) { Fail "AngelServ.exe not found" }
+if (-not (Test-Path "$PSScriptRoot\OzPack.exe"))    { Fail "OzPack.exe not found" }
+if (-not (Test-Path "$PSScriptRoot\AngelEd\AngelEd.exe")) { Fail "AngelEd.exe not found" }
 Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe"
 Move-Item -Force "$PSScriptRoot\AngelServ.exe" "$OUT_DIR\AngelServ.exe"
 Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe"

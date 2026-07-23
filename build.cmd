@@ -20,6 +20,16 @@ if errorlevel 1 (
     echo ERROR: g++ not found. Expected in %W64DEVKIT%\bin
     exit /b 1
 )
+where windres >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: windres not found. Expected in %W64DEVKIT%\bin
+    exit /b 1
+)
+where mingw32-make >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: mingw32-make not found. Expected in %W64DEVKIT%\bin
+    exit /b 1
+)
 g++ --version | findstr /i "g++"
 
 REM --- Clean previous artifacts ---
@@ -62,79 +72,14 @@ if errorlevel 1 (
 )
 echo OzPack.exe built.
 
-REM --- 4. Build AngelEd (level editor) ---
+REM --- 4. Build AngelEd (level editor) via Makefile ---
 echo.
 echo === Building AngelEd ===
 cd /d "%ROOT%AngelEd"
-
-set EDITOR_FLAGS=-O3 -g --std=c++20 -Wno-narrowing
-set EDITOR_INC=-I ../Source -I Source -I %RAYLIB_INC%
-
-REM Compile raygui
-g++ -fpermissive %EDITOR_FLAGS% %EDITOR_INC% -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o
-if errorlevel 1 ( echo ERROR: raygui compilation failed & exit /b 1 )
-
-REM Compile editor sources
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c Source/Main.cpp -o Main.o
-if errorlevel 1 ( echo ERROR: Main.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c Source/Win32Dialogs.cpp -o Win32Dialogs.o
-if errorlevel 1 ( echo ERROR: Win32Dialogs.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c Source/EditorIcons.cpp -o EditorIcons.o
-if errorlevel 1 ( echo ERROR: EditorIcons.cpp compilation failed & exit /b 1 )
-
-REM Compile engine sources needed by editor
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o
-if errorlevel 1 ( echo ERROR: OzPawnSystem.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Package/OzAssetMapper.cpp -o OzAssetMapper.o
-if errorlevel 1 ( echo ERROR: OzAssetMapper.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/OzOzoneLoader.cpp -o OzOzoneLoader.o
-if errorlevel 1 ( echo ERROR: OzOzoneLoader.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o
-if errorlevel 1 ( echo ERROR: OzoneParser.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Server/WDLParser.cpp -o WDLParser.o
-if errorlevel 1 ( echo ERROR: WDLParser.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Log.cpp -o Log.o
-if errorlevel 1 ( echo ERROR: Log.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Physics/OzBsp.cpp -o OzBsp.o
-if errorlevel 1 ( echo ERROR: OzBsp.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Physics/WorldChunk.cpp -o WorldChunk.o
-if errorlevel 1 ( echo ERROR: WorldChunk.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o
-if errorlevel 1 ( echo ERROR: LightningScriptContext.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Script/LightningScriptParser.cpp -o LightningScriptParser.o
-if errorlevel 1 ( echo ERROR: LightningScriptParser.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Script/LightningEntityRegistry.cpp -o LightningEntityRegistry.o
-if errorlevel 1 ( echo ERROR: LightningEntityRegistry.cpp compilation failed & exit /b 1 )
-
-g++ %EDITOR_FLAGS% %EDITOR_INC% -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o
-if errorlevel 1 ( echo ERROR: LightningEntityManager.cpp compilation failed & exit /b 1 )
-
-REM OTCustom stub
-echo int main_custom() { return 0; } | g++ %EDITOR_FLAGS% %EDITOR_INC% -x c++ -c - -o OTCustom_stub.o
-if errorlevel 1 ( echo ERROR: OTCustom stub compilation failed & exit /b 1 )
-
-REM Link editor
-set EDITOR_LIBS=-lraylib -lopengl32 -lgdi32 -lwinmm -lcomctl32 -lcomdlg32 -lws2_32 -lm
-g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o raygui.o OTCustom_stub.o -o AngelEd.exe %EDITOR_FLAGS% %EDITOR_INC% %EDITOR_LIBS%
-if errorlevel 1 ( echo ERROR: AngelEd link failed & exit /b 1 )
-
-REM Cleanup editor objects
-del /q Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o raygui.o OTCustom_stub.o 2>nul
-
-echo AngelEd.exe built.
+mingw32-make -j %NUMBER_OF_PROCESSORS% AngelEd
+if errorlevel 1 ( echo ERROR: AngelEd build failed & exit /b 1 )
 cd /d "%ROOT%"
+echo AngelEd.exe built.
 
 REM --- 5. Assemble System/ directory ---
 echo.
@@ -147,11 +92,15 @@ mkdir "%OUT_DIR%" 2>nul
 mkdir "%OUT_DIR%\Data" 2>nul
 mkdir "%OUT_DIR%\Cache" 2>nul
 
-REM Move EXEs from build locations into System/
-if exist "%ROOT%Angels95.exe"  move /y "%ROOT%Angels95.exe"  "%OUT_DIR%\Angels95.exe"  >nul
-if exist "%ROOT%AngelServ.exe" move /y "%ROOT%AngelServ.exe" "%OUT_DIR%\AngelServ.exe" >nul
-if exist "%ROOT%OzPack.exe"    move /y "%ROOT%OzPack.exe"    "%OUT_DIR%\OzPack.exe"    >nul
-if exist "%ROOT%AngelEd\AngelEd.exe" move /y "%ROOT%AngelEd\AngelEd.exe" "%OUT_DIR%\AngelEd.exe" >nul
+REM Move EXEs from build locations into System/ (fail if any missing)
+if not exist "%ROOT%Angels95.exe"  echo ERROR: Angels95.exe missing & exit /b 1
+if not exist "%ROOT%AngelServ.exe" echo ERROR: AngelServ.exe missing & exit /b 1
+if not exist "%ROOT%OzPack.exe"    echo ERROR: OzPack.exe missing & exit /b 1
+if not exist "%ROOT%AngelEd\AngelEd.exe" echo ERROR: AngelEd.exe missing & exit /b 1
+move /y "%ROOT%Angels95.exe"  "%OUT_DIR%\Angels95.exe"  >nul
+move /y "%ROOT%AngelServ.exe" "%OUT_DIR%\AngelServ.exe" >nul
+move /y "%ROOT%OzPack.exe"    "%OUT_DIR%\OzPack.exe"    >nul
+move /y "%ROOT%AngelEd\AngelEd.exe" "%OUT_DIR%\AngelEd.exe" >nul
 
 REM Copy raylib DLL
 if exist "%RAYLIB_LIB%\libraylib.dll" (
