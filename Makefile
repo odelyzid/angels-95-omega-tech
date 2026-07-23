@@ -33,9 +33,10 @@ BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o \
-          OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o GameState.o \
+          OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
-          LightningEntityRegistry.o LightningEntityManager.o)
+          LightningEntityRegistry.o LightningEntityManager.o \
+          LitLightning.o rlights.o)
 
 .PHONY: all clean test
 all: OTENGINE AngelServ ozpack
@@ -80,6 +81,12 @@ $(BUILD_DIR)/OzSoundLoader.o: Source/Audio/OzSoundLoader.cpp Source/Audio/OzSoun
 
 $(BUILD_DIR)/OzPawnSystem.o: Source/Pawn/OzPawnSystem.cpp Source/Pawn/OzPawnSystem.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Pawn/OzPawnSystem.cpp -o $@
+
+$(BUILD_DIR)/LitLightning.o: Source/Renderer/LitLightning.cpp Source/Renderer/LitLightning.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/LitLightning.cpp -o $@
+
+$(BUILD_DIR)/rlights.o: Source/rlights/rlights.cpp Source/rlights/rlights.h | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/rlights/rlights.cpp -o $@
 
 $(BUILD_DIR)/OzOzoneLoader.o: Source/OzOzoneLoader.cpp Source/OzOzoneLoader.hpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/OzOzoneLoader.cpp -o $@

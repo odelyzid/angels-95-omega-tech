@@ -28,7 +28,10 @@ class Player{
         bool isFlying = false;
         bool isNoClip = false;
 
+        // Zone state
+        bool inWater = false;
+
         BoundingBox PlayerBounds;
-};
+    };
 
 static Player OmegaPlayer;

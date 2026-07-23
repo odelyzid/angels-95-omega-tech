@@ -326,7 +326,9 @@ void LightningEntityManager::DrawHotbar() {
 void LightningEntityManager::TriggerZoneAction(const std::string& zoneName,
                                                 const std::string& actionName) {
     const EntityDef* def = LightningEntityRegistry::Instance().Find(zoneName);
-    if (!def || def->type != EntityType::SKYZONE) return;
+    if (!def) return;
+    // Only allow zone-type entities to trigger via TrigherZoneAction
+    if (def->type != EntityType::SKYZONE) return;
 
     // Find existing instance or create one
     int instIdx = -1;

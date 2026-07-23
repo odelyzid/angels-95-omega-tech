@@ -99,6 +99,11 @@ void AssetMapper::RegisterEngineTextures() {
         {"PlayerStart"},
         {"Sound"},
         {"ZoneInfo"},
+        {"ZoneWater"},
+        {"ZoneLadder"},
+        {"ZoneSky"},
+        {"ZoneSound"},
+        {"ZoneReverb"},
     };
     const char* baseDir = "GameData/Global/Engine";
     for (auto& ic : engineIcons) {

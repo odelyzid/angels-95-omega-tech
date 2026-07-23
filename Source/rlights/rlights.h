@@ -44,8 +44,6 @@
 
 // Light data
 
-#define RLIGHTS_IMPLEMENTATION
-
 // Light type
 typedef enum {
     LIGHT_DIRECTIONAL = 0,
@@ -73,7 +71,7 @@ typedef struct {
     float radius;        // point/spot light range
     float innerCone;     // spot light inner angle (degrees)
     float outerCone;     // spot light outer angle (degrees)
-    int effect;          // LightEffect
+    int effect;          // LightEffect (0=none, 1=watery, 2=torch, 3=fire, 4=lamp)
     bool hasFlare;       // lens flare enabled
     bool hasCorona;      // corona glow enabled
     int worldIndex;      // which world this light belongs to
@@ -88,6 +86,7 @@ typedef struct {
     int attenuationLoc;
     int intensityLoc;
     int radiusLoc;
+    int effectLoc;
 } Light;
 
 #ifdef __cplusplus
@@ -168,6 +167,7 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.colorLoc = GetShaderLocation(shader, TextFormat("lights[%i].color", lightsCount));
         light.intensityLoc = GetShaderLocation(shader, TextFormat("lights[%i].intensity", lightsCount));
         light.radiusLoc = GetShaderLocation(shader, TextFormat("lights[%i].radius", lightsCount));
+        light.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", lightsCount));
 
         UpdateLightValues(shader, light);
         
@@ -195,6 +195,7 @@ void UpdateLightValues(Shader shader, Light light)
 
     SetShaderValue(shader, light.intensityLoc, &light.intensity, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.radiusLoc, &light.radius, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shader, light.effectLoc, &light.effect, SHADER_UNIFORM_INT);
 }
 
 #endif // RLIGHTS_IMPLEMENTATION

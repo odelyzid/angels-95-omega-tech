@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "raylib.h"
+#include "../Renderer/LitLightning.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -192,6 +193,14 @@ public:
     void DrawEntities(Camera3D& camera);
 
     // Sky zone tracking â€” returns true if player is inside a ZONE_SKY volume
+    // Light node management
+    int AddLight(const LightNode& node);
+    void RemoveLight(int id);
+    void ClearLights();
+    std::vector<LightNode>& GetLights() { return m_lights; }
+    const std::vector<LightNode>& GetLights() const { return m_lights; }
+    LightNode* GetLight(int id);
+
     bool IsInSkyZone() const { return m_inSkyZone; }
     BoundingBox GetSkyZoneBounds() const { return m_activeSkyZoneBounds; }
     void UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds);
@@ -206,6 +215,7 @@ private:
     std::vector<Pawn> m_pawns;
     std::vector<int> m_freeIds;
     std::vector<PawnDef> m_defs;
+    std::vector<LightNode> m_lights;
     uint32_t m_nextId = 1;
 
     // Entity node storage
@@ -214,6 +224,7 @@ private:
     std::vector<ZoneVolumeNode> m_zones;
     std::vector<EmitterNode> m_emitters;
     uint32_t m_nextEntityId = 1;
+    uint32_t m_nextLightId = 1;
 
     // Sky zone state
     bool m_inSkyZone = false;

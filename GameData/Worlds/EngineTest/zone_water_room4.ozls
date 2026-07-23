@@ -1,0 +1,10 @@
+entity "zone_water_0" : skyzone {
+    actions {
+        on_enter {
+            say "Entered WATER zone — reduced gravity active"
+        }
+        on_exit {
+            say "Exited WATER zone"
+        }
+    }
+}

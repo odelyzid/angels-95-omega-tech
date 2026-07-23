@@ -120,6 +120,18 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                     catch (...) { break; }
                 }
             }
+        } else if (type_name == "light") {
+            prim.type = OzonePrimitiveType::ENTITY_LIGHT;
+            // light point x y z r g b intensity radius [effect]
+            // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect]
+            // light directional tx ty tz r g b intensity
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
         } else if (type_name == "heightmap") {
             prim.type = OzonePrimitiveType::HEIGHTMAP;
             // heightmap imagePath texturePath x y z scale sizeX sizeY sizeZ

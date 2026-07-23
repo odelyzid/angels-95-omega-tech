@@ -160,7 +160,34 @@ Pawn* PawnSystem::Get(int id) {
 }
 
 // ---------------------------------------------------------------------------
-// IsPlayerAttacked â€” check if any pawn is close enough to damage the player
+// Light node management
+// ---------------------------------------------------------------------------
+int PawnSystem::AddLight(const LightNode& node) {
+    LightNode n = node;
+    if (n.id == 0) n.id = m_nextLightId++;
+    m_lights.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveLight(int id) {
+    auto it = std::remove_if(m_lights.begin(), m_lights.end(),
+        [id](const LightNode& n) { return n.id == (uint32_t)id; });
+    m_lights.erase(it, m_lights.end());
+}
+
+void PawnSystem::ClearLights() {
+    m_lights.clear();
+}
+
+LightNode* PawnSystem::GetLight(int id) {
+    for (auto& n : m_lights) {
+        if (n.id == (uint32_t)id) return &n;
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// IsPlayerAttacked — check if any pawn is close enough to damage the player
 // ---------------------------------------------------------------------------
 bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
     outDamage = 0.0f;
@@ -340,18 +367,17 @@ void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
             m_inSkyZone = true;
             m_activeSkyZoneBounds = n.bounds;
             if (!wasInSky) {
-                // Trigger sky zone enter action (uses configured zone .ozls name)
+                // Trigger sky zone enter action
                 LightningEntityManager::Instance().TriggerZoneAction(
-                    n.name.empty() ? "skyzone_default" : n.name.c_str(), "on_enter");
+                    n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_enter");
             }
             return;
         }
     }
     if (wasInSky && !m_inSkyZone) {
         // Trigger sky zone exit action
-        // Find the last zone we were in
         LightningEntityManager::Instance().TriggerZoneAction(
-            "skyzone_default", "on_exit");
+            "zone_sky_0", "on_exit");
     }
 }
 

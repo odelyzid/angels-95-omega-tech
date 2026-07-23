@@ -1,0 +1,10 @@
+entity "zone_ladder_0" : skyzone {
+    actions {
+        on_enter {
+            say "Entered LADDER zone — press W/S to climb"
+        }
+        on_exit {
+            say "Exited LADDER zone"
+        }
+    }
+}

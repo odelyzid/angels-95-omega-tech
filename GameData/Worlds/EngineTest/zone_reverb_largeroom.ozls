@@ -1,0 +1,10 @@
+entity "zone_reverb_0" : skyzone {
+    actions {
+        on_enter {
+            say "Entered REVERB zone — echo effect active"
+        }
+        on_exit {
+            say "Exited REVERB zone"
+        }
+    }
+}

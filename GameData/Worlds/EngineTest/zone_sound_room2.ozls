@@ -1,0 +1,10 @@
+entity "zone_sound_0" : skyzone {
+    actions {
+        on_enter {
+            say "Entered GAMEPLAY_SOUND zone — ambient audio active"
+        }
+        on_exit {
+            say "Exited GAMEPLAY_SOUND zone"
+        }
+    }
+}

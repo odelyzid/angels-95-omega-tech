@@ -1,4 +1,4 @@
-entity "skyzone_engine_test" : skyzone {
+entity "zone_sky_0" : skyzone {
     fog_color = (0.7, 0.75, 0.8)
     fog_density = 0.002
     ambient_light = (0.5, 0.5, 0.6)

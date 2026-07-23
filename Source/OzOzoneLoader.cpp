@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <unordered_map>
 
 static ZoneType ParseZoneType(std::string name) {
     std::transform(name.begin(), name.end(), name.begin(),
@@ -53,6 +54,11 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
                 };
                 node.zoneType = ParseZoneType(prim.entitySubType);
                 if (prim.args.size() >= 7) node.intensity = prim.args[6];
+                // Generate unique zone name for .ozls script hook matching
+                static std::unordered_map<std::string, int> zoneCounters;
+                std::string typeKey = prim.entitySubType;
+                auto& counter = zoneCounters[typeKey];
+                node.name = "zone_" + typeKey + "_" + std::to_string(counter++);
                 pawns.AddZone(node);
             }
             return true;
@@ -60,6 +66,45 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
             if (prim.args.size() >= 3)
                 pawns.Spawn({prim.args[0], prim.args[2], prim.args[1]}, prim.entityType.c_str());
             return true;
+        case OzonePrimitiveType::ENTITY_LIGHT: {
+            LightNode node;
+            node.active = true;
+            std::string subtype = prim.entityType;
+            auto arg = [&](int i) -> float {
+                return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
+            };
+            if (subtype == "point" && prim.args.size() >= 7) {
+                // light point x y z r g b intensity radius [effect]
+                node.type = LitLightType::POINT;
+                node.position = {arg(0), arg(2), arg(1)}; // Z-up conversion
+                node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
+                node.intensity = arg(6);
+                node.radius = arg(7);
+                if (prim.args.size() >= 9) node.effect = (LitLightEffect)(int)arg(8);
+            } else if (subtype == "spot" && prim.args.size() >= 12) {
+                // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect]
+                node.type = LitLightType::SPOT;
+                node.position = {arg(0), arg(2), arg(1)};
+                node.target = {arg(3), arg(5), arg(4)};
+                node.color = (Color){(unsigned char)arg(6), (unsigned char)arg(7), (unsigned char)arg(8), 255};
+                node.intensity = arg(9);
+                node.radius = arg(10);
+                node.innerCone = arg(11);
+                node.outerCone = arg(12);
+                if (prim.args.size() >= 14) node.effect = (LitLightEffect)(int)arg(13);
+            } else if (subtype == "directional" && prim.args.size() >= 6) {
+                // light directional tx ty tz r g b intensity
+                node.type = LitLightType::DIRECTIONAL;
+                node.target = {arg(0), arg(2), arg(1)};
+                node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
+                node.intensity = arg(6);
+            } else {
+                OZ_WARN("OZONE: invalid light definition (subtype=%s args=%zu)", subtype.c_str(), prim.args.size());
+                return true;
+            }
+            pawns.AddLight(node);
+            return true;
+        }
         default:
             return false;
     }
@@ -509,6 +554,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
             r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
             continue;
 
@@ -561,6 +607,7 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
             r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
             continue;
 

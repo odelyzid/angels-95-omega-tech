@@ -128,6 +128,19 @@ public:
 
     int PackageCount() const { return (int)m_readers.size(); }
 
+    // Load an additional package file at runtime (e.g. via editor "Add Package")
+    bool LoadPackageFile(const char* path) {
+        OzPackageReader reader;
+        if (reader.Open(path)) {
+            m_readers.push_back(std::move(reader));
+            OZ_INFO("PackageLoader: added %s (%u entries)",
+                    fs::path(path).filename().string().c_str(),
+                    m_readers.back().EntryCount());
+            return true;
+        }
+        return false;
+    }
+
     // List all filenames across all loaded packages
     void ListAllFiles(std::vector<std::string>& names) const {
         names.clear();

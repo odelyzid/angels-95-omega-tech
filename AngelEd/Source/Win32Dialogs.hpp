@@ -89,7 +89,7 @@ struct EditorPanelState {
 
     struct WinPos { int x, y, w, h; };
     WinPos soundMgrPos   = {50, 50, 400, 280};
-    WinPos textureMgrPos = {480, 50, 480, 320};
+    WinPos textureMgrPos = {480, 50, 520, 480};
     WinPos pawnMgrPos    = {50, 360, 360, 200};
     WinPos scriptMgrPos  = {440, 400, 420, 300};
     WinPos modelBrwPos   = {100, 80, 540, 500};
@@ -158,6 +158,17 @@ void ClearZoneApplyFlags();
 void PawnManagerAddPawn(const char* name, const char* meshPath);
 int GetPawnCount();
 const char* GetPawnName(int index);
+
+// Pawn tree node for hierarchical view
+struct PawnTreeNode {
+    std::string label;
+    bool isExpanded = false;
+    std::vector<PawnTreeNode> children;
+    std::string defName;  // empty for category nodes, valid for leaf nodes
+    std::string typeTag;  // "enemy", "weapon", "pickup", "playerstart", "zone", "emitter", ""
+};
+// Build the full tree from current PawnSystem state
+PawnTreeNode BuildPawnTree();
 
 #ifdef _WIN32
 // --- Windows-only functions ---

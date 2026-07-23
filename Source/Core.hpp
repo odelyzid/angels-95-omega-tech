@@ -30,8 +30,7 @@ void SaveGame();
 void UpdateCustom();
 void CacheWDL();
 float SampleHeightmapGroundY(float px, float pz);
-void PutLight(Vector3 Position);
-void ClearLights();
+
 
 #include "ParticleDemon/ParticleDemon.hpp"
 
@@ -122,7 +121,11 @@ void SpawnWDLProcess(const char *Path)
 
         if (Instruction == L"Light")
         {
-            PutLight({ToFloat(WSplitValue(WData, i + 1)) , ToFloat(WSplitValue(WData, i + 2)) , ToFloat(WSplitValue(WData, i + 3))});
+            LightNode node;
+            node.position = {ToFloat(WSplitValue(WData, i + 1)), ToFloat(WSplitValue(WData, i + 2)), ToFloat(WSplitValue(WData, i + 3))};
+            // Extended WDL format: Light:X:Y:Z:R:G:B:I:Rad:T:E:
+            // Parse extra args if available (TODO: fully parse extended format)
+            PawnSystem::Instance().AddLight(node);
         }
 
         i += 3;
@@ -178,13 +181,16 @@ void LoadEntitiesFromWDL()
                 className = string(WSplitValue(WData, i + 6).begin(), WSplitValue(WData, i + 6).end());
             PawnSystem::Instance().Spawn({x, y, z}, className.c_str());
         }
-        // Light: "Light:X:Y:Z"
+        // Light: "Light:X:Y:Z:R:G:B:I:Rad:T:E:"
         else if (Instruction == L"Light")
         {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            PutLight({x, y, z});
+            LightNode node;
+            node.position.x = ToFloat(WSplitValue(WData, i + 1));
+            node.position.y = ToFloat(WSplitValue(WData, i + 2));
+            node.position.z = ToFloat(WSplitValue(WData, i + 3));
+            // Extended format: parse optional R:G:B:I:Rad:T:E:
+            // I=intensity, Rad=radius, T=type(0=point,1=dir,2=spot), E=effect
+            PawnSystem::Instance().AddLight(node);
         }
         // Sound: "Sound:X:Y:Z:S:Rotation"
         else if (Instruction.substr(0, 5) == L"Sound")
@@ -240,7 +246,7 @@ auto LoadWorld()
 {
     OZ_INFO("LoadWorld: loading world %d", OmegaTechData.LevelIndex);
     PlayFade();
-    ClearLights();
+    PawnSystem::Instance().ClearLights();
 
     // Reset movement state so player falls to new world's collision
     OmegaPlayer.onGround = false;
@@ -741,31 +747,37 @@ void LoadLaunchConfig()
     }
 }
 
-int LightCounter = 1;
-
-void UpdateLightSources(){
+void UpdateLightSources() {
+    float dt = GetFrameTime();
     float cameraPos[3] = { OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z };
-    OmegaTechData.GameLights[0].position = { OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z };
+
+    // Light[0] = directional headlight (attached to camera)
+    OmegaTechData.GameLights[0].position = OmegaTechData.MainCamera.position;
     OmegaTechData.GameLights[0].target = { OmegaTechData.MainCamera.target.x, OmegaTechData.MainCamera.target.y - 5, OmegaTechData.MainCamera.target.z };
+    OmegaTechData.GameLights[0].enabled = true;
+    OmegaTechData.GameLights[0].type = LIGHT_DIRECTIONAL;
+
     SetShaderValue(OmegaTechData.Lights, OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
-    for (int i = 0; i < MAX_LIGHTS; i++) UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[i]);
-}
 
-void ClearLights(){
-    LightCounter = 1;
-    for (int i = 0; i < MAX_LIGHTS; i++) OmegaTechData.GameLights[i] = { 0 };
-}
+    // Submit PawnSystem lights via LitLightning_Update
+    auto& pawnLights = PawnSystem::Instance().GetLights();
+    LitLightning_Update(pawnLights, OmegaTechData.Lights, OmegaTechData.MainCamera, dt);
 
-void PutLight(Vector3 Position){
-    OmegaTechData.GameLights[LightCounter] = CreateLight(LIGHT_POINT, Position, Vector3Zero(), RED, OmegaTechData.Lights);
-    LightCounter ++;
+    // Re-submit the headlight on top (index 0)
+    UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[0]);
+
+    // Update uTime for GPU light animation
+    static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");
+    float timeVal = (float)GetTime();
+    SetShaderValue(OmegaTechData.Lights, uTimeLoc, &timeVal, SHADER_UNIFORM_FLOAT);
 }
 
 void DrawLights(){
-    for (int i = 1; i < MAX_LIGHTS; i++)
-    {
-        if (OmegaTechData.GameLights[i].enabled) DrawSphereEx(OmegaTechData.GameLights[i].position, 0.2f, 8, 8, OmegaTechData.GameLights[i].color);
-        else DrawSphereWires(OmegaTechData.GameLights[i].position, 0.2f, 8, 8, ColorAlpha(OmegaTechData.GameLights[i].color, 0.3f));
+    const auto& lights = PawnSystem::Instance().GetLights();
+    for (const auto& node : lights) {
+        if (!node.active) continue;
+        Color c = node.color;
+        DrawSphereEx(node.position, 0.2f, 8, 8, c);
     }
 }
 
@@ -839,6 +851,10 @@ void OmegaTechInit()
     SetShaderValue(OmegaTechData.Lights, fogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
     SetShaderValue(OmegaTechData.Lights, fogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
 
+    // uTime uniform for GPU light animation
+    static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");
+    float timeVal = (float)GetTime();
+    SetShaderValue(OmegaTechData.Lights, uTimeLoc, &timeVal, SHADER_UNIFORM_FLOAT);
 
     OmegaTechData.HomeScreen = LoadTextureWithFallback("GameData/Global/Title/Title.png");
     OmegaTechData.PauseHeading = LoadTexture("GameData/Global/Title/menu_heading.png");
@@ -1412,15 +1428,15 @@ void WDLProcess()
 
             
 
-            if (Instruction == L"Object1")
+            if (Instruction == L"Object1" && OmegaTechGameObjects.Object1.meshes != nullptr)
                 DrawModelEx(OmegaTechGameObjects.Object1, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object2")
+            if (Instruction == L"Object2" && OmegaTechGameObjects.Object2.meshes != nullptr)
                 DrawModelEx(OmegaTechGameObjects.Object2, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object3")
+            if (Instruction == L"Object3" && OmegaTechGameObjects.Object3.meshes != nullptr)
                 DrawModelEx(OmegaTechGameObjects.Object3, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object4")
+            if (Instruction == L"Object4" && OmegaTechGameObjects.Object4.meshes != nullptr)
                 DrawModelEx(OmegaTechGameObjects.Object4, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object5")
+            if (Instruction == L"Object5" && OmegaTechGameObjects.Object5.meshes != nullptr)
                 DrawModelEx(OmegaTechGameObjects.Object5, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
 
             if (Instruction == L"Collision")

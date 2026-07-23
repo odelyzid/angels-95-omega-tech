@@ -9,6 +9,22 @@
 // ---------------------------------------------------------------------------
 // Native Win32 menu bar — replaces the old raygui F2 menu
 // ---------------------------------------------------------------------------
+
+
+/*
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    TODO: 
+        REFACTOR THE Demo Pickup / Projectile system to be more efficient and less hacky and use real Engine systems instead of this hacky mess.
+        This has to be linked entirely to the new LightningEntityManager system and use the new entity definitions for pickups and projectiles instead of hardcoded types aswell as correct PawmRegistry from ozone files
+        .
+        aswell usage of the new entity system for the local projectiles and pickups instead of this hacky mess.
+        Real Pawn system should be used for pickups and projectiles instead of this hacky mess.
+        ZoneInfos arent even integrated at all, same goes for Models, Textures, Sounds, and other assets. This is a very hacky mess and needs to be
+        refactored to use the new systems instead of this hacky mess.
+        Guns / projectiles/ Rendering / Everything is Hardcoded inside this file and needs to be refactored to use the new systems instead of this hacky mess.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+*/
 #define IDM_FILE_LOAD   1001
 #define IDM_FILE_SAVE   1002
 #define IDM_FILE_QUIT   1003
@@ -43,7 +59,7 @@ static void PumpWin32Messages() {
                     break;
                 case IDM_ABOUT:
                     MessageBoxA(NULL,
-                        "Angels95 v1.0\nOmegaTech Engine\nTribeWarez 2025",
+                        "Angels95 v1.0\nOzWorld GameEngine Engine\nBased on OmegaTech\nTribeWarez 2026",
                         "About Angels95", MB_OK | MB_ICONINFORMATION);
                     break;
             }
@@ -76,20 +92,7 @@ static void CreateNativeMenuBar() {
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
-static bool g_demoPickupsReady = false;
 
-// Local projectiles (fired by this client)
-static struct LocalProjectile {
-    Vector3 origin;
-    Vector3 direction;
-    float spawn_time;
-    int weapon_type;
-} g_local_projectiles[32];
-static int g_local_proj_count = 0;
-
-static float now_f() {
-    return static_cast<float>(GetTime());
-}
 
 // ---------------------------------------------------------------------------
 // HUD: draw player stats bars (always visible)
@@ -237,71 +240,21 @@ static void DrawRemotePlayers() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Projectile rendering
-// ---------------------------------------------------------------------------
-static void DrawActiveProjectiles() {
-    float cur = now_f();
-    float proj_speed = 30.0f;
-    float lifetime = 1.5f;
 
-    // Draw client-received projectiles
-    if (g_network_enabled && g_client.is_connected()) {
-        for (const auto& p : g_client.projectiles()) {
-            float age = cur - p.spawn_time;
-            if (age < 0 || age > lifetime) continue;
-            float t = age / lifetime;
-            float dist = t * proj_speed;
-            Vector3 pos = {
-                p.origin.x + p.direction.x * dist,
-                p.origin.y + p.direction.y * dist,
-                p.origin.z + p.direction.z * dist
-            };
-            float alpha = 1.0f - t;
-            Color c = unpack_color(p.color_packed);
-            c.a = (unsigned char)(alpha * 255);
-            DrawSphere(pos, 0.8f + t * 0.5f, c);
-            DrawSphereWires(pos, 1.0f + t * 0.8f, 6, 6, (Color){c.r, c.g, c.b, (unsigned char)(alpha * 80)});
-        }
-    }
-
-    // Draw local projectiles
-    for (int i = 0; i < g_local_proj_count; i++) {
-        float age = cur - g_local_projectiles[i].spawn_time;
-        if (age < 0 || age > lifetime) continue;
-        float t = age / lifetime;
-        float dist = t * proj_speed;
-        Vector3 pos = {
-            g_local_projectiles[i].origin.x + g_local_projectiles[i].direction.x * dist,
-            g_local_projectiles[i].origin.y + g_local_projectiles[i].direction.y * dist,
-            g_local_projectiles[i].origin.z + g_local_projectiles[i].direction.z * dist
-        };
-        float alpha = 1.0f - t;
-        Color c = {0, 200, 255, (unsigned char)(alpha * 255)};
-        DrawSphere(pos, 0.8f + t * 0.5f, c);
-        DrawSphereWires(pos, 1.0f + t * 0.8f, 6, 6, (Color){0, 200, 255, (unsigned char)(alpha * 80)});
-    }
-}
 
 // ---------------------------------------------------------------------------
-// Fire weapon helper
+// Fire weapon helper — delegates to LightningEntityManager
 // ---------------------------------------------------------------------------
 static void FireWeapon() {
     Camera3D& cam = OmegaTechData.MainCamera;
-
-    // Get camera forward direction
     Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
-
-    // Calculate origin slightly in front of camera
     Vector3 origin = Vector3Add(cam.position, Vector3Scale(forward, 2.0f));
 
-    // Add local projectile
-    if (g_local_proj_count < 32) {
-        int idx = g_local_proj_count++;
-        g_local_projectiles[idx].origin = origin;
-        g_local_projectiles[idx].direction = forward;
-        g_local_projectiles[idx].spawn_time = now_f();
-        g_local_projectiles[idx].weapon_type = 1;
+    // Fire via selected weapon entity if available
+    EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
+    if (ent && ent->def && ent->def->type == EntityType::WEAPON) {
+        // Execute weapon's LightningScript on_fire action (future)
+        // For now: entity system will handle projectile spawning via script
     }
 
     // Send to server
@@ -384,7 +337,6 @@ static void ExecuteConsoleCommand(const char* cmd) {
             OZ_INFO("World switch: %d -> %d", OmegaTechData.LevelIndex, id);
             SetSceneId = id;
             SetSceneFlag = true;
-            g_demoPickupsReady = false;
             // World3 uses a ClipBox floor — spawn well above the platform surface
             float spawnY = (id == 3) ? 8.0f : 20.0f;
             OmegaTechData.MainCamera.position = (Vector3){0.0f, spawnY, 0.0f};
@@ -477,113 +429,6 @@ static void HandleConsoleInput() {
             strncpy(g_consoleBuf, hist.c_str(), 255);
             g_consoleCursor = strlen(g_consoleBuf);
         }
-    }
-}
-
-// ---- Pickup ground rendering ----
-// Server-side PickupType values: HEALTH=0, MANA=1, PSYCHIC=2, ARMOR=3, WEAPON=4, AMMO=5, KEY=6, COIN=7, POWERUP=8
-static Texture2D* IconForPickupType(int type) {
-    switch (type) {
-        case 0: return &OmegaTechGameObjects.HealthVialIcon;
-        case 1: return &OmegaTechGameObjects.ManaVialIcon;
-        case 2: return &OmegaTechGameObjects.EnergyCrystalIcon;
-        case 6: return &OmegaTechGameObjects.KeyIcon;
-        case 7: return &OmegaTechGameObjects.CoinIcon;
-        case 8: return &OmegaTechGameObjects.PowerupIcon;
-        default: return nullptr;
-    }
-}
-
-static void DrawPickupBillboard(Texture2D* icon, Vector3 pos) {
-    if (!icon || icon->id == 0) return;
-    float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
-    Vector3 p = {pos.x, pos.y + 0.9f + bob, pos.z};
-    float sz = 1.2f;
-    DrawBillboardPro(OmegaTechData.MainCamera, *icon,
-        (Rectangle){0, 0, (float)icon->width, (float)icon->height},
-        p, (Vector3){0, 1, 0}, (Vector2){sz, sz}, (Vector2){0.5f, 0.5f}, 0, WHITE);
-}
-
-// Offline demo pickups near spawn so sprites can be verified without a server
-struct LocalDemoPickup { Vector3 pos; int type; bool active; };
-static constexpr int g_demoPickupCount = 6;
-
-static LocalDemoPickup g_demoPickups[g_demoPickupCount] = {};
-
-static void InitDemoPickupPositions() {
-    if (g_demoPickupsReady) return;
-    struct { float x, z; int type; } base[g_demoPickupCount] = {
-        {  4.0f, -8.0f, 0 },
-        {  6.0f, -8.0f, 1 },
-        {  8.0f, -8.0f, 2 },
-        { 10.0f, -8.0f, 6 },
-        { 12.0f, -8.0f, 7 },
-        { 14.0f, -8.0f, 8 },
-    };
-    for (int i = 0; i < g_demoPickupCount; i++) {
-        float gy = SampleHeightmapGroundY(base[i].x, base[i].z);
-        if (gy < -50000.0f) gy = 18.0f;
-        g_demoPickups[i] = {{ base[i].x, gy + 1.0f, base[i].z }, base[i].type, true };
-        OZ_INFO("Demo pickup %d at (%.1f, %.1f, %.1f) type=%d",
-                i, base[i].x, gy + 1.0f, base[i].z, base[i].type);
-    }
-    g_demoPickupsReady = true;
-}
-
-static void UpdateDemoPickupCollect() {
-    if (g_network_enabled && g_client.is_connected()) return;
-    InitDemoPickupPositions();
-    Vector3 cam = OmegaTechData.MainCamera.position;
-    for (int i = 0; i < g_demoPickupCount; i++) {
-        if (!g_demoPickups[i].active) continue;
-        Vector3 dp = g_demoPickups[i].pos;
-        float dx = cam.x - dp.x, dy = cam.y - dp.y, dz = cam.z - dp.z;
-        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-        if (dist > 4.0f) continue;
-        g_demoPickups[i].active = false;
-        bool autoUsed = false;
-        switch (g_demoPickups[i].type) {
-            case 0: // health vial — auto-use
-                OmegaPlayer.Health = std::min(OmegaPlayer.Health + 25.0f, OmegaPlayer.MaxHealth);
-                autoUsed = true;
-                break;
-            case 1: // mana vial — auto-use
-                OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + 25.0f, OmegaPlayer.MaxMana);
-                autoUsed = true;
-                break;
-            case 2: // psychic crystal
-                gInventory.AddToBackpack(3, 1);
-                break;
-            case 6: // key
-                gInventory.AddToBackpack(12, 1);
-                break;
-            case 7: // coin
-                gInventory.coins += 1;
-                break;
-            case 8: // powerup
-                gInventory.AddToBackpack(14, 1);
-                break;
-        }
-        PlaySound(OmegaTechSoundData.UIClick);
-        fprintf(stderr, "DEMO pickup type=%d%s\n",
-                g_demoPickups[i].type, autoUsed ? " (auto-used)" : "");
-    }
-}
-
-static void DrawGroundPickups() {
-    if (g_network_enabled && g_client.is_connected()) {
-        const auto& pickups = g_client.pickups();
-        for (const auto& p : pickups) {
-            if (!p.active) continue;
-            DrawPickupBillboard(IconForPickupType(p.type),
-                (Vector3){p.position.x, p.position.y, p.position.z});
-        }
-        return;
-    }
-    InitDemoPickupPositions();
-    for (int i = 0; i < g_demoPickupCount; i++) {
-        if (!g_demoPickups[i].active) continue;
-        DrawPickupBillboard(IconForPickupType(g_demoPickups[i].type), g_demoPickups[i].pos);
     }
 }
 
@@ -954,22 +799,79 @@ int main(int argc, char** argv){
             }
         }
 
-        // --- Jump / Fly / Noclip Y management ---
+        // --- Zone volume detection + movement effects ---
+        {
+            float dt = GetFrameTime();
+            Vector3 playerPos = OmegaTechData.MainCamera.position;
+            static std::string lastZoneName;
+
+            // Query active zone at current position
+            ZoneVolumeNode* activeZone = PawnSystem::Instance().CheckZoneCollision(playerPos, OmegaPlayer.PlayerBounds);
+            OmegaPlayer.inWater = false;
+
+            if (activeZone) {
+                ZoneType zt = activeZone->zoneType;
+                // Skip zones already handled elsewhere
+                if (zt != ZoneType::ZONE_SKY && zt != ZoneType::ZONE_GAMEPLAY_SOUND) {
+                    // Fire zone enter event using zone name (triggers .ozls script hooks)
+                    if (activeZone->name != lastZoneName) {
+                        LightningEntityManager::Instance().TriggerZoneAction(activeZone->name, "on_enter");
+                        if (!lastZoneName.empty())
+                            LightningEntityManager::Instance().TriggerZoneAction(lastZoneName, "on_exit");
+                        lastZoneName = activeZone->name;
+                    }
+                }
+
+                switch (zt) {
+                    case ZoneType::ZONE_WATER:
+                        OmegaPlayer.inWater = true;
+                        break;
+                    case ZoneType::ZONE_LADDER:
+                        // Ladder: disable gravity, allow vertical movement with W/S
+                        OmegaPlayer.velocityY = 0.0f;
+                        OmegaPlayer.onGround = false;
+                        if (IsKeyDown(KEY_W))
+                            OmegaTechData.MainCamera.position.y += 6.0f * dt;
+                        if (IsKeyDown(KEY_S))
+                            OmegaTechData.MainCamera.position.y -= 6.0f * dt;
+                        break;
+                    case ZoneType::ZONE_REVERB:
+                        // Placeholder: reverb DSP will be applied via audio system
+                        break;
+                    default:
+                        break;
+                }
+            } else if (!lastZoneName.empty()) {
+                LightningEntityManager::Instance().TriggerZoneAction(lastZoneName, "on_exit");
+                lastZoneName.clear();
+            }
+        }
+
+        // ---  Jump / Fly / Noclip Y management ---
         {
             float dt = GetFrameTime();
 
             if (OmegaPlayer.isNoClip) {
                 // Noclip: let raylib control Y natively (space up / shift down)
-                // No gravity, no terrain snapping, no collision
             } else if (OmegaPlayer.isFlying) {
-                // Flying: let raylib control Y, no terrain snap, no gravity
-                // But restore Y from before camera if space was not held
-                // Actually raylib space/shift works fine for fly up/down
-            } else {
-                // Normal / grounded: restore Y, raylib's space/shift is ignored
+                // Flying: let raylib control Y, no terrain snap
+            } else if (OmegaPlayer.inWater) {
+                // Water: restore Y, reduced gravity, dampen fall
                 OmegaTechData.MainCamera.position.y = savedCamY;
 
-                // Jump input
+                if (IsKeyPressed(KEY_SPACE) && !g_consoleOpen && !ShowInventory) {
+                    OmegaPlayer.velocityY = 5.0f; // swim upward
+                }
+
+                if (!OmegaPlayer.onGround) {
+                    OmegaPlayer.velocityY += -8.0f * dt; // reduced gravity
+                    OmegaPlayer.velocityY *= 0.95f;      // water drag
+                    OmegaTechData.MainCamera.position.y += OmegaPlayer.velocityY * dt;
+                }
+            } else {
+                // Normal / grounded: restore Y
+                OmegaTechData.MainCamera.position.y = savedCamY;
+
                 if (IsKeyPressed(KEY_SPACE) && OmegaPlayer.onGround && !g_consoleOpen && !ShowInventory) {
                     OmegaPlayer.velocityY = 8.0f;
                     OmegaPlayer.onGround = false;
@@ -1013,15 +915,6 @@ int main(int argc, char** argv){
     
         DrawWorld();
 
-        UpdateDemoPickupCollect();
-
-        // Draw ground pickups in a second 3D pass to the render target
-        BeginTextureMode(Target);
-        BeginMode3D(OmegaTechData.MainCamera);
-        DrawGroundPickups();
-        EndMode3D();
-        EndTextureMode();
-        
         BeginDrawing();  
 
         ClearBackground(BLACK);
@@ -1055,7 +948,6 @@ int main(int argc, char** argv){
         // LightningScript dynamic hotbar
         LightningEntityManager::Instance().DrawHotbar();
         LightningEntityManager::Instance().HandleInput();
-        UpdateObjectBar();
 
         if (ParticlesEnabled){
             OmegaTechData.RainParticles.Update(0,0);
@@ -1135,9 +1027,6 @@ int main(int argc, char** argv){
 
         // Remote player models
         DrawRemotePlayers();
-
-        // Active projectiles
-        DrawActiveProjectiles();
 
         // Inventory overlay
         if (ShowInventory) {

@@ -18,6 +18,7 @@
 #include "../../Source/Physics/OzBsp.hpp"
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -129,6 +130,23 @@ static RayCollision RaycastTestPickups(Ray ray) {
     return best;
 }
 
+static RayCollision RaycastTestZones(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& zones = PawnSystem::Instance().GetZones();
+    for (auto& z : zones) {
+        RayCollision hit = GetRayCollisionBox(ray, z.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::ZONE, (int)z.id, "ZoneVolume", {
+                (z.bounds.min.x + z.bounds.max.x) * 0.5f,
+                (z.bounds.min.y + z.bounds.max.y) * 0.5f,
+                (z.bounds.min.z + z.bounds.max.z) * 0.5f
+            }};
+        }
+    }
+    return best;
+}
+
 static void EditorPickEntity() {
     Ray ray = GetMouseRay(GetMousePosition(), OTEditor.MainCamera);
     g_sel = { SelType::NONE, -1, "", {0,0,0} };
@@ -141,6 +159,7 @@ static void EditorPickEntity() {
     test(RaycastTestModels(ray));
     test(RaycastTestPawns(ray));
     test(RaycastTestPickups(ray));
+    test(RaycastTestZones(ray));
 
     if (best.hit) {
         EditorLog("Selected: %s (type=%d idx=%d dist=%.1f)",
@@ -181,6 +200,111 @@ static void DrawContextMenu() {
     }
 }
 
+// Properties panel state
+static bool g_showPropsPanel = false;
+static char g_propsBuf[6][32] = {{0}}; // editable fields
+static int g_propsFieldCount = 0;
+static int g_propsFocusField = -1;
+static int g_propsCursorBlink = 0;
+
+static void DrawPropertiesPanel() {
+    if (!g_showPropsPanel) return;
+    int sw = GetScreenWidth(), sh = GetScreenHeight();
+    int pw = 300, ph = 220;
+    int px = (sw - pw) / 2, py = (sh - ph) / 2;
+    DrawRectangle(px, py, pw, ph, (Color){45,45,55,240});
+    DrawRectangleLines(px, py, pw, ph, (Color){100,100,120,255});
+
+    int yy = py + 10;
+    DrawText("Entity Properties", px + 8, yy, 14, WHITE); yy += 22;
+    DrawLine(px, yy, px + pw, yy, (Color){80,80,100,255}); yy += 6;
+
+    Rectangle closeR = {(float)px + pw - 70, (float)(py + ph - 28), 60, 20};
+    Rectangle applyR = {(float)px + 10, (float)(py + ph - 28), 60, 20};
+
+    const char* labels[] = {"X:", "Y:", "Z:", "W:", "H:", "L:"};
+    for (int i = 0; i < g_propsFieldCount && i < 6; i++) {
+        DrawText(labels[i], px + 10, yy + 2, 12, LIGHTGRAY);
+        Rectangle r = {(float)px + 50, (float)yy, 100, 18};
+        bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+        bool focus = (i == g_propsFocusField);
+        Color c = focus ? (Color){50,65,90,255} : (hover ? (Color){60,70,90,255} : (Color){30,35,45,255});
+        DrawRectangleRec(r, c);
+        DrawRectangleLinesEx(r, 1, focus ? (Color){150,180,220,255} : (Color){80,80,100,255});
+        std::string disp = g_propsBuf[i];
+        if (focus) {
+            g_propsCursorBlink++;
+            if ((g_propsCursorBlink / 20) % 2 == 0) disp += "_";
+        }
+        DrawText(disp.c_str(), px + 54, yy + 2, 11, WHITE);
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
+            g_propsFocusField = i;
+            g_propsCursorBlink = 0;
+        } else if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !hover
+                   && !CheckCollisionPointRec(GetMousePosition(), closeR)
+                   && !CheckCollisionPointRec(GetMousePosition(), applyR)) {
+            g_propsFocusField = -1;
+        }
+        yy += 22;
+    }
+
+    // Keyboard input for focused field
+    if (g_propsFocusField >= 0 && g_propsFocusField < g_propsFieldCount) {
+        int len = (int)strlen(g_propsBuf[g_propsFocusField]);
+        int key = GetCharPressed();
+        while (key > 0) {
+            if ((key >= '0' && key <= '9') || key == '.' || key == '-' || key == '+') {
+                if (len < 31) {
+                    g_propsBuf[g_propsFocusField][len] = (char)key;
+                    g_propsBuf[g_propsFocusField][len + 1] = '\0';
+                }
+            }
+            key = GetCharPressed();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE) && len > 0) {
+            g_propsBuf[g_propsFocusField][len - 1] = '\0';
+        }
+        if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) {
+            g_propsFocusField = (g_propsFocusField + 1) % g_propsFieldCount;
+        }
+    }
+
+    // Close button
+    Color closeC = CheckCollisionPointRec(GetMousePosition(), closeR) ? (Color){80,50,50,255} : (Color){50,50,60,255};
+    DrawRectangleRec(closeR, closeC);
+    DrawRectangleLinesEx(closeR, 1, (Color){120,80,80,255});
+    DrawText("Close", px + pw - 58, py + ph - 26, 11, WHITE);
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(GetMousePosition(), closeR))
+        g_showPropsPanel = false;
+
+    // Apply button
+    Color applyC = CheckCollisionPointRec(GetMousePosition(), applyR) ? (Color){50,80,50,255} : (Color){50,60,50,255};
+    DrawRectangleRec(applyR, applyC);
+    DrawRectangleLinesEx(applyR, 1, (Color){80,120,80,255});
+    DrawText("Apply", px + 16, py + ph - 26, 11, WHITE);
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(GetMousePosition(), applyR)) {
+        float vals[6];
+        for (int i = 0; i < g_propsFieldCount && i < 6; i++)
+            vals[i] = (float)atof(g_propsBuf[i]);
+        if (g_sel.type == SelType::NPC) {
+            Pawn* p = PawnSystem::Instance().Get(g_sel.index);
+            if (p) p->position = {vals[0], vals[1], vals[2]};
+        } else if (g_sel.type == SelType::PICKUP) {
+            auto& pickups = PawnSystem::Instance().GetPickups();
+            for (auto& pk : pickups) {
+                if ((int)pk.id == g_sel.index) {
+                    pk.position = {vals[0], vals[1], vals[2]};
+                    break;
+                }
+            }
+        } else if (g_sel.type == SelType::BRUSH && g_propsFieldCount >= 6) {
+            EditorLog("Brush property apply not yet implemented");
+        }
+        EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), g_sel.index);
+        g_showPropsPanel = false;
+    }
+}
+
 // Editor log file (appended to System/AngelEd.log)
 static FILE* g_editorLog = nullptr;
 static void EditorLog(const char* fmt, ...) {
@@ -216,6 +340,30 @@ static fs::path g_pendingOpenPath;
 static bool g_pendingNew = false;
 static Sound g_previewSound = {0};
 static bool g_previewSoundLoaded = false;
+
+// Orthographic / view preset state
+static bool g_orthoView = false;
+static Camera3D g_perspectiveCamState = {0};
+
+static void SetViewPreset(const Vector3& pos, const Vector3& target, const Vector3& up) {
+    if (!g_orthoView) {
+        g_perspectiveCamState = OTEditor.MainCamera;
+        g_orthoView = true;
+    }
+    OTEditor.MainCamera.position = pos;
+    OTEditor.MainCamera.target = target;
+    OTEditor.MainCamera.up = up;
+    OTEditor.MainCamera.projection = CAMERA_ORTHOGRAPHIC;
+}
+
+static void SetViewPerspective() {
+    if (g_orthoView) {
+        // Restore saved state
+        OTEditor.MainCamera = g_perspectiveCamState;
+        g_orthoView = false;
+    }
+    OTEditor.MainCamera.projection = CAMERA_PERSPECTIVE;
+}
 
 // Panel toggle helpers (keyboard-driven, no top menu bar)
 static void ToggleSoundMgr()    { ShowSoundManager(!g_editorPanels.showSoundMgr); }
@@ -316,6 +464,32 @@ static bool LoadWorldDocument(const fs::path& path) {
     ClearScene();
     SetWorldDirectory(path.parent_path());
     g_documentPath = path;
+
+    // Auto-load .oztex packages from the world directory (for textures used by this level)
+    {
+        fs::path worldDir = path.parent_path();
+        int loadedPkg = 0;
+        if (fs::exists(worldDir)) {
+            for (auto& entry : fs::recursive_directory_iterator(worldDir)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".oztex" || ext == ".ozpak") {
+                        auto& loader = PackageAssetLoader::Instance();
+                        if (loader.LoadPackageFile(entry.path().string().c_str())) {
+                            loadedPkg++;
+                            EditorLog("Loaded package: %s", entry.path().filename().string().c_str());
+                        }
+                    }
+                }
+            }
+        }
+        if (loadedPkg > 0) {
+            EditorLog("Auto-loaded %d texture package(s) from world directory", loadedPkg);
+            UpdateTextureManagerList();
+        }
+    }
+
     std::string extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char c) { return (char)std::tolower(c); });
@@ -359,8 +533,98 @@ static void AppendOzoneEntities(std::wofstream& output) {
                << zone.intensity << L":\n";
 }
 
+static void ExportToOzone(std::ostream& output) {
+    // Header
+    output << "# OZONE world exported from AngelEd\n";
+    output << "# Format: ozone v1.0\n\n";
+
+    // Export collision volumes as box primitives
+    auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+    for (size_t i = 0; i < vols.size(); i++) {
+        auto& v = vols[i];
+        Vector3 center = {(v.aabb.min.x + v.aabb.max.x) * 0.5f,
+                          (v.aabb.min.y + v.aabb.max.y) * 0.5f,
+                          (v.aabb.min.z + v.aabb.max.z) * 0.5f};
+        float w = v.aabb.max.x - v.aabb.min.x;
+        float h = v.aabb.max.y - v.aabb.min.y;
+        float d = v.aabb.max.z - v.aabb.min.z;
+        if (w < 0.01f) w = 1.0f;
+        if (h < 0.01f) h = 1.0f;
+        if (d < 0.01f) d = 1.0f;
+        // Use CSG op from stored data (default to add)
+        const char* csgPrefix = "add";
+        output << csgPrefix << " box " << center.x << " " << center.y << " " << center.z
+               << " " << w << " " << h << " " << d << " 0\n";
+    }
+
+    // Heightmap
+    if (WDLModels.HeightMapReady) {
+        output << "heightmap Models/HeightMap.png Models/HeightMapTexture.png "
+               << WDLModels.HeightMapPosition.x << " " << WDLModels.HeightMapPosition.y << " " << WDLModels.HeightMapPosition.z
+               << " " << WDLModels.HeightMapScale
+               << " " << WDLModels.HeightMapSize.x << " " << WDLModels.HeightMapSize.y << " " << WDLModels.HeightMapSize.z << "\n";
+    }
+
+    output << "\n# Entities\n";
+
+    // Player starts
+    auto& pawns = PawnSystem::Instance();
+    for (auto& start : pawns.GetPlayerStarts()) {
+        output << "playerstart " << start.position.x << " " << start.position.y << " " << start.position.z << " " << start.yaw << "\n";
+    }
+
+    // Pickups
+    for (auto& pickup : pawns.GetPickups()) {
+        output << "pickup " << pickup.typeName << " " << pickup.position.x << " " << pickup.position.y << " " << pickup.position.z;
+        if (pickup.respawnTime > 0.01f) output << " " << pickup.respawnTime;
+        output << "\n";
+    }
+
+    // NPCs
+    for (auto& pawn : pawns.GetPawns()) {
+        if (!pawn.active || pawn.defName.empty()) continue;
+        output << "npc " << pawn.defName << " " << pawn.position.x << " " << pawn.position.y << " " << pawn.position.z << "\n";
+    }
+
+    // Zone volumes
+    for (auto& zone : pawns.GetZones()) {
+        const char* zt = "water";
+        switch (zone.zoneType) {
+            case ZoneType::ZONE_LADDER: zt = "ladder"; break;
+            case ZoneType::ZONE_SKY: zt = "sky"; break;
+            case ZoneType::ZONE_REVERB: zt = "reverb"; break;
+            case ZoneType::ZONE_GAMEPLAY_SOUND: zt = "sound"; break;
+            default: zt = "water"; break;
+        }
+        output << "zone " << zt
+               << " " << zone.bounds.min.x << " " << zone.bounds.min.y << " " << zone.bounds.min.z
+               << " " << zone.bounds.max.x << " " << zone.bounds.max.y << " " << zone.bounds.max.z
+               << " " << zone.intensity << "\n";
+    }
+
+    // Emitters
+    for (auto& emitter : pawns.GetEmitters()) {
+        const char* et = (emitter.type == EmitterType::SOUND) ? "sound" : "music";
+        output << "emitter " << et << " " << emitter.position.x << " " << emitter.position.y << " " << emitter.position.z << "\n";
+    }
+
+    output << "\n# End of OZONE export\n";
+}
+
 static bool SaveWorldDocument(const fs::path& path) {
-    if (path.extension() != ".wdl") return false;
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    if (ext == ".ozone") {
+        std::ofstream output(path);
+        if (!output.is_open()) return false;
+        ExportToOzone(output);
+        g_documentPath = path;
+        SetWorldDirectory(path.parent_path());
+        return true;
+    }
+
+    if (ext != ".wdl") return false;
     std::wofstream output(path);
     if (!output.is_open()) return false;
     output << OTEditor.WorldData;
@@ -440,17 +704,72 @@ int main(int argc, char **argv){
     CacheWDL();
     ShowCsgSidebar(true);
 
-    // Register default pawn definitions
+    // Load pawn definitions from config files (data-driven)
     {
         auto& ps = PawnSystem::Instance();
-        ps.RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
-        ps.RegisterDef({"Skaarj", 2.5f, 10.0f, 2.0f, 20.0f, 150});
-        ps.RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
-        ps.RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
-        PawnManagerAddPawn("Walker", "GameData/Models/Walker.obj");
-        PawnManagerAddPawn("Skaarj", "GameData/Models/Skaarj.obj");
-        PawnManagerAddPawn("Brute", "GameData/Models/Brute.obj");
-        PawnManagerAddPawn("Floater", "GameData/Models/Floater.obj");
+        const char* defsDir = "GameData/Global/PawnDefs";
+        if (fs::exists(defsDir)) {
+            int loaded = 0;
+            for (auto& entry : fs::directory_iterator(defsDir)) {
+                if (!entry.is_regular_file()) continue;
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext != ".cfg") continue;
+                std::ifstream f(entry.path());
+                if (!f.is_open()) continue;
+                std::string name, sp, sc;
+                float speed = 1.5f, aggroRange = 6.0f, attackRange = 1.5f, damage = 10.0f;
+                int maxHealth = 100;
+                std::string line;
+                while (std::getline(f, line)) {
+                    line.erase(0, line.find_first_not_of(" \t\r\n"));
+                    if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+                    size_t eq = line.find('=');
+                    if (eq == std::string::npos) continue;
+                    std::string key = line.substr(0, eq);
+                    std::string val = line.substr(eq + 1);
+                    key.erase(0, key.find_first_not_of(" \t"));
+                    key.erase(key.find_last_not_of(" \t") + 1);
+                    val.erase(0, val.find_first_not_of(" \t"));
+                    val.erase(val.find_last_not_of(" \t\r") + 1);
+                    if (key == "name") name = val;
+                    else if (key == "speed") speed = std::stof(val);
+                    else if (key == "aggroRange") aggroRange = std::stof(val);
+                    else if (key == "attackRange") attackRange = std::stof(val);
+                    else if (key == "damage") damage = std::stof(val);
+                    else if (key == "maxHealth") maxHealth = std::stoi(val);
+                    else if (key == "sprite_path") sp = val;
+                    else if (key == "scream_path") sc = val;
+                }
+                if (!name.empty()) {
+                    PawnDef def;
+                    def.name = strdup(name.c_str());
+                    def.speed = speed;
+                    def.aggroRange = aggroRange;
+                    def.attackRange = attackRange;
+                    def.damage = damage;
+                    def.maxHealth = maxHealth;
+                    def.sprite_path = sp.empty() ? nullptr : strdup(sp.c_str());
+                    def.scream_path = sc.empty() ? nullptr : strdup(sc.c_str());
+                    ps.RegisterDef(def);
+                    PawnManagerAddPawn(name.c_str(), (std::string("GameData/Models/") + name + ".obj").c_str());
+                    loaded++;
+                    EditorLog("Loaded pawn def: %s", name.c_str());
+                }
+            }
+            EditorLog("Loaded %d pawn definitions from %s", loaded, defsDir);
+        } else {
+            // Legacy fallback if no config directory exists
+            EditorLog("WARN: %s not found, using hardcoded defaults", defsDir);
+            ps.RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
+            ps.RegisterDef({"Skaarj", 2.5f, 10.0f, 2.0f, 20.0f, 150});
+            ps.RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
+            ps.RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
+            PawnManagerAddPawn("Walker", "GameData/Models/Walker.obj");
+            PawnManagerAddPawn("Skaarj", "GameData/Models/Skaarj.obj");
+            PawnManagerAddPawn("Brute", "GameData/Models/Brute.obj");
+            PawnManagerAddPawn("Floater", "GameData/Models/Floater.obj");
+        }
     }
 
     if (argc > 1 && argv[1]) {
@@ -650,7 +969,7 @@ int main(int argc, char **argv){
             }
         }
 
-        // Pawn system ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â draw active pawns as billboards
+        // Pawn system 
         PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
         PawnSystem::Instance().DrawEntities(OTEditor.MainCamera);
 
@@ -695,10 +1014,20 @@ int main(int argc, char **argv){
                 DrawCubeWires({px, py, pz}, 0.5f, 0.2f, 0.5f, (Color){c.r,c.g,c.b,80});
             }
 
-            DrawCubeWires({px, py, pz}, ps, ps, ps, (EMID <= 100 || EMID == -3) ? PINK : ORANGE);
-            DrawLine3D({px, py, pz}, {px + ps*3, py, pz}, RED);
-            DrawLine3D({px, py, pz}, {px, py + ps*3, pz}, BLUE);
-            DrawLine3D({px, py, pz}, {px, py, pz + ps*3}, GREEN);
+            // Axis gizmo
+            float gizmoLen = fmaxf(ps * 3, 2.0f);
+            float gizmoTip = gizmoLen * 0.1f;
+            // X axis (Red)
+            DrawLine3D({px, py, pz}, {px + gizmoLen, py, pz}, RED);
+            DrawSphere({px + gizmoLen, py, pz}, gizmoTip, RED);
+            // Y axis (Blue)
+            DrawLine3D({px, py, pz}, {px, py + gizmoLen, pz}, BLUE);
+            DrawSphere({px, py + gizmoLen, pz}, gizmoTip, BLUE);
+            // Z axis (Green)
+            DrawLine3D({px, py, pz}, {px, py, pz + gizmoLen}, GREEN);
+            DrawSphere({px, py, pz + gizmoLen}, gizmoTip, GREEN);
+            // Origin sphere
+            DrawSphere({px, py, pz}, gizmoTip * 0.5f, (Color){180, 180, 180, 200});
 
             // Movement controls
             if (!IsMouseButtonDown(2)) {
@@ -840,6 +1169,14 @@ int main(int argc, char **argv){
                 auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
                 if (g_sel.index >= 0 && g_sel.index < (int)vols.size())
                     selBox = vols[g_sel.index].aabb;
+            } else if (g_sel.type == SelType::ZONE) {
+                auto& zones = PawnSystem::Instance().GetZones();
+                for (auto& z : zones) {
+                    if ((int)z.id == g_sel.index) {
+                        selBox = z.bounds;
+                        break;
+                    }
+                }
             }
             if (selBox.min.x != selBox.max.x || selBox.min.y != selBox.max.y) {
                 float pulse = 0.5f + 0.5f * sinf(GetTime() * 4);
@@ -1064,18 +1401,104 @@ int main(int argc, char **argv){
 
         // Context menu overlay (right-click entity)
         DrawContextMenu();
+        DrawPropertiesPanel();
         if (g_contextMenuChoice >= 0) {
             int action = g_contextMenuChoice;
             g_contextMenuChoice = -1;
-            if (action == 2 && g_sel.type == SelType::NPC) {
-                PawnSystem::Instance().Despawn(g_sel.index);
-                EditorLog("Deleted NPC %d", g_sel.index);
+
+            if (action == 1) {
+                // Properties
+                g_propsFieldCount = 0;
+                for (int i = 0; i < 6; i++) g_propsBuf[i][0] = '\0';
+                if (g_sel.type == SelType::NPC) {
+                    Pawn* p = PawnSystem::Instance().Get(g_sel.index);
+                    if (p) {
+                        snprintf(g_propsBuf[0], 32, "%.1f", p->position.x);
+                        snprintf(g_propsBuf[1], 32, "%.1f", p->position.y);
+                        snprintf(g_propsBuf[2], 32, "%.1f", p->position.z);
+                        g_propsFieldCount = 3;
+                    }
+                } else if (g_sel.type == SelType::PICKUP) {
+                    auto& pickups = PawnSystem::Instance().GetPickups();
+                    for (auto& pk : pickups) {
+                        if ((int)pk.id == g_sel.index) {
+                            snprintf(g_propsBuf[0], 32, "%.1f", pk.position.x);
+                            snprintf(g_propsBuf[1], 32, "%.1f", pk.position.y);
+                            snprintf(g_propsBuf[2], 32, "%.1f", pk.position.z);
+                            g_propsFieldCount = 3;
+                            break;
+                        }
+                    }
+                } else if (g_sel.type == SelType::BRUSH) {
+                    auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+                    if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
+                        auto& v = vols[g_sel.index];
+                        Vector3 center = {(v.aabb.min.x + v.aabb.max.x) * 0.5f,
+                                          (v.aabb.min.y + v.aabb.max.y) * 0.5f,
+                                          (v.aabb.min.z + v.aabb.max.z) * 0.5f};
+                        snprintf(g_propsBuf[0], 32, "%.1f", center.x);
+                        snprintf(g_propsBuf[1], 32, "%.1f", center.y);
+                        snprintf(g_propsBuf[2], 32, "%.1f", center.z);
+                        snprintf(g_propsBuf[3], 32, "%.1f", v.aabb.max.x - v.aabb.min.x);
+                        snprintf(g_propsBuf[4], 32, "%.1f", v.aabb.max.y - v.aabb.min.y);
+                        snprintf(g_propsBuf[5], 32, "%.1f", v.aabb.max.z - v.aabb.min.z);
+                        g_propsFieldCount = 6;
+                    }
+                }
+                g_showPropsPanel = true;
+                EditorLog("Properties for %s idx=%d", g_sel.name.c_str(), g_sel.index);
             }
-            if (action == 2 && g_sel.type == SelType::PICKUP) {
-                PawnSystem::Instance().RemovePickup(g_sel.index);
-                EditorLog("Deleted pickup %d", g_sel.index);
+
+            if (action == 2) {
+                // Delete
+                EditorLog("Deleted %s idx=%d", g_sel.name.c_str(), g_sel.index);
+                if (g_sel.type == SelType::NPC)
+                    PawnSystem::Instance().Despawn(g_sel.index);
+                else if (g_sel.type == SelType::PICKUP)
+                    PawnSystem::Instance().RemovePickup(g_sel.index);
+                else if (g_sel.type == SelType::BRUSH) {
+                    // Remove brush collision volume (clear and rebuild without this one)
+                    EditorLog("Brush deletion not yet implemented (vol index %d)", g_sel.index);
+                }
+                g_sel = { SelType::NONE, -1, "", {0,0,0} };
             }
-            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+
+            if (action == 3) {
+                // Duplicate
+                Vector3 offset = {2.0f, 0, 2.0f};
+                EditorLog("Duplicating %s idx=%d", g_sel.name.c_str(), g_sel.index);
+                if (g_sel.type == SelType::NPC) {
+                    Pawn* p = PawnSystem::Instance().Get(g_sel.index);
+                    if (p) {
+                        Vector3 newPos = {p->position.x + offset.x, p->position.y + offset.y, p->position.z + offset.z};
+                        PawnSystem::Instance().Spawn(newPos, p->defName.c_str());
+                    }
+                } else if (g_sel.type == SelType::PICKUP) {
+                    auto& pickups = PawnSystem::Instance().GetPickups();
+                    for (auto& pk : pickups) {
+                        if ((int)pk.id == g_sel.index) {
+                            PickupNode clone = pk;
+                            clone.position.x += offset.x;
+                            clone.position.z += offset.z;
+                            PawnSystem::Instance().AddPickup(clone);
+                            break;
+                        }
+                    }
+                } else if (g_sel.type == SelType::ZONE) {
+                    auto& zones = PawnSystem::Instance().GetZones();
+                    for (auto& z : zones) {
+                        if ((int)z.id == g_sel.index) {
+                            ZoneVolumeNode clone = z;
+                            clone.bounds.min.x += offset.x;
+                            clone.bounds.min.z += offset.z;
+                            clone.bounds.max.x += offset.x;
+                            clone.bounds.max.z += offset.z;
+                            PawnSystem::Instance().AddZone(clone);
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         EndDrawing();
@@ -1278,9 +1701,35 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_F12)) ToggleEnvPanel();
 
         // Camera shortcuts
-        if (IsKeyPressed(KEY_HOME)) ResetCamera();
+        if (IsKeyPressed(KEY_HOME)) { SetViewPerspective(); ResetCamera(); }
         if (IsKeyPressed(KEY_PAGE_UP)) CamUp();
         if (IsKeyPressed(KEY_PAGE_DOWN)) CamDown();
+
+        // View preset shortcuts (NumPad)
+        if (IsKeyPressed(KEY_KP_7)) {
+            // Top view
+            Vector3 center = OTEditor.MainCamera.target;
+            SetViewPreset({center.x, center.y + 80, center.z + 0.1f}, center, {0, 0, -1});
+        }
+        if (IsKeyPressed(KEY_KP_1)) {
+            // Bottom view
+            Vector3 center = OTEditor.MainCamera.target;
+            SetViewPreset({center.x, center.y - 80, center.z + 0.1f}, center, {0, 0, 1});
+        }
+        if (IsKeyPressed(KEY_KP_3)) {
+            // Right view
+            Vector3 center = OTEditor.MainCamera.target;
+            SetViewPreset({center.x + 80, center.y, center.z}, center, {0, 1, 0});
+        }
+        if (IsKeyPressed(KEY_KP_9)) {
+            // Left view
+            Vector3 center = OTEditor.MainCamera.target;
+            SetViewPreset({center.x - 80, center.y, center.z}, center, {0, 1, 0});
+        }
+        if (IsKeyPressed(KEY_KP_5)) {
+            // Perspective / back to default
+            SetViewPerspective();
+        }
 
     }
 

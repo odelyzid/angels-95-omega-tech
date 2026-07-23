@@ -20,6 +20,7 @@ enum class OzonePrimitiveType : uint8_t {
     ENTITY_PICKUP,       // Pickup node (item)
     ENTITY_ZONE,         // Zone volume
     ENTITY_NPC,          // NPC spawn node
+    ENTITY_LIGHT,        // Light node (point/spot/directional)
     HEIGHTMAP,           // Terrain heightmap (grayscale image)
     UNKNOWN
 };

@@ -548,7 +548,7 @@ private:
     void DrawHelpPage(Rectangle area) {
         DrawPageHeader(area, "About Angels95 / OmegaTech Engine");
         const char* l[] = {
-            "Angels95 - Powered by the OmegaTech Engine","","A first-person shooter built with raylib 5.5 and C++20.","",
+            "Angels95 - Powered by the OzWorld Engine - based on OmegaTech Engine","","A first-person shooter built with raylib 5.5 and C++20.","",
             "Controls:","  WASD  - Movement","  Mouse - Look around","  Left Click - Fire weapon",
             "  E     - Interact / Use","  Tab   - Inventory","  Escape - Pause menu","  `     - Console","",
             "Features:","  - LightningScript scripting system","  - OZONE world format with CSG brushes",
