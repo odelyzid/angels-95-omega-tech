@@ -94,7 +94,11 @@ CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DI
              $(BUILD_DIR)/WDLParser.o $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o
 
-EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorIcons.o $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
+# 5c. Editor Windows resource
+$(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)
+	windres AngelEd.rc -O coff -o $@
+
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 	$(COMP) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 
