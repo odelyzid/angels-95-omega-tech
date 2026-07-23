@@ -486,7 +486,6 @@ static bool LoadWorldDocument(const fs::path& path) {
         }
         if (loadedPkg > 0) {
             EditorLog("Auto-loaded %d texture package(s) from world directory", loadedPkg);
-            UpdateTextureManagerList();
         }
     }
 
