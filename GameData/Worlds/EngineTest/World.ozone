@@ -11,8 +11,8 @@ zone sky -80 -80 -30 80 80 80
 # ==============================================================================
 # Ground plane (everything sits on) — extended south for outdoor area
 # ==============================================================================
-add box 10 -10 -0.5 60 0.5 85 0
-add box 10 -80 -0.5 50 0.5 46 0          # outdoor ground extension
+add box 10 -10 -0.5 60 0.5 85 0           # main ground (rooms area)
+add box 20 -68 -0.5 46 0.5 48 0           # outdoor ground (large room exit to far south)
 
 # ==============================================================================
 # ROOM 1 (top-left, connects to Room2 via CorridorA, Room4 via CorridorD)
@@ -69,11 +69,8 @@ add cyl 20 -10 5 0.6 0.6 10 16 0
 add box 20 -38 -0.25 23 0.5 23 0
 add box 13 -26.75 5 9 10 0.5 0
 add box 27 -26.75 5 9 10 0.5 0
-add box 20 -49.75 5 23 10 0.5 0         # south wall — OPENING in center for outdoor exit
-add box 20 -49.75 10 8 10 0.5 0          # south wall left section
-add box 20 -49.75 10 8 10 0.5 0          # south wall right section
-# Actually redo south wall with a 6-wide opening in the center
-sub box 20 -49.75 10 6 10 0.5 0          # carve opening in south wall
+add box 12 -49.75 5 9 10 0.5 0           # south wall LEFT  (x=7.5..16.5, gap 16.5..23.5)
+add box 28 -49.75 5 9 10 0.5 0           # south wall RIGHT (x=23.5..32.5)
 add box 31.75 -38 5 0.5 10 23 0
 add box 8.25 -38 5 0.5 10 23 0
 add cyl 12 -30 5 0.6 0.6 10 16 0
@@ -125,11 +122,18 @@ add cyl 12 -72 5 0.5 0.5 12 16 0
 add cyl 28 -72 5 0.5 0.5 12 16 0
 
 # Walkway from large room exit to the outdoor area
-add box 20 -55 -0.25 6 0.5 10 0
+add box 20 -55 -0.25 6 0.5 10 0          # walkway floor
 
-# Archway frame (thin walls flanking the exit)
-add box 14 -49.75 5 2 10 0.5 0
-add box 26 -49.75 5 2 10 0.5 0
+# Walkway walls (short, like a covered passage)
+add box 16 -55 5 2 10 7 0                 # walkway left wall
+add box 24 -55 5 2 10 7 0                 # walkway right wall
+
+# Walkway ceiling (partial — front half open to sky)
+add box 20 -52 7 8 0.5 4 0                # ceiling over rear half of walkway
+
+# Archway frame (thin walls flanking the exit from large room)
+add box 14 -49.75 5 2 10 0.5 0           # left arch pillar
+add box 26 -49.75 5 2 10 0.5 0           # right arch pillar
 
 # ==============================================================================
 # Player start
@@ -175,7 +179,7 @@ zone sound 12.5 2.5 0 27.5 17.5 10
 # Lights — placed in rooms for testing
 # ==============================================================================
 # Sun (directional) — illuminates the entire world from above-right
-light directional -50 -50 80 255 240 220 1.2
+light directional -50 -50 80 255 240 220 0.6
 
 # Room 1 — warm point light
 light point 0 10 3 255 200 100 1.0 40
