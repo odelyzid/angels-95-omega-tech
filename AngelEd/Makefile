@@ -13,7 +13,7 @@ else
 endif
 
 COMP := g++
-BUILD_DIR := ../build
+BUILD_DIR := ../build-ed
 
 .PHONY: all clean
 
@@ -104,5 +104,4 @@ AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 
 clean:
 	rm -f AngelEd
-	rm -f $(BUILD_DIR)/Main.o $(BUILD_DIR)/Win32Dialogs.o $(BUILD_DIR)/raygui.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/Custom.so
-	rm -f $(LIGHTNING_OBJS)
+	rm -rf $(BUILD_DIR)

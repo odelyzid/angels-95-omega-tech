@@ -37,7 +37,9 @@ echo.
 echo === Cleaning previous build ===
 cd /d "%ROOT%"
 mingw32-make clean 2>nul
-if exist "%ROOT%AngelEd\*.o" del /q "%ROOT%AngelEd\*.o" 2>nul
+cd /d "%ROOT%AngelEd"
+mingw32-make clean 2>nul
+cd /d "%ROOT%"
 
 REM --- 1. Build OTENGINE (game client) ---
 echo.

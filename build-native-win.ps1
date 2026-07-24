@@ -46,10 +46,9 @@ if (-not (Test-Path "$W64DEVKIT\include\raymath.h")) {
 # --- Clean previous artifacts ---
 if (-not $SkipClean) {
     Write-Step "Cleaning previous build..."
-    Push-Location $PSScriptRoot
-    & mingw32-make clean 2>&1 | Out-Null
+    & mingw32-make clean 2>&1 | Out-Null          # main build/
     Push-Location "$PSScriptRoot\AngelEd"
-    & mingw32-make clean 2>&1 | Out-Null
+    & mingw32-make clean 2>&1 | Out-Null          # editor build-ed/
     Pop-Location
 }
 
