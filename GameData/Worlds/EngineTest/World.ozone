@@ -78,9 +78,9 @@ add cyl 28 -30 5 0.6 0.6 10 16 0
 add cyl 12 -46 5 0.6 0.6 10 16 0
 add cyl 28 -46 5 0.6 0.6 10 16 0
 
-# Two pillars flanking the exit to outdoor area
-add cyl 17 -49.75 5 0.4 0.4 10 16 0
-add cyl 23 -49.75 5 0.4 0.4 10 16 0
+# Two pillars flanking the exit to outdoor area (snapped to floor Z=-0.25 → center=4.75)
+add cyl 17 -49.75 4.75 0.4 0.4 10 16 0
+add cyl 23 -49.75 4.75 0.4 0.4 10 16 0
 
 # ==============================================================================
 # Corridors connecting rooms
@@ -108,18 +108,17 @@ add box 17.25 -22 5 0.5 10 9 0
 # ==============================================================================
 # OUTDOOR AREA (south of LargeRoom) — open sky, pillars, garden walls
 # ==============================================================================
-# Floor with green tint (simulated grass via ground plane above)
-# Decorative low walls framing the space
-add box 12 -62 -0.25 12 1 18 0           # low garden wall left
-add box 28 -62 -0.25 12 1 18 0           # low garden wall right
-add box 12 -75 -0.25 12 1 8 0            # far wall left
-add box 28 -75 -0.25 12 1 8 0            # far wall right
+# Decorative low walls framing the space (snapped to Z=-0.5 ground, h=1 → center Z=0)
+add box 12 -62 0 12 1 18 0              # low garden wall left
+add box 28 -62 0 12 1 18 0              # low garden wall right
+add box 12 -75 0 12 1 8 0               # far wall left
+add box 28 -75 0 12 1 8 0               # far wall right
 
-# Tall pillars
-add cyl 12 -55 5 0.5 0.5 12 16 0
-add cyl 28 -55 5 0.5 0.5 12 16 0
-add cyl 12 -72 5 0.5 0.5 12 16 0
-add cyl 28 -72 5 0.5 0.5 12 16 0
+# Tall pillars (snapped to outdoor ground Z=-0.5, height=12 → center Z=5.5)
+add cyl 12 -55 5.5 0.5 0.5 12 16 0
+add cyl 28 -55 5.5 0.5 0.5 12 16 0
+add cyl 12 -72 5.5 0.5 0.5 12 16 0
+add cyl 28 -72 5.5 0.5 0.5 12 16 0
 
 # Walkway from large room exit to the outdoor area
 add box 20 -55 -0.25 6 0.5 10 0          # walkway floor

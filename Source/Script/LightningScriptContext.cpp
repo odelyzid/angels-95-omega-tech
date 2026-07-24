@@ -42,12 +42,12 @@ bool LightningScriptContext::Load(const std::string& scriptText) {
     for (int i = 0; i < lineIdx; i++) {
         const std::string& ln = m_lines[i];
         size_t colon = ln.find(':');
-        if (colon != std::string::npos && colon > 0 && colon < ln.size() - 1) {
+        if (colon != std::string::npos && colon > 0) {
             bool isLabel = true;
             for (size_t c = 0; c < colon; c++) {
                 if (!std::isalnum(ln[c]) && ln[c] != '_') { isLabel = false; break; }
             }
-            if (isLabel && ln[colon+1] == ' ') {
+            if (isLabel && (colon + 1 >= ln.size() || ln[colon+1] == ' ')) {
                 m_jumpLabels[ln.substr(0, colon)] = i;
             }
         }
@@ -83,7 +83,7 @@ bool LightningScriptContext::ExecuteNext() {
     if (colon != std::string::npos) {
         bool allAlpha = true;
         for (size_t c = 0; c < colon; c++) { if (!std::isalnum(line[c]) && line[c] != '_') { allAlpha = false; break; } }
-        if (allAlpha && colon < line.size() - 1 && line[colon+1] == ' ') {
+        if (allAlpha && (colon + 1 >= line.size() || line[colon+1] == ' ')) {
             m_pc++;
             return true;
         }
@@ -354,6 +354,14 @@ bool LightningScriptContext::EvalCondition(const std::string& cond) {
     };
     trim(lhs); trim(rhs);
 
+    // Strip matching parentheses around the whole expression
+    auto stripParens = [&trim](std::string& s) {
+        while (s.size() >= 2 && s.front() == '(' && s.back() == ')')
+            s = s.substr(1, s.size() - 2);
+        trim(s);
+    };
+    stripParens(lhs); stripParens(rhs);
+
     // Resolve variable references
     auto resolve = [&](const std::string& s) -> float {
         if (s.rfind("$", 0) == 0) {
@@ -364,7 +372,7 @@ bool LightningScriptContext::EvalCondition(const std::string& cond) {
             if (it2 != m_intVars.end()) return (float)it2->second;
             return 0;
         }
-        return std::stof(s);
+        try { return std::stof(s); } catch (...) { return 0; }
     };
 
     float lv = resolve(lhs);

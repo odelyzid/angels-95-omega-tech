@@ -9,8 +9,10 @@
 #include <algorithm>
 #include <vector>
 
+#ifdef _WIN32
 // ---------------------------------------------------------------------------
 // Native Win32 menu bar — replaces the old raygui F2 menu
+// Window subclass intercepts WM_COMMAND from menus before raylib's WndProc
 // ---------------------------------------------------------------------------
 
 #define IDM_FILE_LOAD   1001
@@ -19,48 +21,43 @@
 #define IDM_SETTINGS    2001
 #define IDM_ABOUT       3001
 
-static void PumpWin32Messages() {
-    MSG msg;
-    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        if (msg.message == WM_COMMAND) {
-            switch (LOWORD(msg.wParam)) {
-                case IDM_FILE_LOAD:
-                    // Reload current world
-                    SetSceneId = OmegaTechData.LevelIndex;
-                    SetSceneFlag = true;
-                    break;
-                case IDM_FILE_SAVE:
-                    SaveGame();
-                    break;
-                case IDM_FILE_QUIT:
-                    CloseWindow();
-                    break;
-                case IDM_SETTINGS:
-                    ShowSettings = !ShowSettings;
-                    if (ShowSettings) {
-                        ShowCursor();
-                        EnableCursor();
-                    } else {
-                        HideCursor();
-                        DisableCursor();
-                    }
-                    break;
-                case IDM_ABOUT:
-                    MessageBoxA(NULL,
-                        "Angels95 v1.0\nOzWorld GameEngine Engine\nBased on OmegaTech\nTribeWarez 2026",
-                        "About Angels95", MB_OK | MB_ICONINFORMATION);
-                    break;
-            }
-        } else {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+static WNDPROC g_originalWndProc = nullptr;
+
+static LRESULT CALLBACK ClientWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_COMMAND) {
+        switch (LOWORD(wParam)) {
+            case IDM_FILE_LOAD:
+                SetSceneId = OmegaTechData.LevelIndex;
+                SetSceneFlag = true;
+                return 0;
+            case IDM_FILE_SAVE:
+                SaveGame();
+                return 0;
+            case IDM_FILE_QUIT:
+                CloseWindow();
+                return 0;
+            case IDM_SETTINGS:
+                ShowSettings = !ShowSettings;
+                if (ShowSettings) { ShowCursor(); EnableCursor(); }
+                else { HideCursor(); DisableCursor(); }
+                return 0;
+            case IDM_ABOUT:
+                MessageBoxA(NULL,
+                    "Angels95 v1.0\nOzWorld GameEngine Engine\nBased on OmegaTech\nTribeWarez 2026",
+                    "About Angels95", MB_OK | MB_ICONINFORMATION);
+                return 0;
         }
     }
+    return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
 }
 
 static void CreateNativeMenuBar() {
     HWND hWnd = (HWND)GetWindowHandle();
     if (!hWnd) return;
+
+    // Subclass the raylib window so we intercept WM_COMMAND from menus
+    g_originalWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ClientWndProc);
+
     HMENU hMenuBar = CreateMenu();
     HMENU hFileMenu = CreatePopupMenu();
     AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_LOAD, "&Load World...");
@@ -76,6 +73,7 @@ static void CreateNativeMenuBar() {
     AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hAboutMenu, "&?");
     SetMenu(hWnd, hMenuBar);
 }
+#endif // _WIN32
 
 static OmegaClient g_client;
 static bool g_network_enabled = false;
@@ -594,7 +592,9 @@ int main(int argc, char** argv){
     }
 
     OmegaTechInit();
+#ifdef _WIN32
     CreateNativeMenuBar();
+#endif
     PlaySplashScreen();
 
     static bool g_returnToMenu = false;
@@ -649,8 +649,6 @@ int main(int argc, char** argv){
     
     while (!WindowShouldClose() && !g_returnToMenu)
     {
-        PumpWin32Messages();
-
         // Console toggle with ^ (grave) key
         if (IsKeyPressed(KEY_GRAVE)) {
             g_consoleOpen = !g_consoleOpen;

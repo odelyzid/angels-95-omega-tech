@@ -6,7 +6,7 @@
 static bool ShowSettings = false;
 static bool Debug = false;
 static bool HeadBob = true;
-static bool PixelShader = true;
+static bool PixelShader = false;
 static bool ParticlesEnabled = true;
 static bool FPSEnabled = false;
 static bool ShowLogWindow = false;
