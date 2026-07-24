@@ -1272,6 +1272,17 @@ int main(int argc, char **argv){
                     g_csgProc.GetVolumes(vols);
                     EditorLog("CSG: op=%d volumes=%d merges=%d",
                               (int)brush.op, (int)vols.size(), merges);
+                    // Add brush renderable so it's visible in the viewport
+                    int primType = EMID - 200;
+                    Vector3 center = {OmegaTechEditor.X + OmegaTechEditor.W * 0.5f,
+                                      OmegaTechEditor.Y + OmegaTechEditor.H * 0.5f,
+                                      OmegaTechEditor.Z + OmegaTechEditor.L * 0.5f};
+                    Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
+                    int ridx = OzoneLoader::Instance().AddBrushRenderable(
+                        primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
+                        OmegaTechEditor.CSGOperation);
+                    if (ridx >= 0)
+                        EditorLog("Brush renderable added idx=%d prim=%d", ridx, primType);
                 }
 
                 CacheWDL();

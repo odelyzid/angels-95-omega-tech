@@ -13,21 +13,6 @@
 // Native Win32 menu bar — replaces the old raygui F2 menu
 // ---------------------------------------------------------------------------
 
-
-/*
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    TODO: 
-        REFACTOR THE Demo Pickup / Projectile system to be more efficient and less hacky and use real Engine systems instead of this hacky mess.
-        This has to be linked entirely to the new LightningEntityManager system and use the new entity definitions for pickups and projectiles instead of hardcoded types aswell as correct PawmRegistry from ozone files
-        .
-        aswell usage of the new entity system for the local projectiles and pickups instead of this hacky mess.
-        Real Pawn system should be used for pickups and projectiles instead of this hacky mess.
-        ZoneInfos arent even integrated at all, same goes for Models, Textures, Sounds, and other assets. This is a very hacky mess and needs to be
-        refactored to use the new systems instead of this hacky mess.
-        Guns / projectiles/ Rendering / Everything is Hardcoded inside this file and needs to be refactored to use the new systems instead of this hacky mess.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-*/
 #define IDM_FILE_LOAD   1001
 #define IDM_FILE_SAVE   1002
 #define IDM_FILE_QUIT   1003
@@ -309,6 +294,8 @@ static void ExecuteConsoleCommand(const char* cmd) {
                         }
                     }
                     return;
+                } else {
+                    OZ_INFO("No match for /summon '%s'", arg);
                 }
             }
         }

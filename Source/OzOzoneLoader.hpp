@@ -52,6 +52,10 @@ public:
     std::vector<OzoneCollisionVolume>& GetCollisionVolumesMutable() { return m_collisionVolumes; }
     void RebuildCollisionVolumes();
 
+    // Editor: add a brush renderable so it becomes visible in the viewport
+    int AddBrushRenderable(int primType, const Vector3& pos, const Vector3& size,
+                           float rot, float scale, int csgOp);
+
     // Spatial partitioning for efficient collision queries
     const WorldChunkManager& GetChunkManager() const { return m_chunkManager; }
 

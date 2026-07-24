@@ -618,6 +618,35 @@ void OzoneLoader::RebuildCollisionVolumes() {
 }
 
 // ---------------------------------------------------------------------------
+// AddBrushRenderable — editor helper to make a new brush visible
+// ---------------------------------------------------------------------------
+int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
+                                    const Vector3& size, float rot,
+                                    float scale, int csgOp) {
+    Model mdl = {0};
+    switch (primType) {
+        case 0: mdl = BuildBox(size.x, size.y, size.z); break;
+        case 1: mdl = BuildCylinder(size.x, size.y, size.z, 16); break;
+        case 2: mdl = BuildSphere(size.x, 16); break;
+        case 3: mdl = BuildPyramid(size.x, size.z, size.y); break;
+        case 4: mdl = BuildPlane(0, 1, 0, 0); break;
+        default: return -1;
+    }
+    if (mdl.meshes == nullptr) return -1;
+
+    OzoneRenderable r;
+    r.typeId = primType;
+    r.position = pos;
+    r.scale = scale;
+    r.rotation = rot;
+    r.model = mdl;
+    r.loaded = true;
+    r.csgOp = csgOp;
+    m_renderables.push_back(r);
+    return (int)m_renderables.size() - 1;
+}
+
+// ---------------------------------------------------------------------------
 // DrawZoneGeometry â€” draw renderables whose AABBs overlap the given zone
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
