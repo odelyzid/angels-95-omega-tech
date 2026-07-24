@@ -48,3 +48,5 @@ build/cmake*
 
 # Scratch plan files (keep main plan files tracked)
 PLAN_STUBS_*.scratch
+build/
+build-ed/
