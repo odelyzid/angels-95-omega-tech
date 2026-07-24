@@ -966,7 +966,7 @@ void PlayHomeScreen()
 
     if (menu.ShouldLoadGame() || menu.GetSelectedWorld()) {
         UnloadRenderTexture(Target);
-        Target = LoadRenderTexture(GetScreenWidth() / 4, GetScreenHeight() / 4);
+        Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
     }
 
     if (menu.GetSelectedWorld()) {

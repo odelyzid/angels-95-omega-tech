@@ -78,9 +78,9 @@ add cyl 28 -30 5 0.6 0.6 10 16 0
 add cyl 12 -46 5 0.6 0.6 10 16 0
 add cyl 28 -46 5 0.6 0.6 10 16 0
 
-# Two pillars flanking the exit to outdoor area (snapped to floor Z=-0.25 → center=4.75)
-add cyl 17 -49.75 4.75 0.4 0.4 10 16 0
-add cyl 23 -49.75 4.75 0.4 0.4 10 16 0
+# Two pillars flanking the exit to outdoor area (floor top at Y=0 → center=5)
+add cyl 17 -49.75 5 0.4 0.4 10 16 0
+add cyl 23 -49.75 5 0.4 0.4 10 16 0
 
 # ==============================================================================
 # Corridors connecting rooms
@@ -119,6 +119,9 @@ add cyl 12 -55 5.5 0.5 0.5 12 16 0
 add cyl 28 -55 5.5 0.5 0.5 12 16 0
 add cyl 12 -72 5.5 0.5 0.5 12 16 0
 add cyl 28 -72 5.5 0.5 0.5 12 16 0
+
+# Threshold floor patch under arch pillars (fills gap between large room and walkway)
+add box 20 -49.75 -0.25 12 0.5 1 0       # arch threshold floor
 
 # Walkway from large room exit to the outdoor area
 add box 20 -55 -0.25 6 0.5 10 0          # walkway floor
