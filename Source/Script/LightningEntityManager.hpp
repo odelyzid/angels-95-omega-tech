@@ -77,6 +77,12 @@ public:
     const std::string& PendingSkybox() const { return m_pendingSkybox; }
     void ClearPendingSkybox() { m_pendingSkybox.clear(); }
 
+    bool HasPendingAmbient() const { return m_pendingAmbient; }
+    float PendingAmbientR() const { return m_ambientR; }
+    float PendingAmbientG() const { return m_ambientG; }
+    float PendingAmbientB() const { return m_ambientB; }
+    void ClearPendingAmbient() { m_pendingAmbient = false; }
+
 private:
     LightningEntityManager() = default;
     std::vector<EntityInstance> m_instances;
@@ -91,10 +97,12 @@ private:
     };
     std::vector<CachedResource> m_resources;
 
-    // Pending fog/skybox state (set by script execution, read by host)
+    // Pending fog/skybox/ambient state (set by script execution, read by host)
     bool m_pendingFog = false;
     float m_fogR = 0.0f, m_fogG = 0.0f, m_fogB = 0.0f, m_fogDensity = 0.0f;
     std::string m_pendingSkybox;
+    bool m_pendingAmbient = false;
+    float m_ambientR = 0.0f, m_ambientG = 0.0f, m_ambientB = 0.0f;
 
     // Simple one-shot sound cache: path → loaded Sound
     struct CachedSound { Sound sound; float timer = 0.0f; };

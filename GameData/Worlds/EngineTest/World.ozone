@@ -12,7 +12,7 @@ zone sky -80 -80 -30 80 80 80
 # Ground plane (everything sits on) — extended south for outdoor area
 # ==============================================================================
 add box 10 -10 -0.5 60 0.5 85 0           # main ground (rooms area)
-add box 20 -68 -0.5 46 0.5 48 0           # outdoor ground (large room exit to far south)
+add box 20 -68 -0.5 46 0.5 48 0 5          # outdoor ground (texSlot=5 grass)
 
 # ==============================================================================
 # ROOM 1 (top-left, connects to Room2 via CorridorA, Room4 via CorridorD)

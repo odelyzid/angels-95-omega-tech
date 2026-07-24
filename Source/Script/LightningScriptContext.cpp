@@ -207,6 +207,7 @@ bool LightningScriptContext::ExecuteNext() {
         if (qs != std::string::npos && qe != std::string::npos)
             msg = msg.substr(qs, qe - qs + 1);
         LS_LOG("say: %s", msg.c_str());
+        fprintf(stdout, "[LightningScript] %s\n", msg.c_str());
         m_pc++;
 
     } else if (opcode == "stop" || opcode == "end") {
@@ -251,6 +252,26 @@ bool LightningScriptContext::ExecuteNext() {
         ls >> r >> g >> b >> d;
         SetFloat("__fog_r", r); SetFloat("__fog_g", g);
         SetFloat("__fog_b", b); SetFloat("__fog_density", d);
+        m_pc++;
+
+    } else if (opcode == "restore_fog") {
+        m_floatVars.erase("__fog_r");
+        m_floatVars.erase("__fog_g");
+        m_floatVars.erase("__fog_b");
+        m_floatVars.erase("__fog_density");
+        m_pc++;
+
+    } else if (opcode == "set_ambient") {
+        float r, g, b;
+        ls >> r >> g >> b;
+        SetFloat("__ambient_r", r); SetFloat("__ambient_g", g);
+        SetFloat("__ambient_b", b);
+        m_pc++;
+
+    } else if (opcode == "restore_ambient") {
+        m_floatVars.erase("__ambient_r");
+        m_floatVars.erase("__ambient_g");
+        m_floatVars.erase("__ambient_b");
         m_pc++;
 
     } else if (opcode == "set_skybox") {
@@ -395,4 +416,15 @@ std::string LightningScriptContext::PopPendingSkybox() {
     std::string name = it->second;
     m_strVars.erase(it);
     return name;
+}
+
+bool LightningScriptContext::PopPendingAmbient(float& r, float& g, float& b) {
+    auto it_r = m_floatVars.find("__ambient_r");
+    if (it_r == m_floatVars.end()) return false;
+    r = it_r->second; m_floatVars.erase(it_r);
+    auto it_g = m_floatVars.find("__ambient_g");
+    auto it_b = m_floatVars.find("__ambient_b");
+    if (it_g != m_floatVars.end()) { g = it_g->second; m_floatVars.erase(it_g); }
+    if (it_b != m_floatVars.end()) { b = it_b->second; m_floatVars.erase(it_b); }
+    return true;
 }

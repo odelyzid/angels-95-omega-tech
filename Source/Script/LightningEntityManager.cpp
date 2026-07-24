@@ -132,6 +132,12 @@ void LightningEntityManager::Update(float dt) {
             if (!sky.empty()) {
                 m_pendingSkybox = sky;
             }
+
+            float ar=0, ag=0, ab=0;
+            if (inst.ctx.PopPendingAmbient(ar, ag, ab)) {
+                m_pendingAmbient = true;
+                m_ambientR = ar; m_ambientG = ag; m_ambientB = ab;
+            }
         }
     }
 

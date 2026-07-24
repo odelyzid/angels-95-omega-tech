@@ -56,6 +56,7 @@ public:
     std::string PopPendingSound();              // returns __last_sound and clears it
     bool PopPendingFog(float& r, float& g, float& b, float& density);
     std::string PopPendingSkybox();             // returns __skybox name or empty
+    bool PopPendingAmbient(float& r, float& g, float& b);
 
 private:
     std::vector<std::string> m_lines;

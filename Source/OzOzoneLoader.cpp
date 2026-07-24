@@ -181,7 +181,8 @@ void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
     m_wallTex   = load("concrete_ceiling_a1_32x32.png");
     m_columnTex = load("industrial_metal_a1_32x32.png");
     m_ceilTex   = load("industrial_tech_a1_128x128.png");
-    if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id)
+    m_grassTex  = load("jungle_grass_01_256_128.png");
+    if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id || m_grassTex.id)
         OZ_INFO("OzoneLoader: loaded world textures from %soztex/tileset/", worldDir.c_str());
 }
 
@@ -190,6 +191,30 @@ void OzoneLoader::UnloadTextures() {
     if (m_wallTex.id)   { UnloadTexture(m_wallTex);   m_wallTex   = Texture2D{0}; }
     if (m_columnTex.id) { UnloadTexture(m_columnTex); m_columnTex = Texture2D{0}; }
     if (m_ceilTex.id)   { UnloadTexture(m_ceilTex);   m_ceilTex   = Texture2D{0}; }
+    if (m_grassTex.id)  { UnloadTexture(m_grassTex);  m_grassTex  = Texture2D{0}; }
+}
+
+// ---------------------------------------------------------------------------
+// Re-apply texture on a model based on texSlot (1-5 override)
+// ---------------------------------------------------------------------------
+void OzoneLoader::ApplyTexSlotToModel(Model& model, int slot) {
+    if (model.meshCount == 0) return;
+    Texture2D tex{0};
+    Color fallback = LIGHTGRAY;
+    switch (slot) {
+        case 1: tex = m_floorTex; fallback = LIGHTGRAY; break;
+        case 2: tex = m_wallTex;  fallback = (Color){180,180,200,255}; break;
+        case 3: tex = m_columnTex; fallback = SKYBLUE; break;
+        case 4: tex = m_ceilTex;  fallback = (Color){200,200,220,255}; break;
+        case 5: tex = m_grassTex; fallback = (Color){60,160,40,255}; break;
+        default: return;
+    }
+    if (tex.id)
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+    else
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = fallback;
+    if (GetLitFogShader().id > 0)
+        model.materials[0].shader = GetLitFogShader();
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +472,15 @@ bool OzoneLoader::LoadFile(const char* path) {
 
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
+    // Parse optional texSlot after rotation: box has 7+1=8 args, cyl has 8+1=9
+    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
+        r.texSlot = (int)prim.args[7];
+    else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 9)
+        r.texSlot = (int)prim.args[8];
+    else if (prim.type == OzonePrimitiveType::PYRAMID && prim.args.size() >= 7)
+        r.texSlot = (int)prim.args[6];
+    // Apply texture override if set
+    if (r.texSlot > 0) ApplyTexSlotToModel(r.model, r.texSlot);
     m_renderables.push_back(r);
     }
 
@@ -494,6 +528,13 @@ bool OzoneLoader::LoadString(const char* data) {
     r.scale = 1.0f;
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
+    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
+        r.texSlot = (int)prim.args[7];
+    else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 9)
+        r.texSlot = (int)prim.args[8];
+    else if (prim.type == OzonePrimitiveType::PYRAMID && prim.args.size() >= 7)
+        r.texSlot = (int)prim.args[6];
+    if (r.texSlot > 0) ApplyTexSlotToModel(r.model, r.texSlot);
     m_renderables.push_back(r);
     }
     RebuildCollisionVolumes();

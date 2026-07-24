@@ -29,6 +29,7 @@ struct OzoneRenderable {
     Model model;                 // generated raylib Model (meshes + materials)
     bool loaded = false;
     int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
+    int texSlot = 0;             // 0=auto, 1=floor, 2=wall, 3=column, 4=ceil, 5=grass
 };
 
 // Collision AABB for an OZONE brush primitive.
@@ -77,6 +78,14 @@ public:
     void LoadWorldTextures(const std::string& worldDir);
     void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
     void SetLitFogShaderEnabled(bool enabled);
+    void ApplyTexSlotToModel(Model& model, int slot);
+
+    // Texture accessors for ApplyTexSlot
+    Texture2D GetFloorTex() const { return m_floorTex; }
+    Texture2D GetWallTex() const { return m_wallTex; }
+    Texture2D GetColumnTex() const { return m_columnTex; }
+    Texture2D GetCeilTex() const { return m_ceilTex; }
+    Texture2D GetGrassTex() const { return m_grassTex; }
 
     static OzoneLoader& Instance();
     
@@ -102,6 +111,7 @@ private:
     Texture2D m_wallTex{0};
     Texture2D m_columnTex{0};
     Texture2D m_ceilTex{0};
+    Texture2D m_grassTex{0};
 
     void UnloadTextures();
     void UnloadHeightmap();

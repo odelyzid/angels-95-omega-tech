@@ -130,6 +130,45 @@ static int test_set_fog() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_set_ambient() {
+    TEST("set_ambient stores ambient vars");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_ambient");
+    CHECK(ctx.Load("set_ambient 0.6 0.55 0.5"));
+    ctx.ExecuteNext();
+    CHECK_APROX(ctx.GetFloat("__ambient_r"), 0.6f, 0.001f);
+    CHECK_APROX(ctx.GetFloat("__ambient_g"), 0.55f, 0.001f);
+    CHECK_APROX(ctx.GetFloat("__ambient_b"), 0.5f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_restore_fog() {
+    TEST("restore_fog clears fog vars");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_restore_fog");
+    CHECK(ctx.Load("set_fog 0.8 0.85 0.9 0.015\nrestore_fog"));
+    ctx.ExecuteNext();
+    CHECK_APROX(ctx.GetFloat("__fog_r"), 0.8f, 0.001f);
+    float r=0,g=0,b=0,d=0;
+    CHECK(ctx.PopPendingFog(r,g,b,d));
+    ctx.ExecuteNext(); // restore_fog
+    CHECK(!ctx.PopPendingFog(r,g,b,d)); // should return false now
+    PASS(); return 0; END_TEST();
+}
+
+static int test_restore_ambient() {
+    TEST("restore_ambient clears ambient vars");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_restore_ambient");
+    CHECK(ctx.Load("set_ambient 0.6 0.55 0.5\nrestore_ambient"));
+    ctx.ExecuteNext();
+    float r=0,g=0,b=0;
+    CHECK(ctx.PopPendingAmbient(r,g,b));
+    ctx.ExecuteNext(); // restore_ambient
+    CHECK(!ctx.PopPendingAmbient(r,g,b)); // should return false now
+    PASS(); return 0; END_TEST();
+}
+
 static int test_unknown_opcode_warns() {
     TEST("unknown opcode is skipped (no crash)");
     LightningScriptContext ctx;
@@ -154,6 +193,9 @@ int main() {
     failures += test_jump_label();
     failures += test_set_cooldown();
     failures += test_set_fog();
+    failures += test_set_ambient();
+    failures += test_restore_fog();
+    failures += test_restore_ambient();
     failures += test_unknown_opcode_warns();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;

@@ -2154,6 +2154,14 @@ void DrawWorld()
             lem.ClearPendingSkybox();
         }
 
+        // Apply pending Ambient changes from script contexts
+        if (lem.HasPendingAmbient()) {
+            float amb[4] = { lem.PendingAmbientR(), lem.PendingAmbientG(), lem.PendingAmbientB(), 1.0f };
+            static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
+            SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
+            lem.ClearPendingAmbient();
+        }
+
         // Zone environment override application
         {
             static std::string activeEnvZone;
