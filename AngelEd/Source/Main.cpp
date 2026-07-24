@@ -165,7 +165,12 @@ static RayCollision RaycastTestZones(Ray ray) {
 }
 
 static void EditorPickEntity() {
-    Ray ray = GetMouseRay(GetMousePosition(), OTEditor.MainCamera);
+    // Account for left sidebar offset (200px) when casting ray into 3D viewport
+    const int sbW = 200;
+    Vector2 mousePos = GetMousePosition();
+    mousePos.x -= (float)sbW;
+    mousePos.y -= 28.0f; // top toolbar height
+    Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
     g_sel = { SelType::NONE, -1, "", {0,0,0} };
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
 
@@ -338,68 +343,6 @@ static void DrawPropertiesPanel() {
         EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), g_sel.index);
         g_showPropsPanel = false;
     }
-}
-
-// ---------------------------------------------------------------------------
-// Native Win32 Menu Bar
-// ---------------------------------------------------------------------------
-static void CreateEditorMenuBar() {
-#ifdef _WIN32
-    HWND hWnd = (HWND)GetWindowHandle();
-    if (!hWnd) return;
-
-    HMENU hMenu = CreateMenu();
-
-    // File menu
-    HMENU hFile = CreatePopupMenu();
-    AppendMenuA(hFile, MF_STRING, IDM_NEW, "&New\tN");
-    AppendMenuA(hFile, MF_STRING, IDM_OPEN, "&Open...\tO");
-    AppendMenuA(hFile, MF_STRING, IDM_SAVE, "&Save\tS");
-    AppendMenuA(hFile, MF_STRING, IDM_SAVE_AS, "Save &As...");
-    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hFile, MF_STRING, IDM_PLAY_TEST, "&Play Test\tP");
-    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hFile, MF_STRING, IDM_EXIT, "E&xit\tQ");
-    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hFile, "&File");
-
-    // View menu (panels)
-    HMENU hView = CreatePopupMenu();
-    AppendMenuA(hView, MF_STRING, IDM_MODEL_BRW, "Model &Browser\tF5");
-    AppendMenuA(hView, MF_STRING, IDM_SOUND_MGR, "&Sound Manager\tF6");
-    AppendMenuA(hView, MF_STRING, IDM_TEXTURE_MGR, "&Texture Manager\tF7");
-    AppendMenuA(hView, MF_STRING, IDM_PAWN_MGR, "&Pawn Manager\tF8");
-    AppendMenuA(hView, MF_STRING, IDM_SCRIPT_MGR, "&Script Manager\tF9");
-    AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hView, MF_STRING, IDM_ZONE_PROPS, "&Zone Properties\tF12");
-    AppendMenuA(hView, MF_STRING, IDM_NODE_PANEL, "&Node Panel");
-    AppendMenuA(hView, MF_STRING, IDM_PICKUP_PANEL, "&Pickups\tF10");
-    AppendMenuA(hView, MF_STRING, IDM_LIGHT_PROPS, "&Light Properties");
-    AppendMenuA(hView, MF_STRING, IDM_HEIGHTMAP, "&Heightmap Editor\tH");
-    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hView, "&View");
-
-    // Camera menu
-    HMENU hCam = CreatePopupMenu();
-    AppendMenuA(hCam, MF_STRING, IDM_RESET_CAM, "&Reset Camera\tHome");
-    AppendMenuA(hCam, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hCam, MF_STRING, IDM_VIEW_TOP, "&Top\tNumpad 7");
-    AppendMenuA(hCam, MF_STRING, IDM_VIEW_BOTTOM, "&Bottom\tNumpad 1");
-    AppendMenuA(hCam, MF_STRING, IDM_VIEW_RIGHT, "&Right\tNumpad 3");
-    AppendMenuA(hCam, MF_STRING, IDM_VIEW_LEFT, "&Left\tNumpad 9");
-    AppendMenuA(hCam, MF_STRING, IDM_VIEW_PERSPECTIVE, "&Perspective\tNumpad 5");
-    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hCam, "&Camera");
-
-    // Settings menu
-    HMENU hSettings = CreatePopupMenu();
-    AppendMenuA(hSettings, MF_STRING, IDM_FULLSCREEN, "Toggle &Fullscreen\tF11");
-    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hSettings, "&Settings");
-
-    // Help menu
-    HMENU hHelp = CreatePopupMenu();
-    AppendMenuA(hHelp, MF_STRING, IDM_ABOUT, "&About AngelEd");
-    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hHelp, "&Help");
-
-    SetMenu(hWnd, hMenu);
-#endif
 }
 
 // Editor log file (appended to System/AngelEd.log)
@@ -765,6 +708,102 @@ static bool ApplyTextureToModel(int target, const char* path) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Native Win32 Menu Bar — window subclass intercepts WM_COMMAND from menus
+// ---------------------------------------------------------------------------
+static WNDPROC g_originalWndProc = nullptr;
+
+static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_COMMAND) {
+        int id = LOWORD(wParam);
+        switch (id) {
+            case IDM_NEW:           FileNew(); return 0;
+            case IDM_OPEN:          { std::string p; if (ChooseOpenWorldFile(p)) g_pendingOpenPath = fs::path(p); } return 0;
+            case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); return 0;
+            case IDM_SAVE_AS:       FileSaveAs(); return 0;
+            case IDM_PLAY_TEST:     { std::string tempPath = "System/Cache/editor_test.wdl";
+                std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
+                std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" Angels95.exe --world " + tempPath).c_str()); } } return 0;
+            case IDM_EXIT:          CloseWindow(); return 0;
+            case IDM_MODEL_BRW:     ToggleModelBrowser(); return 0;
+            case IDM_SOUND_MGR:     ToggleSoundMgr(); return 0;
+            case IDM_TEXTURE_MGR:   ToggleTextureMgr(); return 0;
+            case IDM_PAWN_MGR:      TogglePawnMgr(); return 0;
+            case IDM_SCRIPT_MGR:    ToggleScriptMgr(); return 0;
+            case IDM_ZONE_PROPS:    ToggleEnvPanel(); return 0;
+            case IDM_NODE_PANEL:    ToggleNodePanel(); return 0;
+            case IDM_PICKUP_PANEL:  TogglePickupPanel(); return 0;
+            case IDM_LIGHT_PROPS:   ShowLightProps(true); return 0;
+            case IDM_HEIGHTMAP:     ToggleHeightmapEditor(); return 0;
+            case IDM_FULLSCREEN:    ToggleFullscreen(); return 0;
+            case IDM_RESET_CAM:     SetViewPerspective(); ResetCamera(); return 0;
+            case IDM_VIEW_TOP:      { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y+80,c.z+0.1f},c,{0,0,-1}); } return 0;
+            case IDM_VIEW_BOTTOM:   { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y-80,c.z+0.1f},c,{0,0,1}); } return 0;
+            case IDM_VIEW_RIGHT:    { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x+80,c.y,c.z},c,{0,1,0}); } return 0;
+            case IDM_VIEW_LEFT:     { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x-80,c.y,c.z},c,{0,1,0}); } return 0;
+            case IDM_VIEW_PERSPECTIVE: SetViewPerspective(); return 0;
+            case IDM_ABOUT:         MessageBoxA(NULL, "AngelEd v1.0\nOzWorld Editor\nBased on OmegaTech\nTribeWarez 2026", "About AngelEd", MB_OK | MB_ICONINFORMATION); return 0;
+        }
+    }
+    return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
+}
+
+static void CreateEditorMenuBar() {
+#ifdef _WIN32
+    HWND hWnd = (HWND)GetWindowHandle();
+    if (!hWnd) return;
+
+    // Subclass the raylib/GLFW window so we can intercept menu WM_COMMAND
+    g_originalWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)EditorWndProc);
+
+    HMENU hMenu = CreateMenu();
+    HMENU hFile = CreatePopupMenu();
+    AppendMenuA(hFile, MF_STRING, IDM_NEW, "&New\tN");
+    AppendMenuA(hFile, MF_STRING, IDM_OPEN, "&Open...\tO");
+    AppendMenuA(hFile, MF_STRING, IDM_SAVE, "&Save\tS");
+    AppendMenuA(hFile, MF_STRING, IDM_SAVE_AS, "Save &As...");
+    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hFile, MF_STRING, IDM_PLAY_TEST, "&Play Test\tP");
+    AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hFile, MF_STRING, IDM_EXIT, "E&xit\tQ");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hFile, "&File");
+
+    HMENU hView = CreatePopupMenu();
+    AppendMenuA(hView, MF_STRING, IDM_MODEL_BRW, "Model &Browser\tF5");
+    AppendMenuA(hView, MF_STRING, IDM_SOUND_MGR, "&Sound Manager\tF6");
+    AppendMenuA(hView, MF_STRING, IDM_TEXTURE_MGR, "&Texture Manager\tF7");
+    AppendMenuA(hView, MF_STRING, IDM_PAWN_MGR, "&Pawn Manager\tF8");
+    AppendMenuA(hView, MF_STRING, IDM_SCRIPT_MGR, "&Script Manager\tF9");
+    AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hView, MF_STRING, IDM_ZONE_PROPS, "&Zone Properties\tF12");
+    AppendMenuA(hView, MF_STRING, IDM_NODE_PANEL, "&Node Panel");
+    AppendMenuA(hView, MF_STRING, IDM_PICKUP_PANEL, "&Pickups\tF10");
+    AppendMenuA(hView, MF_STRING, IDM_LIGHT_PROPS, "&Light Properties");
+    AppendMenuA(hView, MF_STRING, IDM_HEIGHTMAP, "&Heightmap Editor\tH");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hView, "&View");
+
+    HMENU hCam = CreatePopupMenu();
+    AppendMenuA(hCam, MF_STRING, IDM_RESET_CAM, "&Reset Camera\tHome");
+    AppendMenuA(hCam, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_TOP, "&Top\tNumpad 7");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_BOTTOM, "&Bottom\tNumpad 1");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_RIGHT, "&Right\tNumpad 3");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_LEFT, "&Left\tNumpad 9");
+    AppendMenuA(hCam, MF_STRING, IDM_VIEW_PERSPECTIVE, "&Perspective\tNumpad 5");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hCam, "&Camera");
+
+    HMENU hSettings = CreatePopupMenu();
+    AppendMenuA(hSettings, MF_STRING, IDM_FULLSCREEN, "Toggle &Fullscreen\tF11");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hSettings, "&Settings");
+
+    HMENU hHelp = CreatePopupMenu();
+    AppendMenuA(hHelp, MF_STRING, IDM_ABOUT, "&About AngelEd");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hHelp, "&Help");
+
+    SetMenu(hWnd, hMenu);
+#endif
+}
+
 int main(int argc, char **argv){
     // Auto-detect repo root: if cwd ends with /System, go up one level
     {
@@ -776,7 +815,7 @@ int main(int argc, char **argv){
     }
 
     EditorLog("=== AngelEd starting ===");
-    SetWindowState(FLAG_VSYNC_HINT);
+    SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "AngelEd");
     CreateEditorMenuBar();
     SetTraceLogLevel(LOG_WARNING);
@@ -899,45 +938,11 @@ int main(int argc, char **argv){
 
     while (!WindowShouldClose())
     {
-        // Process Win32 messages for child panels + menu bar
+        // Process Win32 messages for child panels
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            // Only intercept WM_COMMAND when it comes from the main window (menu commands).
-            // Child dialog WM_COMMAND messages must be dispatched normally.
-            if (msg.message == WM_COMMAND && msg.hwnd == GetWindowHandle()) {
-                int id = LOWORD(msg.wParam);
-                switch (id) {
-                    case IDM_NEW:           FileNew(); break;
-                    case IDM_OPEN:          { std::string p; if (ChooseOpenWorldFile(p)) g_pendingOpenPath = fs::path(p); } break;
-                    case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); break;
-                    case IDM_SAVE_AS:       FileSaveAs(); break;
-                    case IDM_PLAY_TEST:     { std::string tempPath = "System/Cache/editor_test.wdl";
-                        std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
-                        std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" Angels95.exe --world " + tempPath).c_str()); } } break;
-                    case IDM_EXIT:          CloseWindow(); break;
-                    case IDM_MODEL_BRW:     ToggleModelBrowser(); break;
-                    case IDM_SOUND_MGR:     ToggleSoundMgr(); break;
-                    case IDM_TEXTURE_MGR:   ToggleTextureMgr(); break;
-                    case IDM_PAWN_MGR:      TogglePawnMgr(); break;
-                    case IDM_SCRIPT_MGR:    ToggleScriptMgr(); break;
-                    case IDM_ZONE_PROPS:    ToggleEnvPanel(); break;
-                    case IDM_NODE_PANEL:    ToggleNodePanel(); break;
-                    case IDM_PICKUP_PANEL:  TogglePickupPanel(); break;
-                    case IDM_LIGHT_PROPS:   ShowLightProps(true); break;
-                    case IDM_HEIGHTMAP:     ToggleHeightmapEditor(); break;
-                    case IDM_FULLSCREEN:    ToggleFullscreen(); break;
-                    case IDM_RESET_CAM:     SetViewPerspective(); ResetCamera(); break;
-                    case IDM_VIEW_TOP:      { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y+80,c.z+0.1f},c,{0,0,-1}); } break;
-                    case IDM_VIEW_BOTTOM:   { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x,c.y-80,c.z+0.1f},c,{0,0,1}); } break;
-                    case IDM_VIEW_RIGHT:    { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x+80,c.y,c.z},c,{0,1,0}); } break;
-                    case IDM_VIEW_LEFT:     { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x-80,c.y,c.z},c,{0,1,0}); } break;
-                    case IDM_VIEW_PERSPECTIVE: SetViewPerspective(); break;
-                    case IDM_ABOUT:         MessageBoxA(NULL, "AngelEd v1.0\nOzWorld Editor\nBased on OmegaTech\nTribeWarez 2026", "About AngelEd", MB_OK | MB_ICONINFORMATION); break;
-                }
-            } else {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
 
         if (g_pendingNew) {

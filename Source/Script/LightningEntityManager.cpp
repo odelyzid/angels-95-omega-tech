@@ -1,5 +1,6 @@
 #include "LightningEntityManager.hpp"
 #include "LightningEntityRegistry.hpp"
+#include "../Package/PackageAssetLoader.hpp"
 #include "../Log.hpp"
 #ifndef OMEGA_TEST_ENV
 #include "../Pawn/OzPawnSystem.hpp"
@@ -253,7 +254,11 @@ EntityInstance* LightningEntityManager::SelectedEntity() const {
 // Resource caching
 // ---------------------------------------------------------------------------
 int LightningEntityManager::CacheModel(const std::string& path) {
+#ifndef OMEGA_TEST_ENV
+    Model model = LoadModelWithFallback(path.c_str());
+#else
     Model model = LoadModel(path.c_str());
+#endif
     if (model.meshes == nullptr) return -1;
     CachedResource res;
     res.type = 1;
@@ -263,7 +268,11 @@ int LightningEntityManager::CacheModel(const std::string& path) {
 }
 
 int LightningEntityManager::CacheTexture(const std::string& path) {
+#ifndef OMEGA_TEST_ENV
+    Texture2D tex = LoadTextureWithFallback(path.c_str());
+#else
     Texture2D tex = LoadTexture(path.c_str());
+#endif
     if (tex.id == 0) return -1;
     CachedResource res;
     res.type = 2;
