@@ -2,6 +2,7 @@
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Renderer/EngineBillboard.hpp"
 #include "../../Source/OzOzoneLoader.hpp"
+#include "../../Source/Script/LightningEntityRegistry.hpp"
 #include <cstring>
 #include <cmath>
 #include <filesystem>
@@ -177,28 +178,6 @@ float SampleHeightmapGroundY(float px, float pz) {
     float h11 = p[(iz + 1) * iw + ix + 1] / 255.0f;
     float ht = h00 * (1-tx)*(1-tz) + h10 * tx*(1-tz) + h01 * (1-tx)*tz + h11 * tx*tz;
     return o.y + ht * WDLModels.HeightMapSize.y * scale;
-}
-
-// --- Pickup types for editor placement ---
-enum class EditorPickupType {
-    HEALTH_VIAL = 0,
-    MANA_VIAL = 1,
-    ENERGY_CRYSTAL = 2,
-    KEY = 3,
-    COIN = 4,
-    POWERUP = 5
-};
-
-static const char* PickupTypeLabel(EditorPickupType t) {
-    switch (t) {
-        case EditorPickupType::HEALTH_VIAL:    return "Health Vial";
-        case EditorPickupType::MANA_VIAL:      return "Mana Vial";
-        case EditorPickupType::ENERGY_CRYSTAL: return "Energy Crystal";
-        case EditorPickupType::KEY:            return "Key";
-        case EditorPickupType::COIN:           return "Coin";
-        case EditorPickupType::POWERUP:        return "Powerup";
-        default: return "?";
-    }
 }
 
 // --- Pawn node types ---
@@ -463,10 +442,17 @@ void WDLProcess()
             if (WReadValue(Instruction, 0, 5) == L"Script") DrawCubeWires({X, Y, Z}, S, S, S, YELLOW);
             if (WReadValue(Instruction, 0, 6) == L"Pickup") {
                 Camera3D cam = OTEditor.MainCamera;
-                const char* pickupNames[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
-                int pickupType = std::stoi(WSplitValue(WData, i + 1));
-                if (pickupType >= 0 && pickupType < 6) {
-                    EngineBillboard::DrawPickup(cam, pickupNames[pickupType], {X, Y, Z}, 0.8f);
+                std::wstring typeField = WSplitValue(WData, i + 1);
+                std::string pickupName;
+                try {
+                    int oldType = std::stoi(typeField);
+                    static const char* legacyMap[] = {"HealthVial","ManaVial","EnergyCrystal","Key","Coin","Powerup"};
+                    if (oldType >= 0 && oldType < 6) pickupName = legacyMap[oldType];
+                } catch (...) {
+                    pickupName = std::string(typeField.begin(), typeField.end());
+                }
+                if (!pickupName.empty()) {
+                    EngineBillboard::DrawPickup(cam, pickupName.c_str(), {X, Y, Z}, 0.8f);
                 } else {
                     DrawCubeWires({X, Y, Z}, 0.5f, 0.5f, 0.5f, GREEN);
                 }
@@ -524,7 +510,7 @@ class InEditor{
     public:
         bool DrawModel = false;
         float X = 0, Y = 0, Z = 0, S = 1, R = 0, L = 0, H = 0, W = 0;
-        EditorPickupType ActivePickupType = EditorPickupType::HEALTH_VIAL;
+        std::string ActivePickupName = "HealthVial";
         EditorNodeType ActiveNodeType = EditorNodeType::SPAWN;
         // CSG operation for OZONE brush placement: 0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC
         int CSGOperation = 0;

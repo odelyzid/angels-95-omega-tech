@@ -192,7 +192,9 @@ public:
 
     // Player start nodes
     void AddPlayerStart(const PlayerStartNode& node);
+    void RemovePlayerStart(int id);
     void ClearPlayerStarts();
+    std::vector<PlayerStartNode>& GetPlayerStarts() { return m_playerStarts; }
     const std::vector<PlayerStartNode>& GetPlayerStarts() const { return m_playerStarts; }
     PlayerStartNode* GetFirstPlayerStart();
 

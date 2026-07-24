@@ -1,0 +1,10 @@
+entity "ManaVial" : pickup {
+    icon = "ManaVial.png"
+    stats {
+        item_id = 2
+        preview_color = (0.0, 0.0, 1.0)
+        value = 25
+        respawn_time = 30.0
+        pickup_category = "mana_vial"
+    }
+}

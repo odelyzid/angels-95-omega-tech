@@ -1,0 +1,10 @@
+entity "EnergyCrystal" : pickup {
+    icon = "EnergyCrystal.png"
+    stats {
+        item_id = 3
+        preview_color = (0.5, 0.0, 0.5)
+        value = 111
+        respawn_time = 25.0
+        pickup_category = "energy_crystal"
+    }
+}

@@ -65,7 +65,7 @@ static CsgProcessor g_csgProc;
 // ---------------------------------------------------------------------------
 // Entity selection system (right-click raycast)
 // ---------------------------------------------------------------------------
-enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE };
+enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN };
 struct EditorSelection {
     SelType type = SelType::NONE;
     int index = -1;
@@ -100,16 +100,20 @@ static RayCollision RaycastTestBrushes(Ray ray) {
 
 static RayCollision RaycastTestModels(Ray ray) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
-    for (size_t i = 0; i < WDLModels.models.size(); i++) {
-        auto& m = WDLModels.models[i];
-        if (!m.loaded || m.model.meshCount == 0) continue;
-        BoundingBox box = GetMeshBoundingBox(m.model.meshes[0]);
-        box.min = Vector3Add(box.min, (Vector3){0,0,0}); // model position offset if stored
-        box.max = Vector3Add(box.max, (Vector3){0,0,0});
+    for (int i = 0; i < CachedModelCounter; i++) {
+        int mid = CachedModels[i].ModelId;
+        if (mid <= 0) continue;
+        LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
+        if (!lm || !lm->loaded || lm->model.meshCount == 0) continue;
+        BoundingBox box = GetMeshBoundingBox(lm->model.meshes[0]);
+        float sx = CachedModels[i].S;
+        Vector3 pos = {CachedModels[i].X, CachedModels[i].Y, CachedModels[i].Z};
+        box.min = Vector3Add(Vector3Scale(box.min, sx), pos);
+        box.max = Vector3Add(Vector3Scale(box.max, sx), pos);
         RayCollision hit = GetRayCollisionBox(ray, box);
         if (hit.hit && hit.distance < best.distance) {
             best = hit;
-            g_sel = { SelType::MODEL, (int)i, m.name.empty() ? "Model" : m.name, {0,0,0} };
+            g_sel = { SelType::MODEL, i, TextFormat("Model%d", mid), pos, sx, CachedModels[i].R };
         }
     }
     return best;
@@ -164,6 +168,36 @@ static RayCollision RaycastTestZones(Ray ray) {
     return best;
 }
 
+static RayCollision RaycastTestLights(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& lights = PawnSystem::Instance().GetLights();
+    for (auto& l : lights) {
+        BoundingBox box = { {l.position.x - 0.3f, l.position.y - 0.3f, l.position.z - 0.3f},
+                            {l.position.x + 0.3f, l.position.y + 0.3f, l.position.z + 0.3f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::LIGHT, (int)l.id, "Light", l.position };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestStarts(Ray ray) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& starts = PawnSystem::Instance().GetPlayerStarts();
+    for (auto& s : starts) {
+        BoundingBox box = { {s.position.x - 0.3f, s.position.y - 0.3f, s.position.z - 0.3f},
+                            {s.position.x + 0.3f, s.position.y + 0.3f, s.position.z + 0.3f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            g_sel = { SelType::SPAWN, (int)s.id, "PlayerStart", s.position };
+        }
+    }
+    return best;
+}
+
 static void EditorPickEntity() {
     // Account for left sidebar offset (200px) when casting ray into 3D viewport
     const int sbW = 200;
@@ -181,7 +215,9 @@ static void EditorPickEntity() {
     test(RaycastTestModels(ray));
     test(RaycastTestPawns(ray));
     test(RaycastTestPickups(ray));
+    test(RaycastTestLights(ray));
     test(RaycastTestZones(ray));
+    test(RaycastTestStarts(ray));
 
     if (best.hit) {
         EditorLog("Selected: %s (type=%d idx=%d dist=%.1f)",
@@ -189,6 +225,8 @@ static void EditorPickEntity() {
     }
 }
 
+
+// Draw Context Menu Native
 static void DrawContextMenu() {
     if (!g_showContextMenu) return;
     int sw = GetScreenWidth(), sh = GetScreenHeight();
@@ -339,6 +377,49 @@ static void DrawPropertiesPanel() {
                           g_sel.index,
                           vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
             }
+        } else if (g_sel.type == SelType::LIGHT) {
+            LightNode* l = PawnSystem::Instance().GetLight(g_sel.index);
+            if (l) l->position = {vals[0], vals[1], vals[2]};
+        } else if (g_sel.type == SelType::ZONE && g_propsFieldCount >= 6) {
+            auto& zones = PawnSystem::Instance().GetZones();
+            for (auto& z : zones) {
+                if ((int)z.id == g_sel.index) {
+                    Vector3 center = {vals[0], vals[1], vals[2]};
+                    Vector3 size = {vals[3], vals[4], vals[5]};
+                    z.bounds.min = {center.x - size.x*0.5f, center.y - size.y*0.5f, center.z - size.z*0.5f};
+                    z.bounds.max = {center.x + size.x*0.5f, center.y + size.y*0.5f, center.z + size.z*0.5f};
+                    break;
+                }
+            }
+        } else if (g_sel.type == SelType::MODEL && g_propsFieldCount >= 5) {
+            if (g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
+                int mid = CachedModels[g_sel.index].ModelId;
+                wstring oldLine = L"Model" + to_wstring(mid) + L":" +
+                    to_wstring(CachedModels[g_sel.index].X) + L":" +
+                    to_wstring(CachedModels[g_sel.index].Y) + L":" +
+                    to_wstring(CachedModels[g_sel.index].Z) + L":" +
+                    to_wstring(CachedModels[g_sel.index].S) + L":" +
+                    to_wstring(CachedModels[g_sel.index].R) + L":";
+                wstring newLine = L"Model" + to_wstring(mid) + L":" +
+                    to_wstring(vals[0]) + L":" + to_wstring(vals[1]) + L":" +
+                    to_wstring(vals[2]) + L":" + to_wstring(vals[3]) + L":" +
+                    to_wstring(vals[4]) + L":";
+                size_t pos = OTEditor.WorldData.find(oldLine);
+                if (pos != wstring::npos) {
+                    OTEditor.WorldData.replace(pos, oldLine.size(), newLine);
+                    CacheWDL();
+                    EditorLog("Applied model %d properties", mid);
+                }
+            }
+        } else if (g_sel.type == SelType::SPAWN) {
+            auto& starts = PawnSystem::Instance().GetPlayerStarts();
+            for (auto& s : starts) {
+                if ((int)s.id == g_sel.index) {
+                    s.position = {vals[0], vals[1], vals[2]};
+                    if (g_propsFieldCount >= 4) s.yaw = vals[3];
+                    break;
+                }
+            }
         }
         EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), g_sel.index);
         g_showPropsPanel = false;
@@ -463,8 +544,12 @@ static ZoneType ParseWDLZoneType(std::string name) {
     return ZoneType::ZONE_WATER;
 }
 
+static const char* LegacyPickupType(int idx) {
+    static const char* map[] = {"HealthVial","ManaVial","EnergyCrystal","Key","Coin","Powerup"};
+    return (idx >= 0 && idx < 6) ? map[idx] : nullptr;
+}
+
 static void SyncWDLNodes() {
-    static const char* pickupNames[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
     auto& pawns = PawnSystem::Instance();
     pawns.DespawnAll();
     pawns.ClearPlayerStarts();
@@ -480,10 +565,11 @@ static void SyncWDLNodes() {
             node.position = {element.args[0], element.args[1], element.args[2]};
             node.typeName = element.pickupType;
             try {
-                int type = std::stoi(node.typeName);
-                if (type >= 0 && type < 6) node.typeName = pickupNames[type];
+                int legacyIdx = std::stoi(node.typeName);
+                const char* mapped = LegacyPickupType(legacyIdx);
+                if (mapped) node.typeName = mapped;
             } catch (...) {
-                EditorLog("WARN: Failed to parse pickup type '%s', using as-is", node.typeName.c_str());
+                // already a string name, use as-is
             }
             pawns.AddPickup(node);
         } else if (element.type == WDLElementType::NPC && element.args.size() >= 3) {
@@ -835,6 +921,9 @@ int main(int argc, char **argv){
     // Initialize package-based asset loading
     PackageAssetLoader::Instance().Init();
 
+    // Initialize LightningScript entity registry (loads .ozls pickup defs)
+    LightningEntityRegistry::Instance().Init();
+
 #ifdef _WIN32
     CreateAllEditorWindows(GetModuleHandle(NULL), GetWindowHandle());
 #endif
@@ -1138,13 +1227,14 @@ int main(int argc, char **argv){
             } else if (g_placeMode == PlaceMode::PICKUP) {
                 // Draw pickup preview as a colored cube
                 Color c = GREEN;
-                switch (OmegaTechEditor.ActivePickupType) {
-                    case EditorPickupType::HEALTH_VIAL:    c = RED;  break;
-                    case EditorPickupType::MANA_VIAL:      c = BLUE; break;
-                    case EditorPickupType::ENERGY_CRYSTAL: c = PURPLE; break;
-                    case EditorPickupType::KEY:            c = GOLD; break;
-                    case EditorPickupType::COIN:           c = YELLOW; break;
-                    case EditorPickupType::POWERUP:        c = MAGENTA; break;
+                const EntityDef* edef = LightningEntityRegistry::Instance().Find(OmegaTechEditor.ActivePickupName);
+                if (edef) {
+                    auto it = edef->stats.vec3s.find("preview_color");
+                    if (it != edef->stats.vec3s.end()) {
+                        c.r = (unsigned char)(it->second[0] * 255.0f);
+                        c.g = (unsigned char)(it->second[1] * 255.0f);
+                        c.b = (unsigned char)(it->second[2] * 255.0f);
+                    }
                 }
                 DrawCube({px, py + 0.5f, pz}, 0.4f, 0.6f, 0.4f, c);
                 DrawCubeWires({px, py + 0.5f, pz}, 0.4f, 0.6f, 0.4f, (Color){c.r,c.g,c.b,80});
@@ -1228,7 +1318,7 @@ int main(int argc, char **argv){
                         }
                     }
                 } else if (g_placeMode == PlaceMode::PICKUP) {
-                    WDLCommand += L"Pickup:" + to_wstring((int)OmegaTechEditor.ActivePickupType) + L":" +
+                    WDLCommand += L"Pickup:" + wstring(OmegaTechEditor.ActivePickupName.begin(), OmegaTechEditor.ActivePickupName.end()) + L":" +
                         to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
                         to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
                         to_wstring(OmegaTechEditor.R) + L":";
@@ -1332,6 +1422,32 @@ int main(int argc, char **argv){
                         selBox = z.bounds;
                         break;
                     }
+                }
+            } else if (g_sel.type == SelType::LIGHT) {
+                LightNode* l = PawnSystem::Instance().GetLight(g_sel.index);
+                if (l) {
+                    selBox = {{l->position.x-0.3f,l->position.y-0.3f,l->position.z-0.3f},
+                              {l->position.x+0.3f,l->position.y+0.3f,l->position.z+0.3f}};
+                }
+            } else if (g_sel.type == SelType::SPAWN) {
+                auto& starts = PawnSystem::Instance().GetPlayerStarts();
+                for (auto& s : starts) {
+                    if ((int)s.id == g_sel.index) {
+                        selBox = {{s.position.x-0.3f,s.position.y-0.3f,s.position.z-0.3f},
+                                  {s.position.x+0.3f,s.position.y+0.3f,s.position.z+0.3f}};
+                        break;
+                    }
+                }
+            } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
+                int mid = CachedModels[g_sel.index].ModelId;
+                LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
+                if (lm && lm->loaded) {
+                    BoundingBox box = GetMeshBoundingBox(lm->model.meshes[0]);
+                    float sx = CachedModels[g_sel.index].S;
+                    Vector3 pos = {CachedModels[g_sel.index].X, CachedModels[g_sel.index].Y, CachedModels[g_sel.index].Z};
+                    box.min = Vector3Add(Vector3Scale(box.min, sx), pos);
+                    box.max = Vector3Add(Vector3Scale(box.max, sx), pos);
+                    selBox = box;
                 }
             }
             if (selBox.min.x != selBox.max.x || selBox.min.y != selBox.max.y) {
@@ -1589,6 +1705,49 @@ int main(int argc, char **argv){
                         snprintf(g_propsBuf[5], 32, "%.1f", v.aabb.max.z - v.aabb.min.z);
                         g_propsFieldCount = 6;
                     }
+                } else if (g_sel.type == SelType::LIGHT) {
+                    LightNode* l = PawnSystem::Instance().GetLight(g_sel.index);
+                    if (l) {
+                        snprintf(g_propsBuf[0], 32, "%.1f", l->position.x);
+                        snprintf(g_propsBuf[1], 32, "%.1f", l->position.y);
+                        snprintf(g_propsBuf[2], 32, "%.1f", l->position.z);
+                        g_propsFieldCount = 3;
+                    }
+                } else if (g_sel.type == SelType::ZONE) {
+                    auto& zones = PawnSystem::Instance().GetZones();
+                    for (auto& z : zones) {
+                        if ((int)z.id == g_sel.index) {
+                            snprintf(g_propsBuf[0], 32, "%.1f", (z.bounds.min.x + z.bounds.max.x) * 0.5f);
+                            snprintf(g_propsBuf[1], 32, "%.1f", (z.bounds.min.y + z.bounds.max.y) * 0.5f);
+                            snprintf(g_propsBuf[2], 32, "%.1f", (z.bounds.min.z + z.bounds.max.z) * 0.5f);
+                            snprintf(g_propsBuf[3], 32, "%.1f", z.bounds.max.x - z.bounds.min.x);
+                            snprintf(g_propsBuf[4], 32, "%.1f", z.bounds.max.y - z.bounds.min.y);
+                            snprintf(g_propsBuf[5], 32, "%.1f", z.bounds.max.z - z.bounds.min.z);
+                            g_propsFieldCount = 6;
+                            break;
+                        }
+                    }
+                } else if (g_sel.type == SelType::SPAWN) {
+                    auto& starts = PawnSystem::Instance().GetPlayerStarts();
+                    for (auto& s : starts) {
+                        if ((int)s.id == g_sel.index) {
+                            snprintf(g_propsBuf[0], 32, "%.1f", s.position.x);
+                            snprintf(g_propsBuf[1], 32, "%.1f", s.position.y);
+                            snprintf(g_propsBuf[2], 32, "%.1f", s.position.z);
+                            snprintf(g_propsBuf[3], 32, "%.1f", s.yaw);
+                            g_propsFieldCount = 4;
+                            break;
+                        }
+                    }
+                } else if (g_sel.type == SelType::MODEL) {
+                    if (g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
+                        snprintf(g_propsBuf[0], 32, "%.1f", CachedModels[g_sel.index].X);
+                        snprintf(g_propsBuf[1], 32, "%.1f", CachedModels[g_sel.index].Y);
+                        snprintf(g_propsBuf[2], 32, "%.1f", CachedModels[g_sel.index].Z);
+                        snprintf(g_propsBuf[3], 32, "%.1f", CachedModels[g_sel.index].S);
+                        snprintf(g_propsBuf[4], 32, "%.1f", CachedModels[g_sel.index].R);
+                        g_propsFieldCount = 5;
+                    }
                 }
                 g_showPropsPanel = true;
                 EditorLog("Properties for %s idx=%d", g_sel.name.c_str(), g_sel.index);
@@ -1609,6 +1768,26 @@ int main(int argc, char **argv){
                         EditorLog("Deleted brush volume idx=%d", g_sel.index);
                     } else {
                         EditorLog("Brush deletion failed: invalid index %d", g_sel.index);
+                    }
+                } else if (g_sel.type == SelType::LIGHT) {
+                    PawnSystem::Instance().RemoveLight(g_sel.index);
+                } else if (g_sel.type == SelType::ZONE) {
+                    PawnSystem::Instance().RemoveZone(g_sel.index);
+                } else if (g_sel.type == SelType::SPAWN) {
+                    PawnSystem::Instance().RemovePlayerStart(g_sel.index);
+                } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
+                    int mid = CachedModels[g_sel.index].ModelId;
+                    wstring line = L"Model" + to_wstring(mid) + L":" +
+                        to_wstring(CachedModels[g_sel.index].X) + L":" +
+                        to_wstring(CachedModels[g_sel.index].Y) + L":" +
+                        to_wstring(CachedModels[g_sel.index].Z) + L":" +
+                        to_wstring(CachedModels[g_sel.index].S) + L":" +
+                        to_wstring(CachedModels[g_sel.index].R) + L":";
+                    size_t pos = OTEditor.WorldData.find(line);
+                    if (pos != wstring::npos) {
+                        OTEditor.WorldData.erase(pos, line.size());
+                        CacheWDL();
+                        EditorLog("Deleted model %d line", mid);
                     }
                 }
                 g_sel = { SelType::NONE, -1, "", {0,0,0} };
@@ -1648,6 +1827,50 @@ int main(int argc, char **argv){
                             break;
                         }
                     }
+                } else if (g_sel.type == SelType::BRUSH) {
+                    auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
+                    if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
+                        OzoneCollisionVolume clone = vols[g_sel.index];
+                        clone.aabb.min.x += offset.x;
+                        clone.aabb.min.z += offset.z;
+                        clone.aabb.max.x += offset.x;
+                        clone.aabb.max.z += offset.z;
+                        vols.push_back(clone);
+                        OzoneLoader::Instance().RebuildCollisionVolumes();
+                        EditorLog("Duplicated brush idx=%d", g_sel.index);
+                    }
+                } else if (g_sel.type == SelType::LIGHT) {
+                    LightNode* l = PawnSystem::Instance().GetLight(g_sel.index);
+                    if (l) {
+                        LightNode clone = *l;
+                        clone.position.x += offset.x;
+                        clone.position.z += offset.z;
+                        PawnSystem::Instance().AddLight(clone);
+                    }
+                } else if (g_sel.type == SelType::SPAWN) {
+                    auto& starts = PawnSystem::Instance().GetPlayerStarts();
+                    for (auto& s : starts) {
+                        if ((int)s.id == g_sel.index) {
+                            PlayerStartNode clone = s;
+                            clone.position.x += offset.x;
+                            clone.position.z += offset.z;
+                            PawnSystem::Instance().AddPlayerStart(clone);
+                            break;
+                        }
+                    }
+                } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
+                    int mid = CachedModels[g_sel.index].ModelId;
+                    float nx = CachedModels[g_sel.index].X + offset.x;
+                    float nz = CachedModels[g_sel.index].Z + offset.z;
+                    wstring newLine = L"Model" + to_wstring(mid) + L":" +
+                        to_wstring(nx) + L":" +
+                        to_wstring(CachedModels[g_sel.index].Y) + L":" +
+                        to_wstring(nz) + L":" +
+                        to_wstring(CachedModels[g_sel.index].S) + L":" +
+                        to_wstring(CachedModels[g_sel.index].R) + L":";
+                    OTEditor.WorldData += newLine;
+                    CacheWDL();
+                    EditorLog("Duplicated model %d", mid);
                 }
             }
         }
@@ -1754,7 +1977,17 @@ int main(int argc, char **argv){
         // Handle action flags from Win32 dialogs
         if (g_editorPanels.actionPickupType >= 0) {
             g_placeMode = PlaceMode::PICKUP;
-            OmegaTechEditor.ActivePickupType = (EditorPickupType)g_editorPanels.actionPickupType;
+            // Look up pickup name from legacy index or registry
+            int idx = g_editorPanels.actionPickupType;
+            const char* legacy = LegacyPickupType(idx);
+            if (legacy) {
+                OmegaTechEditor.ActivePickupName = legacy;
+            } else {
+                std::vector<const EntityDef*> pickups;
+                LightningEntityRegistry::Instance().FindByType(EntityType::PICKUP, pickups);
+                if (idx >= 0 && idx < (int)pickups.size())
+                    OmegaTechEditor.ActivePickupName = pickups[idx]->name;
+            }
             OmegaTechEditor.DrawModel = true;
             OmegaTechEditor.X = OTEditor.MainCamera.position.x;
             OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
@@ -1787,7 +2020,7 @@ int main(int argc, char **argv){
             OmegaTechEditor.DrawModel = true;
             int primType = g_editorPanels.actionCsgPlace;
             // Map primitive type to EMID
-            // 0=box, 1=cyl, 2=sph, 3=pyr, 4=pln ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â use 200+ offset for OZONE primitives
+        
             EMID = 200 + primType;
             g_editorPanels.actionCsgPlace = -1;
         }

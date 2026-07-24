@@ -4,6 +4,7 @@
 #include "../../Source/WindowsCompat.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
+#include "../../Source/Script/LightningEntityRegistry.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <commctrl.h>
@@ -913,7 +914,7 @@ PawnTreeNode BuildPawnTree() {
     }
     pawnBranch.children.push_back(enemyBranch);
 
-    // InventoryPawn branch — pickups
+    // InventoryPawn branch — pickups (data-driven from LightningScript entity registry)
     PawnTreeNode invBranch;
     invBranch.label = "InventoryPawn";
     invBranch.isExpanded = false;
@@ -923,13 +924,16 @@ PawnTreeNode BuildPawnTree() {
     pickupBranch.label = "Pickups";
     pickupBranch.isExpanded = false;
     pickupBranch.typeTag = "category";
-    const char* pickupNames[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
-    for (auto& pn : pickupNames) {
-        PawnTreeNode leaf;
-        leaf.label = pn;
-        leaf.defName = pn;
-        leaf.typeTag = "pickup";
-        pickupBranch.children.push_back(leaf);
+    {
+        std::vector<const EntityDef*> pickupDefs;
+        LightningEntityRegistry::Instance().FindByType(EntityType::PICKUP, pickupDefs);
+        for (auto* def : pickupDefs) {
+            PawnTreeNode leaf;
+            leaf.label = def->name;
+            leaf.defName = def->name;
+            leaf.typeTag = "pickup";
+            pickupBranch.children.push_back(leaf);
+        }
     }
     invBranch.children.push_back(pickupBranch);
 
@@ -1652,15 +1656,10 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
 }
 
 // =====================================================================
-// Pickup Panel
+// Pickup Panel — dynamically generated from LightningScript entity registry
 // =====================================================================
 static const int ID_PICK_CLOSE   = 100;
-static const int ID_PICK_HEALTH  = 101;
-static const int ID_PICK_MANA    = 102;
-static const int ID_PICK_ENERGY  = 103;
-static const int ID_PICK_KEY     = 104;
-static const int ID_PICK_COIN    = 105;
-static const int ID_PICK_POWERUP = 106;
+static const int ID_PICKUP_BASE  = 101;
 
 static int g_lastPickupType = 0;
 
@@ -1674,30 +1673,23 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
     switch (msg) {
     case WM_CREATE: {
         CreateLabel(hwnd, L"Pickups", 10, 10, 100, 20, 1);
-        CreateButton(hwnd, L"Health Vial", 10, 35, 160, 24, ID_PICK_HEALTH);
-        CreateButton(hwnd, L"Mana Vial", 10, 63, 160, 24, ID_PICK_MANA);
-        CreateButton(hwnd, L"Energy Crystal", 10, 91, 160, 24, ID_PICK_ENERGY);
-        CreateButton(hwnd, L"Key", 10, 119, 160, 24, ID_PICK_KEY);
-        CreateButton(hwnd, L"Coin", 10, 147, 160, 24, ID_PICK_COIN);
-        CreateButton(hwnd, L"Powerup", 10, 175, 160, 24, ID_PICK_POWERUP);
-        CreateButton(hwnd, L"Close", 70, 215, 100, 28, ID_PICK_CLOSE);
+        std::vector<const EntityDef*> pickupDefs;
+        LightningEntityRegistry::Instance().FindByType(EntityType::PICKUP, pickupDefs);
+        int y = 35;
+        for (size_t i = 0; i < pickupDefs.size(); i++, y += 28) {
+            std::wstring label(pickupDefs[i]->name.begin(), pickupDefs[i]->name.end());
+            CreateButton(hwnd, label.c_str(), 10, y, 160, 24, ID_PICKUP_BASE + (int)i);
+        }
+        CreateButton(hwnd, L"Close", 70, y + 8, 100, 28, ID_PICK_CLOSE);
         break;
     }
     case WM_COMMAND: {
         int id = LOWORD(w);
         if (id == ID_PICK_CLOSE) ShowPickupPanel(false);
-        else {
-            int type = -1;
-            if (id == ID_PICK_HEALTH) type = 0;
-            else if (id == ID_PICK_MANA) type = 1;
-            else if (id == ID_PICK_ENERGY) type = 2;
-            else if (id == ID_PICK_KEY) type = 3;
-            else if (id == ID_PICK_COIN) type = 4;
-            else if (id == ID_PICK_POWERUP) type = 5;
-            if (type >= 0) {
-                g_lastPickupType = type;
-                g_editorPanels.actionPickupType = type;
-            }
+        else if (id >= ID_PICKUP_BASE) {
+            int type = id - ID_PICKUP_BASE;
+            g_lastPickupType = type;
+            g_editorPanels.actionPickupType = type;
         }
         break;
     }

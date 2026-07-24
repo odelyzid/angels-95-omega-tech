@@ -2,6 +2,7 @@
 #include "../Package/OzAssetMapper.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Script/LightningEntityManager.hpp"
+#include "../Script/LightningEntityRegistry.hpp"
 #include "Player.hpp"
 #include "Items.hpp"
 #include "../Log.hpp"
@@ -215,6 +216,12 @@ void PawnSystem::AddPlayerStart(const PlayerStartNode& node) {
     m_playerStarts.push_back(n);
 }
 
+void PawnSystem::RemovePlayerStart(int id) {
+    auto it = std::remove_if(m_playerStarts.begin(), m_playerStarts.end(),
+        [id](const PlayerStartNode& n) { return n.id == (uint32_t)id; });
+    m_playerStarts.erase(it, m_playerStarts.end());
+}
+
 void PawnSystem::ClearPlayerStarts() {
     m_playerStarts.clear();
 }
@@ -325,13 +332,23 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
             n.active = false;
             n.respawnTimer = n.respawnTime;
 
-            // Map typeName to item ID, then apply effect
+            // Map typeName to item ID via LightningScript entity registry
             int itemId = 0;
-            if (n.typeName == "HealthVial") itemId = 1;
-            else if (n.typeName == "ManaVial") itemId = 2;
-            else if (n.typeName == "Coin") itemId = 13;
-            else if (n.typeName == "Key") itemId = 12;
-            else if (n.typeName == "Powerup") itemId = 14;
+            const EntityDef* edef = LightningEntityRegistry::Instance().Find(n.typeName);
+            if (edef) {
+                auto it = edef->stats.floats.find("item_id");
+                if (it != edef->stats.floats.end())
+                    itemId = (int)it->second;
+            }
+            if (itemId == 0) {
+                // Fallback: scan ItemDB by name
+                for (int i = 0; i < ITEM_DB_SIZE; i++) {
+                    std::string dbName(ItemDB[i].name);
+                    // Remove spaces for comparison: "Health Vial" -> "HealthVial"
+                    dbName.erase(std::remove(dbName.begin(), dbName.end(), ' '), dbName.end());
+                    if (dbName == n.typeName) { itemId = ItemDB[i].id; break; }
+                }
+            }
 
             const ItemDBEntry* def = (itemId > 0) ? GetItemDef(itemId) : nullptr;
             if (def) {

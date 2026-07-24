@@ -1,0 +1,10 @@
+entity "Powerup" : pickup {
+    icon = "Powerup.png"
+    stats {
+        item_id = 14
+        preview_color = (1.0, 0.0, 1.0)
+        value = 0
+        respawn_time = 60.0
+        pickup_category = "powerup"
+    }
+}

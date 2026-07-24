@@ -145,16 +145,24 @@ void LoadEntitiesFromWDL()
         if (Instruction.empty() || Instruction[0] == L'#')
             continue;
 
-        // Pickup: "Pickup:X:Y:Z:S:Rotation:TypeName"
+        // Pickup: "Pickup:typeName:X:Y:Z:S:R:" (old format: integer index at field 1)
         if (Instruction.substr(0, 6) == L"Pickup")
         {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            wstring typeName = WSplitValue(WData, i + 6);
+            float x = ToFloat(WSplitValue(WData, i + 2));
+            float y = ToFloat(WSplitValue(WData, i + 3));
+            float z = ToFloat(WSplitValue(WData, i + 4));
+            wstring typeField = WSplitValue(WData, i + 1);
+            std::string typeName;
+            try {
+                int legacyIdx = std::stoi(typeField);
+                static const char* legacyMap[] = {"HealthVial","ManaVial","EnergyCrystal","Key","Coin","Powerup"};
+                if (legacyIdx >= 0 && legacyIdx < 6) typeName = legacyMap[legacyIdx];
+            } catch (...) {
+                typeName = std::string(typeField.begin(), typeField.end());
+            }
             PickupNode node;
             node.position = {x, y, z};
-            node.typeName = string(typeName.begin(), typeName.end());
+            node.typeName = typeName;
             PawnSystem::Instance().AddPickup(node);
         }
         // Spawn: "Spawn:X:Y:Z:S:Rotation"
@@ -1282,7 +1290,7 @@ void WDLProcess()
         }
 
         if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 1) == L"NE" || WReadValue(Instruction, 0, 6) == L"ClipBox" ||WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" || WReadValue(Instruction, 0, 8) == L"HeightMap" || WReadValue(Instruction, 0, 8) == L"Collision" || WReadValue(Instruction, 0, 11) == L"AdvCollision" ||
-            WReadValue(Instruction, 0, 6) == L"Pickup" || WReadValue(Instruction, 0, 5) == L"Spawn" ||
+            WReadValue(Instruction, 0, 5) == L"Spawn" ||
             WReadValue(Instruction, 0, 3) == L"NPC" || WReadValue(Instruction, 0, 5) == L"Light" ||
             WReadValue(Instruction, 0, 5) == L"Sound" || WReadValue(Instruction, 0, 5) == L"Music" ||
             WReadValue(Instruction, 0, 8) == L"ZoneInfo")
