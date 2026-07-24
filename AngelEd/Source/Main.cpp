@@ -902,14 +902,16 @@ int main(int argc, char **argv){
         // Process Win32 messages for child panels + menu bar
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_COMMAND) {
+            // Only intercept WM_COMMAND when it comes from the main window (menu commands).
+            // Child dialog WM_COMMAND messages must be dispatched normally.
+            if (msg.message == WM_COMMAND && msg.hwnd == GetWindowHandle()) {
                 int id = LOWORD(msg.wParam);
                 switch (id) {
                     case IDM_NEW:           FileNew(); break;
                     case IDM_OPEN:          { std::string p; if (ChooseOpenWorldFile(p)) g_pendingOpenPath = fs::path(p); } break;
                     case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); break;
                     case IDM_SAVE_AS:       FileSaveAs(); break;
-                    case IDM_PLAY_TEST:     { /* launch test */ std::string tempPath = "System/Cache/editor_test.wdl";
+                    case IDM_PLAY_TEST:     { std::string tempPath = "System/Cache/editor_test.wdl";
                         std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
                         std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" Angels95.exe --world " + tempPath).c_str()); } } break;
                     case IDM_EXIT:          CloseWindow(); break;
