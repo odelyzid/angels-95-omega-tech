@@ -336,7 +336,7 @@ void ScanTextureBrowserFiles() {
     // Only scan packages, not filesystem
     std::vector<std::string> pkgFiles;
     PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
-    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg", ".gif" };
+    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg" };
     for (const auto& pkgPath : pkgFiles) {
         std::string ext = pkgPath.substr(pkgPath.rfind('.'));
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);

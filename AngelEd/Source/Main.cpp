@@ -1656,7 +1656,12 @@ int main(int argc, char **argv){
                 Texture2D tex = {0};
                 if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
                 else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
-                else tex = LoadTextureWithFallback(entry.path.c_str());
+                else {
+                    std::string fext = entry.path.substr(entry.path.rfind('.'));
+                    std::transform(fext.begin(), fext.end(), fext.begin(), ::tolower);
+                    if (fext == ".png" || fext == ".jpg" || fext == ".jpeg" || fext == ".bmp" || fext == ".tga")
+                        tex = LoadTextureWithFallback(entry.path.c_str());
+                }
                 if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
                 if (mdl.meshes != nullptr) {
                     entry.triangles = mdl.meshes[0].triangleCount;
@@ -1685,7 +1690,12 @@ int main(int argc, char **argv){
             Texture2D tex = {0};
             if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
             else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
-            else tex = LoadTextureWithFallback(entry.path.c_str());
+            else {
+                std::string fext = entry.path.substr(entry.path.rfind('.'));
+                std::transform(fext.begin(), fext.end(), fext.begin(), ::tolower);
+                if (fext == ".png" || fext == ".jpg" || fext == ".jpeg" || fext == ".bmp" || fext == ".tga")
+                    tex = LoadTextureWithFallback(entry.path.c_str());
+            }
             if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
             if (mdl.meshes != nullptr) {
                 rlDisableBackfaceCulling();

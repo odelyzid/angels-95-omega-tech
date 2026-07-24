@@ -266,8 +266,14 @@ inline Image LoadImageWithFallback(const char* path) {
     if (data) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
-        std::string ext = normalized.substr(normalized.rfind('.') + 1);
-        return LoadImageFromMemory(ext.c_str(), data, (int)sz);
+        std::string ext = normalized.substr(normalized.rfind('.'));
+        const char* fmt = nullptr;
+        if (ext == ".png") fmt = "png";
+        else if (ext == ".jpg" || ext == ".jpeg") fmt = "jpg";
+        else if (ext == ".bmp") fmt = "bmp";
+        else if (ext == ".tga") fmt = "tga";
+        if (fmt)
+            return LoadImageFromMemory(fmt, data, (int)sz);
     }
     return Image{0};
 }
