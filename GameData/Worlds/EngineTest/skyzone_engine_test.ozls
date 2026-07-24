@@ -1,13 +1,18 @@
 entity "zone_sky_0" : skyzone {
-    fog_color = (0.7, 0.75, 0.8)
-    fog_density = 0.002
-    ambient_light = (0.5, 0.5, 0.6)
-    skybox = "skybox_default"
+    fog_color = (0.6, 0.65, 0.75)
+    fog_density = 0.004
+    ambient_light = (0.6, 0.55, 0.5)
+    skybox = "GameData/Worlds/EngineTest/Models/Skybox.png"
     actions {
         on_enter {
-            say "Entered EngineTest sky zone"
+            set_fog 0.6 0.65 0.75 0.004
+            set_ambient 0.6 0.55 0.5
+            set_skybox "GameData/Worlds/EngineTest/Models/Skybox.png"
+            say "Entered EngineTest — ambient/fog/skybox active"
         }
         on_exit {
+            restore_fog
+            restore_skybox
             say "Exited EngineTest sky zone"
         }
     }
