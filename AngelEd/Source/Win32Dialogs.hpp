@@ -101,7 +101,7 @@ struct EditorPanelState {
 
 extern EditorPanelState g_editorPanels;
 
-// --- ZoneProperties â€” replaces old EnvSettings ---
+// --- ZoneProperties replaces old EnvSettings ---
 enum class GameType : uint8_t {
     SINGLEPLAYER,
     COOP,

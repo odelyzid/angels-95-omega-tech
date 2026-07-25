@@ -1,5 +1,6 @@
 ﻿#include "OzPawnSystem.hpp"
 #include "../Package/OzAssetMapper.hpp"
+#include "../Package/PackageAssetLoader.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Script/LightningEntityManager.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
@@ -91,27 +92,23 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
     p.stateTimer = 0.0f;
     p.defName = defName;
 
-    // Load sprite and scream using def paths or convention
+    // Load sprite and scream using def paths or convention (with package fallback)
     {
         const char* spritePath = def->sprite_path;
-        std::string fallbackSprite = std::string("GameData/Global/Pawn/") + defName + ".png";
-        std::string spriteToLoad;
-        if (spritePath && IsPathFile(spritePath))
-            spriteToLoad = spritePath;
-        else if (IsPathFile(fallbackSprite.c_str()))
-            spriteToLoad = fallbackSprite;
-        if (!spriteToLoad.empty())
-            p.sprite = LoadTexture(spriteToLoad.c_str());
+        if (spritePath && spritePath[0])
+            p.sprite = LoadTextureWithFallback(spritePath);
+        if (p.sprite.id == 0) {
+            std::string fallbackSprite = std::string("GameData/Global/Pawn/") + defName + ".png";
+            p.sprite = LoadTextureWithFallback(fallbackSprite.c_str());
+        }
 
         const char* screamPath = def->scream_path;
-        std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
-        std::string soundToLoad;
-        if (screamPath && IsPathFile(screamPath))
-            soundToLoad = screamPath;
-        else if (IsPathFile(fallbackScream.c_str()))
-            soundToLoad = fallbackScream;
-        if (!soundToLoad.empty())
-            p.scream = LoadSound(soundToLoad.c_str());
+        if (screamPath && screamPath[0])
+            p.scream = LoadSoundWithFallback(screamPath);
+        if (p.scream.frameCount == 0) {
+            std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
+            p.scream = LoadSoundWithFallback(fallbackScream.c_str());
+        }
     }
 
     OZ_DEBUG("Pawn spawned: id=%d def=%s sprite=%d scream=%d at (%.1f, %.1f, %.1f)",
@@ -421,7 +418,7 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
 }
 
 // ---------------------------------------------------------------------------
-// UpdateSkyZone â€” detect if player is inside a ZONE_SKY volume
+// UpdateSkyZone detect if player is inside a ZONE_SKY volume
 // ---------------------------------------------------------------------------
 void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
     bool wasInSky = m_inSkyZone;

@@ -274,6 +274,7 @@ static void ExecuteConsoleCommand(const char* cmd) {
         // Try matching weapon/entity name (LightningEntityRegistry)
         {
             auto& regAll = LightningEntityRegistry::Instance().GetAll();
+            bool found = false;
             for (auto& [regName, def] : regAll) {
                 const char* a = arg;
                 const char* b = regName.c_str();
@@ -294,12 +295,12 @@ static void ExecuteConsoleCommand(const char* cmd) {
                             }
                         }
                     }
-                    return;
-                } else {
-                    OZ_INFO("No match for /summon '%s'", arg);
-                    return;
+                    found = true;
+                    break;
                 }
             }
+            if (!found)
+                OZ_INFO("No match for /summon '%s'", arg);
         }
     } else if (strncmp(cmd, "/world ", 7) == 0) {
         const char* name = cmd + 7;

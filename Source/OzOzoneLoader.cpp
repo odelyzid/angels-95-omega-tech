@@ -470,6 +470,12 @@ bool OzoneLoader::LoadFile(const char* path) {
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
 
+    // Center cylinder and pyramid at position (mesh sits with bottom at Y=0, but
+    // box/sphere/plane are centered; adjust to match the center convention)
+    if ((prim.type == OzonePrimitiveType::CYLINDER ||
+         prim.type == OzonePrimitiveType::PYRAMID) && prim.args.size() >= 6)
+        r.position.y -= prim.args[5] / 2.0f;
+
     r.scale = 1.0f;
     if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 7)
         r.rotation = prim.args[6] * DEG2RAD;
@@ -531,6 +537,12 @@ bool OzoneLoader::LoadString(const char* data) {
     r.csgOp = prim.csgOp;
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
+
+    // Center cylinder and pyramid at position (mesh sits with bottom at Y=0)
+    if ((prim.type == OzonePrimitiveType::CYLINDER ||
+         prim.type == OzonePrimitiveType::PYRAMID) && prim.args.size() >= 6)
+        r.position.y -= prim.args[5] / 2.0f;
+
     r.scale = 1.0f;
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
@@ -574,8 +586,8 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
             float w = (args.size() > 3) ? args[3] : 2.0f;
             float h = (args.size() > 4) ? args[4] : 2.0f;
             float d = (args.size() > 5) ? args[5] : 2.0f;
-            out.min = {position.x - w/2, position.y,       position.z - d/2};
-            out.max = {position.x + w/2, position.y + h,   position.z + d/2};
+            out.min = {position.x - w/2, position.y - h/2, position.z - d/2};
+            out.max = {position.x + w/2, position.y + h/2, position.z + d/2};
             break;
         }
         case OzonePrimitiveType::CYLINDER: {
@@ -583,8 +595,8 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
             float rBot = (args.size() > 4) ? args[4] : 1.0f;
             float h    = (args.size() > 5) ? args[5] : 2.0f;
             float maxR = (rTop > rBot) ? rTop : rBot;
-            out.min = {position.x - maxR, position.y,       position.z - maxR};
-            out.max = {position.x + maxR, position.y + h,   position.z + maxR};
+            out.min = {position.x - maxR, position.y - h/2, position.z - maxR};
+            out.max = {position.x + maxR, position.y + h/2, position.z + maxR};
             break;
         }
         case OzonePrimitiveType::SPHERE: {
@@ -597,8 +609,8 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
             float w = (args.size() > 3) ? args[3] : 2.0f;
             float d = (args.size() > 4) ? args[4] : 2.0f;
             float h = (args.size() > 5) ? args[5] : 2.0f;
-            out.min = {position.x - w/2, position.y,       position.z - d/2};
-            out.max = {position.x + w/2, position.y + h,   position.z + d/2};
+            out.min = {position.x - w/2, position.y - h/2, position.z - d/2};
+            out.max = {position.x + w/2, position.y + h/2, position.z + d/2};
             break;
         }
         default:
@@ -684,6 +696,9 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     OzoneRenderable r;
     r.typeId = primType;
     r.position = pos;
+    // Center cylinder/pyramid at position (mesh sits with bottom at Y=0)
+    if (primType == 1) r.position.y -= size.z / 2.0f;  // cylinder: h = size.z
+    if (primType == 3) r.position.y -= size.y / 2.0f;  // pyramid: h = size.y
     r.scale = scale;
     r.rotation = rot;
     r.model = mdl;

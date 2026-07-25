@@ -1,4 +1,5 @@
 #include "OzAssetMapper.hpp"
+#include "PackageAssetLoader.hpp"
 #include "../Log.hpp"
 #include <cstring>
 #include <cctype>
@@ -181,12 +182,21 @@ Texture2D AssetMapper::GetTexture(const char* alias) {
     if (e->texture.id > 0)
         return e->texture;
 
-    // Try loading the path
-    Texture2D tex = {0};
-    if (IsPathFile(e->path)) {
-        tex = LoadTexture(e->path);
-        if (tex.id > 0)
-            SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+    // Try loading the path (filesystem first, then packages)
+    Texture2D tex = LoadTextureWithFallback(e->path);
+    if (tex.id > 0)
+        SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+
+    // .gif -> .png fallback for items (package may have .png where .gif was probed)
+    if (tex.id == 0 && strcmp(e->category, "items") == 0) {
+        std::string pngPath = e->path;
+        size_t dot = pngPath.rfind(".gif");
+        if (dot != std::string::npos) {
+            pngPath.replace(dot, 4, ".png");
+            tex = LoadTextureWithFallback(pngPath.c_str());
+            if (tex.id > 0)
+                SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+        }
     }
 
     // Fallback to grid
