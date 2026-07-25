@@ -18,13 +18,13 @@
 ## HUD
 
 - **Health / Mana / Psychic Energy** — three resource pools displayed at top, automatic regeneration (tick-based). Max values default to 100.
-- **Level & XP** — exponential XP curve (`XP_BASE_TO_NEXT=100`, growth 1.3× per level). XP gained from pickups, NPC kills, and exploration.
+- **Level & XP** — exponential XP curve (`XP_BASE_TO_NEXT=100`, growth 1.3x per level). XP gained from pickups, NPC kills, and exploration.
 - **Hotbar** — 5 weapon slots + 3 equipment slots (8 total). Slot 1 is the default Wand / Energy Bolt weapon.
 - **Ping** — displayed when connected to a network server.
 
 ## Pickups
 
-9 pickup types, each with per-type respawn timers and values:
+Pickup types are **data-driven** via LightningScript entity definitions (`.ozls` files parsed by `LightningEntityRegistry`). The legacy hardcoded types are:
 
 | Type | ID |
 |---|---|
@@ -38,6 +38,8 @@
 | Coin | 7 |
 | Powerup | 8 |
 
+New pickup types can be added by creating `.ozls` entity definition files.
+
 ## Inventory
 
 - **20 backpack slots** — collected items go here
@@ -47,18 +49,20 @@
 
 ## NPC AI
 
-Four-state finite state machine:
+Six-state finite state machine:
 
 ```
-IDLE → PATROL → CHASE → RETURN
+IDLE -> PATROL -> CHASE -> ATTACK -> RETURN -> DEAD
 ```
 
-- **IDLE**: standing still, waiting
+- **IDLE**: standing still, waiting for a target to enter aggro range
 - **PATROL**: circles around spawn point
 - **CHASE**: pursues nearby player within aggro range
+- **ATTACK**: engages when within attack range (deals configured damage)
 - **RETURN**: goes back to spawn if target strays too far
+- **DEAD**: despawned state after health reaches zero
 
-NPCs are configured via WDL `Walker` instructions or placed in the editor via the Pawn Manager.
+NPCs are configured data-driven from `GameData/Global/PawnDefs/*.cfg` (name, speed, aggroRange, attackRange, damage, maxHealth) or via fallback hardcoded defs: Walker, Skaarj, Brute, Floater.
 
 ## Networking
 

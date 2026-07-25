@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -838,6 +839,57 @@ static void on_server_message(const net::NetworkMessage& msg,
             g_game_server->broadcast_message(msg);
             break;
         }
+        case net::MessageType::NPC_DAMAGE: {
+            if (msg.size < sizeof(net::NpcDamageData)) break;
+            net::NpcDamageData ndd;
+            memcpy(&ndd, msg.payload, sizeof(ndd));
+            ndd.player_id = sender.id;
+            // Find and damage the NPC
+            WorldState* ws = g_game_state.get_world(ndd.world_index);
+            if (!ws) break;
+            ServerNPC* npc = nullptr;
+            if (ndd.partition_index >= 0) {
+                WorldPartition* part = g_game_state.get_partition(*ws, ndd.partition_index);
+                if (part && ndd.npc_index >= 0 && ndd.npc_index < (int)part->npcs.size())
+                    npc = &part->npcs[ndd.npc_index];
+            } else {
+                if (ndd.npc_index >= 0 && ndd.npc_index < (int)ws->global_npcs.size())
+                    npc = &ws->global_npcs[ndd.npc_index];
+            }
+            if (!npc || !npc->active) break;
+            // Validate distance (2x attack range for leeway)
+            ServerPlayer* attacker = g_game_state.get_player(sender.id);
+            if (!attacker) break;
+            float dx = attacker->position.x - npc->position.x;
+            float dy = attacker->position.y - npc->position.y;
+            float dz = attacker->position.z - npc->position.z;
+            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (dist > 20.0f) break; // max weapon range
+            // Rate-limit: max 5 damage ticks/second (2 server ticks at 10fps)
+            if (attacker->last_damage_tick > 0 &&
+                g_game_state.tick_count() - attacker->last_damage_tick < 2) break;
+            attacker->last_damage_tick = g_game_state.tick_count();
+            g_game_state.damage_npc(*npc, ndd.damage, sender.id);
+            // Broadcast updated NPC state
+            net::NpcStateUpdateData nsud;
+            nsud.world_index = ndd.world_index;
+            nsud.npc_index = ndd.npc_index;
+            nsud.partition_index = ndd.partition_index;
+            nsud.position = npc->position;
+            nsud.yaw = npc->yaw;
+            nsud.state = static_cast<int>(npc->state);
+            nsud.health = npc->health;
+            nsud.active = npc->active;
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
+            relay.size = sizeof(nsud);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &nsud, sizeof(nsud));
+            g_game_server->broadcast_message(relay);
+            break;
+        }
         default:
             OZ_WARN("Unhandled message type %s (%u) from player %u",
                     net::message_type_string(type), (unsigned)type, sender.id);
@@ -946,6 +998,37 @@ int main(int argc, char** argv) {
         discovery.update();
 
         g_game_state.tick(0.1f);
+
+        // Broadcast pickups that just respawned to all clients
+        {
+            auto respawned = g_game_state.consume_respawned_pickups();
+            for (auto& rp : respawned) {
+                WorldState* ws = g_game_state.get_world(rp.world_index);
+                if (!ws) continue;
+                ServerPickup* pickup = nullptr;
+                for (auto& part : ws->partitions)
+                    for (auto& p : part.pickups)
+                        if (p.id == rp.pickup_id) { pickup = &p; break; }
+                if (!pickup)
+                    for (auto& p : ws->global_pickups)
+                        if (p.id == rp.pickup_id) { pickup = &p; break; }
+                if (!pickup || !pickup->active) continue;
+                net::PickupRespawnData prd;
+                prd.pickup_id = pickup->id;
+                prd.world_index = rp.world_index;
+                prd.position = {pickup->position.x, pickup->position.y, pickup->position.z};
+                prd.type = static_cast<int>(pickup->type);
+                prd.value = pickup->value;
+                net::NetworkMessage msg{};
+                msg.magic = net::MAGIC;
+                msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
+                msg.size = sizeof(prd);
+                msg.sequence = 0;
+                msg.timestamp = static_cast<uint32_t>(time(nullptr));
+                memcpy(msg.payload, &prd, sizeof(prd));
+                g_game_server->broadcast_message(msg);
+            }
+        }
 
         // Broadcast NPC state to all players every 4 ticks (2.5/sec)
         if (tick % 4 == 0) {

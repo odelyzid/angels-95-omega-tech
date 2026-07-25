@@ -235,6 +235,28 @@ static void FireWeapon() {
             origin.x, origin.y, origin.z,
             forward.x, forward.y, forward.z,
             1, 10);
+
+        // Client-side NPC hit detection — find nearest NPC along fire ray
+        int hitIdx = -1, hitPart = -1;
+        float hitDist = 1e9f;
+        const auto& cnpc = g_client.npcs();
+        for (size_t i = 0; i < cnpc.size(); i++) {
+            if (!cnpc[i].active) continue;
+            Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
+            Vector3 toNpc = Vector3Subtract(np, origin);
+            float t = Vector3DotProduct(toNpc, forward);
+            if (t < 0) continue;
+            Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
+            float d = Vector3Distance(closest, np);
+            if (d < 2.0f && t < hitDist) {
+                hitDist = t;
+                hitIdx = static_cast<int>(i);
+                hitPart = cnpc[i].partition_index;
+            }
+        }
+        if (hitIdx >= 0) {
+            g_client.send_npc_damage(0, hitIdx, hitPart, 10);
+        }
     }
 }
 
@@ -964,8 +986,11 @@ int main(int argc, char** argv){
         // Network client update
         if (g_network_enabled) {
             Camera3D& cam = OmegaTechData.MainCamera;
+            Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+            float yaw = atan2f(fwd.x, fwd.z);
+            float pitch = asinf(fwd.y);
             g_client.update(cam.position.x, cam.position.y, cam.position.z,
-                           0.0f, 0.0f);
+                            yaw, pitch);
 
             if (g_client.is_connected()) {
                 OmegaPlayer.Level = g_client.get_level();

@@ -41,6 +41,8 @@ struct ServerPlayer {
     int health_ticks = 0; // for regen
     int mana_ticks = 0;
     int penergy_ticks = 0;
+    int exploration_tick = 0; // for exploration XP
+    uint32_t last_damage_tick = 0; // throttle NPC_DAMAGE
 };
 
 // ---------------------------------------------------------------------------
@@ -187,8 +189,12 @@ struct WorldState {
     std::vector<ServerPickup> global_pickups; // not partition-locked
 };
 
+// Pickup collect range (world units)
+constexpr float MAX_COLLECT_RANGE = 5.0f;
+
 // XP constants
 constexpr int XP_PER_KILL = 20;
+constexpr int XP_EXPLORE_PER_SEC = 1;
 constexpr int XP_BASE_TO_NEXT = 100;
 constexpr float XP_GROWTH_FACTOR = 1.3f;
 
@@ -250,7 +256,7 @@ public:
     int xp_needed_for_level(int level) const;
 
     // Damage / killing
-    void damage_npc(ServerNPC& npc, int amount);
+    void damage_npc(ServerNPC& npc, int amount, uint32_t killer_id = UINT32_MAX);
     void damage_player(ServerPlayer& player, int amount);
 
     // Partition helpers
@@ -260,10 +266,19 @@ public:
 
     // Tick all worlds
     void tick(float dt);
+    uint32_t tick_count() const { return m_tick_count; }
 
     // Access to worlds
     std::vector<WorldState>& worlds() { return m_worlds; }
     WorldState* get_world(int idx);
+
+    // Respawned pickups notifier (consumed by server for broadcast)
+    struct RespawnedPickupInfo { int world_index; int pickup_id; };
+    std::vector<RespawnedPickupInfo> consume_respawned_pickups() {
+        std::vector<RespawnedPickupInfo> out;
+        std::swap(out, m_respawned_this_tick);
+        return out;
+    }
 
     // Save/load
     void save_world_state(const WorldState& ws, const std::string& gamedata_dir);
@@ -275,7 +290,9 @@ private:
     std::vector<ServerPlayer> m_players;
     int m_player_count = 0;
     uint32_t m_next_player_id = 1;
+    uint32_t m_tick_count = 0;
     std::vector<WorldState> m_worlds;
+    std::vector<RespawnedPickupInfo> m_respawned_this_tick;
 
     static int get_player_xp_level(int xp);
 };

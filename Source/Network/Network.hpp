@@ -67,7 +67,8 @@ enum class MessageType : uint32_t {
     PLAYER_HURT = 15,
     PLAYER_KILL = 16,
     PLAYER_ACTION = 17,
-    PICKUP_COLLECTED = 18
+    PICKUP_COLLECTED = 18,
+    NPC_DAMAGE = 19
 };
 
 struct NetworkPlayer {
@@ -160,6 +161,14 @@ struct WeaponFireData {
     float dir_x, dir_y, dir_z;
     int weapon_type; // 1 = wand/energy bolt
     int power;       // damage multiplier
+};
+
+struct NpcDamageData {
+    uint32_t player_id;
+    int world_index;
+    int npc_index;
+    int partition_index; // -1 for global NPCs
+    int damage;
 };
 
 struct ChatData {

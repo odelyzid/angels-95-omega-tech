@@ -492,6 +492,13 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
     }
     if (!pickup) return false;
 
+    // Distance validation — reject if player is too far from pickup
+    float dx = player->position.x - pickup->position.x;
+    float dy = player->position.y - pickup->position.y;
+    float dz = player->position.z - pickup->position.z;
+    float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+    if (dist > MAX_COLLECT_RANGE) return false;
+
     // Write out-params before marking inactive
     if (out_type)  *out_type  = pickup->type;
     if (out_value) *out_value = pickup->value;
@@ -538,6 +545,7 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
 void GameState::respawn_pickup(WorldState& ws, ServerPickup& pickup) {
     pickup.active = true;
     pickup.respawn_timer = 0.0f;
+    m_respawned_this_tick.push_back({ws.world_index, pickup.id});
     OZ_INFO("Pickup %d (type %s) respawned", pickup.id, pickup_type_str(pickup.type));
 }
 
@@ -564,12 +572,16 @@ void GameState::add_xp(uint32_t player_id, int amount) {
 // ---------------------------------------------------------------------------
 // Damage system
 // ---------------------------------------------------------------------------
-void GameState::damage_npc(ServerNPC& npc, int amount) {
+void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id) {
     npc.health -= amount;
     if (npc.health <= 0) {
         npc.active = false;
         npc.health = 0;
         OZ_INFO("NPC killed at (%.2f, %.2f, %.2f)", npc.position.x, npc.position.y, npc.position.z);
+        if (killer_id != UINT32_MAX) {
+            add_xp(killer_id, XP_PER_KILL);
+            OZ_INFO("Killer %u awarded %d XP for NPC kill", killer_id, XP_PER_KILL);
+        }
     }
 }
 
@@ -585,6 +597,7 @@ void GameState::damage_player(ServerPlayer& player, int amount) {
 // Tick all worlds
 // ---------------------------------------------------------------------------
 void GameState::tick(float dt) {
+    m_tick_count++;
     for (auto &world : m_worlds) {
         tick_npcs(world, dt);
         tick_pickups(world, dt);
@@ -610,6 +623,13 @@ void GameState::tick(float dt) {
         if (p.psychic_energy < p.max_psychic_energy && p.penergy_ticks >= 12) {
             p.psychic_energy++;
             p.penergy_ticks = 0;
+        }
+
+        // Exploration XP — 1 XP per 10 seconds alive
+        p.exploration_tick++;
+        if (p.exploration_tick >= 100) { // 100 ticks = 10 seconds at 10 ticks/s
+            p.exploration_tick = 0;
+            add_xp(p.id, XP_EXPLORE_PER_SEC * 10);
         }
     }
 }

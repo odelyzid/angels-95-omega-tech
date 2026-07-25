@@ -128,6 +128,24 @@ void OmegaClient::send_weapon_fire(float ox, float oy, float oz,
     m_client.send_message(msg);
 }
 
+void OmegaClient::send_npc_damage(int world_index, int npc_index, int partition_index, int damage) {
+    if (!m_client.is_connected()) return;
+    net::NpcDamageData ndd;
+    ndd.player_id = 0;
+    ndd.world_index = world_index;
+    ndd.npc_index = npc_index;
+    ndd.partition_index = partition_index;
+    ndd.damage = damage;
+    net::NetworkMessage msg;
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::NPC_DAMAGE);
+    msg.size = sizeof(ndd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    std::memcpy(msg.payload, &ndd, sizeof(ndd));
+    m_client.send_message(msg);
+}
+
 void OmegaClient::handle_message(const net::NetworkMessage& msg) {
     auto type = static_cast<net::MessageType>(msg.type);
 

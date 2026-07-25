@@ -7,112 +7,169 @@ AngelEd is a Windows-only level editor combining Win32 native panels with a rayl
 Launch `System\AngelEd.exe`. The editor opens with:
 
 - **3D viewport** — raylib render window (center)
-- **Toolbar** — top bar with icons and mode buttons
+- **Menu bar** — File/View/Camera/Settings/Help menus
 - **Win32 panels** — dockable side windows (Model Browser, Texture Manager, etc.)
 
-The CSG Brushes sidebar is visible by default on the left.
+## File Formats
 
-## Toolbar Reference
+Supports both WDL (`.wdl`) and OZONE (`.ozone`) world formats. Open/Save dialogs accept both. OZONE export includes CSG brush geometry and entity definitions in a combined plain-text format.
 
-| Button | Action |
-|---|---|
-| New | Create a new world |
-| Open | Load a world from file |
-| Save | Save the current world |
-| **Mod** | Toggle Model Browser panel |
-| **Snd** | Toggle Sound Manager panel |
-| **Tex** | Toggle Texture Manager panel |
-| **Pawn** | Toggle Pawn Manager panel |
-| **Scr** | Toggle Script Manager panel |
-| **Lit / Unlit / Wire** | Toggle lighting mode |
-| **ModeAdd/Sub/Intersect/DeResc** | CSG operation mode |
-| **BBCube/Cyl/Sphere/Sheet** | Place CSG brush primitive |
-| **BBTerrain** | Open Heightmap Editor |
-| **Zone** | Toggle Zone Properties panel |
-| **Node** | Toggle Node Placement panel |
-| **Pickup** | Toggle Pickup Placement panel |
-| **Play** | Launch Angels95.exe with current world |
+## Menu Bar Reference
 
-## Lighting Modes
+### File
+| Item | Shortcut | Action |
+|---|---|---|
+| New | N | Create a new world |
+| Open... | O | Load a world from file |
+| Save | S | Save the current world |
+| Save As... | | Save to a new path |
+| Play Test | P | Launch Angels95.exe with the current world |
+| Exit | Q | Close editor |
 
-Three modes selectable from the toolbar:
+### View
+| Item | Shortcut | Action |
+|---|---|---|
+| Model Browser | F5 | Toggle model browser |
+| Sound Manager | F6 | Toggle sound manager |
+| Texture Manager | F7 | Toggle texture manager |
+| Pawn Manager | F8 | Toggle pawn manager |
+| Script Manager | F9 | Toggle script manager |
+| Zone Properties | F12 | Toggle zone/env panel |
+| Node Panel | | Toggle node placement |
+| Pickups | F10 | Toggle pickup panel |
+| Light Properties | | Toggle light properties |
+| Heightmap Editor | H | Toggle heightmap editor |
+| World Graph Explorer | | Toggle world graph |
 
-- **Lit** — models render with the `LitFogShader` applied (lighting + fog)
-- **Unlit** — all models rendered with the default unlit shader
-- **Wireframe** — disables backface culling and depth mask (not true wireframe)
+### Camera
+| Item | Shortcut | Action |
+|---|---|---|
+| Reset Camera | Home | Reset to default position |
+| Top | Numpad 7 | Orthographic top-down view |
+| Bottom | Numpad 1 | Orthographic bottom-up view |
+| Right | Numpad 3 | Orthographic right view |
+| Left | Numpad 9 | Orthographic left view |
+| Perspective | Numpad 5 | Restore perspective view |
 
-Toggle between modes at any time. The shader state is saved per-model and restored when switching back to Lit.
+## Entity Selection (Click + Right-Click)
 
-## Entity Selection (Right-Click)
+Click on any entity in the 3D viewport to select it (highlighted red):
 
-Right-click on any entity in the 3D viewport to select it:
-
+- **Brush** — click on CSG collision geometry / OZONE primitives
+- **Model** — click on a placed 3D model
 - **NPC** — click on a pawn's billboard
-- **Pickup** — click on a pickup cube
-- **Brush** — click on CSG collision geometry
+- **Pickup** — click on a pickup node
+- **Light** — click on a light node
+- **Zone** — click on a zone volume boundary
+- **Spawn** — click on a player start node
 
-When selected, the entity is highlighted with a pulsing yellow bounding box. A context menu appears:
+**Right-click** a selected entity to open the native context menu:
 
 | Option | Action |
 |---|---|
-| Properties | (future — opens entity properties dialog) |
+| Properties | Opens the Properties panel with entity details |
 | Delete | Removes the selected entity from the world |
-| Cancel | Dismiss the context menu |
+| Duplicate | Creates a copy offset 2 units on X+Z |
+| Apply Texture to Surface | Applies the currently selected texture (if a texture is active in the Texture Manager and the target is a Brush or Model) |
 
-Right-click drag (when not in entity selection mode) resizes the placement ghost.
+Right-click drag (without an entity under the cursor) orbits the camera.
+
+## Lighting Modes
+
+| Button | Action |
+|---|---|
+| Lit | Models render with LitFogShader (lighting + fog) |
+| Unlit | Models render with default unlit shader |
+
+Toggle between modes from the ViewMode toolbar combo.
 
 ## CSG Brushes
 
-The CSG Brushes sidebar provides:
+The CSG Brushes panel provides:
 
 - **Primitive buttons**: Box, Cylinder, Sphere, Pyramid, Plane
-- **Operation buttons**: Add, Sub, Intersect, De-Resc
+- **Operation dropdown**: Add (0), Sub (1), Intersect (2), De-Resc (3)
 - **Edit fields**: Position (X/Y/Z), Size (W/H/D), Rotation, Scale
-- **Place Brush** — commits the brush
-- **Enable Collision** — toggles collision for the placed brush
+- **Place Brush** — commits the brush to the collision volume list
+- **Enable Collision** — toggle collision for placed brush
 
-The CSG operation value is stored and displayed but the backend `CsgProcessor` boolean operations are not yet fully integrated for render-time geometry.
+The CSG operation value is stored but the backend `CsgProcessor` boolean operations are not yet integrated for render-time geometry.
 
 ## Panels
 
 ### Model Browser
 - Lists all `.obj`/`.gltf`/`.glb`/`.iqm`/`.vox`/`.m3d` files from `GameData/` and packages
-- Owner-drawn preview window shows selected model rendered in a 256×256 render target
-- Select a model → click a target slot → model is placed in the world
+- Previews selected model in a 256x256 render texture
+- Select a model, click a target slot to place in world
 
 ### Texture Manager
-- Lists all `.png`/`.tga`/`.bmp`/`.jpg`/`.jpeg`/`.gif` files from filesystem and packages
-- Owner-drawn listbox with **64×64 thumbnail previews** next to filenames
-- Click a texture → full-size preview image displayed
-- Select target (Model 1–20) → click Apply → texture applied to model
+- Lists all `.png`/`.tga`/`.bmp`/`.jpg`/`.jpeg` files from filesystem and packages
+- **Grid view** with 64x64 thumbnail previews in a custom scrollable control
+- Click a texture to see full-size preview and file info
+- Select target model from dropdown (populated from loaded world models)
+- Click **Apply** to set texture on model; **Apply to All** checkbox applies to all model instances
+- **Add Package** button loads additional `.oztex`/`.ozpak` files at runtime
 
 ### Sound Manager
-- Lists all `.wav`/`.mp3`/`.ogg` files
-- Category tabs: All, Sound, Music
-- Preview button plays the selected sound
+- Lists `.wav`/`.mp3`/`.ogg` files organized by category tabs: **SFX** / **Music** / **Ambience**
+- Source path shown for each category
 - Volume slider for preview volume
+- **Loop** checkbox for continuous playback
+- **Play** / **Stop** / **Refresh** buttons
 
 ### Pawn Manager
-- Lists registered pawn definitions (Walker, Skaarj, Brute, Floater)
-- "Add Pawn" button spawns a pawn at the camera position
-- Configure via: Name, Mesh, Texture, Scale
+- Hierarchical **tree view** of all actor types:
+  - **PlayerPawn** > OmegaPlayer (player start)
+  - **EnemyPawn** > registered NPC defs (Walker, Skaarj, Brute, Floater, etc.)
+  - **InventoryPawn** > Pickups (from LightningScript registry) + Weapons
+  - **Volume & Node Markers** > PlayerStartNode, EmitterNodes (Sound/Music), ZoneVolumeNode types (Water/Ladder/Sky/Reverb/GameplaySound)
+- Double-click a leaf node to view entity info
+- **Spawn Selected** places the chosen actor at camera position
+- **Refresh** reloads the tree from current definitions
 
 ### Script Manager
-- Lists `.ozls` script files from filesystem and packages
-- Edit and reload scripts in-world
-- Associates scripts with entity types
+- Lists `.ps`/`.wdl`/`.ozone` files from `GameData/` and packages
+- Double-click to view file info and path
 
-### Environment Settings
+### Zone Properties / Environment Settings
 - **Fog**: color, density, start/end distance
 - **Ambient**: color, intensity
-- **Skybox**: enable/disable, tint
-- **Lighting**: configure active lights
-- **Zone Properties**: per-zone gameplay sound profiles
+- **Game Type**: Singleplayer, Coop, Etheral Match, Angel Team Game, Angel Run, Capture the Orb, Time Shift
+- **Max Players**, **Respawn Time**, **Time Limit**, **Score Limit**, **Friendly Fire**
+- **Particles**: type (None/Snow/Rain/Void Realm/Psychic Realm), density, speed, color, wind
+- **Skybox**: custom skybox texture path
+- Per-zone overrides for fog/ambient/reverb when editing zone volumes
+
+### Pickup Panel
+- Select and place pickup nodes by type (from LightningScript entity registry)
+- Configures `actionPickupType` for the main loop
+
+### Node Panel
+- Place node markers: Player Start, NPC Spawn, Point Light, Zone Volume
+- Configures `actionNodeType` for the main loop
 
 ### Heightmap Editor
-- Browse for a grayscale heightmap image
-- Click "Generate" to build terrain mesh from the image
-- Configure: position, scale, size X/Y/Z
+- Browse for grayscale heightmap image
+- Browse for terrain texture overlay
+- Configure: position (X/Y/Z), size (Sx/Sy/Sz), scale
+- Click **Generate** to build terrain mesh
+
+### Light Properties
+- Configure point lights: color (R/G/B), intensity, radius
+- Light type: directional, point, spot
+- Light effect: none, watery, torch, fire, lamp
+- Toggle: flare, corona
+
+### World Graph Explorer
+- Lists all placed models in the current world
+- Shows each model's position, rotation, scale, and name
+- Click to select/jump to that model in the viewport
+
+### Properties Panel
+- Context-sensitive panel showing selected entity details
+- Edit position (X/Y/Z), scale, rotation
+- For brushes/zones: edit size (W/H/D)
+- Texture mapping: U/V scale and offset
 
 ## Keyboard Shortcuts
 
@@ -134,16 +191,22 @@ The CSG operation value is stored and displayed but the backend `CsgProcessor` b
 | F6 | Sound Manager |
 | F7 | Texture Manager |
 | F8 | Pawn Manager |
+| F9 | Script Manager |
+| F10 | Pickup Panel |
+| F11 | Toggle Fullscreen |
 | F12 | Zone Properties |
+| H | Heightmap Editor |
+| C | Toggle collision visibility |
 
 ## World Saving
 
-Worlds are saved in WDL text format and stored in `OTEditor.WorldData`. The editor also supports OZONE format for CSG brush geometry.
+Worlds are saved in WDL or OZONE text format stored in `OTEditor.WorldData`. OZONE export includes CSG brush primitives, heightmap, and all entity types (player starts, pickups, NPCs, zones, emitters) with per-zone environment overrides.
 
 ## Known Limitations
 
-- Texture/Model previews require the Win32 panel to be visible (raylib render-to-texture feeds the panel)
-- Heightmap Editor has no visual preview of the generated terrain
-- CSG operation booleans are stored as metadata but not processed into geometry
+- Lighting toggle (Lit/Unlit) does not actually unset shader from model materials
+- CSG operation booleans are stored as metadata but not processed into geometry by the backend `CsgProcessor`
 - No undo/redo system
 - No test-play save prompts ("Reload world from playtest changes?")
+- Model/Texture preview rendering requires the raylib viewport to be focused
+- Lighting effects (watery, torch, fire, lamp) are UI only — not rendered in viewport

@@ -58,7 +58,7 @@ Builds: `Angels95`, `AngelServ`, `OzPack`
 | Game client | `make OTENGINE` | raylib 5.5 |
 | Dedicated server | `make AngelServ` | None (standalone) |
 | Asset packer | `make ozpack` | None (standalone) |
-| Level editor | See build scripts | raylib 5.5 + Win32 |
+| Level editor | `make -C AngelEd` | raylib 5.5 + Win32 |
 
 ### Windows Build Scripts
 
@@ -87,14 +87,14 @@ Uses `OzPack.exe` to create `.oz*` containers from `GameData/` subdirectories.
 ## Testing
 
 ```bash
-make test                # runs all test suites
+make test                # runs test_parser + test_entity_manager
 make test_parser         # LightningScriptParser tests
 make test_context        # LightningScriptContext tests
 make test_registry       # LightningEntityRegistry tests
 make test_entity_manager # LightningEntityManager lifecycle tests
 ```
 
-Tests are standalone `.test.cpp` files compiled directly into executables (no test framework). No raylib dependency — uses `SERVER_CXX` compiler.
+Tests are standalone `.test.cpp` files compiled directly into executables (no test framework). No raylib dependency — uses `SERVER_CXX` compiler with `-DOMEGA_TEST_ENV`.
 
 ## Outputs
 

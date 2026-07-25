@@ -76,6 +76,9 @@ public:
     // Send pickup collect request
     void send_pickup_collect(int pickup_id, int world_index);
 
+    // Send NPC damage
+    void send_npc_damage(int world_index, int npc_index, int partition_index, int damage);
+
     // Send weapon fire action
     void send_weapon_fire(float ox, float oy, float oz,
                           float dx, float dy, float dz,

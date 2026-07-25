@@ -2,8 +2,8 @@
 
 OmegaTech uses two world description formats:
 
-- **WDL** (World Description Language) — colon-delimited plain text, loaded by client and server
-- **OZONE** — extended format used by the editor, supports CSG primitives and additional metadata
+- **WDL** (World Description Language) — colon-delimited plain text, parsed by `WDLParser` (standalone, no raylib)
+- **OZONE** — extended format used by the editor, supports CSG primitives and additional entity metadata
 
 ## WDL Format
 
@@ -13,27 +13,29 @@ OmegaTech uses two world description formats:
 Instruction:arg1:arg2:...:
 ```
 
-Each line is an instruction with colon-delimited arguments. Lines are parsed at world load time by `WDLParser` (`Source/Server/WDLParser.hpp`).
+Each line is an instruction with colon-delimited arguments. Lines are parsed at world load time by `WDLParser` (`Source/Server/WDLParser.cpp`). Comments starting with `#` are supported. Trailing colons are normalized.
 
 ### Instructions
 
 | Instruction | Arguments | Description |
 |---|---|---|
-| `HeightMap` | `x y z scale sizeX sizeY sizeZ` | Terrain heightmap position and scale |
-| `Model1`–`Model20` | `x y z scale rot` | Place a 3D model (Model1.obj etc. loaded from `Models/` directory) |
-| `Object1`–`Object5` | `x y z scale rot` | Place a collectible object/item |
-| `Pickup` | `type x y z scale rot` | Place a pickup node (type=0-5: Health, Mana, Psychic, Armor, Weapon, Ammo) |
-| `Spawn` | `x y z 0 0` | Player spawn point |
-| `NPC` | `x y z defName` | NPC spawn (`defName`: Walker, Skaarj, Brute, Floater) |
-| `Walker` | `x y z` | Legacy NPC spawn (creates a "Walker" pawn) |
-| `Light` | `x y z radius r g b` | Point light |
-| `ClipBox` | `x y z scale rot w h d` | Collision clip box |
-| `Collision` | `x y z scale rot` | Simple collision volume |
-| `AdvCollision` | `x y z scale rot w h d` | Advanced collision volume |
-| `Script` | `id x y z scale rot` | In-world script trigger |
-| `ZoneInfo` | `minX minY minZ maxX maxY maxZ type` | Zone volume (type: 0=Water, 1=Ladder, 2=Sky, 3=Reverb, 4=GameplaySound) |
-| `NE1`–`NE3` | `x y z` | Noise emitter (ambient sound at position) |
-| `Music` | `path` | Override background music |
+| `HeightMap` | `x y z scale rotation` | Terrain heightmap position and scale |
+| `Model<N>` | `x y z scale rotation` | Place a 3D model (Model1.obj etc. from `Models/` directory, N=1-20) |
+| `Object<N>` | `x y z scale rotation` | Place a collectible object/item |
+| `Script<N>` | `x y z scale rotation` | In-world script trigger |
+| `NE<N>` | `x y z` | Noise emitter (ambient sound at position) |
+| `Pickup` | `type x y z` | Place a pickup node (type is string name, e.g. `HealthVial`, `Coin`, `Key`, or legacy numeric ID) |
+| `Spawn` | `x y z yaw` | Player spawn point with yaw rotation |
+| `NPC` | `type x y z` | NPC spawn by definition name (e.g. `Walker`, `Skaarj`, `Brute`, `Floater`). Legacy: `Walker:x:y:z:` also accepted |
+| `Light` | `x y z` | Point light position |
+| `LightType` | `type x y z` | Light with type string |
+| `Fog` | `r g b density` | Global fog settings |
+| `Ambient` | `r g b intensity` | Global ambient lighting |
+| `ClipBox` | `x y z scale rotation w h d` | Collision clip box |
+| `Collision` | `x y z scale rotation` | Simple collision volume |
+| `AdvCollision` | `x y z scale rotation w h l` | Advanced collision volume |
+| `ZoneInfo` | `type minX minY minZ maxX maxY maxZ intensity` | Zone volume (type: 0=Water, 1=Ladder, 2=Sky, 3=Reverb, 4=GameplaySound) |
+| `C` | _(none)_ | Collision flag — marks the next placed model as having collision |
 
 ### World Directory Layout
 
@@ -60,7 +62,7 @@ GameData/Worlds/<WorldName>/
 
 ## OZONE Format
 
-OZONE is an extended plain-text format used by the AngelEd editor. It supports the same model/entity placement as WDL plus CSG brush primitives.
+OZONE is an extended plain-text format used by the AngelEd editor. It supports model/entity placement plus CSG brush primitives.
 
 ### Primitive Types
 
@@ -73,15 +75,14 @@ OZONE is an extended plain-text format used by the AngelEd editor. It supports t
 | `pln` | `pln x y z nx ny nz dist` | Plane primitive |
 | `heightmap` | `heightmap imgPath texPath x y z scale sizeX sizeY sizeZ` | Terrain heightmap |
 
-### Entity Instructions
-
-Same as WDL format, embedded in the same file:
+### Entity Instructions (exported from editor)
 
 ```
-Spawn:x:y:z:0:0:
-NPC:x:y:z:defName:
-Pickup:type:x:y:z:scale:rot:
-ZoneInfo:minX:minY:minZ:maxX:maxY:maxZ:type:
+playerstart x y z yaw
+pickup type x y z [respawnTime]
+npc defName x y z
+zone type minX minY minZ maxX maxY maxZ intensity [fogR fogG fogB fogDensity fogStart fogEnd ambR ambG ambB ambIntensity reverbMix reverbDecay]
+emitter sound|music x y z
 ```
 
 ### CSG Operations
@@ -96,7 +97,7 @@ Each brush primitive stores a CSG operation metadata:
 | 3 | INTERSECT (keep only overlap) |
 | 4 | DE_RESC (same as SUB) |
 
-The `CsgProcessor` in `Source/Physics/OzBsp.hpp` implements AABB-based boolean operations. In the editor, brushes are placed with their CSG operation stored as metadata.
+The `CsgProcessor` in `Source/Physics/OzBsp.hpp` implements AABB-based boolean operations. In the editor, brushes are placed with their CSG operation stored as metadata but the backend processor is not yet called.
 
 ## Package Loading
 
@@ -104,7 +105,7 @@ World files can be packaged into `.ozone` containers in `System/Data/Zones/`. Wh
 
 ```
 System/Data/Zones/world_<WorldName>.ozone
-    → resolves Models/HeightMap.png to GameData/Worlds/<WorldName>/Models/HeightMap.png
+    -> resolves Models/HeightMap.png to GameData/Worlds/<WorldName>/Models/HeightMap.png
 ```
 
-World textures (`oztex/tileset/*.png`) are loaded from packages by `OzoneLoader::LoadWorldTextures()`.
+World textures (`.oztex`) are loaded by `OzoneLoader::LoadWorldTextures()`.
