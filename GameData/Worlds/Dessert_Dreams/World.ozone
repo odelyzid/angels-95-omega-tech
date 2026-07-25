@@ -1,0 +1,162 @@
+OZONE
+# Dessert_Dreams — Large open desert for NPC/Pawn combat testing
+# OZONE Z-up: x=east, y=north, z=up
+# Scaled for player dimensions (Height=10, Width=2)
+
+# ==============================================================================
+# Sky zone — covers the entire desert
+# ==============================================================================
+zone sky -120 -120 -30 120 120 80
+
+# ==============================================================================
+# Ground — massive flat desert floor
+# ==============================================================================
+add box 0 0 -0.5 200 0.5 200 0
+
+# ==============================================================================
+# CENTRAL ARENA — circular combat area flanked by pillars
+# ==============================================================================
+# Outer ring pillars (mark the arena boundary)
+add cyl 0 30 5 0.8 0.8 10 16 0
+add cyl 30 0 5 0.8 0.8 10 16 0
+add cyl 0 -30 5 0.8 0.8 10 16 0
+add cyl -30 0 5 0.8 0.8 10 16 0
+add cyl 21 21 5 0.8 0.8 10 16 0
+add cyl -21 21 5 0.8 0.8 10 16 0
+add cyl 21 -21 5 0.8 0.8 10 16 0
+add cyl -21 -21 5 0.8 0.8 10 16 0
+
+# ==============================================================================
+# ROCK FORMATIONS — scattered across the desert for cover
+# ==============================================================================
+# Northern cluster
+add box -40 60 2 15 4 15 0
+add cyl -50 50 3 1.0 1.5 6 12 0
+add cyl -30 55 3 0.8 1.2 5 12 0
+
+# Eastern cluster
+add box 60 -30 2 12 3 12 0
+add cyl 70 -25 3 1.2 1.5 6 12 0
+add cyl 55 -40 3 0.6 1.0 4 12 0
+
+# Southern cluster
+add box -50 -60 2 14 4 14 0
+add cyl -40 -50 3 1.0 1.3 5 12 0
+add cyl -60 -65 3 0.7 1.1 4 12 0
+
+# Western cluster
+add box -70 30 2 12 3 12 0
+add cyl -80 20 3 1.1 1.4 6 12 0
+add cyl -65 40 3 0.5 0.9 4 12 0
+
+# ==============================================================================
+# RUINS — broken wall segments
+# ==============================================================================
+# Ruin 1 (north-west)
+add box -20 80 5 8 10 1 0               # standing wall
+add box -25 75 2 4 4 5 0                 # rubble pile
+
+# Ruin 2 (south-east)
+add box 80 -20 5 6 10 1 0
+add box 75 -25 2 3 4 4 0
+
+# Ruin 3 (far south)
+add box 0 -85 5 10 10 1 0
+add box -5 -80 2 5 4 5 0
+
+# ==============================================================================
+# LOW COVER WALLS — scattered for tactical gameplay
+# ==============================================================================
+add box 10 50 2 8 4 1 0
+add box -10 -50 2 8 4 1 0
+add box 50 10 2 1 4 8 0
+add box -50 -10 2 1 4 8 0
+add box 40 -60 2 6 4 1 0
+add box -60 70 2 1 4 6 0
+
+# ==============================================================================
+# OASIS (decorative water zone in the center)
+# ==============================================================================
+zone water -8 -8 0 8 8 2
+add cyl 0 0 2 5 5 0.5 24 0       # shallow water disc
+
+# ==============================================================================
+# Player start — west side, facing east toward the arena
+# ==============================================================================
+playerstart -90 0 0 90
+
+# ==============================================================================
+# NPC spawns — spread across the map at various distances
+# ==============================================================================
+# Near (30-50 units from start)
+npc Walker -50 0 0
+npc Walker -40 30 0
+npc Walker -40 -30 0
+
+# Mid-range (50-80 units)
+npc Skaarj 0 50 0
+npc Skaarj 0 -50 0
+npc Walker 30 40 0
+
+# Far (80-120 units) — aggro range test
+npc Brute 50 0 0
+npc Brute -20 80 0
+npc Floater 0 -80 0
+npc Floater 80 30 0
+npc Skaarj 80 -30 0
+npc Walker 60 60 0
+npc Brute -60 -60 0
+npc Walker 40 -70 0
+
+# Extreme range — sniper/patrol distance test
+npc Floater -80 -80 0
+npc Brute 90 0 0
+npc Walker 0 90 0
+npc Skaarj -90 0 0
+npc Walker 80 -60 0
+
+# ==============================================================================
+# Pickups — scattered near player start and key locations
+# ==============================================================================
+# Starting area
+pickup HealthVial -80 0 3
+pickup ManaVial -75 5 3
+pickup Key -85 -5 0
+pickup Coin -70 10 0
+
+# Arena area
+pickup HealthVial 0 25 3
+pickup ManaVial 25 0 3
+pickup EnergyCrystal 0 -25 3
+pickup Powerup -25 0 3
+
+# Far outposts
+pickup HealthVial 50 50 3
+pickup ManaVial -50 -50 3
+pickup Key 80 -80 0
+
+# ==============================================================================
+# Lights — desert sun + scattered warm lights
+# ==============================================================================
+# Sun (directional) — hot desert light from above-left
+light directional -100 -100 120 255 220 160 1.5
+
+# Arena pillar lights
+light point 0 30 5 255 180 80 1.0 40
+light point 30 0 5 255 180 80 1.0 40
+light point 0 -30 5 255 180 80 1.0 40
+light point -30 0 5 255 180 80 1.0 40
+
+# Oasis center glow
+light point 0 0 3 100 200 255 0.6 25 2
+
+# Ruin lights
+light point -20 80 5 255 160 60 0.7 35
+light point 80 -20 5 255 160 60 0.7 35
+light point 0 -85 5 255 160 60 0.7 35
+
+# Rock formation accent lights
+light point -50 50 4 200 120 60 0.5 25
+light point 70 -25 4 200 120 60 0.5 25
+light point -40 -50 4 200 120 60 0.5 25
+light point -80 20 4 200 120 60 0.5 25
