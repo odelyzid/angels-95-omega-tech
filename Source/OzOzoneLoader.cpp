@@ -168,7 +168,8 @@ void OzoneLoader::SetLitFogShaderEnabled(bool enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// World texture loading (scans worlddir/oztex/tileset/ for all PNGs)
+// World texture loading — loads ALL .png from oztex/tileset/ into vector
+// Textures are indexed 1..N by their sorted filename order.
 // ---------------------------------------------------------------------------
 void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
     UnloadTextures();
@@ -186,48 +187,31 @@ void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
     if (texFiles.empty()) return;
 
     std::sort(texFiles.begin(), texFiles.end());
-    auto load = [&](const std::string& name) -> Texture2D {
-        return LoadTexture((tilesetDir + name).c_str());
-    };
-    // Assign up to 5 textures to slots: 0=auto, 1=floor, 2=wall, 3=column, 4=ceil, 5=grass
-    for (size_t i = 0; i < texFiles.size() && i < 5; i++) {
-        Texture2D tex = load(texFiles[i]);
-        if (tex.id == 0) continue;
-        switch (i) {
-            case 0: m_floorTex  = tex; break;
-            case 1: m_wallTex   = tex; break;
-            case 2: m_columnTex = tex; break;
-            case 3: m_ceilTex   = tex; break;
-            case 4: m_grassTex  = tex; break;
+    for (auto& f : texFiles) {
+        Texture2D tex = LoadTexture((tilesetDir + f).c_str());
+        if (tex.id) {
+            m_tilesetTex.push_back(tex);
+            OZ_INFO("OzoneLoader: tex[%zu] = %s", m_tilesetTex.size(), f.c_str());
         }
-        OZ_INFO("OzoneLoader: texSlot %zu = %s", i + 1, texFiles[i].c_str());
     }
-    if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id || m_grassTex.id)
-        OZ_INFO("OzoneLoader: loaded %zu textures from %s", texFiles.size(), tilesetDir.c_str());
+    OZ_INFO("OzoneLoader: loaded %zu textures from %s", m_tilesetTex.size(), tilesetDir.c_str());
 }
 
 void OzoneLoader::UnloadTextures() {
-    if (m_floorTex.id)  { UnloadTexture(m_floorTex);  m_floorTex  = Texture2D{0}; }
-    if (m_wallTex.id)   { UnloadTexture(m_wallTex);   m_wallTex   = Texture2D{0}; }
-    if (m_columnTex.id) { UnloadTexture(m_columnTex); m_columnTex = Texture2D{0}; }
-    if (m_ceilTex.id)   { UnloadTexture(m_ceilTex);   m_ceilTex   = Texture2D{0}; }
-    if (m_grassTex.id)  { UnloadTexture(m_grassTex);  m_grassTex  = Texture2D{0}; }
+    for (auto& tex : m_tilesetTex)
+        if (tex.id) UnloadTexture(tex);
+    m_tilesetTex.clear();
 }
 
 // ---------------------------------------------------------------------------
-// Re-apply texture on a model based on texSlot (1-5 override)
+// Re-apply texture on a model based on texSlot (1-based index into tileset)
 // ---------------------------------------------------------------------------
 void OzoneLoader::ApplyTexSlotToModel(Model& model, int slot) {
     if (model.meshCount == 0) return;
     Texture2D tex{0};
     Color fallback = LIGHTGRAY;
-    switch (slot) {
-        case 1: tex = m_floorTex; fallback = LIGHTGRAY; break;
-        case 2: tex = m_wallTex;  fallback = (Color){180,180,200,255}; break;
-        case 3: tex = m_columnTex; fallback = SKYBLUE; break;
-        case 4: tex = m_ceilTex;  fallback = (Color){200,200,220,255}; break;
-        case 5: tex = m_grassTex; fallback = (Color){60,160,40,255}; break;
-        default: return;
+    if (slot >= 1 && slot <= (int)m_tilesetTex.size()) {
+        tex = m_tilesetTex[slot - 1];
     }
     if (tex.id)
         model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
@@ -255,11 +239,11 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
     Model model = LoadModelFromMesh(mesh);
-    // Thin boxes (< 1.0 tall) are treated as floors, tall as walls
-    if (h < 1.0f)
-        ApplyTex(model, m_floorTex, LIGHTGRAY);
-    else
-        ApplyTex(model, m_wallTex, LIGHTGRAY);
+    // Auto-select: slot 1 (floor) if thin, slot 2 (wall) if tall
+    Texture2D tex = (m_tilesetTex.size() >= 1 && h < 1.0f) ? m_tilesetTex[0] :
+                    (m_tilesetTex.size() >= 2) ? m_tilesetTex[1] : Texture2D{0};
+    Color fallback = (h < 1.0f) ? LIGHTGRAY : (Color){180,180,200,255};
+    ApplyTex(model, tex, fallback);
     return model;
 }
 
@@ -267,7 +251,8 @@ Model OzoneLoader::BuildCylinder(float rTop, float rBot, float h, int slices) {
     float r = (rTop > rBot) ? rTop : rBot;
     Mesh mesh = GenMeshCylinder(r, h, slices);
     Model model = LoadModelFromMesh(mesh);
-    ApplyTex(model, m_columnTex, SKYBLUE);
+    Texture2D tex = (m_tilesetTex.size() >= 3) ? m_tilesetTex[2] : Texture2D{0};
+    ApplyTex(model, tex, SKYBLUE);
     return model;
 }
 
@@ -337,7 +322,8 @@ Model OzoneLoader::BuildPyramid(float w, float d, float h) {
 Model OzoneLoader::BuildPlane(float nx, float ny, float nz, float dist) {
     Mesh mesh = GenMeshPlane(10.0f, 10.0f, 1, 1);
     Model model = LoadModelFromMesh(mesh);
-    ApplyTex(model, m_floorTex, DARKGRAY);
+    Texture2D tex = (m_tilesetTex.size() >= 1) ? m_tilesetTex[0] : Texture2D{0};
+    ApplyTex(model, tex, DARKGRAY);
     return model;
 }
 
