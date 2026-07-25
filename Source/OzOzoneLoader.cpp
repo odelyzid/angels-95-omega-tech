@@ -10,6 +10,8 @@
 #include <cmath>
 #include <algorithm>
 #include <unordered_map>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 static ZoneType ParseZoneType(std::string name) {
     std::transform(name.begin(), name.end(), name.begin(),
@@ -166,24 +168,42 @@ void OzoneLoader::SetLitFogShaderEnabled(bool enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// World texture loading (from worlddir/oztex/tileset/)
+// World texture loading (scans worlddir/oztex/tileset/ for all PNGs)
 // ---------------------------------------------------------------------------
 void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
     UnloadTextures();
-    auto load = [&](const char* name) -> Texture2D {
-        char path[512];
-        snprintf(path, sizeof(path), "%soztex/tileset/%s", worldDir.c_str(), name);
-        if (IsPathFile(path))
-            return LoadTexture(path);
-        return Texture2D{0};
+    std::string tilesetDir = worldDir + "oztex/tileset/";
+    if (!fs::exists(tilesetDir)) return;
+
+    std::vector<std::string> texFiles;
+    for (auto& entry : fs::directory_iterator(tilesetDir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".png")
+            texFiles.push_back(entry.path().filename().string());
+    }
+    if (texFiles.empty()) return;
+
+    std::sort(texFiles.begin(), texFiles.end());
+    auto load = [&](const std::string& name) -> Texture2D {
+        return LoadTexture((tilesetDir + name).c_str());
     };
-    m_floorTex  = load("concrete_floor_a1_32x32.png");
-    m_wallTex   = load("concrete_ceiling_a1_32x32.png");
-    m_columnTex = load("industrial_metal_a1_32x32.png");
-    m_ceilTex   = load("industrial_tech_a1_128x128.png");
-    m_grassTex  = load("jungle_grass_01_256_128.png");
+    // Assign up to 5 textures to slots: 0=auto, 1=floor, 2=wall, 3=column, 4=ceil, 5=grass
+    for (size_t i = 0; i < texFiles.size() && i < 5; i++) {
+        Texture2D tex = load(texFiles[i]);
+        if (tex.id == 0) continue;
+        switch (i) {
+            case 0: m_floorTex  = tex; break;
+            case 1: m_wallTex   = tex; break;
+            case 2: m_columnTex = tex; break;
+            case 3: m_ceilTex   = tex; break;
+            case 4: m_grassTex  = tex; break;
+        }
+        OZ_INFO("OzoneLoader: texSlot %zu = %s", i + 1, texFiles[i].c_str());
+    }
     if (m_floorTex.id || m_wallTex.id || m_columnTex.id || m_ceilTex.id || m_grassTex.id)
-        OZ_INFO("OzoneLoader: loaded world textures from %soztex/tileset/", worldDir.c_str());
+        OZ_INFO("OzoneLoader: loaded %zu textures from %s", texFiles.size(), tilesetDir.c_str());
 }
 
 void OzoneLoader::UnloadTextures() {
