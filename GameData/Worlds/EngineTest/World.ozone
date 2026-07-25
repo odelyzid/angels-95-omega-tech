@@ -82,6 +82,10 @@ add cyl 28 -46 5 0.6 0.6 10 16 0
 add cyl 17 -49.75 5 0.4 0.4 10 16 0
 add cyl 23 -49.75 5 0.4 0.4 10 16 0
 
+# Large Room ceiling with atrium (open center gap)
+add box 12.25 -38 10 7.5 0.5 23 0        # left ceiling slab
+add box 27.75 -38 10 7.5 0.5 23 0        # right ceiling slab
+
 # ==============================================================================
 # Corridors connecting rooms
 # ==============================================================================
@@ -153,14 +157,19 @@ npc Floater 28 -38 0
 npc Walker 32 -45 0
 
 # ==============================================================================
-# Pickup nodes — all 6 types in Room 1 (lobby area)
+# Pickup nodes — one per room with matching colored lights
 # ==============================================================================
-pickup HealthVial -2 10 3
-pickup ManaVial 2 10 3
-pickup EnergyCrystal 0 10 6
-pickup Key -3 11 0
-pickup Coin 3 11 0
-pickup Powerup 0 12 0
+# Room 1 (lobby, top-left) — Health Vial + red light
+pickup HealthVial 0 10 3
+# Room 2 (top-right) — Mana Vial + blue light
+pickup ManaVial 20 10 3
+# Room 3 (bottom-right hub) — Key + orange light
+pickup Key 20 -10 3
+# Room 4 (bottom-left) — Coin + yellow light
+pickup Coin 0 -10 3
+# Large Room — Energy Crystal + Powerup
+pickup EnergyCrystal 20 -38 3
+pickup Powerup 28 -38 3
 
 # ==============================================================================
 # Zone volumes for testing zone physics/audio
@@ -178,29 +187,29 @@ zone reverb 0 -46 0 40 -30 10
 zone sound 12.5 2.5 0 27.5 17.5 10
 
 # ==============================================================================
-# Lights — placed in rooms for testing
+# Lights — matching pickup colors per room
 # ==============================================================================
-# Sun (directional) — illuminates the entire world from above-right
-light directional -50 -50 80 255 240 220 0.6
+# Sun (directional) — ambient fill from above
+light directional -50 -50 80 200 210 255 0.3
 
-# Room 1 — warm point light
-light point 0 10 3 255 200 100 1.0 40
+# Room 1 — HEALTH VIAL → RED point light
+light point 0 10 4 255 40 40 0.9 30
 
-# Room 2 — blue point light
-light point 20 10 3 100 150 255 0.8 35
+# Room 2 — MANA VIAL → BLUE point light
+light point 20 10 4 60 100 255 0.9 30
 
-# Room 3 — cool point light with torch effect
-light point 20 -10 3 200 100 255 0.9 30 2
+# Room 3 — KEY → ORANGE point light
+light point 20 -10 4 255 160 40 0.9 30
 
-# Large Room — two point lights for coverage
-light point 12 -30 3 255 200 150 0.7 45
-light point 28 -46 3 200 100 100 0.9 40
+# Room 4 — COIN → YELLOW point light
+light point 0 -10 4 255 220 50 0.9 30
 
-# Corridor A — extra fill light
-light point 10 10 3 200 200 220 0.4 20
+# Large Room — two cool white lights under ceiling slabs
+light point 12.25 -30 9 200 210 255 0.6 30
+light point 27.75 -46 9 200 210 255 0.6 30
 
 # Corridor E — light strip
-light point 20 -22 3 180 200 255 0.5 25
+light point 20 -22 3 180 200 255 0.4 20
 
 # ==============================================================================
 # Outdoor area lights — warm sunlight + point lights
