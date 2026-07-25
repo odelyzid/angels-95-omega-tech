@@ -15,12 +15,13 @@
 #include "Custom/OTCustom.hpp"
 
 #include <cmath>
+#include <cstring>
 
 bool FloorCollision = true;
 bool ObjectCollision = false;
 extern bool g_showCollisionDebug;
 
-const char* g_world_to_load = "EngineTest";
+static char g_world_to_load[256] = "EngineTest";
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -978,7 +979,8 @@ void PlayHomeScreen()
     }
 
     if (menu.GetSelectedWorld()) {
-        g_world_to_load = menu.GetSelectedWorld();
+        strncpy(g_world_to_load, menu.GetSelectedWorld(), sizeof(g_world_to_load) - 1);
+        g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
     }
 
     if (menu.ShouldJoinServer()) {

@@ -6,8 +6,11 @@
 #include "Script/LightningEntityDef.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 #include <vector>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #ifdef _WIN32
 // ---------------------------------------------------------------------------
@@ -294,22 +297,46 @@ static void ExecuteConsoleCommand(const char* cmd) {
                     return;
                 } else {
                     OZ_INFO("No match for /summon '%s'", arg);
+                    return;
                 }
             }
         }
     } else if (strncmp(cmd, "/world ", 7) == 0) {
-        int id = atoi(cmd + 7);
-        if (id >= 1 && id <= 20) {
-            OZ_INFO("World switch: %d -> %d", OmegaTechData.LevelIndex, id);
-            SetSceneId = id;
-            SetSceneFlag = true;
-            // World3 uses a ClipBox floor — spawn well above the platform surface
-            float spawnY = (id == 3) ? 8.0f : 20.0f;
-            OmegaTechData.MainCamera.position = (Vector3){0.0f, spawnY, 0.0f};
-            OmegaTechData.MainCamera.target = (Vector3){0.0f, spawnY, -10.0f};
+        const char* name = cmd + 7;
+        while (*name == ' ') name++;
+        if (*name) {
+            // Check if the world exists
+            char worldPath[512];
+            snprintf(worldPath, sizeof(worldPath), "GameData/Worlds/%s/World.ozone", name);
+            char wdlPath[512];
+            snprintf(wdlPath, sizeof(wdlPath), "GameData/Worlds/%s/World.wdl", name);
+            if (IsPathFile(worldPath) || IsPathFile(wdlPath)) {
+                strncpy(g_world_to_load, name, sizeof(g_world_to_load) - 1);
+                g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
+                OZ_INFO("World switch: %s -> %s", g_world_to_load, name);
+                SetSceneFlag = true;
+                OmegaTechData.MainCamera.position = (Vector3){0.0f, 20.0f, 0.0f};
+                OmegaTechData.MainCamera.target = (Vector3){0.0f, 20.0f, -10.0f};
+            } else {
+                OZ_WARN("World '%s' not found in GameData/Worlds/", name);
+            }
+        }
+    } else if (strcmp(cmd, "/worlds") == 0) {
+        // List available worlds
+        OZ_INFO("Available worlds in GameData/Worlds/:");
+        if (fs::exists("GameData/Worlds")) {
+            for (auto& entry : fs::directory_iterator("GameData/Worlds")) {
+                if (entry.is_directory()) {
+                    std::string dirName = entry.path().filename().string();
+                    std::string wdl = entry.path().string() + "/World.wdl";
+                    std::string oz  = entry.path().string() + "/World.ozone";
+                    if (IsPathFile(wdl.c_str()) || IsPathFile(oz.c_str()))
+                        OZ_INFO("  %s", dirName.c_str());
+                }
+            }
         }
     } else if (strcmp(cmd, "/world") == 0) {
-        fprintf(stderr, "WORLD current=%d (use /world N)\n", OmegaTechData.LevelIndex);
+        fprintf(stderr, "WORLD: current=%s (use /world <name> or /worlds to list)\n", g_world_to_load);
     } else if (strcmp(cmd, "/fly") == 0) {
         OmegaPlayer.isFlying = !OmegaPlayer.isFlying;
         if (OmegaPlayer.isFlying) {
@@ -575,7 +602,8 @@ int main(int argc, char** argv){
     // CLI args
     for (int i = 1; i + 1 < argc; i++) {
         if (strcmp(argv[i], "--world") == 0) {
-            g_world_to_load = argv[i + 1];
+            strncpy(g_world_to_load, argv[i + 1], sizeof(g_world_to_load) - 1);
+            g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
             i++;
         }
     }

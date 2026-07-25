@@ -6,6 +6,9 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 static const Color TEAM_COLORS[7] = {
     {200, 40, 40, 255},   {40, 100, 220, 255},  {40, 180, 60, 255},
@@ -65,33 +68,35 @@ static TitleMenuTextures& GetMenuTex() { static TitleMenuTextures tex; tex.Load(
 static std::vector<WorldEntry> ScanWorlds() {
     std::vector<WorldEntry> worlds;
     const char* base = "GameData/Worlds";
-    std::string baseStr(base);
-    std::vector<std::string> check;
-    check.push_back(baseStr + "/EngineTest");
-    check.push_back(baseStr + "/Legacy/EtheralTestRealm");
-    check.push_back(baseStr + "/Legacy/World1");
-    check.push_back(baseStr + "/Legacy/World2");
-    check.push_back(baseStr + "/Legacy/World3");
-
-    auto tryAdd = [&](const std::string& dir) {
-        WorldEntry e;
-        e.dirName = dir;
-        size_t pos = dir.rfind('/');
-        if (pos == std::string::npos) pos = dir.rfind('\\');
-        e.name = (pos != std::string::npos) ? dir.substr(pos + 1) : dir;
-        worlds.push_back(e);
-    };
-
-    for (auto& c : check) {
-        std::string wdl = c + "/World.wdl";
-        std::string oz = c + "/World.ozone";
+    if (!fs::exists(base)) return worlds;
+    for (auto& entry : fs::directory_iterator(base)) {
+        if (!entry.is_directory()) continue;
+        std::string dirName = entry.path().filename().string();
+        std::string wdl = entry.path().string() + "/World.wdl";
+        std::string oz  = entry.path().string() + "/World.ozone";
         if (IsPathFile(wdl.c_str()) || IsPathFile(oz.c_str())) {
-            std::string dir = c.substr(baseStr.length() + 1);
-            tryAdd(dir);
+            worlds.push_back({dirName, dirName});
         }
     }
     return worlds;
 }
+
+enum PaneType : int {
+    PANE_CAMPAIGN = 0,
+    PANE_PRACTICE,
+    PANE_SERAPHIC,
+    PANE_STATS,
+    PANE_SETTINGS,
+    PANE_CHARACTER,
+    PANE_HELP
+};
+
+struct Pane {
+    Rectangle rect;
+    PaneType type;
+    bool dragging = false;
+    Vector2 dragOffset{0};
+};
 
 class TitleMenu {
 public:
@@ -158,7 +163,7 @@ private:
     static constexpr int TAB_COUNT = 7;
     static const char* TAB_NAMES[TAB_COUNT];
     Rectangle m_tabRects[TAB_COUNT];
-    int m_hoveredTab = -1, m_activeTab = 0, m_openTab = -1, m_hoveredItem = -1;
+    int m_hoveredTab = -1, m_openTab = -1, m_hoveredItem = -1;
     bool m_dropdownOpen = false;
     Rectangle m_dropdownRect{0};
     std::vector<Rectangle> m_itemRects;
@@ -168,13 +173,20 @@ private:
     std::string m_selectedWorld;
     std::vector<WorldEntry> m_worlds;
 
-    bool m_showSettings = false;
     char m_charName[64];
-    int m_teamColor = 0, m_contentPage = 0, m_gameTypeFilter = 0, m_settingsSubPage = 0;
+    int m_teamColor = 0, m_gameTypeFilter = 0, m_settingsSubPage = 0;
 
     Rectangle m_minBtn, m_maxBtn, m_closeBtn;
     bool m_dragging = false;
+    bool m_dragPane = false;
+    int m_dragPaneIdx = -1;
     Vector2 m_dragStart{0};
+
+    // Pane system
+    std::vector<Pane> m_panes;
+    int m_cascadeX = 40, m_cascadeY = 40;
+    static constexpr int PANE_TITLE_H = 20;
+    static constexpr int PANE_BORDER = 4;
 
     void UpdateLayout() {
         m_frameRect = {(float)FRAME_M, (float)FRAME_M, (float)(m_sw - FRAME_M*2), (float)(m_sh - FRAME_M*2)};
@@ -204,13 +216,14 @@ private:
 
         m_hoveredItem = -1;
 
+        // Main window chrome buttons
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (CheckCollisionPointRec(mp, m_closeBtn)) { PostMessage(GetActiveWindow(), WM_CLOSE, 0, 0); return; }
             if (CheckCollisionPointRec(mp, m_maxBtn)) { ToggleFullscreen(); return; }
             if (CheckCollisionPointRec(mp, m_minBtn)) { ShowWindow(GetActiveWindow(), SW_MINIMIZE); return; }
             if (CheckCollisionPointRec(mp, m_titleBar)) { m_dragging = true; m_dragStart = mp; return; }
         }
-        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) m_dragging = false;
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) { m_dragging = false; m_dragPane = false; }
         if (m_dragging) {
             Vector2 d = {mp.x - m_dragStart.x, mp.y - m_dragStart.y};
             if (d.x != 0 || d.y != 0) {
@@ -221,15 +234,24 @@ private:
             return;
         }
 
+        // Pane dragging
+        if (m_dragPane && m_dragPaneIdx >= 0 && m_dragPaneIdx < (int)m_panes.size()) {
+            m_panes[m_dragPaneIdx].rect.x = mp.x - m_panes[m_dragPaneIdx].dragOffset.x;
+            m_panes[m_dragPaneIdx].rect.y = mp.y - m_panes[m_dragPaneIdx].dragOffset.y;
+            return;
+        }
+
+        // Dropdown tab clicks
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (m_hoveredTab >= 0) {
                 PlaySound(OmegaTechSoundData.UIClick);
                 if (m_openTab == m_hoveredTab && m_dropdownOpen) { m_dropdownOpen = false; m_openTab = -1; }
-                else { m_openTab = m_hoveredTab; m_dropdownOpen = true; m_showSettings = false; BuildDropdownItems(); }
+                else { m_openTab = m_hoveredTab; m_dropdownOpen = true; BuildDropdownItems(); }
                 return;
             }
         }
 
+        // Dropdown menu clicks
         if (m_dropdownOpen && m_openTab >= 0) {
             if (CheckCollisionPointRec(mp, m_dropdownRect)) {
                 for (size_t i = 0; i < m_itemRects.size(); i++)
@@ -242,7 +264,9 @@ private:
             } else if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { m_dropdownOpen = false; m_openTab = -1; }
         }
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) HandleContentClick(mp);
+        // Pane input handling (front to back)
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsMouseButtonReleased(MOUSE_LEFT_BUTTON))
+            HandlePaneInput(mp);
     }
 
     void BuildDropdownItems() {
@@ -277,36 +301,213 @@ private:
         }
     }
 
-    void HandleDropdownClick(int tab, int item) {
-        m_dropdownOpen = false; m_openTab = -1;
-        switch (tab) {
-            case 0: case 1:
-                if (item == 2 && tab == 1) {
-                    if (!m_worlds.empty()) { m_selectedWorld = m_worlds[0].dirName; m_exit = true; }
-                } else if (item == 1) {
-                    if (IsPathFile("GameData/Saves/TF.sav")) { LoadSave(); LoadFlag = true; m_exit = true; }
-                } else { m_activeTab = tab; m_contentPage = tab; }
-                break;
-            case 4: m_activeTab = tab; m_showSettings = true; m_settingsSubPage = item; break;
-            default: m_activeTab = tab; break;
+    static const char* GetPaneTitle(PaneType t) {
+        switch (t) {
+            case PANE_CAMPAIGN:  return "Campaign Missions";
+            case PANE_PRACTICE:  return "Practice Session";
+            case PANE_SERAPHIC:  return "Seraphic Realm";
+            case PANE_STATS:     return "Player Statistics";
+            case PANE_SETTINGS:  return "Settings";
+            case PANE_CHARACTER: return "Character Configuration";
+            case PANE_HELP:      return "About Angels95";
+            default:             return "";
         }
     }
 
-    void HandleContentClick(Vector2 mp) {
-        if (m_activeTab == 0 || m_activeTab == 1) {
-            int cols = std::max(1, (int)((m_contentArea.width - 20) / (CELL_W + CELL_GAP)));
-            int sx = (int)(m_contentArea.x + 10);
-            int sy = (int)(m_contentArea.y + 50 + CELL_GAP);
-            for (size_t i = 0; i < m_worlds.size(); i++) {
-                int r = (int)(i / cols), c = (int)(i % cols);
-                Rectangle cell = {(float)(sx + c * (CELL_W + CELL_GAP)), (float)(sy + r * (CELL_H + CELL_GAP)), (float)CELL_W, (float)CELL_H};
-                if (CheckCollisionPointRec(mp, cell)) {
+    void OpenPane(PaneType type) {
+        // If a pane of this type already exists, bring it to front
+        for (size_t i = 0; i < m_panes.size(); i++) {
+            if (m_panes[i].type == type) {
+                BringPaneToFront((int)i);
+                return;
+            }
+        }
+        int pw, ph;
+        GetPaneSize(type, pw, ph);
+        Rectangle r;
+        r.width = (float)pw;
+        r.height = (float)ph;
+        r.x = m_contentArea.x + m_cascadeX;
+        r.y = m_contentArea.y + m_cascadeY;
+        // Clamp inside content area
+        if (r.x + r.width > m_contentArea.x + m_contentArea.width - 10)
+            r.x = m_contentArea.x + 20;
+        if (r.y + r.height > m_contentArea.y + m_contentArea.height - 10)
+            r.y = m_contentArea.y + 20;
+        // Cascade position for next pane
+        m_cascadeX += 24;
+        m_cascadeY += 24;
+        if (m_cascadeX + pw > (int)m_contentArea.width - 60) m_cascadeX = 40;
+        if (m_cascadeY + ph > (int)m_contentArea.height - 60) m_cascadeY = 40;
+        // For settings pane, reset sub-page
+        if (type == PANE_SETTINGS) m_settingsSubPage = 0;
+        m_panes.push_back({r, type, false, {0, 0}});
+    }
+
+    void GetPaneSize(int type, int& w, int& h) {
+        switch (type) {
+            case PANE_CAMPAIGN:  w = 640; h = 380; break;
+            case PANE_PRACTICE:  w = 640; h = 380; break;
+            case PANE_SERAPHIC:  w = 460; h = 260; break;
+            case PANE_STATS:     w = 360; h = 240; break;
+            case PANE_SETTINGS:  w = 480; h = 340; break;
+            case PANE_CHARACTER: w = 440; h = 260; break;
+            case PANE_HELP:      w = 520; h = 360; break;
+            default:             w = 400; h = 300; break;
+        }
+    }
+
+    void BringPaneToFront(int idx) {
+        if (idx < 0 || idx >= (int)m_panes.size()) return;
+        Pane p = m_panes[idx];
+        m_panes.erase(m_panes.begin() + idx);
+        m_panes.push_back(p);
+    }
+
+    int GetPaneAtPoint(Vector2 mp) {
+        for (int i = (int)m_panes.size() - 1; i >= 0; i--)
+            if (CheckCollisionPointRec(mp, m_panes[i].rect))
+                return i;
+        return -1;
+    }
+
+    Rectangle GetPaneTitleBarRect(const Pane& p) {
+        return {p.rect.x + PANE_BORDER, p.rect.y + PANE_BORDER, p.rect.width - PANE_BORDER * 2, PANE_TITLE_H};
+    }
+
+    Rectangle GetPaneCloseBtnRect(const Pane& p) {
+        Rectangle tb = GetPaneTitleBarRect(p);
+        return {tb.x + tb.width - 16, tb.y, 14, tb.height};
+    }
+
+    Rectangle GetPaneContentRect(const Pane& p) {
+        Rectangle tb = GetPaneTitleBarRect(p);
+        return {
+            p.rect.x + PANE_BORDER + 2,
+            tb.y + tb.height + 2,
+            p.rect.width - PANE_BORDER * 2 - 4,
+            p.rect.height - PANE_BORDER - tb.height - 6
+        };
+    }
+
+    void HandlePaneInput(Vector2 mp) {
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            // Check close buttons first (front to back)
+            for (int i = (int)m_panes.size() - 1; i >= 0; i--) {
+                Rectangle closeBtn = GetPaneCloseBtnRect(m_panes[i]);
+                if (CheckCollisionPointRec(mp, closeBtn)) {
                     PlaySound(OmegaTechSoundData.UIClick);
-                    m_selectedWorld = m_worlds[i].dirName;
-                    m_exit = true;
+                    m_panes.erase(m_panes.begin() + i);
                     return;
                 }
             }
+
+            // Check title bar for drag (front to back)
+            for (int i = (int)m_panes.size() - 1; i >= 0; i--) {
+                Rectangle tb = GetPaneTitleBarRect(m_panes[i]);
+                if (CheckCollisionPointRec(mp, tb)) {
+                    m_dragPane = true;
+                    m_dragPaneIdx = i;
+                    m_panes[i].dragging = true;
+                    m_panes[i].dragOffset = {mp.x - m_panes[i].rect.x, mp.y - m_panes[i].rect.y};
+                    BringPaneToFront(i);
+                    return;
+                }
+            }
+
+            // Check content area clicks (front to back)
+            int paneIdx = GetPaneAtPoint(mp);
+            if (paneIdx >= 0) {
+                BringPaneToFront(paneIdx);
+                Pane& p = m_panes[paneIdx];
+                Rectangle cr = GetPaneContentRect(p);
+                Vector2 localMp = {mp.x - cr.x, mp.y - cr.y};
+                if (CheckCollisionPointRec(mp, cr)) {
+                    HandlePaneContentClick(p.type, mp, cr);
+                }
+                return;
+            }
+        }
+    }
+
+    void HandlePaneContentClick(PaneType type, Vector2 mp, Rectangle contentRect) {
+        switch (type) {
+            case PANE_CAMPAIGN:
+            case PANE_PRACTICE: {
+                bool campaign = (type == PANE_CAMPAIGN);
+                int cols = std::max(1, (int)((contentRect.width - 24) / (CELL_W + CELL_GAP)));
+                int sx = (int)(contentRect.x + 12);
+                int sy = (int)(contentRect.y + 64);
+                for (size_t i = 0; i < m_worlds.size(); i++) {
+                    int r = (int)(i / cols), c = (int)(i % cols);
+                    Rectangle cell = {(float)(sx + c * (CELL_W + CELL_GAP)), (float)(sy + r * (CELL_H + CELL_GAP)), (float)CELL_W, (float)CELL_H};
+                    if (CheckCollisionPointRec(mp, cell)) {
+                        PlaySound(OmegaTechSoundData.UIClick);
+                        m_selectedWorld = m_worlds[i].dirName;
+                        if (!campaign) { m_loadGame = false; }
+                        m_exit = true;
+                        return;
+                    }
+                }
+                break;
+            }
+            case PANE_SETTINGS: {
+                // Settings sub-page buttons
+                float bx = contentRect.x + 12, by = contentRect.y + 40;
+                auto checkBtn = [&](int idx, Rectangle r) {
+                    if (CheckCollisionPointRec(mp, r)) {
+                        PlaySound(OmegaTechSoundData.UIClick);
+                        m_settingsSubPage = idx;
+                    }
+                };
+                checkBtn(0, {bx, by, 140, 32});
+                checkBtn(1, {bx, by + 40, 140, 32});
+                checkBtn(2, {bx, by + 80, 140, 32});
+                break;
+            }
+            case PANE_CHARACTER: {
+                // Team color swatches
+                float x = contentRect.x + 16;
+                float y = contentRect.y + 76; // after name and label
+                float sx2 = x + 100;
+                for (int i = 0; i < 7; i++) {
+                    Rectangle sw = {sx2 + i * 30, y, 24, 24};
+                    if (CheckCollisionPointRec(mp, sw)) {
+                        PlaySound(OmegaTechSoundData.UIClick);
+                        m_teamColor = i;
+                        break;
+                    }
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+
+    void HandleDropdownClick(int tab, int item) {
+        m_dropdownOpen = false; m_openTab = -1;
+        switch (tab) {
+            case 0:
+                if (item == 0) OpenPane(PANE_CAMPAIGN);
+                else if (item == 1) {
+                    if (IsPathFile("GameData/Saves/TF.sav")) { LoadSave(); LoadFlag = true; m_exit = true; }
+                }
+                break;
+            case 1:
+                if (item == 0) OpenPane(PANE_PRACTICE);
+                else if (item == 1) {
+                    if (IsPathFile("GameData/Saves/TF.sav")) { LoadSave(); LoadFlag = true; m_exit = true; }
+                }
+                else if (item == 2 && !m_worlds.empty()) {
+                    m_selectedWorld = m_worlds[0].dirName; m_exit = true;
+                }
+                break;
+            case 2: OpenPane(PANE_SERAPHIC); break;
+            case 3: OpenPane(PANE_STATS); break;
+            case 4: OpenPane(PANE_SETTINGS); break;
+            case 5: OpenPane(PANE_CHARACTER); break;
+            case 6: OpenPane(PANE_HELP); break;
+            default: break;
         }
     }
 
@@ -382,7 +583,7 @@ private:
         for (int i = 0; i < TAB_COUNT; i++) {
             Rectangle tr = m_tabRects[i];
             bool hover = (i == m_hoveredTab);
-            bool active = (i == m_openTab) || (i == m_activeTab && !m_dropdownOpen);
+            bool active = (i == m_openTab);
             if (active) DrawRectangleRec(tr, (Color){30,60,100,255});
             else if (hover) DrawRectangleRec(tr, (Color){20,40,70,255});
             Color tc = active ? WHITE : (hover ? WHITE : (Color){180,200,220,255});
@@ -404,20 +605,63 @@ private:
         }
     }
 
+    // ── Pane rendering ──────────────────────────────────────────────
+
     void DrawContent(Rectangle area) {
         auto& t = GetMenuTex();
         if (t.clientArea.id) DrawTexturePro(t.clientArea, {0,0,128,1}, area, {0,0}, 0, WHITE);
         else DrawRectangleRec(area, (Color){4,8,24,220});
-        switch (m_activeTab) {
-            case 0: DrawCampaignPage(area); break;
-            case 1: DrawPracticeSessionPage(area); break;
-            case 2: DrawSeraphicPage(area); break;
-            case 3: DrawStatsPage(area); break;
-            case 4: DrawSettingsPage(area); break;
-            case 5: DrawCharacterPage(area); break;
-            case 6: DrawHelpPage(area); break;
+
+        for (auto& p : m_panes) {
+            DrawPane(p);
+        }
+
+        if (m_panes.empty()) {
+            const char* msg = "Select an action from the menu above";
+            DrawText(msg, (int)(area.x + (area.width - MeasureText(msg, 16)) / 2),
+                     (int)(area.y + area.height / 2 - 10), 16, (Color){100,130,160,150});
         }
     }
+
+    void DrawPane(const Pane& p) {
+        auto& t = GetMenuTex();
+        // Draw 9-slice frame
+        Draw9SlicePanel(p.rect, t.fTL, t.fT, t.fTR, t.fL, t.fArea, t.fR, t.fBL, t.fB, t.fBR);
+
+        // Draw pane title bar
+        Rectangle tb = GetPaneTitleBarRect(p);
+        DrawRectangleRec(tb, (Color){0,16,48,255});
+        if (t.barL.id)
+            DrawTexturePro(t.barL, {0,0,16,16}, {tb.x, tb.y, 16, tb.height}, {0,0}, 0, WHITE);
+        if (t.barTile.id && tb.width > 32) {
+            float tw = tb.width - 16 - 16 - 2;
+            if (tw > 0)
+                DrawTexturePro(t.barTile, {0,0,1,16}, {tb.x + 16, tb.y, tw, tb.height}, {0,0}, 0, WHITE);
+        }
+        DrawWinButton(GetPaneCloseBtnRect(p), 2);
+        const char* title = GetPaneTitle(p.type);
+        DrawText(title, (int)(tb.x + 20), (int)(tb.y + 4), 12, WHITE);
+
+        // Draw pane content with scissoring
+        Rectangle cr = GetPaneContentRect(p);
+        BeginScissorMode((int)cr.x, (int)cr.y, (int)cr.width, (int)cr.height);
+        DrawPaneContent(p.type, cr);
+        EndScissorMode();
+    }
+
+    void DrawPaneContent(PaneType type, Rectangle area) {
+        switch (type) {
+            case PANE_CAMPAIGN:  DrawCampaignPage(area); break;
+            case PANE_PRACTICE:  DrawPracticeSessionPage(area); break;
+            case PANE_SERAPHIC:  DrawSeraphicPage(area); break;
+            case PANE_STATS:     DrawStatsPage(area); break;
+            case PANE_SETTINGS:  DrawSettingsPage(area); break;
+            case PANE_CHARACTER: DrawCharacterPage(area); break;
+            case PANE_HELP:      DrawHelpPage(area); break;
+        }
+    }
+
+    // ── Page drawing functions (no input handling) ──────────────────
 
     void DrawPageHeader(Rectangle area, const char* title) {
         DrawText(title, (int)(area.x + 12), (int)(area.y + 8), 18, WHITE);
@@ -429,7 +673,7 @@ private:
         DrawText("Game Type: ", (int)(area.x + 12), (int)(area.y + 38), 12, LIGHTGRAY);
         float fx = area.x + 12 + MeasureText("Game Type: ", 12) + 4;
         Rectangle filterRect = {fx, (float)(area.y + 36), 120, 20};
-        GuiDropdownBox(filterRect, "All Types;Campaign;Deathmatch;CTF", &m_gameTypeFilter, m_dropdownOpen && m_openTab < 0);
+        GuiDropdownBox(filterRect, "All Types;Campaign;Deathmatch;CTF", &m_gameTypeFilter, false);
 
         int cols = std::max(1, (int)((area.width - 24) / (CELL_W + CELL_GAP)));
         int sx = (int)(area.x + 12), sy = (int)(area.y + 64);
@@ -474,7 +718,6 @@ private:
             auto& t = GetMenuTex();
             DrawTexturePro(h ? t.btnHover : t.btnNormal, {0,0,64,64}, r, {0,0}, 0, h ? WHITE : (Color){200,200,200,255});
             DrawText(label, (int)(r.x + (r.width - MeasureText(label, 13))/2), (int)(r.y + 9), 13, h ? WHITE : LIGHTGRAY);
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && h) { PlaySound(OmegaTechSoundData.UIClick); m_settingsSubPage = idx; }
         };
         float bx = area.x + 12, by = area.y + 40;
         drawBtn(0, "Video", {bx, by, 140, 32});
@@ -483,31 +726,29 @@ private:
 
         float sx = bx + 160, sw = area.x + area.width - sx - 12;
         Rectangle sub = {sx, by, sw, area.y + area.height - by - 8};
-        if (m_showSettings) {
-            DrawRectangleRec(sub, (Color){8,16,36,180});
-            int y = (int)(sub.y + 4);
-            switch (m_settingsSubPage) {
-                case 0: {
-                    DrawText("Video Settings", (int)(sx + 8), y, 14, WHITE); y += 24;
-                    bool fs = IsWindowFullscreen();
-                    if (GuiButton({sx+8, (float)y, 140, 22}, fs ? "Fullscreen: ON" : "Fullscreen: OFF")) ToggleFullscreen();
-                    y += 30;
-                    DrawText("Press Alt+Enter to toggle fullscreen", (int)(sx + 8), y, 11, (Color){140,160,180,200});
-                    break;
-                }
-                case 1: {
-                    DrawText("Audio Settings", (int)(sx + 8), y, 14, WHITE); y += 24;
-                    float vol = GetMasterVolume();
-                    vol = GuiSlider({sx+8, (float)y, 200, 20}, "Volume", NULL, vol, 0.0f, 1.0f);
-                    SetMasterVolume(vol);
-                    break;
-                }
-                case 2: {
-                    DrawText("Controls", (int)(sx + 8), y, 14, WHITE); y += 24;
-                    const char* c[] = {"WASD - Move","Mouse - Look","Left Click - Fire","E - Interact","Tab - Inventory","Escape - Pause","` - Console"};
-                    for (int i = 0; i < 7; i++) { DrawText(c[i], (int)(sx + 8), y, 13, LIGHTGRAY); y += 20; }
-                    break;
-                }
+        DrawRectangleRec(sub, (Color){8,16,36,180});
+        int y = (int)(sub.y + 4);
+        switch (m_settingsSubPage) {
+            case 0: {
+                DrawText("Video Settings", (int)(sx + 8), y, 14, WHITE); y += 24;
+                bool fs = IsWindowFullscreen();
+                if (GuiButton({sx+8, (float)y, 140, 22}, fs ? "Fullscreen: ON" : "Fullscreen: OFF")) ToggleFullscreen();
+                y += 30;
+                DrawText("Press Alt+Enter to toggle fullscreen", (int)(sx + 8), y, 11, (Color){140,160,180,200});
+                break;
+            }
+            case 1: {
+                DrawText("Audio Settings", (int)(sx + 8), y, 14, WHITE); y += 24;
+                float vol = GetMasterVolume();
+                vol = GuiSlider({sx+8, (float)y, 200, 20}, "Volume", NULL, vol, 0.0f, 1.0f);
+                SetMasterVolume(vol);
+                break;
+            }
+            case 2: {
+                DrawText("Controls", (int)(sx + 8), y, 14, WHITE); y += 24;
+                const char* c[] = {"WASD - Move","Mouse - Look","Left Click - Fire","E - Interact","Tab - Inventory","Escape - Pause","` - Console"};
+                for (int i = 0; i < 7; i++) { DrawText(c[i], (int)(sx + 8), y, 13, LIGHTGRAY); y += 20; }
+                break;
             }
         }
     }
@@ -527,7 +768,6 @@ private:
             DrawRectangleRec(sw, TEAM_COLORS[i]);
             if (i == m_teamColor) DrawRectangleLinesEx(sw, 2, WHITE);
             else if (h) DrawRectangleLinesEx(sw, 1, LIGHTGRAY);
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && h) { PlaySound(OmegaTechSoundData.UIClick); m_teamColor = i; }
         }
         y += 36;
         DrawText(TEAM_COLOR_NAMES[m_teamColor], (int)x, (int)y, 12, LIGHTGRAY); y += 24;
@@ -574,16 +814,21 @@ private:
             if (m_openTab == 5) return "Customize your character";
             if (m_openTab == 6) return "About Angels95 and the OmegaTech Engine";
         }
-        switch (m_activeTab) {
-            case 0: return "Select a campaign mission to play";
-            case 1: return "Select a world for free practice, or load a saved game";
-            case 2: return "The Seraphic Realm - coming soon";
-            case 3: return "Your player statistics";
-            case 4: return "Configure game settings";
-            case 5: return "Customize your character";
-            case 6: return "About Angels95 / OmegaTech Engine";
-            default: return "";
+        if (!m_panes.empty()) {
+            int idx = GetPaneAtPoint(GetMousePosition());
+            if (idx >= 0) {
+                switch (m_panes[idx].type) {
+                    case PANE_CAMPAIGN:  return "Campaign mission selection";
+                    case PANE_PRACTICE:  return "Practice session world selection";
+                    case PANE_SERAPHIC:  return "The Seraphic Realm - coming soon";
+                    case PANE_STATS:     return "Your player statistics";
+                    case PANE_SETTINGS:  return "Configure game settings";
+                    case PANE_CHARACTER: return "Customize your character";
+                    case PANE_HELP:      return "About Angels95 / OmegaTech Engine";
+                }
+            }
         }
+        return "Select an action from the menu above";
     }
 };
 

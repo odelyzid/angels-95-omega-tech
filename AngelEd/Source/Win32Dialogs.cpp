@@ -1757,7 +1757,7 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Heightmap Editor Ã¢â‚¬â€ Load, configure, and preview terrain heightmaps
+// Heightmap Editor Load, configure, and preview terrain heightmaps
 // =====================================================================
 static const int ID_HM_IMAGE      = 210;
 static const int ID_HM_TEX        = 211;

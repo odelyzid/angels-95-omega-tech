@@ -65,6 +65,8 @@ struct GameplaySoundProfile {
     float volume_mult = 1.0f;     // Volume multiplier for this zone
 };
 
+
+// TODO: Gun/WEapon PawnDefs for stat block
 // Template definition shared between spawn calls; stored in an internal
 // registry so Spawn() can be called by name.
 struct PawnDef {
