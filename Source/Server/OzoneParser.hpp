@@ -31,6 +31,7 @@ struct OzonePrimitive {
     std::string entityType;         // for entity types: "Walker", "HealthVial", etc.
     std::string entitySubType;      // for zones: "Water", "Ladder", "Sky", "Reverb"
     int csgOp = 0;                  // CSG operation: 0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC
+    int surfaceFlags = 0;           // surface behavior flags (e.g. SURF_FAKEBACKDROP)
 };
 
 class OzoneParser {

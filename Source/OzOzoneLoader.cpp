@@ -1,6 +1,7 @@
 ﻿#include "OzOzoneLoader.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Pawn/OzPawnSystem.hpp"
+#include "Script/LightningEntityRegistry.hpp"
 #include "Server/OzoneParser.hpp"
 #include "Log.hpp"
 #include "Package/PackageAssetLoader.hpp"
@@ -82,6 +83,33 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
                     }
                 }
                 pawns.AddZone(node);
+
+                // For sky zones, also register a SkyZoneNode
+                if (ParseZoneType(prim.entitySubType) == ZoneType::ZONE_SKY) {
+                    SkyZoneNode skyNode;
+                    skyNode.bounds = node.bounds;
+                    skyNode.position = {
+                        (node.bounds.min.x + node.bounds.max.x) * 0.5f,
+                        (node.bounds.min.y + node.bounds.max.y) * 0.5f,
+                        (node.bounds.min.z + node.bounds.max.z) * 0.5f
+                    };
+                    skyNode.name = node.name;
+                    skyNode.intensity = node.intensity;
+                    // Look up .ozls SKYZONE entity by name for initial config
+                    const EntityDef* edef = LightningEntityRegistry::Instance().Find(node.name);
+                    if (edef && edef->type == EntityType::SKYZONE) {
+                        skyNode.skyboxPath = edef->skybox;
+                        // Look up fov from stats if available
+                        auto fit = edef->stats.floats.find("fov");
+                        if (fit != edef->stats.floats.end())
+                            skyNode.fov = fit->second;
+                        auto sit = edef->stats.vec3s.find("scroll_speed");
+                        if (sit != edef->stats.vec3s.end()) {
+                            skyNode.scrollSpeed = {sit->second[0], sit->second[1], sit->second[2]};
+                        }
+                    }
+                    pawns.AddSkyZone(skyNode);
+                }
             }
             return true;
         case OzonePrimitiveType::ENTITY_NPC:
@@ -410,11 +438,6 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 bool OzoneLoader::LoadFile(const char* path) {
     OZ_INFO("OzoneLoader: loading %s", path);
     Unload();
-    auto& pawns = PawnSystem::Instance();
-    pawns.DespawnAll();
-    pawns.ClearPlayerStarts();
-    pawns.ClearPickups();
-    pawns.ClearZones();
 
     // Extract world directory from the .ozone path and load textures
     std::string p(path);
@@ -466,6 +489,7 @@ bool OzoneLoader::LoadFile(const char* path) {
     OzoneRenderable r;
     r.typeId = (int)prim.type;
     r.csgOp = prim.csgOp;
+    r.surfaceFlags = prim.surfaceFlags;
 
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
@@ -507,11 +531,6 @@ bool OzoneLoader::LoadFile(const char* path) {
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadString(const char* data) {
     Unload();
-    auto& pawns = PawnSystem::Instance();
-    pawns.DespawnAll();
-    pawns.ClearPlayerStarts();
-    pawns.ClearPickups();
-    pawns.ClearZones();
 
     auto primitives = OzoneParser::parse_string(data);
     if (primitives.empty()) return false;
@@ -535,6 +554,7 @@ bool OzoneLoader::LoadString(const char* data) {
     OzoneRenderable r;
     r.typeId = (int)prim.type;
     r.csgOp = prim.csgOp;
+    r.surfaceFlags = prim.surfaceFlags;
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
 
@@ -560,13 +580,28 @@ bool OzoneLoader::LoadString(const char* data) {
 }
 
 // ---------------------------------------------------------------------------
-// Draw
+// Draw — all renderables (backward compat, used by editor)
 // ---------------------------------------------------------------------------
 void OzoneLoader::Draw(Camera3D& camera) {
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
         if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
-            // Heightmap uses its own position/scale stored from the primitive
+            DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
+                        (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
+        } else {
+            DrawModel(r.model, r.position, r.scale, WHITE);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DrawWorldGeometry — skip SURF_FAKEBACKDROP flagged brushes
+// ---------------------------------------------------------------------------
+void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
+    for (auto& r : m_renderables) {
+        if (!r.loaded) continue;
+        if (r.surfaceFlags & SURF_FAKEBACKDROP) continue;
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
             DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
                         (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
         } else {
@@ -709,20 +744,14 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
 }
 
 // ---------------------------------------------------------------------------
-// DrawZoneGeometry â€” draw renderables whose AABBs overlap the given zone
+// DrawZoneGeometry â€” draw renderables with SURF_FAKEBACKDROP flag set
+// (with optional bounds filter for backward compat)
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
-            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
-            continue;
-
-        // Compute world-space AABB for this renderable
+        if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
+        // Optional bounds filter: skip if brush AABB doesn't overlap zone
         BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
         BoundingBox worldBounds;
         worldBounds.min = {r.position.x + mb.min.x * r.scale,
@@ -731,15 +760,35 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
         worldBounds.max = {r.position.x + mb.max.x * r.scale,
                            r.position.y + mb.max.y * r.scale,
                            r.position.z + mb.max.z * r.scale};
+        if (!CheckCollisionBoxes(worldBounds, zoneBounds)) continue;
+        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
+            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+            continue;
 
-        // Check overlap with sky zone
-        if (CheckCollisionBoxes(worldBounds, zoneBounds)) {
-            if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady)
-                DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
-                            (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
-            else
-                DrawModel(r.model, r.position, r.scale, WHITE);
-        }
+        DrawModel(r.model, r.position, r.scale, WHITE);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DrawZoneGeometry â€” draw all SURF_FAKEBACKDROP brushes (no bounds filter)
+// ---------------------------------------------------------------------------
+void OzoneLoader::DrawZoneGeometry(Camera3D& camera) {
+    for (auto& r : m_renderables) {
+        if (!r.loaded) continue;
+        if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
+        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
+            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+            continue;
+
+        DrawModel(r.model, r.position, r.scale, WHITE);
     }
 }
 

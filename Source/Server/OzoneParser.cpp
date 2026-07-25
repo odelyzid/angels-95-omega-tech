@@ -42,46 +42,40 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             if (!(ls >> type_name)) continue;
         }
 
+        auto parseFloatsAndFlags = [&]() {
+            std::string s;
+            while (ls >> s) {
+                try { prim.args.push_back(std::stof(s)); }
+                catch (...) {
+                    // Not a float — check if it's a surfaceFlags token
+                    if (s.rfind("flags=", 0) == 0) {
+                        prim.surfaceFlags = std::stoi(s.substr(6));
+                    }
+                    break;
+                }
+            }
+        };
+
         if (type_name == "box") {
             prim.type = OzonePrimitiveType::BOX;
-            // box x y z w h d rot
-            std::string s;
-            while (ls >> s) {
-                try { prim.args.push_back(std::stof(s)); }
-                catch (...) { break; }
-            }
+            // box x y z w h d rot [texSlot] [flags:N]
+            parseFloatsAndFlags();
         } else if (type_name == "cyl") {
             prim.type = OzonePrimitiveType::CYLINDER;
-            // cyl x y z r_top r_bot h slices rot
-            std::string s;
-            while (ls >> s) {
-                try { prim.args.push_back(std::stof(s)); }
-                catch (...) { break; }
-            }
+            // cyl x y z r_top r_bot h slices rot [texSlot] [flags:N]
+            parseFloatsAndFlags();
         } else if (type_name == "sph") {
             prim.type = OzonePrimitiveType::SPHERE;
-            // sph x y z r [segments]
-            std::string s;
-            while (ls >> s) {
-                try { prim.args.push_back(std::stof(s)); }
-                catch (...) { break; }
-            }
+            // sph x y z r [segments] [flags:N]
+            parseFloatsAndFlags();
         } else if (type_name == "pyr") {
             prim.type = OzonePrimitiveType::PYRAMID;
-            // pyr x y z w d h
-            std::string s;
-            while (ls >> s) {
-                try { prim.args.push_back(std::stof(s)); }
-                catch (...) { break; }
-            }
+            // pyr x y z w d h [texSlot] [flags:N]
+            parseFloatsAndFlags();
         } else if (type_name == "pln") {
             prim.type = OzonePrimitiveType::PLANE;
-            // pln x y z nx ny nz dist
-            std::string s;
-            while (ls >> s) {
-                try { prim.args.push_back(std::stof(s)); }
-                catch (...) { break; }
-            }
+            // pln x y z nx ny nz dist [flags:N]
+            parseFloatsAndFlags();
         } else if (type_name == "playerstart") {
             prim.type = OzonePrimitiveType::ENTITY_PLAYERSTART;
             // playerstart x y z yaw

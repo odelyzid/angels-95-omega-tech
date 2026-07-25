@@ -162,6 +162,22 @@ struct ZoneVolumeNode {
     ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
 };
 
+// Sky zone node — runtime state for isolated skybox chamber rendering
+struct SkyZoneNode {
+    uint32_t id = 0;
+    Vector3 position{0,0,0};      // camera origin inside skybox chamber
+    BoundingBox bounds;            // trigger volume for player detection
+    Vector3 rotation{0,0,0};       // current sky orientation / angular velocity
+    Vector3 scrollSpeed{0,0,0};    // UV scroll speed for cloud/stars layers
+    float fov = 60.0f;             // sky camera field of view
+    bool bHighDetail = false;      // high/low detail variant toggle
+    uint32_t skyEntityInstance = UINT32_MAX; // index into LightningEntityManager
+    std::string skyboxPath;        // current skybox texture path
+    std::string name;              // matching .ozls entity name for script hookup
+    bool active = false;
+    float intensity = 1.0f;
+};
+
 class PawnSystem {
 public:
     // Register a PawnDef so Spawn() can use it by name
@@ -236,7 +252,29 @@ public:
     // Draw entities (billboards for player starts, pickups, zones, emitters)
     void DrawEntities(Camera3D& camera);
 
+    // Sky zone node management
+    int AddSkyZone(const SkyZoneNode& node);
+    void RemoveSkyZone(int id);
+    void ClearSkyZones();
+    SkyZoneNode* GetSkyZone(int id);
+    std::vector<SkyZoneNode>& GetSkyZones() { return m_skyZones; }
+    const std::vector<SkyZoneNode>& GetSkyZones() const { return m_skyZones; }
+    void SetActiveSkyZone(int index);
+    SkyZoneNode* GetActiveSkyZone();
+    int GetActiveSkyZoneIndex() const { return m_activeSkyZoneIndex; }
+
     // Sky zone tracking â€” returns true if player is inside a ZONE_SKY volume
+    bool IsInSkyZone() const { return m_activeSkyZoneIndex >= 0; }
+    BoundingBox GetSkyZoneBounds() const {
+        if (m_activeSkyZoneIndex >= 0 && m_activeSkyZoneIndex < (int)m_skyZones.size())
+            return m_skyZones[m_activeSkyZoneIndex].bounds;
+        return {{0,0,0},{0,0,0}};
+    }
+    void UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds);
+
+    // Synchronize LightningEntityManager pending skybox state into active SkyZoneNode
+    void SyncSkyboxState();
+
     // Light node management
     int AddLight(const LightNode& node);
     void RemoveLight(int id);
@@ -244,10 +282,6 @@ public:
     std::vector<LightNode>& GetLights() { return m_lights; }
     const std::vector<LightNode>& GetLights() const { return m_lights; }
     LightNode* GetLight(int id);
-
-    bool IsInSkyZone() const { return m_inSkyZone; }
-    BoundingBox GetSkyZoneBounds() const { return m_activeSkyZoneBounds; }
-    void UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds);
 
     // Access registered definitions
     const std::vector<PawnDef>& GetDefs() const { return m_defs; }
@@ -272,8 +306,8 @@ private:
     uint32_t m_nextLightId = 1;
 
     // Sky zone state
-    bool m_inSkyZone = false;
-    BoundingBox m_activeSkyZoneBounds = {{0,0,0},{0,0,0}};
+    std::vector<SkyZoneNode> m_skyZones;
+    int m_activeSkyZoneIndex = -1;
 
     PawnDef* FindDef(const char* name);
     int AllocSlot();

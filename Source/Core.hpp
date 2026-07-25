@@ -169,6 +169,8 @@ void LoadEntitiesFromWDL()
             node.position = {x, y, z};
             node.typeName = typeName;
             PawnSystem::Instance().AddPickup(node);
+            i += 6;
+            continue;
         }
         // Spawn: "Spawn:X:Y:Z:S:Rotation"
         else if (Instruction.substr(0, 5) == L"Spawn")
@@ -181,6 +183,8 @@ void LoadEntitiesFromWDL()
             node.position = {x, y, z};
             node.yaw = yaw;
             PawnSystem::Instance().AddPlayerStart(node);
+            i += 5;
+            continue;
         }
         // NPC: "NPC<ClassName>:X:Y:Z:S:Rotation" or "NPC:X:Y:Z:S:Rotation:ClassName"
         else if (Instruction.substr(0, 3) == L"NPC")
@@ -194,17 +198,29 @@ void LoadEntitiesFromWDL()
             else
                 className = string(WSplitValue(WData, i + 6).begin(), WSplitValue(WData, i + 6).end());
             PawnSystem::Instance().Spawn({x, y, z}, className.c_str());
+            i += 5;
+            continue;
         }
         // Light: "Light:X:Y:Z:R:G:B:I:Rad:T:E:"
         else if (Instruction == L"Light")
         {
             LightNode node;
+            node.active = true;
             node.position.x = ToFloat(WSplitValue(WData, i + 1));
             node.position.y = ToFloat(WSplitValue(WData, i + 2));
             node.position.z = ToFloat(WSplitValue(WData, i + 3));
-            // Extended format: parse optional R:G:B:I:Rad:T:E:
-            // I=intensity, Rad=radius, T=type(0=point,1=dir,2=spot), E=effect
+            node.color.r = (unsigned char)ToFloat(WSplitValue(WData, i + 4));
+            node.color.g = (unsigned char)ToFloat(WSplitValue(WData, i + 5));
+            node.color.b = (unsigned char)ToFloat(WSplitValue(WData, i + 6));
+            node.color.a = 255;
+            node.intensity = ToFloat(WSplitValue(WData, i + 7));
+            node.radius = ToFloat(WSplitValue(WData, i + 8));
+            int typeVal = (int)ToFloat(WSplitValue(WData, i + 9));
+            node.type = (typeVal == 1) ? LitLightType::DIRECTIONAL : (typeVal == 2) ? LitLightType::SPOT : LitLightType::POINT;
+            node.effect = (LitLightEffect)(int)ToFloat(WSplitValue(WData, i + 10));
             PawnSystem::Instance().AddLight(node);
+            i += 10;
+            continue;
         }
         // Sound: "Sound:X:Y:Z:S:Rotation"
         else if (Instruction.substr(0, 5) == L"Sound")
@@ -216,6 +232,8 @@ void LoadEntitiesFromWDL()
             node.position = {x, y, z};
             node.type = EmitterType::SOUND;
             PawnSystem::Instance().AddEmitter(node);
+            i += 5;
+            continue;
         }
         // Music: "Music:X:Y:Z:S:Rotation"
         else if (Instruction.substr(0, 5) == L"Music")
@@ -227,6 +245,8 @@ void LoadEntitiesFromWDL()
             node.position = {x, y, z};
             node.type = EmitterType::MUSIC;
             PawnSystem::Instance().AddEmitter(node);
+            i += 5;
+            continue;
         }
         // ZoneInfo: "ZoneInfo:X:Y:Z:S:Rotation:W:H:L:TypeName"
         else if (Instruction.substr(0, 8) == L"ZoneInfo")
@@ -253,6 +273,8 @@ void LoadEntitiesFromWDL()
             node.bounds = {{x, y, z}, {w, h, l}};
             node.zoneType = zt;
             PawnSystem::Instance().AddZone(node);
+            i += 9;
+            continue;
         }
     }
 }
@@ -331,7 +353,6 @@ auto LoadWorld()
         {
             EnemyTextures.Frame1 = LoadTexture(TextFormat("GameData/Worlds/%s/Entities/Walker/Frame1.png", g_world_to_load));
             EnemyTextures.Scream = LoadSound(TextFormat("GameData/Worlds/%s/Entities/Walker/Scream.mp3", g_world_to_load));
-            SpawnWDLProcess(TextFormat("GameData/Worlds/%s/Entities/Entities.wdl", g_world_to_load));
         }
 
         if (WDLModels.HeightMapImage.data)
@@ -755,18 +776,20 @@ auto LoadWorld()
             CacheWDL();
         }
 
-        char ozonePath[512];
-        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
-        if (IsPathFile(ozonePath))
-            OzoneLoader::Instance().LoadFile(ozonePath);
-
-        // Clear existing entities before loading new world
+        // Clear all existing entities before loading new world
+        PawnSystem::Instance().ClearLights();
         PawnSystem::Instance().ClearPlayerStarts();
         PawnSystem::Instance().ClearPickups();
         PawnSystem::Instance().ClearZones();
         PawnSystem::Instance().ClearEmitters();
         PawnSystem::Instance().DespawnAll();
-        LoadEntitiesFromWDL();
+
+        char ozonePath[512];
+        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
+        if (IsPathFile(ozonePath))
+            OzoneLoader::Instance().LoadFile(ozonePath);
+        else
+            LoadEntitiesFromWDL();
 
         if (OmegaTechSoundData.MusicFound)
             StopMusicStream(OmegaTechSoundData.BackgroundMusic);
@@ -2052,8 +2075,14 @@ void DrawWorld()
     BeginTextureMode(Target);
     ClearBackground(BLACK);
 
-    // Skybox background texture (full-screen 2D, drawn behind 3D scene)
-    if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0)
+    // Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
+    PawnSystem::Instance().UpdateSkyZone(
+        OmegaTechData.MainCamera.position,
+        OmegaPlayer.PlayerBounds);
+    bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
+
+    // 2D skybox fallback texture (only when no active 3D sky zone)
+    if (!inSkyZone && OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0)
     {
         float sw = (float)Target.texture.width;
         float sh = (float)Target.texture.height;
@@ -2066,22 +2095,30 @@ void DrawWorld()
                        (Vector2){tx * scale * 0.5f, ty * scale * 0.5f}, 0, WHITE);
     }
 
-    // Detect sky zone for skybox rendering
-    PawnSystem::Instance().UpdateSkyZone(
-        OmegaTechData.MainCamera.position,
-        OmegaPlayer.PlayerBounds);
-    bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
-
     BeginMode3D(OmegaTechData.MainCamera);
 
-    // Sky zone geometry â€” drawn first as backdrop (unlit background)
+    // -----------------------------------------------------------------------
+    // SKY PASS — render SURF_FAKEBACKDROP brushes from a virtual camera
+    // positioned at the active SkyZoneNode's origin, tracking player look dir.
+    // -----------------------------------------------------------------------
     if (inSkyZone)
     {
-        rlDisableDepthMask();
-        OzoneLoader::Instance().DrawZoneGeometry(
-            OmegaTechData.MainCamera,
-            PawnSystem::Instance().GetSkyZoneBounds());
-        rlEnableDepthMask();
+        SkyZoneNode* skyZone = PawnSystem::Instance().GetActiveSkyZone();
+        if (skyZone)
+        {
+            // Build sky camera at SkyZoneNode position, following player rotation
+            Camera3D skyCam = OmegaTechData.MainCamera;
+            skyCam.position = skyZone->position;
+            // Keep the player's look direction for parallax
+            Vector3 dir = Vector3Subtract(OmegaTechData.MainCamera.target, OmegaTechData.MainCamera.position);
+            dir = Vector3Normalize(dir);
+            skyCam.target = Vector3Add(skyCam.position, dir);
+            skyCam.fovy = skyZone->fov;
+
+            rlDisableDepthMask();
+            OzoneLoader::Instance().DrawZoneGeometry(skyCam);
+            rlEnableDepthMask();
+        }
     }
 
     // GameplaySoundZone — trigger zone-specific music/sound profiles
@@ -2174,7 +2211,7 @@ void DrawWorld()
         WDLProcess();
     }
 
-    OzoneLoader::Instance().Draw(OmegaTechData.MainCamera);
+    OzoneLoader::Instance().DrawWorldGeometry(OmegaTechData.MainCamera);
 
     // OZONE brush collision - chunk-accelerated query
     {
@@ -2364,6 +2401,9 @@ void DrawWorld()
         float dt = GetFrameTime();
         LightningEntityManager::Instance().Update(dt);
 
+        // Sync pending script effects into PawnSystem's active SkyZoneNode
+        PawnSystem::Instance().SyncSkyboxState();
+
         // Apply pending Fog changes from script contexts
         auto &lem = LightningEntityManager::Instance();
         if (lem.HasPendingFog())
@@ -2382,23 +2422,46 @@ void DrawWorld()
         }
 
         // Apply pending Skybox changes from script contexts
-        if (lem.HasPendingSkybox())
+        // (if activeSkyZone present, SyncSkyboxState stored path — load texture here)
         {
-            std::string path = lem.PendingSkybox();
-            OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
-            Texture2D newSky = LoadTextureWithFallback(path.c_str());
-            if (newSky.id > 0)
+            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
+            if (sky && !sky->skyboxPath.empty())
             {
-                if (WDLModels.Skybox.id > 0)
-                    UnloadTexture(WDLModels.Skybox);
-                WDLModels.Skybox = newSky;
-                OmegaTechData.SkyboxEnabled = true;
+                std::string path = sky->skyboxPath;
+                OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
+                Texture2D newSky = LoadTextureWithFallback(path.c_str());
+                if (newSky.id > 0)
+                {
+                    if (WDLModels.Skybox.id > 0)
+                        UnloadTexture(WDLModels.Skybox);
+                    WDLModels.Skybox = newSky;
+                    OmegaTechData.SkyboxEnabled = true;
+                }
+                else
+                {
+                    OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
+                }
+                sky->skyboxPath.clear();
             }
-            else
+            else if (lem.HasPendingSkybox())
             {
-                OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
+                // Fallback: no active sky zone, apply directly
+                std::string path = lem.PendingSkybox();
+                OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
+                Texture2D newSky = LoadTextureWithFallback(path.c_str());
+                if (newSky.id > 0)
+                {
+                    if (WDLModels.Skybox.id > 0)
+                        UnloadTexture(WDLModels.Skybox);
+                    WDLModels.Skybox = newSky;
+                    OmegaTechData.SkyboxEnabled = true;
+                }
+                else
+                {
+                    OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
+                }
+                lem.ClearPendingSkybox();
             }
-            lem.ClearPendingSkybox();
         }
 
         // Apply pending Ambient changes from script contexts

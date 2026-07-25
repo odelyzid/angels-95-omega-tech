@@ -418,31 +418,87 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
 }
 
 // ---------------------------------------------------------------------------
-// UpdateSkyZone detect if player is inside a ZONE_SKY volume
+// SkyZoneNode management
+// ---------------------------------------------------------------------------
+int PawnSystem::AddSkyZone(const SkyZoneNode& node) {
+    SkyZoneNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_skyZones.push_back(n);
+    return (int)m_skyZones.size() - 1;
+}
+
+void PawnSystem::RemoveSkyZone(int id) {
+    auto it = std::remove_if(m_skyZones.begin(), m_skyZones.end(),
+        [id](const SkyZoneNode& n) { return n.id == (uint32_t)id; });
+    m_skyZones.erase(it, m_skyZones.end());
+    if (m_activeSkyZoneIndex >= (int)m_skyZones.size())
+        m_activeSkyZoneIndex = -1;
+}
+
+void PawnSystem::ClearSkyZones() {
+    m_skyZones.clear();
+    m_activeSkyZoneIndex = -1;
+}
+
+SkyZoneNode* PawnSystem::GetSkyZone(int id) {
+    for (auto& n : m_skyZones) {
+        if (n.id == (uint32_t)id) return &n;
+    }
+    return nullptr;
+}
+
+void PawnSystem::SetActiveSkyZone(int index) {
+    m_activeSkyZoneIndex = (index >= 0 && index < (int)m_skyZones.size()) ? index : -1;
+}
+
+SkyZoneNode* PawnSystem::GetActiveSkyZone() {
+    if (m_activeSkyZoneIndex >= 0 && m_activeSkyZoneIndex < (int)m_skyZones.size())
+        return &m_skyZones[m_activeSkyZoneIndex];
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// UpdateSkyZone detect if player is inside a SkyZoneNode trigger volume
 // ---------------------------------------------------------------------------
 void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
-    bool wasInSky = m_inSkyZone;
-    m_inSkyZone = false;
-    for (auto& n : m_zones) {
-        if (n.zoneType != ZoneType::ZONE_SKY) continue;
-        // Check if player position is inside the sky zone
+    int prevActive = m_activeSkyZoneIndex;
+
+    // Find the sky zone the player is inside
+    m_activeSkyZoneIndex = -1;
+    for (int i = 0; i < (int)m_skyZones.size(); i++) {
+        auto& n = m_skyZones[i];
         if (playerPos.x >= n.bounds.min.x && playerPos.x <= n.bounds.max.x &&
             playerPos.y >= n.bounds.min.y && playerPos.y <= n.bounds.max.y &&
             playerPos.z >= n.bounds.min.z && playerPos.z <= n.bounds.max.z) {
-            m_inSkyZone = true;
-            m_activeSkyZoneBounds = n.bounds;
-            if (!wasInSky) {
-                // Trigger sky zone enter action
-                LightningEntityManager::Instance().TriggerZoneAction(
-                    n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_enter");
-            }
-            return;
+            m_activeSkyZoneIndex = i;
+            break;
         }
     }
-    if (wasInSky && !m_inSkyZone) {
-        // Trigger sky zone exit action
+
+    bool wasInSky = (prevActive >= 0);
+    bool inSky = (m_activeSkyZoneIndex >= 0);
+
+    if (inSky && !wasInSky) {
+        auto& n = m_skyZones[m_activeSkyZoneIndex];
         LightningEntityManager::Instance().TriggerZoneAction(
-            "zone_sky_0", "on_exit");
+            n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_enter");
+    } else if (!inSky && wasInSky) {
+        auto& n = m_skyZones[prevActive];
+        LightningEntityManager::Instance().TriggerZoneAction(
+            n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_exit");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SyncSkyboxState — pull pending script effects into active SkyZoneNode
+// ---------------------------------------------------------------------------
+void PawnSystem::SyncSkyboxState() {
+    SkyZoneNode* sky = GetActiveSkyZone();
+    if (!sky) return;
+    auto& lem = LightningEntityManager::Instance();
+    if (lem.HasPendingSkybox()) {
+        sky->skyboxPath = lem.PendingSkybox();
+        lem.ClearPendingSkybox();
     }
 }
 

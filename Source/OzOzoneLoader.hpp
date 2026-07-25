@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+// Surface behavior flags for OZONE brush primitives
+#define SURF_FAKEBACKDROP (1 << 3)  // brush renders as sky backdrop
+
 // ---------------------------------------------------------------------------
 // OzoneLoader — client-side OZONE format loader + mesh renderer
 //
@@ -30,6 +33,7 @@ struct OzoneRenderable {
     bool loaded = false;
     int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
     int texSlot = 0;             // 0=auto, 1..N = index into tileset textures
+    int surfaceFlags = 0;        // SURF_* bitmask for surface behavior
 };
 
 // Collision AABB for an OZONE brush primitive.
@@ -74,9 +78,13 @@ public:
     Vector3 GetHeightmapPosition() const { return m_hmPosition; }
     float GetHeightmapScale() const { return m_hmScale; }
 
-    // Draw only the renderables whose AABBs intersect the given zone bounds
-    // (used for skybox rendering from ZONE_SKY brushes)
+    // Draw only the renderables with SURF_FAKEBACKDROP flag set
+    // (used for skybox rendering from SkyZone camera)
     void DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds);
+    void DrawZoneGeometry(Camera3D& camera); // without bounds filter
+
+    // Draw all non-FAKEBACKDROP renderables (main world pass)
+    void DrawWorldGeometry(Camera3D& camera);
 
     // Editor integration — heightmap generation (called from editor main loop)
     Model BuildHeightmap(const std::string& imagePath, const std::string& texPath,
