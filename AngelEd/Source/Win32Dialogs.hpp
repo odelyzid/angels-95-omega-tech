@@ -66,6 +66,37 @@ struct EditorPanelState {
     bool actionApplyLight = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
 
+    // Active texture tracking (for context menu apply + auto-apply)
+    std::string activeTexturePath;   // currently selected texture in browser
+    int activeTextureSlot = 0;       // tileset slot index if applicable
+    bool actionApplyTextureToSel = false;  // flag: apply activeTexturePath to selected entity
+
+    // WorldGraph Explorer
+    bool showWorldGraph = false;
+    int actionSelectFromGraph = -1;         // item index selected
+    int actionSelectFromGraphType = -1;     // SelType encoded
+    std::string actionSelectFromGraphName;
+    float actionSelectFromGraphPos[3] = {0,0,0};
+
+    // Properties panel (context-sensitive)
+    bool showPropsPanel = false;
+    int propsTargetType = -1;       // SelType encoded
+    int propsTargetIndex = -1;
+    std::string propsTargetName;
+    float propsTargetPos[3] = {0,0,0};
+    float propsTargetScale = 1.0f;
+    float propsTargetRotation = 0.0f;
+    // Apply results (set by panel, consumed by Main.cpp)
+    bool actionApplyProperties = false;
+    float propPosX = 0, propPosY = 0, propPosZ = 0;
+    float propSizeX = 1, propSizeY = 1, propSizeZ = 1;  // for brush/zone
+    float propRotation = 0;
+    float propScale = 1;
+    float propTexScaleU = 1.0f;
+    float propTexScaleV = 1.0f;
+    float propTexOffsetU = 0.0f;
+    float propTexOffsetV = 0.0f;
+
 #ifdef _WIN32
     // Window handles (Windows only)
     void* hSoundMgr = nullptr;
@@ -79,6 +110,8 @@ struct EditorPanelState {
     void* hSettingsPanel = nullptr;
     void* hHeightmapEditor = nullptr;
     void* hLightProps = nullptr;
+    void* hWorldGraph = nullptr;
+    void* hPropsPanel = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -96,6 +129,8 @@ struct EditorPanelState {
     WinPos settingsPos        = {50, 50, 400, 600};
     WinPos heightmapEditorPos = {120, 100, 520, 480};
     WinPos lightPropsPos = {400, 100, 340, 480};
+    WinPos worldGraphPos = {540, 100, 600, 400};
+    WinPos propsPanelPos = {300, 150, 400, 500};
 #endif
 };
 
@@ -182,6 +217,9 @@ void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
 void ShowLightProps(bool show);
+void ShowWorldGraph(bool show);
+void ShowPropertiesPanel(bool show);
+void RefreshWorldGraph();
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
 void SetTextureTargetNames(const std::vector<std::string>& names);
@@ -201,6 +239,9 @@ inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void ShowHeightmapEditor(bool) {}
 inline void ShowLightProps(bool) {}
+inline void ShowWorldGraph(bool) {}
+inline void ShowPropertiesPanel(bool) {}
+inline void RefreshWorldGraph() {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
 inline void SetTextureTargetNames(const std::vector<std::string>&) {}

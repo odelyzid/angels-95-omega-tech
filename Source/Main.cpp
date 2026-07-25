@@ -84,7 +84,8 @@ static bool ShowInventory = false;
 
 
 // ---------------------------------------------------------------------------
-// HUD: draw player stats bars (always visible)
+// HUD: draw player stats bars (always visible) 
+// TODO: move into PlayerUiHandler
 // ---------------------------------------------------------------------------
 static void DrawPlayerHUD() {
     const int sw = GetScreenWidth();
@@ -186,7 +187,8 @@ static Color unpack_color(uint32_t packed) {
 }
 
 // ---------------------------------------------------------------------------
-// Remote player rendering
+// Remote player rendering 
+// TODO: Move into Render/
 // ---------------------------------------------------------------------------
 static void DrawRemotePlayers() {
     if (!g_network_enabled || !g_client.is_connected()) return;
@@ -216,7 +218,8 @@ static void DrawRemotePlayers() {
 
 
 // ---------------------------------------------------------------------------
-// Fire weapon helper — delegates to LightningEntityManager
+// Fire weapon helper — delegates to LightningEntityManager 
+// TODO: Move away from Main into WeaponHandler
 // ---------------------------------------------------------------------------
 static void FireWeapon() {
     Camera3D& cam = OmegaTechData.MainCamera;
@@ -426,7 +429,7 @@ static void HandleConsoleInput() {
     }
 }
 
-// ---- Inventory Overlay (Diablo I style) ----
+// ---- Inventory Overlay (Diablo I style TODO: -> Should be derived into PlayerUiHandler) ----
 static int g_invSelectedBpSlot = -1;
 
 static void DrawInventoryOverlay() {
@@ -484,7 +487,7 @@ static void DrawInventoryOverlay() {
         ey += slotH + 4;
     }
 
-    // === BACKPACK (right side) ===
+    // === BACKPACK (right side) -> Legacy ===
     int bx = px + 190;
     int by = py + 50;
     int cellSize = 52;
@@ -638,6 +641,8 @@ int main(int argc, char** argv){
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
+
+    // This is Legacy TODO: Refactor into Pawn based Pickup System
     g_client.set_on_item_collected([](int item_id, int quantity) {
         OZ_INFO("Item collected: id=%d qty=%d (slot=%s)", item_id, quantity,
                 item_id == 1 ? "Object1" : item_id == 2 ? "Object2" :
@@ -888,6 +893,8 @@ int main(int argc, char** argv){
         left_click_was_down = left_click_now;
 
         OmegaInputController.UpdateInputs();
+        
+        // TODO: Legacy Function -> Refactor into Renderer/LitLightning.hpp
         UpdateLightSources();
 
         if (Direction == 1)
@@ -976,7 +983,8 @@ int main(int argc, char** argv){
                     }
                 }
 
-                // Auto-collect when walking over a pickup (also E); throttle requests
+                // Auto-collect when walking over a pickup (also E); throttle requests 
+                // TODO: also should be moved to be handled by PickupPawns
                 {
                     static double last_collect_try = 0.0;
                     double t = GetTime();

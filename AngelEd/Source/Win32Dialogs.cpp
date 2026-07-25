@@ -5,11 +5,13 @@
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "../../Source/Script/LightningEntityRegistry.hpp"
+#include "../../Source/OzOzoneLoader.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <algorithm>
@@ -22,6 +24,11 @@ namespace fs = std::filesystem;
 // Globals
 // =====================================================================
 EditorPanelState g_editorPanels;
+
+// Extern accessors from Main.cpp for WorldGraph model data
+extern int WorldGraph_GetModelCount();
+extern void WorldGraph_GetModelData(int index, float& outX, float& outY, float& outZ, float& outR, float& outS);
+extern const char* WorldGraph_GetModelName(int index);
 
 static HINSTANCE g_hInst = nullptr;
 static HWND g_hRaylibWnd = nullptr;
@@ -39,6 +46,8 @@ static const wchar_t* CLASS_NODEPANEL   = L"OzNodePanel";
 static const wchar_t* CLASS_HMEDITOR   = L"OzHmEditor";
 
 static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
+static const wchar_t* CLASS_WORLDGRAPH = L"OzWorldGraph";
+static const wchar_t* CLASS_PROPSPANEL = L"OzPropsPanel";
 
 // Zone properties (read by editor rendering loop)
 // g_zoneProps is defined in the ZoneProperties section below
@@ -135,6 +144,8 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
 // Helper functions
@@ -334,10 +345,30 @@ void ShowTextureManager(bool show) {
 
 void ScanTextureBrowserFiles() {
     g_textureFiles.clear();
-    // Only scan packages, not filesystem
+    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg" };
+
+    // Scan filesystem under GameData/
+    fs::path base = fs::current_path() / "GameData";
+    try {
+        if (fs::exists(base)) {
+            for (auto& entry : fs::recursive_directory_iterator(base)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    for (const auto& e : exts) {
+                        if (ext == e) {
+                            g_textureFiles.push_back({ entry.path().stem().string(), entry.path().string(), nullptr });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    } catch (...) {}
+
+    // Scan packages
     std::vector<std::string> pkgFiles;
     PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
-    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg" };
     for (const auto& pkgPath : pkgFiles) {
         std::string ext = pkgPath.substr(pkgPath.rfind('.'));
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -353,8 +384,14 @@ void ScanTextureBrowserFiles() {
             }
         }
     }
+
+    // Deduplicate by keeping the first (filesystem) entry
     std::sort(g_textureFiles.begin(), g_textureFiles.end(),
         [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+    auto last = std::unique(g_textureFiles.begin(), g_textureFiles.end(),
+        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
+    g_textureFiles.erase(last, g_textureFiles.end());
+
     if (g_editorPanels.hTextureMgr)
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
 }
@@ -728,6 +765,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 int sel = gs ? gs->selectedIdx : -1;
                 if (sel >= 0 && sel < (int)g_textureFiles.size()) {
                     std::string& p = g_textureFiles[sel].path;
+                    g_editorPanels.activeTexturePath = p;
                     SetWindowTextA(hSrc, TextFormat("Source: %s", p.c_str()));
                     Image tmp = LoadImageWithFallback(p.c_str());
                     if (tmp.data) {
@@ -1989,6 +2027,437 @@ static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
 }
 
 // =====================================================================
+// WorldGraph Explorer - ListView of all world entities
+// =====================================================================
+static const int ID_WG_LIST    = 301;
+static const int ID_WG_REFRESH = 302;
+static const int ID_WG_CLOSE   = 303;
+
+struct WorldGraphEntry {
+    std::string typeLabel;
+    std::string name;
+    float posX, posY, posZ;
+    float rotation;
+    int selType;   // SelType encoded as int
+    int selIndex;
+};
+
+static std::vector<WorldGraphEntry> g_worldGraphEntries;
+
+static void BuildWorldGraphEntries() {
+    g_worldGraphEntries.clear();
+
+    // Brushes from OzoneLoader collision volumes
+    {
+        auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+        for (size_t i = 0; i < vols.size(); i++) {
+            WorldGraphEntry e;
+            e.typeLabel = "Brush";
+            e.name = TextFormat("Brush %zu", i);
+            e.posX = (vols[i].aabb.min.x + vols[i].aabb.max.x) * 0.5f;
+            e.posY = (vols[i].aabb.min.y + vols[i].aabb.max.y) * 0.5f;
+            e.posZ = (vols[i].aabb.min.z + vols[i].aabb.max.z) * 0.5f;
+            e.rotation = 0;
+            e.selType = 1; // SelType::BRUSH
+            e.selIndex = (int)i;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // WDL Models
+    {
+        int count = WorldGraph_GetModelCount();
+        for (int i = 0; i < count; i++) {
+            const char* name = WorldGraph_GetModelName(i);
+            float x, y, z, r, s;
+            WorldGraph_GetModelData(i, x, y, z, r, s);
+            WorldGraphEntry e;
+            e.typeLabel = "Model";
+            e.name = name ? name : "Model";
+            e.posX = x; e.posY = y; e.posZ = z;
+            e.rotation = r;
+            e.selType = 2; // SelType::MODEL
+            e.selIndex = i;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Pawns (NPCs)
+    {
+        auto& pawns = PawnSystem::Instance().GetPawns();
+        for (auto& p : pawns) {
+            if (!p.active) continue;
+            WorldGraphEntry e;
+            e.typeLabel = "NPC";
+            e.name = p.defName;
+            e.posX = p.position.x; e.posY = p.position.y; e.posZ = p.position.z;
+            e.rotation = p.yaw;
+            e.selType = 3; // SelType::NPC
+            e.selIndex = (int)p.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Pickups
+    {
+        auto& pickups = PawnSystem::Instance().GetPickups();
+        for (auto& pk : pickups) {
+            if (!pk.active) continue;
+            WorldGraphEntry e;
+            e.typeLabel = "Pickup";
+            e.name = pk.typeName;
+            e.posX = pk.position.x; e.posY = pk.position.y; e.posZ = pk.position.z;
+            e.rotation = 0;
+            e.selType = 4; // SelType::PICKUP
+            e.selIndex = (int)pk.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Lights
+    {
+        auto& lights = PawnSystem::Instance().GetLights();
+        for (auto& l : lights) {
+            if (!l.active) continue;
+            WorldGraphEntry e;
+            e.typeLabel = "Light";
+            e.name = l.name.empty() ? "Light" : l.name;
+            e.posX = l.position.x; e.posY = l.position.y; e.posZ = l.position.z;
+            e.rotation = 0;
+            e.selType = 5; // SelType::LIGHT
+            e.selIndex = (int)l.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Zones
+    {
+        auto& zones = PawnSystem::Instance().GetZones();
+        for (auto& z : zones) {
+            WorldGraphEntry e;
+            e.typeLabel = "Zone";
+            e.name = z.name.empty() ? "ZoneVolume" : z.name;
+            e.posX = (z.bounds.min.x + z.bounds.max.x) * 0.5f;
+            e.posY = (z.bounds.min.y + z.bounds.max.y) * 0.5f;
+            e.posZ = (z.bounds.min.z + z.bounds.max.z) * 0.5f;
+            e.rotation = 0;
+            e.selType = 7; // SelType::ZONE
+            e.selIndex = (int)z.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Player Starts
+    {
+        auto& starts = PawnSystem::Instance().GetPlayerStarts();
+        for (auto& s : starts) {
+            WorldGraphEntry e;
+            e.typeLabel = "Spawn";
+            e.name = "PlayerStart";
+            e.posX = s.position.x; e.posY = s.position.y; e.posZ = s.position.z;
+            e.rotation = s.yaw;
+            e.selType = 8; // SelType::SPAWN
+            e.selIndex = (int)s.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Emitters
+    {
+        auto& emitters = PawnSystem::Instance().GetEmitters();
+        for (auto& em : emitters) {
+            WorldGraphEntry e;
+            e.typeLabel = (em.type == EmitterType::SOUND) ? "SoundEmitter" : "MusicEmitter";
+            e.name = "Emitter";
+            e.posX = em.position.x; e.posY = em.position.y; e.posZ = em.position.z;
+            e.rotation = 0;
+            e.selType = 0; // SelType::NONE - emitters not directly selectable
+            e.selIndex = (int)em.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+}
+
+static void PopulateWorldGraphList(HWND hList) {
+    ListView_DeleteAllItems(hList);
+    for (size_t i = 0; i < g_worldGraphEntries.size(); i++) {
+        auto& e = g_worldGraphEntries[i];
+
+        std::wstring wtype(e.typeLabel.begin(), e.typeLabel.end());
+        LVITEMW lvi = {};
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.iItem = (int)i;
+        lvi.lParam = i;
+        lvi.pszText = const_cast<wchar_t*>(wtype.c_str());
+        ListView_InsertItem(hList, &lvi);
+
+        std::wstring wname(e.name.begin(), e.name.end());
+        ListView_SetItemText(hList, (int)i, 1, const_cast<wchar_t*>(wname.c_str()));
+
+        wchar_t wbuf[32];
+        swprintf(wbuf, 32, L"%.1f", e.posX);
+        ListView_SetItemText(hList, (int)i, 2, wbuf);
+        swprintf(wbuf, 32, L"%.1f", e.posY);
+        ListView_SetItemText(hList, (int)i, 3, wbuf);
+        swprintf(wbuf, 32, L"%.1f", e.posZ);
+        ListView_SetItemText(hList, (int)i, 4, wbuf);
+        swprintf(wbuf, 32, L"%.1f", e.rotation);
+        ListView_SetItemText(hList, (int)i, 5, wbuf);
+    }
+}
+
+static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    static HWND hList;
+    switch (msg) {
+    case WM_CREATE: {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int bw = 80, margin = 6;
+        int listH = rc.bottom - bw - margin * 3;
+
+        hList = CreateWindowEx(0, WC_LISTVIEW, L"",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL,
+            margin, margin, rc.right - margin * 2, listH,
+            hwnd, (HMENU)ID_WG_LIST, g_hInst, nullptr);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+        // Columns: Type, Name, PosX, PosY, PosZ, Rot
+        LVCOLUMNW lvc = {};
+        lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+        lvc.fmt = LVCFMT_LEFT;
+        const wchar_t* headers[] = {L"Type", L"Name", L"PosX", L"PosY", L"PosZ", L"Rot"};
+        int widths[] = {80, 140, 70, 70, 70, 60};
+        for (int i = 0; i < 6; i++) {
+            lvc.cx = widths[i];
+            lvc.pszText = const_cast<wchar_t*>(headers[i]);
+            ListView_InsertColumn(hList, i, &lvc);
+        }
+
+        CreateButton(hwnd, L"Refresh", margin, listH + margin * 2, bw, 26, ID_WG_REFRESH);
+        CreateButton(hwnd, L"Close", rc.right - bw - margin, listH + margin * 2, bw, 26, ID_WG_CLOSE);
+
+        BuildWorldGraphEntries();
+        PopulateWorldGraphList(hList);
+        break;
+    }
+    case WM_USER + 50: {
+        BuildWorldGraphEntries();
+        PopulateWorldGraphList(hList);
+        break;
+    }
+    case WM_NOTIFY: {
+        NMHDR* nm = (NMHDR*)l;
+        if (nm->idFrom == ID_WG_LIST && nm->code == NM_DBLCLK) {
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel >= 0 && sel < (int)g_worldGraphEntries.size()) {
+                auto& e = g_worldGraphEntries[sel];
+                g_editorPanels.actionSelectFromGraph = e.selIndex;
+                g_editorPanels.actionSelectFromGraphType = e.selType;
+                g_editorPanels.actionSelectFromGraphName = e.name;
+                g_editorPanels.actionSelectFromGraphPos[0] = e.posX;
+                g_editorPanels.actionSelectFromGraphPos[1] = e.posY;
+                g_editorPanels.actionSelectFromGraphPos[2] = e.posZ;
+            }
+        }
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_WG_CLOSE) ShowWorldGraph(false);
+        if (id == ID_WG_REFRESH) {
+            BuildWorldGraphEntries();
+            PopulateWorldGraphList(hList);
+        }
+        break;
+    }
+    case WM_CLOSE: ShowWorldGraph(false); break;
+    case WM_DESTROY: g_editorPanels.hWorldGraph = nullptr; break;
+    default: return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+void ShowWorldGraph(bool show) {
+    g_editorPanels.showWorldGraph = show;
+    if (g_editorPanels.hWorldGraph)
+        ShowWindow((HWND)g_editorPanels.hWorldGraph, show ? SW_SHOW : SW_HIDE);
+}
+
+void RefreshWorldGraph() {
+    if (g_editorPanels.hWorldGraph)
+        SendMessage((HWND)g_editorPanels.hWorldGraph, WM_USER + 50, 0, 0);
+}
+
+// =====================================================================
+// Properties Panel - context-sensitive, dynamic controls
+// =====================================================================
+static const int ID_PP_POSX  = 401;
+static const int ID_PP_POSY  = 402;
+static const int ID_PP_POSZ  = 403;
+static const int ID_PP_ROT   = 404;
+static const int ID_PP_SX    = 405;
+static const int ID_PP_SY    = 406;
+static const int ID_PP_SZ    = 407;
+static const int ID_PP_APPLY = 408;
+static const int ID_PP_CLOSE = 409;
+static const int ID_PP_LABEL = 410;
+static const int ID_PP_TEX_SCALE_U = 411;
+static const int ID_PP_TEX_SCALE_V = 412;
+static const int ID_PP_TEX_OFF_U = 413;
+static const int ID_PP_TEX_OFF_V = 414;
+
+static void PopulatePropertiesPanel(HWND hwnd) {
+    // Destroy existing controls
+    HWND child = GetWindow(hwnd, GW_CHILD);
+    while (child) {
+        HWND next = GetWindow(child, GW_HWNDNEXT);
+        DestroyWindow(child);
+        child = next;
+    }
+
+    int selType = g_editorPanels.propsTargetType;
+    int selIdx  = g_editorPanels.propsTargetIndex;
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int x = 10, y = 10, lw = 60, ew = 100, bw = 80, rowH = 24;
+
+    // Title label
+    {
+        char title[128];
+        snprintf(title, sizeof(title), "Properties: %s",
+                 g_editorPanels.propsTargetName.c_str());
+        std::wstring wtitle(title, title + strlen(title));
+        CreateLabel(hwnd, wtitle.c_str(), x, y, rc.right - 20, 20, ID_PP_LABEL);
+        y += 26;
+    }
+
+    // Common position fields
+    auto addField = [&](const wchar_t* label, int id, float val) {
+        CreateLabel(hwnd, label, x, y, lw, 20, 0);
+        std::wstring wval = std::to_wstring(val);
+        HWND hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", wval.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            x + lw, y, ew, 22, hwnd, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+        y += rowH;
+        return hEdit;
+    };
+
+    addField(L"Pos X:", ID_PP_POSX, g_editorPanels.propPosX);
+    addField(L"Pos Y:", ID_PP_POSY, g_editorPanels.propPosY);
+    addField(L"Pos Z:", ID_PP_POSZ, g_editorPanels.propPosZ);
+
+    // Type-specific fields
+    if (selType == 1 || selType == 7) { // Brush or Zone — add size fields
+        addField(L"Size X:", ID_PP_SX, g_editorPanels.propSizeX);
+        addField(L"Size Y:", ID_PP_SY, g_editorPanels.propSizeY);
+        addField(L"Size Z:", ID_PP_SZ, g_editorPanels.propSizeZ);
+    }
+
+    // Texture scale/offset for brushes
+    if (selType == 1) {
+        addField(L"Tex U Scale:", ID_PP_TEX_SCALE_U, g_editorPanels.propTexScaleU);
+        addField(L"Tex V Scale:", ID_PP_TEX_SCALE_V, g_editorPanels.propTexScaleV);
+        addField(L"Tex U Off:", ID_PP_TEX_OFF_U, g_editorPanels.propTexOffsetU);
+        addField(L"Tex V Off:", ID_PP_TEX_OFF_V, g_editorPanels.propTexOffsetV);
+    }
+
+    // Rotation
+    addField(L"Rot:", ID_PP_ROT, g_editorPanels.propRotation);
+
+    y += 8;
+    CreateButton(hwnd, L"Apply", x, y, bw, 26, ID_PP_APPLY);
+    CreateButton(hwnd, L"Close", x + bw + 6, y, bw, 26, ID_PP_CLOSE);
+}
+
+static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+    case WM_CREATE: {
+        PopulatePropertiesPanel(hwnd);
+        break;
+    }
+    case WM_USER + 50: {
+        PopulatePropertiesPanel(hwnd);
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_PP_CLOSE) { ShowPropertiesPanel(false); break; }
+        if (id == ID_PP_APPLY) {
+            // Read all edit fields and set action flags
+            auto readFloat = [hwnd](int id, float def) -> float {
+                HWND hCtrl = GetDlgItem(hwnd, id);
+                if (!hCtrl) return def;
+                wchar_t buf[64];
+                GetWindowTextW(hCtrl, buf, 64);
+                return (float)_wtof(buf);
+            };
+            g_editorPanels.propPosX = readFloat(ID_PP_POSX, 0);
+            g_editorPanels.propPosY = readFloat(ID_PP_POSY, 0);
+            g_editorPanels.propPosZ = readFloat(ID_PP_POSZ, 0);
+            g_editorPanels.propRotation = readFloat(ID_PP_ROT, 0);
+            g_editorPanels.propSizeX = readFloat(ID_PP_SX, 1);
+            g_editorPanels.propSizeY = readFloat(ID_PP_SY, 1);
+            g_editorPanels.propSizeZ = readFloat(ID_PP_SZ, 1);
+            g_editorPanels.propTexScaleU = readFloat(ID_PP_TEX_SCALE_U, 1.0f);
+            g_editorPanels.propTexScaleV = readFloat(ID_PP_TEX_SCALE_V, 1.0f);
+            g_editorPanels.propTexOffsetU = readFloat(ID_PP_TEX_OFF_U, 0.0f);
+            g_editorPanels.propTexOffsetV = readFloat(ID_PP_TEX_OFF_V, 0.0f);
+            g_editorPanels.actionApplyProperties = true;
+            ShowPropertiesPanel(false);
+        }
+        break;
+    }
+    case WM_CLOSE: ShowPropertiesPanel(false); break;
+    case WM_DESTROY: g_editorPanels.hPropsPanel = nullptr; break;
+    default: return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+void ShowPropertiesPanel(bool show) {
+    g_editorPanels.showPropsPanel = show;
+    if (show && g_editorPanels.hPropsPanel) {
+        // Pre-populate apply values from the selection
+        g_editorPanels.propPosX = g_editorPanels.propsTargetPos[0];
+        g_editorPanels.propPosY = g_editorPanels.propsTargetPos[1];
+        g_editorPanels.propPosZ = g_editorPanels.propsTargetPos[2];
+        g_editorPanels.propRotation = g_editorPanels.propsTargetRotation;
+        g_editorPanels.propScale = g_editorPanels.propsTargetScale;
+        // For brush/zone, derive size from position data if needed
+        if (g_editorPanels.propsTargetType == 1) { // BRUSH
+            auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+            int idx = g_editorPanels.propsTargetIndex;
+            if (idx >= 0 && idx < (int)vols.size()) {
+                g_editorPanels.propSizeX = vols[idx].aabb.max.x - vols[idx].aabb.min.x;
+                g_editorPanels.propSizeY = vols[idx].aabb.max.y - vols[idx].aabb.min.y;
+                g_editorPanels.propSizeZ = vols[idx].aabb.max.z - vols[idx].aabb.min.z;
+                g_editorPanels.propTexScaleU = vols[idx].texScaleU;
+                g_editorPanels.propTexScaleV = vols[idx].texScaleV;
+                g_editorPanels.propTexOffsetU = vols[idx].texOffsetU;
+                g_editorPanels.propTexOffsetV = vols[idx].texOffsetV;
+            }
+        } else if (g_editorPanels.propsTargetType == 7) { // ZONE
+            auto& zones = PawnSystem::Instance().GetZones();
+            for (auto& z : zones) {
+                if ((int)z.id == g_editorPanels.propsTargetIndex) {
+                    g_editorPanels.propSizeX = z.bounds.max.x - z.bounds.min.x;
+                    g_editorPanels.propSizeY = z.bounds.max.y - z.bounds.min.y;
+                    g_editorPanels.propSizeZ = z.bounds.max.z - z.bounds.min.z;
+                    break;
+                }
+            }
+        }
+
+        ShowWindow((HWND)g_editorPanels.hPropsPanel, SW_SHOW);
+        SetForegroundWindow((HWND)g_editorPanels.hPropsPanel);
+        // Rebuild controls for the current entity type
+        SendMessage((HWND)g_editorPanels.hPropsPanel, WM_USER + 50, 0, 0);
+    } else if (g_editorPanels.hPropsPanel) {
+        ShowWindow((HWND)g_editorPanels.hPropsPanel, SW_HIDE);
+    }
+}
+
+// =====================================================================
 // Public API — Create / Destroy
 // =====================================================================
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
@@ -1998,6 +2467,10 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     // Initialize common controls for TreeView, etc.
     INITCOMMONCONTROLSEX icex = { sizeof(INITCOMMONCONTROLSEX), ICC_TREEVIEW_CLASSES };
     InitCommonControlsEx(&icex);
+
+    // Initialize ListView common controls
+    INITCOMMONCONTROLSEX icexLV = { sizeof(INITCOMMONCONTROLSEX), ICC_LISTVIEW_CLASSES };
+    InitCommonControlsEx(&icexLV);
 
     RegisterPanelClass(CLASS_SOUNDMGR, SoundMgrProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_TEXTUREMGR, TextureMgrProc, (HINSTANCE)hInst);
@@ -2024,6 +2497,8 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_NODEPANEL, NodePanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_HMEDITOR, HmEditorProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_LIGHTPROPS, LightPropsProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_WORLDGRAPH, WorldGraphProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_PROPSPANEL, PropsPanelProc, (HINSTANCE)hInst);
 
     auto create = [&](const wchar_t* cls, const wchar_t* title,
                       EditorPanelState::WinPos& pos, void*& out) {
@@ -2046,6 +2521,8 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_NODEPANEL,   L"Nodes",               g_editorPanels.nodePanelPos,  g_editorPanels.hNodePanel);
     create(CLASS_HMEDITOR,    L"Heightmap Editor",     g_editorPanels.heightmapEditorPos, g_editorPanels.hHeightmapEditor);
     create(CLASS_LIGHTPROPS,  L"Light Properties",     g_editorPanels.lightPropsPos,       g_editorPanels.hLightProps);
+    create(CLASS_WORLDGRAPH,  L"World Graph Explorer", g_editorPanels.worldGraphPos,       g_editorPanels.hWorldGraph);
+    create(CLASS_PROPSPANEL,  L"Entity Properties",    g_editorPanels.propsPanelPos,        g_editorPanels.hPropsPanel);
 
     ScanTextureBrowserFiles();
     ScanSoundBrowserFiles();
@@ -2067,6 +2544,8 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hNodePanel);
     destroy(g_editorPanels.hHeightmapEditor);
     destroy(g_editorPanels.hLightProps);
+    destroy(g_editorPanels.hWorldGraph);
+    destroy(g_editorPanels.hPropsPanel);
     if (g_editorPanels.hPreviewBitmap) {
         DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
         g_editorPanels.hPreviewBitmap = nullptr;

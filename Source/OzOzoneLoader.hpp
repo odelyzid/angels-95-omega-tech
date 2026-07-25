@@ -36,6 +36,13 @@ struct OzoneRenderable {
 struct OzoneCollisionVolume {
     BoundingBox aabb;
     int typeId = 0;
+    int texSlot = 0;       // 0 = auto/default, 1..6 = face texture tileset index
+    int texSlots[6] = {0}; // per-face textures: +X,-X,+Y,-Y,+Z,-Z
+    std::string texPath;   // filesystem/package path to texture (non-tileset)
+    float texScaleU = 1.0f;  // texture tiling/repeat U
+    float texScaleV = 1.0f;  // texture tiling/repeat V
+    float texOffsetU = 0.0f; // texture shift U
+    float texOffsetV = 0.0f; // texture shift V
 };
 
 class OzoneLoader {

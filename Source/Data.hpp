@@ -19,7 +19,8 @@
 using namespace std;
 
 #define MaxCachedModels 200
-
+// This Whole Fucker Breaks Render Logic for Models and Entities inside Editor Viewport
+// TODO: Refactor / Remove entire Abrivation for this class as it should only be handled by the PawnSystem 
 
 static wstring WorldData;
 static wstring OtherWDLData;
