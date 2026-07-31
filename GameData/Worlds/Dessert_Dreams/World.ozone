@@ -121,6 +121,7 @@ npc Walker 80 -60 0
 # Starting area
 pickup HealthVial -80 0 3
 pickup ManaVial -75 5 3
+pickup automag -70 0 2
 pickup Key -85 -5 0
 pickup Coin -70 10 0
 

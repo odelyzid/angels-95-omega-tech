@@ -97,43 +97,48 @@ static void DrawPlayerHUD() {
     int y = pad;
 
     // Level
-    DrawText(TextFormat("Lv.%d", OmegaPlayer.Level), x, y, 14, WHITE);
+    DrawText(TextFormat("Lv.%d", LightningEntityManager::Instance().GetPlayerLevel()), x, y, 14, WHITE);
     y += 18;
 
     // XP bar
     int xp_w = bar_w - 40;
     DrawText("XP", x, y, 12, LIGHTGRAY);
-    if (OmegaPlayer.XPToNext > 0) {
-        float xp_pct = (float)OmegaPlayer.XP / OmegaPlayer.XPToNext;
+    int xpToNext = LightningEntityManager::Instance().GetPlayerXPToNext();
+    if (xpToNext > 0) {
+        int xp = LightningEntityManager::Instance().GetPlayerXP();
+        float xp_pct = (float)xp / xpToNext;
         DrawRectangle(x + 30, y, xp_w, bar_h, (Color){30, 30, 30, 255});
         DrawRectangle(x + 30, y, (int)(xp_pct * xp_w), bar_h, SKYBLUE);
-        DrawText(TextFormat("%d/%d", OmegaPlayer.XP, OmegaPlayer.XPToNext),
+        DrawText(TextFormat("%d/%d", xp, xpToNext),
                  x + 34, y + 1, 10, WHITE);
     }
     y += bar_h + pad;
 
     // Health bar
-    float hp_pct = (OmegaPlayer.MaxHealth > 0)
-        ? (OmegaPlayer.Health / OmegaPlayer.MaxHealth) : 0;
-    DrawText(TextFormat("HP %d/%d", (int)OmegaPlayer.Health, (int)OmegaPlayer.MaxHealth),
+    float hpMax = LightningEntityManager::Instance().GetPlayerMaxHealth();
+    float hp = LightningEntityManager::Instance().GetPlayerHealth();
+    float hp_pct = (hpMax > 0) ? (hp / hpMax) : 0;
+    DrawText(TextFormat("HP %d/%d", (int)hp, (int)hpMax),
              x, y, 12, WHITE);
     DrawRectangle(x, y + 14, bar_w, bar_h, (Color){50, 10, 10, 255});
     DrawRectangle(x, y + 14, (int)(hp_pct * bar_w), bar_h, RED);
     y += 14 + bar_h + pad;
 
     // Mana bar
-    float mp_pct = (OmegaPlayer.MaxMana > 0)
-        ? (OmegaPlayer.Mana / OmegaPlayer.MaxMana) : 0;
-    DrawText(TextFormat("MP %d/%d", (int)OmegaPlayer.Mana, (int)OmegaPlayer.MaxMana),
+    float mpMax = LightningEntityManager::Instance().GetPlayerMaxMana();
+    float mp = LightningEntityManager::Instance().GetPlayerMana();
+    float mp_pct = (mpMax > 0) ? (mp / mpMax) : 0;
+    DrawText(TextFormat("MP %d/%d", (int)mp, (int)mpMax),
              x, y, 12, WHITE);
     DrawRectangle(x, y + 14, bar_w, bar_h, (Color){10, 10, 50, 255});
     DrawRectangle(x, y + 14, (int)(mp_pct * bar_w), bar_h, BLUE);
     y += 14 + bar_h + pad;
 
     // Psychic Energy bar
-    float pe_pct = (OmegaPlayer.MaxPsychicEnergy > 0)
-        ? (OmegaPlayer.PsychicEnergy / OmegaPlayer.MaxPsychicEnergy) : 0;
-    DrawText(TextFormat("PE %d/%d", (int)OmegaPlayer.PsychicEnergy, (int)OmegaPlayer.MaxPsychicEnergy),
+    float peMax = LightningEntityManager::Instance().GetPlayerMaxPsychicEnergy();
+    float pe = LightningEntityManager::Instance().GetPlayerPsychicEnergy();
+    float pe_pct = (peMax > 0) ? (pe / peMax) : 0;
+    DrawText(TextFormat("PE %d/%d", (int)pe, (int)peMax),
              x, y, 12, WHITE);
     DrawRectangle(x, y + 14, bar_w, bar_h, (Color){40, 10, 50, 255});
     DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
@@ -364,19 +369,19 @@ static void ExecuteConsoleCommand(const char* cmd) {
     } else if (strcmp(cmd, "/world") == 0) {
         fprintf(stderr, "WORLD: current=%s (use /world <name> or /worlds to list)\n", g_world_to_load);
     } else if (strcmp(cmd, "/fly") == 0) {
-        OmegaPlayer.isFlying = !OmegaPlayer.isFlying;
-        if (OmegaPlayer.isFlying) {
-            OmegaPlayer.onGround = false;
-            OmegaPlayer.velocityY = 0.0f;
+        g_playerMovement.isFlying = !g_playerMovement.isFlying;
+        if (g_playerMovement.isFlying) {
+            g_playerMovement.onGround = false;
+            g_playerMovement.velocityY = 0.0f;
             OZ_INFO("FLY enabled");
         } else {
             OZ_INFO("FLY disabled");
         }
     } else if (strcmp(cmd, "/noclip") == 0) {
-        OmegaPlayer.isNoClip = !OmegaPlayer.isNoClip;
-        if (OmegaPlayer.isNoClip) {
-            OmegaPlayer.onGround = false;
-            OmegaPlayer.velocityY = 0.0f;
+        g_playerMovement.isNoClip = !g_playerMovement.isNoClip;
+        if (g_playerMovement.isNoClip) {
+            g_playerMovement.onGround = false;
+            g_playerMovement.velocityY = 0.0f;
             OZ_INFO("NOCLIP enabled");
         } else {
             OZ_INFO("NOCLIP disabled");
@@ -477,34 +482,26 @@ static void DrawInventoryOverlay() {
     // === EQUIPMENT (left side) ===
     DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
 
-    struct EquipDraw {
-        const char* label;
-        bool* owned;
-        Texture2D* icon;
+    const char* equipLabels[EQUIP_SLOT_COUNT] = {
+        "Helmet", "Armor", "Legs", "Boots",
+        "Jewelry 1", "Jewelry 2", "Accessory 1", "Accessory 2"
     };
 
-    EquipDraw equipDraws[EQUIP_SLOT_COUNT] = {
-        {"Helmet",     &OmegaTechGameObjects.HelmetOwned,     &OmegaTechGameObjects.HelmetIcon},
-        {"Armor",      &OmegaTechGameObjects.Armory1Owned,    &OmegaTechGameObjects.Armory1Icon},
-        {"Legs",       &OmegaTechGameObjects.LegsOwned,       &OmegaTechGameObjects.LegsIcon},
-        {"Boots",      &OmegaTechGameObjects.BootsOwned,      &OmegaTechGameObjects.BootsIcon},
-        {"Jewelry 1",  &OmegaTechGameObjects.Jewelry1Owned,   &OmegaTechGameObjects.Jewelry1Icon},
-        {"Jewelry 2",  &OmegaTechGameObjects.Jewelry2Owned,   &OmegaTechGameObjects.Jewelry2Icon},
-        {"Accessory 1",&OmegaTechGameObjects.Accessory1Owned, &OmegaTechGameObjects.Accessory1Icon},
-        {"Accessory 2",&OmegaTechGameObjects.Accessory2Owned, &OmegaTechGameObjects.Accessory2Icon},
-    };
-
+    auto& lem = LightningEntityManager::Instance();
     for (int i = 0; i < EQUIP_SLOT_COUNT; i++) {
-        bool owned = *equipDraws[i].owned;
+        int idx = lem.EquipmentAt(i);
+        bool owned = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->owned);
         Color c = owned ? WHITE : (Color){80, 80, 80, 255};
         Color bg = owned ? (Color){40, 50, 45, 255} : (Color){20, 25, 20, 255};
 
         DrawRectangle(ex, ey, slotW, slotH, bg);
         DrawRectangleLines(ex, ey, slotW, slotH, c);
-        DrawText(equipDraws[i].label, ex + 6, ey + 12, 12, c);
+        DrawText(equipLabels[i], ex + 6, ey + 12, 12, c);
 
-        if (owned && equipDraws[i].icon->id > 0) {
-            DrawTextureEx(*equipDraws[i].icon, (Vector2){(float)ex + slotW - 34, (float)ey + 2}, 0, 1.5f, WHITE);
+        if (owned && lem.Get(idx)->iconIdx >= 0) {
+            Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
+            if (iconTex && iconTex->id > 0)
+                DrawTextureEx(*iconTex, (Vector2){(float)ex + slotW - 34, (float)ey + 2}, 0, 1.5f, WHITE);
         }
         ey += slotH + 4;
     }
@@ -541,14 +538,23 @@ static void DrawInventoryOverlay() {
                 const ItemDBEntry* def = GetItemDef(itemId);
                 if (def) {
                     Texture2D* icon = nullptr;
+                    const char* iconAlias = nullptr;
                     switch (def->category) {
-                        case ItemCategory::HEALTH_VIAL:    icon = &OmegaTechGameObjects.HealthVialIcon; break;
-                        case ItemCategory::MANA_VIAL:      icon = &OmegaTechGameObjects.ManaVialIcon; break;
-                        case ItemCategory::ENERGY_CRYSTAL: icon = &OmegaTechGameObjects.EnergyCrystalIcon; break;
-                        case ItemCategory::KEY:            icon = &OmegaTechGameObjects.KeyIcon; break;
-                        case ItemCategory::COIN:           icon = &OmegaTechGameObjects.CoinIcon; break;
-                        case ItemCategory::POWERUP:        icon = &OmegaTechGameObjects.PowerupIcon; break;
+                        case ItemCategory::HEALTH_VIAL:    iconAlias = "HealthVial"; break;
+                        case ItemCategory::MANA_VIAL:      iconAlias = "ManaVial"; break;
+                        case ItemCategory::ENERGY_CRYSTAL: iconAlias = "EnergyCrystal"; break;
+                        case ItemCategory::KEY:            iconAlias = "Key"; break;
+                        case ItemCategory::COIN:           iconAlias = "Coin"; break;
+                        case ItemCategory::POWERUP:        iconAlias = "Powerup"; break;
                         default: break;
+                    }
+                    if (iconAlias) {
+                        Texture2D t = AssetMapper::Instance().GetTexture(iconAlias);
+                        if (t.id > 0) {
+                            static Texture2D s_cachedIcon = t;
+                            s_cachedIcon = t;
+                            icon = &s_cachedIcon;
+                        }
                     }
                     if (icon && icon->id > 0) {
                         float scale = (float)cellSize / (float)icon->width * 0.7f;
@@ -569,23 +575,29 @@ static void DrawInventoryOverlay() {
     DrawText("STATS", sx, sy - 18, 12, LIGHTGRAY);
 
     sy += 4;
-    DrawText(TextFormat("Level: %d", OmegaPlayer.Level), sx, sy, 14, WHITE); sy += 22;
-    DrawText(TextFormat("XP: %d/%d", OmegaPlayer.XP, OmegaPlayer.XPToNext), sx, sy, 14, WHITE); sy += 22;
+    DrawText(TextFormat("Level: %d", LightningEntityManager::Instance().GetPlayerLevel()), sx, sy, 14, WHITE); sy += 22;
+    DrawText(TextFormat("XP: %d/%d", LightningEntityManager::Instance().GetPlayerXP(), LightningEntityManager::Instance().GetPlayerXPToNext()), sx, sy, 14, WHITE); sy += 22;
 
+    float hpInv = LightningEntityManager::Instance().GetPlayerHealth();
+    float hpMaxInv = LightningEntityManager::Instance().GetPlayerMaxHealth();
     DrawRectangle(sx, sy, 150, 10, (Color){50, 0, 0, 255});
-    float hpPct = OmegaPlayer.MaxHealth > 0 ? OmegaPlayer.Health / OmegaPlayer.MaxHealth : 0;
+    float hpPct = hpMaxInv > 0 ? hpInv / hpMaxInv : 0;
     DrawRectangle(sx, sy, (int)(150 * hpPct), 10, RED);
-    DrawText(TextFormat("HP: %.0f/%.0f", OmegaPlayer.Health, OmegaPlayer.MaxHealth), sx + 1, sy + 12, 12, RED); sy += 28;
+    DrawText(TextFormat("HP: %.0f/%.0f", hpInv, hpMaxInv), sx + 1, sy + 12, 12, RED); sy += 28;
 
+    float mpInv = LightningEntityManager::Instance().GetPlayerMana();
+    float mpMaxInv = LightningEntityManager::Instance().GetPlayerMaxMana();
     DrawRectangle(sx, sy, 150, 10, (Color){0, 0, 50, 255});
-    float mpPct = OmegaPlayer.MaxMana > 0 ? OmegaPlayer.Mana / OmegaPlayer.MaxMana : 0;
+    float mpPct = mpMaxInv > 0 ? mpInv / mpMaxInv : 0;
     DrawRectangle(sx, sy, (int)(150 * mpPct), 10, BLUE);
-    DrawText(TextFormat("MP: %.0f/%.0f", OmegaPlayer.Mana, OmegaPlayer.MaxMana), sx + 1, sy + 12, 12, BLUE); sy += 28;
+    DrawText(TextFormat("MP: %.0f/%.0f", mpInv, mpMaxInv), sx + 1, sy + 12, 12, BLUE); sy += 28;
 
+    float peInv = LightningEntityManager::Instance().GetPlayerPsychicEnergy();
+    float peMaxInv = LightningEntityManager::Instance().GetPlayerMaxPsychicEnergy();
     DrawRectangle(sx, sy, 150, 10, (Color){30, 0, 30, 255});
-    float pePct = OmegaPlayer.MaxPsychicEnergy > 0 ? OmegaPlayer.PsychicEnergy / OmegaPlayer.MaxPsychicEnergy : 0;
+    float pePct = peMaxInv > 0 ? peInv / peMaxInv : 0;
     DrawRectangle(sx, sy, (int)(150 * pePct), 10, PURPLE);
-    DrawText(TextFormat("PE: %.0f/%.0f", OmegaPlayer.PsychicEnergy, OmegaPlayer.MaxPsychicEnergy), sx + 1, sy + 12, 12, PURPLE);
+    DrawText(TextFormat("PE: %.0f/%.0f", peInv, peMaxInv), sx + 1, sy + 12, 12, PURPLE);
 
     // Selected item info
     if (g_invSelectedBpSlot >= 0) {
@@ -604,7 +616,6 @@ static void DrawInventoryOverlay() {
     int hy = py + panel_h - 48;
     DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
     hx += 60;
-    auto& lem = LightningEntityManager::Instance();
     for (int i = 0; i < LightningEntityManager::HOTBAR_SIZE && i < 8; i++) {
         int idx = lem.HotbarAt(i);
         bool hasItem = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->def);
@@ -637,6 +648,7 @@ int main(int argc, char** argv){
     SetConfigFlags(FLAG_VSYNC_HINT);
 
     InitWindow(1280 , 720 , "Angels95");
+    SetExitKey(0);
     SetTargetFPS(60);
 
     InitAudioDevice();
@@ -664,20 +676,19 @@ int main(int argc, char** argv){
         OmegaTechTextSystem.Write(msg);
     });
 
-    // This is Legacy TODO: Refactor into Pawn based Pickup System
     g_client.set_on_item_collected([](int item_id, int quantity) {
-        OZ_INFO("Item collected: id=%d qty=%d (slot=%s)", item_id, quantity,
-                item_id == 1 ? "Object1" : item_id == 2 ? "Object2" :
-                item_id == 3 ? "Object3" : item_id == 4 ? "Object4" :
-                item_id == 5 ? "Object5" : "other");
+        const char* name = "unknown";
+        const ItemDBEntry* def = GetItemDef(item_id);
+        if (def) name = def->name;
+        OmegaTechTextSystem.Write(TextFormat("Collected: %s x%d", name, quantity));
         if (item_id == 13) {
             gInventory.coins += quantity;
         } else if (item_id == 1) {
-            // Health vial — auto-heal locally (server already applied too)
-            OmegaPlayer.Health = std::min(OmegaPlayer.Health + 25.0f, OmegaPlayer.MaxHealth);
+            float curHp = LightningEntityManager::Instance().GetPlayerHealth();
+            LightningEntityManager::Instance().SetPlayerHealth(std::min(curHp + 25.0f, LightningEntityManager::Instance().GetPlayerMaxHealth()));
         } else if (item_id == 2) {
-            // Mana vial — auto-restore locally
-            OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + 25.0f, OmegaPlayer.MaxMana);
+            float curMp = LightningEntityManager::Instance().GetPlayerMana();
+            LightningEntityManager::Instance().SetPlayerMana(std::min(curMp + 25.0f, LightningEntityManager::Instance().GetPlayerMaxMana()));
         } else if (item_id > 0) {
             gInventory.AddToBackpack(item_id, quantity);
         }
@@ -686,7 +697,7 @@ int main(int argc, char** argv){
     });
 
     g_client.set_on_player_hurt([](int damage, float remaining_health) {
-        OmegaPlayer.Health = remaining_health;
+        LightningEntityManager::Instance().SetPlayerHealth(remaining_health);
         if (OmegaTechSoundData.Death.frameCount > 0 &&
             !IsSoundPlaying(OmegaTechSoundData.Death))
             PlaySound(OmegaTechSoundData.Death);
@@ -805,9 +816,9 @@ int main(int argc, char** argv){
         bool left_click_now = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
         bool left_just_pressed = left_click_now && !left_click_was_down;
 
-        OmegaPlayer.OldX = OmegaTechData.MainCamera.position.x;
-        OmegaPlayer.OldY = OmegaTechData.MainCamera.position.y;
-        OmegaPlayer.OldZ = OmegaTechData.MainCamera.position.z;
+        g_playerMovement.OldX = OmegaTechData.MainCamera.position.x;
+        g_playerMovement.OldY = OmegaTechData.MainCamera.position.y;
+        g_playerMovement.OldZ = OmegaTechData.MainCamera.position.z;
 
         // Save Y so we can override raylib's built-in Space/Shift vertical movement
         float savedCamY = OmegaTechData.MainCamera.position.y;
@@ -818,15 +829,17 @@ int main(int argc, char** argv){
             }
         }
 
-        // --- Zone volume detection + movement effects ---
+        // --- Zone volume detection + movement effects (uses pre-computed player region) ---
         {
             float dt = GetFrameTime();
             Vector3 playerPos = OmegaTechData.MainCamera.position;
             static std::string lastZoneName;
 
-            // Query active zone at current position
-            ZoneVolumeNode* activeZone = PawnSystem::Instance().CheckZoneCollision(playerPos, OmegaPlayer.PlayerBounds);
-            OmegaPlayer.inWater = false;
+            // Get active zones from pre-computed player region (set in UpdateEntities)
+            auto& region = PawnSystem::Instance().GetPlayerRegion();
+            ZoneVolumeNode* activeZone = (region.primaryZoneId >= 0)
+                ? PawnSystem::Instance().GetZone(region.primaryZoneId) : nullptr;
+            g_playerMovement.inWater = false;
 
             if (activeZone) {
                 ZoneType zt = activeZone->zoneType;
@@ -843,12 +856,12 @@ int main(int argc, char** argv){
 
                 switch (zt) {
                     case ZoneType::ZONE_WATER:
-                        OmegaPlayer.inWater = true;
+                        g_playerMovement.inWater = true;
                         break;
                     case ZoneType::ZONE_LADDER:
                         // Ladder: disable gravity, allow vertical movement with W/S
-                        OmegaPlayer.velocityY = 0.0f;
-                        OmegaPlayer.onGround = false;
+                        g_playerMovement.velocityY = 0.0f;
+                        g_playerMovement.onGround = false;
                         if (IsKeyDown(KEY_W))
                             OmegaTechData.MainCamera.position.y += 6.0f * dt;
                         if (IsKeyDown(KEY_S))
@@ -870,36 +883,36 @@ int main(int argc, char** argv){
         {
             float dt = GetFrameTime();
 
-            if (OmegaPlayer.isNoClip) {
+            if (g_playerMovement.isNoClip) {
                 // Noclip: let raylib control Y natively (space up / shift down)
-            } else if (OmegaPlayer.isFlying) {
+            } else if (g_playerMovement.isFlying) {
                 // Flying: let raylib control Y, no terrain snap
-            } else if (OmegaPlayer.inWater) {
+            } else if (g_playerMovement.inWater) {
                 // Water: restore Y, reduced gravity, dampen fall
                 OmegaTechData.MainCamera.position.y = savedCamY;
 
                 if (IsKeyPressed(KEY_SPACE) && !g_consoleOpen && !ShowInventory) {
-                    OmegaPlayer.velocityY = 5.0f; // swim upward
+                    g_playerMovement.velocityY = 5.0f; // swim upward
                 }
 
-                if (!OmegaPlayer.onGround) {
-                    OmegaPlayer.velocityY += -8.0f * dt; // reduced gravity
-                    OmegaPlayer.velocityY *= 0.95f;      // water drag
-                    OmegaTechData.MainCamera.position.y += OmegaPlayer.velocityY * dt;
+                if (!g_playerMovement.onGround) {
+                    g_playerMovement.velocityY += -8.0f * dt; // reduced gravity
+                    g_playerMovement.velocityY *= 0.95f;      // water drag
+                    OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;
                 }
             } else {
                 // Normal / grounded: restore Y
                 OmegaTechData.MainCamera.position.y = savedCamY;
 
-                if (IsKeyPressed(KEY_SPACE) && OmegaPlayer.onGround && !g_consoleOpen && !ShowInventory) {
-                    OmegaPlayer.velocityY = 8.0f;
-                    OmegaPlayer.onGround = false;
+                if (IsKeyPressed(KEY_SPACE) && g_playerMovement.onGround && !g_consoleOpen && !ShowInventory) {
+                    g_playerMovement.velocityY = 8.0f;
+                    g_playerMovement.onGround = false;
                 }
 
                 // Gravity
-                if (!OmegaPlayer.onGround) {
-                    OmegaPlayer.velocityY += -20.0f * dt;
-                    OmegaTechData.MainCamera.position.y += OmegaPlayer.velocityY * dt;
+                if (!g_playerMovement.onGround) {
+                    g_playerMovement.velocityY += -20.0f * dt;
+                    OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;
                 }
             }
         }
@@ -993,9 +1006,9 @@ int main(int argc, char** argv){
                             yaw, pitch);
 
             if (g_client.is_connected()) {
-                OmegaPlayer.Level = g_client.get_level();
-                OmegaPlayer.XP = g_client.get_xp();
-                OmegaPlayer.XPToNext = g_client.get_xp_to_next();
+                LightningEntityManager::Instance().SetPlayerLevel(g_client.get_level());
+                LightningEntityManager::Instance().SetPlayerXP(g_client.get_xp());
+                LightningEntityManager::Instance().SetPlayerXPToNext(g_client.get_xp_to_next());
 
                 const auto& npcs = g_client.npcs();
                 for (size_t i = 0; i < npcs.size(); i++) {
@@ -1043,6 +1056,27 @@ int main(int argc, char** argv){
 
         // HUD: player stats (always visible)
         DrawPlayerHUD();
+
+        // Screen flash on pickup collect (fades out)
+        {
+            auto& fb = PawnSystem::Instance().m_pickupFeedback;
+            if (fb.flashTimer > 0.0f) {
+                fb.flashTimer -= GetFrameTime();
+                Color flashColor = {0, 0, 0, 0};
+                const ItemDBEntry* def = GetItemDef(fb.itemId);
+                if (def) {
+                    switch (def->category) {
+                        case ItemCategory::HEALTH_VIAL: flashColor = (Color){255, 50, 50, (unsigned char)(80 * fb.flashTimer * 2)}; break;
+                        case ItemCategory::MANA_VIAL:  flashColor = (Color){50, 100, 255, (unsigned char)(80 * fb.flashTimer * 2)}; break;
+                        case ItemCategory::ENERGY_CRYSTAL: flashColor = (Color){200, 50, 255, (unsigned char)(80 * fb.flashTimer * 2)}; break;
+                        case ItemCategory::COIN:       flashColor = (Color){255, 215, 0, (unsigned char)(80 * fb.flashTimer * 2)}; break;
+                        default:                       flashColor = (Color){255, 255, 255, (unsigned char)(60 * fb.flashTimer * 2)}; break;
+                    }
+                }
+                if (flashColor.a > 0)
+                    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), flashColor);
+            }
+        }
 
         // Network ping (only when connected)
         if (g_network_enabled && g_client.is_connected()) {

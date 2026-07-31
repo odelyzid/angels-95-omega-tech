@@ -48,6 +48,8 @@ static const wchar_t* CLASS_HMEDITOR   = L"OzHmEditor";
 static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
 static const wchar_t* CLASS_WORLDGRAPH = L"OzWorldGraph";
 static const wchar_t* CLASS_PROPSPANEL = L"OzPropsPanel";
+static const wchar_t* CLASS_STATSSIDEBAR = L"OzStatsSidebar";
+static const int STATS_SIDEBAR_W = 200;
 
 // Zone properties (read by editor rendering loop)
 // g_zoneProps is defined in the ZoneProperties section below
@@ -146,6 +148,7 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
 // Helper functions
@@ -2458,6 +2461,132 @@ void ShowPropertiesPanel(bool show) {
 }
 
 // =====================================================================
+// Stats Sidebar — docked native left panel (stats only, no CSG)
+// =====================================================================
+static const int ID_SB_TITLE   = 900;
+static const int ID_SB_POS     = 901;
+static const int ID_SB_SIZE    = 902;
+static const int ID_SB_ROT     = 903;
+static const int ID_SB_COLL    = 904;
+static const int ID_SB_CHUNKS  = 905;
+static const int ID_SB_MODE    = 906;
+static const int ID_SB_CAM_L   = 907;
+static const int ID_SB_CAM     = 908;
+static const int ID_SB_SEP1    = 909;
+static const int ID_SB_SEP2    = 910;
+
+static HWND g_sbPos = nullptr, g_sbSize = nullptr, g_sbRot = nullptr;
+static HWND g_sbColl = nullptr, g_sbChunks = nullptr, g_sbMode = nullptr;
+static HWND g_sbCam = nullptr;
+static HBRUSH g_sbBgBrush = nullptr;
+
+int GetStatsSidebarWidth() { return STATS_SIDEBAR_W; }
+
+void LayoutStatsSidebar(int clientW, int clientH, int topOffset, int width) {
+    (void)clientW;
+    HWND hwnd = (HWND)g_editorPanels.hStatsSidebar;
+    if (!hwnd) return;
+    int w = width > 0 ? width : STATS_SIDEBAR_W;
+    int h = clientH - topOffset;
+    if (h < 1) h = 1;
+    SetWindowPos(hwnd, HWND_TOP, 0, topOffset, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void UpdateStatsSidebar(float posX, float posY, float posZ,
+                        float sizeX, float sizeY, float sizeZ,
+                        float rot, float scale,
+                        int collisionVols, int chunks,
+                        const char* mode,
+                        float camX, float camY, float camZ) {
+    HWND hwnd = (HWND)g_editorPanels.hStatsSidebar;
+    if (!hwnd) return;
+
+    wchar_t buf[128];
+    auto setA = [](HWND h, const wchar_t* t) {
+        if (h) SetWindowTextW(h, t);
+    };
+
+    swprintf(buf, 128, L"Pos: %.1f %.1f %.1f", posX, posY, posZ);
+    setA(g_sbPos, buf);
+    swprintf(buf, 128, L"Size: %.1f x %.1f x %.1f", sizeX, sizeY, sizeZ);
+    setA(g_sbSize, buf);
+    swprintf(buf, 128, L"Rot: %.0f  Scale: %.1f", rot, scale);
+    setA(g_sbRot, buf);
+    swprintf(buf, 128, L"Collision: %d vols", collisionVols);
+    setA(g_sbColl, buf);
+    swprintf(buf, 128, L"Chunks: %d", chunks);
+    setA(g_sbChunks, buf);
+    {
+        wchar_t modeW[32] = L"MODEL";
+        if (mode && mode[0])
+            MultiByteToWideChar(CP_UTF8, 0, mode, -1, modeW, 32);
+        swprintf(buf, 128, L"Mode: %s", modeW);
+        setA(g_sbMode, buf);
+    }
+    swprintf(buf, 128, L"%.1f %.1f %.1f", camX, camY, camZ);
+    setA(g_sbCam, buf);
+}
+
+static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+    case WM_CREATE: {
+        if (!g_sbBgBrush)
+            g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
+
+        int x = 10, y = 10, lw = STATS_SIDEBAR_W - 20;
+        CreateLabel(hwnd, L"Stats", x, y, lw, 20, ID_SB_TITLE); y += 28;
+        g_sbPos    = CreateLabel(hwnd, L"Pos: 0 0 0", x, y, lw, 18, ID_SB_POS); y += 20;
+        g_sbSize   = CreateLabel(hwnd, L"Size: 0 x 0 x 0", x, y, lw, 18, ID_SB_SIZE); y += 20;
+        g_sbRot    = CreateLabel(hwnd, L"Rot: 0  Scale: 1.0", x, y, lw, 18, ID_SB_ROT); y += 26;
+        CreateLabel(hwnd, L"---", x, y, lw, 16, ID_SB_SEP1); y += 20;
+        g_sbColl   = CreateLabel(hwnd, L"Collision: 0 vols", x, y, lw, 18, ID_SB_COLL); y += 20;
+        g_sbChunks = CreateLabel(hwnd, L"Chunks: 0", x, y, lw, 18, ID_SB_CHUNKS); y += 26;
+        g_sbMode   = CreateLabel(hwnd, L"Mode: MODEL", x, y, lw, 18, ID_SB_MODE); y += 26;
+        CreateLabel(hwnd, L"---", x, y, lw, 16, ID_SB_SEP2); y += 20;
+        CreateLabel(hwnd, L"Camera:", x, y, lw, 18, ID_SB_CAM_L); y += 20;
+        g_sbCam    = CreateLabel(hwnd, L"0.0 0.0 0.0", x, y, lw, 18, ID_SB_CAM);
+        break;
+    }
+    case WM_CTLCOLORSTATIC: {
+        HDC hdc = (HDC)w;
+        SetTextColor(hdc, RGB(180, 200, 220));
+        SetBkColor(hdc, RGB(25, 25, 30));
+        if (!g_sbBgBrush) g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
+        return (LRESULT)g_sbBgBrush;
+    }
+    case WM_ERASEBKGND: {
+        RECT rc; GetClientRect(hwnd, &rc);
+        if (!g_sbBgBrush) g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
+        FillRect((HDC)w, &rc, g_sbBgBrush);
+        return 1;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc; GetClientRect(hwnd, &rc);
+        if (!g_sbBgBrush) g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
+        FillRect(hdc, &rc, g_sbBgBrush);
+        // Right edge line
+        HPEN pen = CreatePen(PS_SOLID, 1, RGB(60, 60, 70));
+        HGDIOBJ old = SelectObject(hdc, pen);
+        MoveToEx(hdc, rc.right - 1, 0, nullptr);
+        LineTo(hdc, rc.right - 1, rc.bottom);
+        SelectObject(hdc, old);
+        DeleteObject(pen);
+        EndPaint(hwnd, &ps);
+        break;
+    }
+    case WM_DESTROY:
+        g_editorPanels.hStatsSidebar = nullptr;
+        g_sbPos = g_sbSize = g_sbRot = g_sbColl = g_sbChunks = g_sbMode = g_sbCam = nullptr;
+        break;
+    default:
+        return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+// =====================================================================
 // Public API — Create / Destroy
 // =====================================================================
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
@@ -2500,6 +2629,19 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_WORLDGRAPH, WorldGraphProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_PROPSPANEL, PropsPanelProc, (HINSTANCE)hInst);
 
+    // Stats sidebar uses dark background (override default COLOR_BTNFACE)
+    {
+        WNDCLASSEX wc = {};
+        wc.cbSize = sizeof(WNDCLASSEX);
+        wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc = StatsSidebarProc;
+        wc.hInstance = (HINSTANCE)hInst;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = CreateSolidBrush(RGB(25, 25, 30));
+        wc.lpszClassName = CLASS_STATSSIDEBAR;
+        RegisterClassEx(&wc);
+    }
+
     auto create = [&](const wchar_t* cls, const wchar_t* title,
                       EditorPanelState::WinPos& pos, void*& out) {
         HWND hwnd = CreateWindowEx(WS_EX_TOOLWINDOW,
@@ -2524,6 +2666,29 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_WORLDGRAPH,  L"World Graph Explorer", g_editorPanels.worldGraphPos,       g_editorPanels.hWorldGraph);
     create(CLASS_PROPSPANEL,  L"Entity Properties",    g_editorPanels.propsPanelPos,        g_editorPanels.hPropsPanel);
 
+    // Docked native stats sidebar (child of raylib window)
+    {
+        // Prevent OpenGL/raylib from painting over child HWNDs
+        if (g_hRaylibWnd) {
+            LONG_PTR style = GetWindowLongPtr(g_hRaylibWnd, GWL_STYLE);
+            SetWindowLongPtr(g_hRaylibWnd, GWL_STYLE, style | WS_CLIPCHILDREN);
+        }
+        RECT rc = {};
+        if (g_hRaylibWnd) GetClientRect(g_hRaylibWnd, &rc);
+        int top = 28;
+        int h = (rc.bottom - rc.top) - top;
+        if (h < 1) h = 400;
+        HWND hSb = CreateWindowEx(0, CLASS_STATSSIDEBAR, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+            0, top, STATS_SIDEBAR_W, h,
+            g_hRaylibWnd, nullptr, (HINSTANCE)hInst, nullptr);
+        g_editorPanels.hStatsSidebar = hSb;
+        if (hSb) {
+            ShowWindow(hSb, SW_SHOW);
+            UpdateWindow(hSb);
+        }
+    }
+
     ScanTextureBrowserFiles();
     ScanSoundBrowserFiles();
     ScanModelBrowserFiles();
@@ -2546,6 +2711,8 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hLightProps);
     destroy(g_editorPanels.hWorldGraph);
     destroy(g_editorPanels.hPropsPanel);
+    destroy(g_editorPanels.hStatsSidebar);
+    if (g_sbBgBrush) { DeleteObject(g_sbBgBrush); g_sbBgBrush = nullptr; }
     if (g_editorPanels.hPreviewBitmap) {
         DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);
         g_editorPanels.hPreviewBitmap = nullptr;

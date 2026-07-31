@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // PawnSystem â€” dynamic entity / NPC manager
@@ -32,9 +33,9 @@ enum class PawnState : uint8_t {
 // Zone environment overrides — fog/ambient/reverb applied on zone entry at runtime.
 // Separate from the editor's ZoneProperties (which has GameType/Particle fields too).
 struct ZoneEnvOverrides {
-    // Fog
-    int fogR = 200, fogG = 200, fogB = 210;
-    float fogDensity = 0.02f;
+    // Fog (defaults match legacy hardcoded fallback in Core.hpp)
+    int fogR = 179, fogG = 179, fogB = 204;
+    float fogDensity = 1.0f;
     float fogStart = 10.0f, fogEnd = 100.0f;
     bool applyFog = false;
     // Ambient
@@ -157,9 +158,47 @@ struct ZoneVolumeNode {
     BoundingBox bounds;
     ZoneType zoneType = ZoneType::ZONE_WATER;
     float intensity = 1.0f;  // e.g., water density, ladder speed
+    int priority = 0;         // higher = wins when overlapping
     std::string name;        // logical name for LightningScript zone lookups
     GameplaySoundProfile soundProfile; // game-type-specific audio profile
     ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
+};
+
+// ZonePortal — connects two zones (enable zone transitions / zone graph)
+struct ZonePortal {
+    BoundingBox portalBounds;     // trigger volume
+    std::string fromZoneName;     // source zone name (or "" for any)
+    std::string toZoneName;       // target zone name (or "" for world default)
+    Vector3 teleportOffset;       // position delta on transition
+    bool bidirectional = true;
+};
+
+// WorldInfo — global world metadata + default environment fallback
+struct WorldInfo {
+    ZoneEnvOverrides defaultEnv;  // defaults: fog, ambient, reverb
+    std::string defaultSkybox;
+    std::string defaultMusic;
+    std::vector<ZonePortal> portals;
+    BoundingBox worldBounds;
+    std::string name;
+    std::string author;
+};
+
+// PointRegion — per-entity zone tracking with stacking support
+struct PointRegion {
+    int lastPrimaryZoneId = -1;    // previous frame's primary zone
+    int primaryZoneId = -1;        // current frame's primary zone
+    ZoneType primaryZoneType = ZoneType::ZONE_WATER; // type of primary zone
+    std::unordered_set<int> activeZoneIds;   // all overlapping zones this frame
+    std::unordered_set<int> enteredZoneIds;  // zones entered this frame
+    std::unordered_set<int> exitedZoneIds;   // zones exited this frame
+    ZoneEnvOverrides combinedEnv;            // merged from all active zones
+
+    void Rebuild(const std::vector<ZoneVolumeNode*>& activeZones);
+    bool HasZoneType(ZoneType type) const { return primaryZoneId >= 0 && primaryZoneType == type; }
+    bool HasZoneId(int id) const;
+    bool HasChanged() const { return primaryZoneId != lastPrimaryZoneId; }
+    void CommitFrame();
 };
 
 // Sky zone node — runtime state for isolated skybox chamber rendering
@@ -195,8 +234,8 @@ public:
     // Tick AI for every active pawn
     void Update(Vector3 playerPos, float dt);
 
-    // Draw billboard sprites for every active pawn
-    void DrawAll(Camera3D& camera);
+    // Draw billboard sprites for every active pawn (optional lit shader for fog/lighting)
+    void DrawAll(Camera3D& camera, Shader litShader = {0});
 
     // Access individual pawns
     Pawn* Get(int id);
@@ -205,6 +244,15 @@ public:
 
     // Check if any pawn is attacking the player at given position
     bool IsPlayerAttacked(Vector3 playerPos, float& outDamage);
+
+    // Feedback state for UI (last collected pickup info)
+    struct PickupFeedback {
+        bool collected = false;
+        std::string typeName;
+        int itemId = 0;
+        float flashTimer = 0.0f;
+    };
+    PickupFeedback m_pickupFeedback;
 
     // --- Entity node management ---
 
@@ -215,6 +263,7 @@ public:
     std::vector<PlayerStartNode>& GetPlayerStarts() { return m_playerStarts; }
     const std::vector<PlayerStartNode>& GetPlayerStarts() const { return m_playerStarts; }
     PlayerStartNode* GetFirstPlayerStart();
+    void RespawnPlayerAtStart(Camera3D& camera);
 
     // Projectile nodes
     int SpawnProjectile(const ProjectileNode& node);
@@ -242,6 +291,19 @@ public:
     ZoneVolumeNode* GetZone(int id);
     ZoneVolumeNode* CheckZoneCollision(Vector3 pos, BoundingBox bounds);
 
+    // Consolidated multi-zone query — returns all overlapping zones sorted by priority
+    std::vector<ZoneVolumeNode*> GetActiveZones(Vector3 pos, BoundingBox bounds);
+
+    // WorldInfo management
+    void SetWorldInfo(const WorldInfo& wi) { m_worldInfo = wi; }
+    const WorldInfo& GetWorldInfo() const { return m_worldInfo; }
+    WorldInfo& GetWorldInfo() { return m_worldInfo; }
+
+    // Player point-region tracking (enter/exit detection + combined env)
+    PointRegion& GetPlayerRegion() { return m_playerRegion; }
+    const PointRegion& GetPlayerRegion() const { return m_playerRegion; }
+    void UpdatePlayerRegion(Vector3 playerPos, BoundingBox playerBounds);
+
     // Sound/music emitter nodes
     int AddEmitter(const EmitterNode& node);
     void RemoveEmitter(int id);
@@ -250,7 +312,7 @@ public:
     const std::vector<EmitterNode>& GetEmitters() const { return m_emitters; }
 
     // Draw entities (billboards for player starts, pickups, zones, emitters)
-    void DrawEntities(Camera3D& camera);
+    void DrawEntities(Camera3D& camera, Shader litShader = {0});
 
     // Sky zone node management
     int AddSkyZone(const SkyZoneNode& node);
@@ -308,6 +370,12 @@ private:
     // Sky zone state
     std::vector<SkyZoneNode> m_skyZones;
     int m_activeSkyZoneIndex = -1;
+
+    // World metadata + zone portal system
+    WorldInfo m_worldInfo;
+
+    // Player zone tracking (enter/exit detection, combined env)
+    PointRegion m_playerRegion;
 
     PawnDef* FindDef(const char* name);
     int AllocSlot();

@@ -1,0 +1,13 @@
+entity "Object4" : weapon {
+    mesh = "GameData/Global/Objects/Object4.obj"
+    texture = "GameData/Global/Objects/Object4Texture.png"
+    icon = "GameData/Global/Objects/Object4Icon.png"
+    stats {
+        item_id = 104
+        damage = 40
+        fire_rate = 0.4
+        projectile_speed = 35.0
+        projectile_lifetime = 3.0
+        equip_slot = "weapon"
+    }
+}

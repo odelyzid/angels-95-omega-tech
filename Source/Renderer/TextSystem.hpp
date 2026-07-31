@@ -1,4 +1,4 @@
-#include "../Pawn/Objects.hpp"
+// Objects.hpp removed — migrated to LightningEntityManager
 
 using namespace std;
 

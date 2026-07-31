@@ -31,14 +31,16 @@ class Editor{
         // Window flag
         bool ShowEnvPanel = false;
         bool ShowWireframe = false;
-        // Lit fog shader
+        // Shaders for lighting modes
         Shader LitFogShader = {0};
+        Shader UnlitShader = {0};
         int FogStartLoc = -1;
         int FogEndLoc = -1;
         int FogDensityLoc = -1;
         int FogColorLoc = -1;
         int FogIntensityLoc = -1;
         int AmbientLoc = -1;
+        int ViewPosLoc = -1;
 };
 
 static Editor OTEditor;
@@ -246,12 +248,20 @@ void Init(){
         
         // Ambient uniform
         OTEditor.AmbientLoc = GetShaderLocation(OTEditor.LitFogShader, "ambient");
+        OTEditor.ViewPosLoc = GetShaderLocation(OTEditor.LitFogShader, "viewPos");
         float ambient[4] = {(float)OTEditor.AmbientColor.r / 255.0f * OTEditor.AmbientIntensity,
                             (float)OTEditor.AmbientColor.g / 255.0f * OTEditor.AmbientIntensity,
                             (float)OTEditor.AmbientColor.b / 255.0f * OTEditor.AmbientIntensity,
                             1.0f};
         if (OTEditor.AmbientLoc >= 0)
             SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+    }
+
+    // Load unlit shader for Unlit ViewMode (pass-through, no lighting)
+    {
+        const char* vs = "#version 330\nin vec3 vertexPosition;in vec2 vertexTexCoord;in vec4 vertexColor;uniform mat4 mvp;out vec2 fragTexCoord;out vec4 fragColor;void main(){gl_Position=mvp*vec4(vertexPosition,1.0);fragTexCoord=vertexTexCoord;fragColor=vertexColor;}";
+        const char* fs = "#version 330\nin vec2 fragTexCoord;in vec4 fragColor;uniform sampler2D texture0;uniform vec4 colDiffuse;out vec4 finalColor;void main(){finalColor=texture(texture0,fragTexCoord)*colDiffuse*fragColor;}";
+        OTEditor.UnlitShader = LoadShaderFromMemory(vs, fs);
     }
 
     // Pass lit fog shader to OzoneLoader for OZONE geometry

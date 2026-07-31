@@ -83,57 +83,6 @@ public:
 
 static EngineData OmegaTechData;
 
-// TODO: This is Legacy Method Fucking up the InGame Node Spawn and rendering -> has to be entirely Dynamic
-void SpawnWDLProcess(const char *Path)
-{
-    wstring WData;
-
-    if (GameDataEncoded)
-    {
-        WData = Encode(LoadFile(Path), MainKey);
-    }
-    else
-    {
-        WData = LoadFile(Path);
-    }
-
-    int WDLSize = 0;
-
-    for (int i = 0; i <= WData.size(); i++)
-    {
-        if (WData[i] == L':')
-        {
-            WDLSize++;
-        }
-    }
-
-    for (int i = 0; i <= WDLSize; i++)
-    {
-        wstring Instruction = WSplitValue(WData, i);
-
-        if (WReadValue(Instruction, 0, 5) == L"Walker")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-
-            // Spawn via PawnSystem (dynamic, unlimited NPCs)
-            PawnSystem::Instance().Spawn({x, y, z}, "Walker");
-        }
-
-        if (Instruction == L"Light")
-        {
-            LightNode node;
-            node.position = {ToFloat(WSplitValue(WData, i + 1)), ToFloat(WSplitValue(WData, i + 2)), ToFloat(WSplitValue(WData, i + 3))};
-            // Extended WDL format: Light:X:Y:Z:R:G:B:I:Rad:T:E:
-            // Parse extra args if available (TODO: fully parse extended format)
-            PawnSystem::Instance().AddLight(node);
-        }
-
-        i += 3;
-    }
-}
-
 void LoadEntitiesFromWDL()
 {
     wstring WData = WorldData;
@@ -167,6 +116,12 @@ void LoadEntitiesFromWDL()
             }
             PickupNode node;
             node.position = {x, y, z};
+            // Snap pickup to ground height if floating
+            if (WDLModels.HeightMapReady) {
+                float groundY = SampleHeightmapGroundY(x, z);
+                if (groundY > -99990.0f && y > groundY + 1.0f)
+                    node.position.y = groundY + 0.5f;
+            }
             node.typeName = typeName;
             PawnSystem::Instance().AddPickup(node);
             i += 6;
@@ -291,15 +246,15 @@ auto LoadWorld()
     PawnSystem::Instance().ClearLights();
 
     // Reset movement state so player falls to new world's collision
-    OmegaPlayer.onGround = false;
-    OmegaPlayer.velocityY = 0.0f;
+    g_playerMovement.onGround = false;
+    g_playerMovement.velocityY = 0.0f;
 
     if (OmegaTechData.Deaths != 3)
     {
 
         OmegaTechData.PanicCounter = 0;
 
-        OmegaPlayer.Health = 100;
+        LightningEntityManager::Instance().SetPlayerHealth(100.0f);
 
         OmegaTechData.SkyboxEnabled = false;
 
@@ -349,12 +304,6 @@ auto LoadWorld()
             }
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Entities/Walker/Frame1.png", g_world_to_load)))
-        {
-            EnemyTextures.Frame1 = LoadTexture(TextFormat("GameData/Worlds/%s/Entities/Walker/Frame1.png", g_world_to_load));
-            EnemyTextures.Scream = LoadSound(TextFormat("GameData/Worlds/%s/Entities/Walker/Scream.mp3", g_world_to_load));
-        }
-
         if (WDLModels.HeightMapImage.data)
         {
             UnloadImage(WDLModels.HeightMapImage);
@@ -386,381 +335,24 @@ auto LoadWorld()
             OZ_INFO("HeightMap: world=%d not found (no heightmap)", OmegaTechData.LevelIndex);
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model1.obj", g_world_to_load)))
+        for (int mid = 1; mid <= GameModels::MAX_WDL_MODELS; mid++)
         {
-            WDLModels.Model1 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model1.obj", g_world_to_load));
-            WDLModels.Model1Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model1Texture.png", g_world_to_load));
-            WDLModels.Model1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model1Texture;
-            WDLModels.Model1.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model1.meshCount != 0)
+            char modelPath[256], texPath[256];
+            snprintf(modelPath, sizeof(modelPath), "GameData/Worlds/%s/Models/Model%d.obj", g_world_to_load, mid);
+            snprintf(texPath, sizeof(texPath), "GameData/Worlds/%s/Models/Model%dTexture.png", g_world_to_load, mid);
+            if (IsPathFile(modelPath))
             {
-                UnloadModel(WDLModels.Model1);
+                WDLModels.wdlModels[mid] = LoadModel(modelPath);
+                WDLModels.wdlModelTextures[mid] = LoadTexture(texPath);
+                WDLModels.wdlModels[mid].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.wdlModelTextures[mid];
+                WDLModels.wdlModels[mid].materials[0].shader = OmegaTechData.Lights;
             }
-            if (WDLModels.Model1Texture.id != 0)
+            else
             {
-                UnloadTexture(WDLModels.Model1Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model2.obj", g_world_to_load)))
-        {
-            WDLModels.Model2 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model2.obj", g_world_to_load));
-            WDLModels.Model2Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model2Texture.png", g_world_to_load));
-            WDLModels.Model2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model2Texture;
-            WDLModels.Model2.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model2.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model2);
-            }
-            if (WDLModels.Model2Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model2Texture);
-            }
-        }
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model3.obj", g_world_to_load)))
-        {
-            WDLModels.Model3 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model3.obj", g_world_to_load));
-            WDLModels.Model3Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model3Texture.png", g_world_to_load));
-            WDLModels.Model3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model3Texture;
-            WDLModels.Model3.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model3.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model3);
-            }
-            if (WDLModels.Model3Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model3Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model4.obj", g_world_to_load)))
-        {
-            WDLModels.Model4 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model4.obj", g_world_to_load));
-            WDLModels.Model4Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model4Texture.png", g_world_to_load));
-            WDLModels.Model4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model4Texture;
-            WDLModels.Model4.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model4.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model4);
-            }
-            if (WDLModels.Model4Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model4Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model5.obj", g_world_to_load)))
-        {
-            WDLModels.Model5 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model5.obj", g_world_to_load));
-            WDLModels.Model5Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model5Texture.png", g_world_to_load));
-            WDLModels.Model5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model5Texture;
-            WDLModels.Model5.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model5.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model5);
-            }
-            if (WDLModels.Model5Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model5Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model6.obj", g_world_to_load)))
-        {
-            WDLModels.Model6 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model6.obj", g_world_to_load));
-            WDLModels.Model6Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model6Texture.png", g_world_to_load));
-            WDLModels.Model6.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model6Texture;
-            WDLModels.Model6.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model6.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model6);
-            }
-            if (WDLModels.Model6Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model6Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model7.obj", g_world_to_load)))
-        {
-            WDLModels.Model7 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model7.obj", g_world_to_load));
-            WDLModels.Model7Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model7Texture.png", g_world_to_load));
-            WDLModels.Model7.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model7Texture;
-            WDLModels.Model7.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model7.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model7);
-            }
-            if (WDLModels.Model7Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model7Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model8.obj", g_world_to_load)))
-        {
-            WDLModels.Model8 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model8.obj", g_world_to_load));
-            WDLModels.Model8Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model8Texture.png", g_world_to_load));
-            WDLModels.Model8.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model8Texture;
-            WDLModels.Model8.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model8.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model8);
-            }
-            if (WDLModels.Model8Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model8Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model9.obj", g_world_to_load)))
-        {
-            WDLModels.Model9 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model9.obj", g_world_to_load));
-            WDLModels.Model9Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model9Texture.png", g_world_to_load));
-            WDLModels.Model9.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model9Texture;
-            WDLModels.Model9.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model9.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model9);
-            }
-            if (WDLModels.Model9Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model9Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model10.obj", g_world_to_load)))
-        {
-            WDLModels.Model10 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model10.obj", g_world_to_load));
-            WDLModels.Model10Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model10Texture.png", g_world_to_load));
-            WDLModels.Model10.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model10Texture;
-            WDLModels.Model10.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model10.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model10);
-            }
-            if (WDLModels.Model10Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model10Texture);
-            }
-        }
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model11.obj", g_world_to_load)))
-        {
-            WDLModels.Model11 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model11.obj", g_world_to_load));
-            WDLModels.Model11Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model11Texture.png", g_world_to_load));
-            WDLModels.Model11.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model11Texture;
-            WDLModels.Model11.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model11.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model11);
-            }
-            if (WDLModels.Model11Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model11Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model12.obj", g_world_to_load)))
-        {
-            WDLModels.Model12 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model12.obj", g_world_to_load));
-            WDLModels.Model12Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model12Texture.png", g_world_to_load));
-            WDLModels.Model12.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model12Texture;
-            WDLModels.Model12.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model12.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model12);
-            }
-            if (WDLModels.Model12Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model12Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model13.obj", g_world_to_load)))
-        {
-            WDLModels.Model13 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model13.obj", g_world_to_load));
-            WDLModels.Model13Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model13Texture.png", g_world_to_load));
-            WDLModels.Model13.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model13Texture;
-            WDLModels.Model13.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model13.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model13);
-            }
-            if (WDLModels.Model13Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model13Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model14.obj", g_world_to_load)))
-        {
-            WDLModels.Model14 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model14.obj", g_world_to_load));
-            WDLModels.Model14Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model14Texture.png", g_world_to_load));
-            WDLModels.Model14.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model14Texture;
-            WDLModels.Model14.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model14.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model14);
-            }
-            if (WDLModels.Model14Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model14Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model15.obj", g_world_to_load)))
-        {
-            WDLModels.Model15 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model15.obj", g_world_to_load));
-            WDLModels.Model15Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model15Texture.png", g_world_to_load));
-            WDLModels.Model15.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model15Texture;
-            WDLModels.Model15.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model15.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model15);
-            }
-            if (WDLModels.Model15Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model15Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model16.obj", g_world_to_load)))
-        {
-            WDLModels.Model16 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model16.obj", g_world_to_load));
-            WDLModels.Model16Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model16Texture.png", g_world_to_load));
-            WDLModels.Model16.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model16Texture;
-            WDLModels.Model16.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model16.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model16);
-            }
-            if (WDLModels.Model16Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model16Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model17.obj", g_world_to_load)))
-        {
-            WDLModels.Model17 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model17.obj", g_world_to_load));
-            WDLModels.Model17Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model17Texture.png", g_world_to_load));
-            WDLModels.Model17.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model17Texture;
-            WDLModels.Model17.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model17.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model17);
-            }
-            if (WDLModels.Model17Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model17Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model18.obj", g_world_to_load)))
-        {
-            WDLModels.Model18 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model18.obj", g_world_to_load));
-            WDLModels.Model18Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model18Texture.png", g_world_to_load));
-            WDLModels.Model18.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model18Texture;
-            WDLModels.Model18.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model18.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model18);
-            }
-            if (WDLModels.Model18Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model18Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model19.obj", g_world_to_load)))
-        {
-            WDLModels.Model19 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model19.obj", g_world_to_load));
-            WDLModels.Model19Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model19Texture.png", g_world_to_load));
-            WDLModels.Model19.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model19Texture;
-            WDLModels.Model19.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model19.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model19);
-            }
-            if (WDLModels.Model19Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model19Texture);
-            }
-        }
-
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Model20.obj", g_world_to_load)))
-        {
-            WDLModels.Model20 = LoadModel(TextFormat("GameData/Worlds/%s/Models/Model20.obj", g_world_to_load));
-            WDLModels.Model20Texture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Model20Texture.png", g_world_to_load));
-            WDLModels.Model20.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.Model20Texture;
-            WDLModels.Model20.materials[0].shader = OmegaTechData.Lights;
-        }
-        else
-        {
-            if (WDLModels.Model20.meshCount != 0)
-            {
-                UnloadModel(WDLModels.Model20);
-            }
-            if (WDLModels.Model20Texture.id != 0)
-            {
-                UnloadTexture(WDLModels.Model20Texture);
+                if (WDLModels.wdlModels[mid].meshCount != 0)
+                    UnloadModel(WDLModels.wdlModels[mid]);
+                if (WDLModels.wdlModelTextures[mid].id != 0)
+                    UnloadTexture(WDLModels.wdlModelTextures[mid]);
             }
         }
 
@@ -978,57 +570,6 @@ void OmegaTechInit()
 
     OmegaTechTextSystem.TextNoise = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
 
-    {
-        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel1.gltf");
-        if (m.meshes != nullptr)
-        {
-            WDLModels.FastModel1 = m;
-            WDLModels.FastModel1Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel1Texture.png");
-            WDLModels.FastModel1.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel1Texture;
-            WDLModels.FastModel1.materials[0].shader = OmegaTechData.Lights;
-        }
-    }
-    {
-        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel2.gltf");
-        if (m.meshes != nullptr)
-        {
-            WDLModels.FastModel2 = m;
-            WDLModels.FastModel2Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel2Texture.png");
-            WDLModels.FastModel2.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel2Texture;
-            WDLModels.FastModel2.materials[0].shader = OmegaTechData.Lights;
-        }
-    }
-    {
-        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel3.gltf");
-        if (m.meshes != nullptr)
-        {
-            WDLModels.FastModel3 = m;
-            WDLModels.FastModel3Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel3Texture.png");
-            WDLModels.FastModel3.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel3Texture;
-            WDLModels.FastModel3.materials[0].shader = OmegaTechData.Lights;
-        }
-    }
-    {
-        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel4.gltf");
-        if (m.meshes != nullptr)
-        {
-            WDLModels.FastModel4 = m;
-            WDLModels.FastModel4Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel4Texture.png");
-            WDLModels.FastModel4.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel4Texture;
-            WDLModels.FastModel4.materials[0].shader = OmegaTechData.Lights;
-        }
-    }
-    {
-        Model m = LoadModelWithFallback("GameData/Global/FModels/FModel5.gltf");
-        if (m.meshes != nullptr)
-        {
-            WDLModels.FastModel5 = m;
-            WDLModels.FastModel5Texture = LoadTextureWithFallback("GameData/Global/FModels/FModel5Texture.png");
-            WDLModels.FastModel5.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.FastModel5Texture;
-            WDLModels.FastModel5.materials[0].shader = OmegaTechData.Lights;
-        }
-    }
-
     OmegaTechData.GameLights[0] = CreateLight(LIGHT_DIRECTIONAL, {OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z}, Vector3Zero(), WHITE, OmegaTechData.Lights);
 
     Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
@@ -1036,7 +577,20 @@ void OmegaTechInit()
     // Initialize sound system
     SoundLoader::Instance().RegisterDefaults();
 
-    InitObjects();
+    // Pre-cache weapon object models from entity definitions (Object1-5)
+    {
+        static const char* objNames[] = {"Object1", "Object2", "Object3", "Object4", "Object5"};
+        for (int o = 0; o < 5; o++) {
+            int rIdx = LightningEntityManager::Instance().PrecacheModelForDef(objNames[o]);
+            if (rIdx >= 0) {
+                Model* m = LightningEntityManager::Instance().GetModelByResourceIdx(rIdx);
+                if (m && m->meshes) {
+                    WDLModels.objectModels[o] = *m;
+                    WDLModels.objectModelsLoaded[o] = true;
+                }
+            }
+        }
+    }
 
     PlayMusicStream(OmegaTechData.HomeScreenMusic);
 }
@@ -1204,7 +758,7 @@ void CWDLProcess()
         {
             if (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X || CachedModels[i].ModelId == -1)
             {
-                if (CheckCollisionBoxSphere((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, {OmegaTechData.MainCamera.position.x + OmegaPlayer.Width / 2, OmegaTechData.MainCamera.position.y - OmegaPlayer.Height / 2, OmegaTechData.MainCamera.position.z - OmegaPlayer.Width / 2}, 1.0))
+                if (CheckCollisionBoxSphere((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2, OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2, OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2}, 1.0))
                 {
                     ObjectCollision = true;
                     if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
@@ -1229,88 +783,28 @@ void CWDLProcess()
             if (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X || CachedModels[i].ModelId == -1)
             {
 
-                switch (CachedModels[i].ModelId)
+                int mid = CachedModels[i].ModelId;
+                if (mid == -2)
                 {
-                case -2:
-                    if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
+                    if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
                     {
                         ObjectCollision = true;
                         if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
-                        {
                             PlaySound(OmegaTechSoundData.CollisionSound);
-                        }
                     }
-                    break;
-                case -1:
+                }
+                else if (mid == -1)
+                {
                     DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 1:
-                    DrawModelEx(WDLModels.Model1, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 2:
-                    DrawModelEx(WDLModels.Model2, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 3:
-                    DrawModelEx(WDLModels.Model3, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 4:
-                    DrawModelEx(WDLModels.Model4, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 5:
-                    DrawModelEx(WDLModels.Model5, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 6:
-                    DrawModelEx(WDLModels.Model6, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 7:
-                    DrawModelEx(WDLModels.Model7, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 8:
-                    DrawModelEx(WDLModels.Model8, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 9:
-                    DrawModelEx(WDLModels.Model9, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 10:
-                    DrawModelEx(WDLModels.Model10, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 11:
-                    DrawModelEx(WDLModels.Model11, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 12:
-                    DrawModelEx(WDLModels.Model12, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 13:
-                    DrawModelEx(WDLModels.Model13, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 14:
-                    DrawModelEx(WDLModels.Model14, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 15:
-                    DrawModelEx(WDLModels.Model15, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 16:
-                    DrawModelEx(WDLModels.Model16, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 17:
-                    DrawModelEx(WDLModels.Model17, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 18:
-                    DrawModelEx(WDLModels.Model18, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 19:
-                    DrawModelEx(WDLModels.Model19, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 20:
-                    DrawModelEx(WDLModels.Model20, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                default:
-                    break;
+                }
+                else if (mid >= 1 && mid <= GameModels::MAX_WDL_MODELS && WDLModels.wdlModels[mid].meshCount > 0)
+                {
+                    DrawModelEx(WDLModels.wdlModels[mid], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
                 }
                 if (CachedModels[i].Collision)
                 {
                     BoundingBox ModelBox = {{(X - S), (Y - S), (Z - S)}, {(X + S), (Y + S), (Z + S)}};
-                    if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, ModelBox))
+                    if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, ModelBox))
                     {
                         ObjectCollision = true;
                     }
@@ -1456,77 +950,14 @@ void WDLProcess()
             if (WReadValue(Instruction, 0, 4) == L"Model")
             {
                 int Identifier = ToFloat(WReadValue(Instruction, 5, 6));
-                switch (Identifier)
-                {
-                case 1:
-                    DrawModelEx(WDLModels.Model1, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 2:
-                    DrawModelEx(WDLModels.Model2, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 3:
-                    DrawModelEx(WDLModels.Model3, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 4:
-                    DrawModelEx(WDLModels.Model4, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 5:
-                    DrawModelEx(WDLModels.Model5, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 6:
-                    DrawModelEx(WDLModels.Model6, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 7:
-                    DrawModelEx(WDLModels.Model7, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 8:
-                    DrawModelEx(WDLModels.Model8, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 9:
-                    DrawModelEx(WDLModels.Model9, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 10:
-                    DrawModelEx(WDLModels.Model10, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 11:
-                    DrawModelEx(WDLModels.Model11, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 12:
-                    DrawModelEx(WDLModels.Model12, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 13:
-                    DrawModelEx(WDLModels.Model13, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 14:
-                    DrawModelEx(WDLModels.Model14, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 15:
-                    DrawModelEx(WDLModels.Model15, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 16:
-                    DrawModelEx(WDLModels.Model16, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 17:
-                    DrawModelEx(WDLModels.Model17, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 18:
-                    DrawModelEx(WDLModels.Model18, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 19:
-                    DrawModelEx(WDLModels.Model19, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                case 20:
-                    DrawModelEx(WDLModels.Model20, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                    break;
-                default:
-                    break;
-                }
+                if (Identifier >= 1 && Identifier <= GameModels::MAX_WDL_MODELS && WDLModels.wdlModels[Identifier].meshCount > 0)
+                    DrawModelEx(WDLModels.wdlModels[Identifier], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
             }
 
             if (NextCollision)
             {
                 BoundingBox ModelBox = {{(X - S), (Y - S), (Z - S)}, {(X + S), (Y + S), (Z + S)}};
-                if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, ModelBox))
+                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, ModelBox))
                 {
                     ObjectCollision = true;
                 }
@@ -1566,20 +997,20 @@ void WDLProcess()
                 }
             }
 
-            if (Instruction == L"Object1" && OmegaTechGameObjects.Object1.meshes != nullptr)
-                DrawModelEx(OmegaTechGameObjects.Object1, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object2" && OmegaTechGameObjects.Object2.meshes != nullptr)
-                DrawModelEx(OmegaTechGameObjects.Object2, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object3" && OmegaTechGameObjects.Object3.meshes != nullptr)
-                DrawModelEx(OmegaTechGameObjects.Object3, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object4" && OmegaTechGameObjects.Object4.meshes != nullptr)
-                DrawModelEx(OmegaTechGameObjects.Object4, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object5" && OmegaTechGameObjects.Object5.meshes != nullptr)
-                DrawModelEx(OmegaTechGameObjects.Object5, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
+            if (Instruction == L"Object1" && WDLModels.objectModelsLoaded[0])
+                DrawModelEx(WDLModels.objectModels[0], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
+            if (Instruction == L"Object2" && WDLModels.objectModelsLoaded[1])
+                DrawModelEx(WDLModels.objectModels[1], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
+            if (Instruction == L"Object3" && WDLModels.objectModelsLoaded[2])
+                DrawModelEx(WDLModels.objectModels[2], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
+            if (Instruction == L"Object4" && WDLModels.objectModelsLoaded[3])
+                DrawModelEx(WDLModels.objectModels[3], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
+            if (Instruction == L"Object5" && WDLModels.objectModelsLoaded[4])
+                DrawModelEx(WDLModels.objectModels[4], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
 
             if (Instruction == L"Collision")
             { // Collision
-                if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
+                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
                 {
                     ObjectCollision = true;
                 }
@@ -1606,7 +1037,7 @@ void WDLProcess()
 
             if (WReadValue(Instruction, 0, 5) == L"Script")
             {
-                if (CheckCollisionBoxes(OmegaPlayer.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
+                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
                 {
                     ObjectCollision = true;
                     if (ScriptTimer == 0)
@@ -1646,9 +1077,9 @@ void WDLProcess()
 
             if (CheckCollisionBoxSphere(
                     (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
-                    {OmegaTechData.MainCamera.position.x + OmegaPlayer.Width / 2,
-                     OmegaTechData.MainCamera.position.y - OmegaPlayer.Height / 2,
-                     OmegaTechData.MainCamera.position.z - OmegaPlayer.Width / 2},
+                    {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2,
+                     OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2,
+                     OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2},
                     1.0))
             {
                 PlatformHeight = H;
@@ -1671,9 +1102,9 @@ void WDLProcess()
 
                 if (CheckCollisionBoxSphere(
                         (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
-                        {OmegaTechData.MainCamera.position.x + OmegaPlayer.Width / 2,
-                         OmegaTechData.MainCamera.position.y - OmegaPlayer.Height / 2,
-                         OmegaTechData.MainCamera.position.z - OmegaPlayer.Width / 2},
+                        {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2,
+                         OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2,
+                         OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2},
                         1.0))
                     ObjectCollision = true;
 
@@ -1720,7 +1151,7 @@ void WDLProcess()
 
     // Stand on heightmap terrain (preferred) or ClipBox platforms
     // Skipped when flying or noclipping â€” player controls Y manually
-    if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
+    if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
     {
         float groundY = SampleHeightmapGroundY(
             OmegaTechData.MainCamera.position.x,
@@ -1732,12 +1163,12 @@ void WDLProcess()
             if (OmegaTechData.MainCamera.position.y <= groundY + eyeHeight + 0.1f)
             {
                 OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
-                OmegaPlayer.velocityY = 0.0f;
-                OmegaPlayer.onGround = true;
+                g_playerMovement.velocityY = 0.0f;
+                g_playerMovement.onGround = true;
             }
             else
             {
-                OmegaPlayer.onGround = false;
+                g_playerMovement.onGround = false;
             }
         }
         else if (FoundPlatform)
@@ -1746,17 +1177,17 @@ void WDLProcess()
             if (OmegaTechData.MainCamera.position.y <= PlatformHeight + eyeHeight + 0.1f)
             {
                 OmegaTechData.MainCamera.position.y = PlatformHeight + eyeHeight;
-                OmegaPlayer.velocityY = 0.0f;
-                OmegaPlayer.onGround = true;
+                g_playerMovement.velocityY = 0.0f;
+                g_playerMovement.onGround = true;
             }
             else
             {
-                OmegaPlayer.onGround = false;
+                g_playerMovement.onGround = false;
             }
         }
         else
         {
-            OmegaPlayer.onGround = false;
+            g_playerMovement.onGround = false;
         }
     }
 }
@@ -1766,36 +1197,61 @@ void UpdateEntities()
     Vector3 playerPos = OmegaTechData.MainCamera.position;
     float dt = GetFrameTime();
 
+    // Single-pass zone scan for player — replaces 4 separate CheckZoneCollision calls
+    PawnSystem::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
+
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
     PawnSystem::Instance().Update(playerPos, dt);
 
     // Update pickups (respawn timers, player collision)
-    PawnSystem::Instance().UpdatePickups(dt, playerPos, OmegaPlayer.PlayerBounds);
+    PawnSystem::Instance().UpdatePickups(dt, playerPos, g_playerMovement.PlayerBounds);
 
-    // Draw all pawns
-    PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera);
-
-    // Draw entity billboards (player starts, pickups, zones)
-    PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera);
-
-    // Check if any pawn is attacking the player
-    float damage = 0;
-    if (PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
+    // Pickup collection feedback (console message + flash)
     {
-        OmegaPlayer.Health = 0;
-
-        if (OmegaTechData.PanicCounter != 240)
-        {
-            OmegaTechData.PanicCounter += 2;
+        auto& fb = PawnSystem::Instance().m_pickupFeedback;
+        if (fb.collected) {
+            OmegaTechTextSystem.Write(TextFormat("Collected: %s", fb.typeName.c_str()));
+            fb.collected = false;
         }
+    }
 
-        if (OmegaTechData.Ticker % 2 == 0)
+    // Draw all pawns (with lit shader for fog/lighting)
+    PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
+
+    // Draw entity billboards (player starts, pickups, zones) with lit shader
+    PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights);
+
+    // Check if any pawn is attacking the player (contact damage)
+    {
+        static float damageCooldown = 0.0f;
+        damageCooldown -= dt;
+        float damage = 0;
+        if (damageCooldown <= 0.0f && PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
         {
-            if (!IsSoundPlaying(OmegaTechSoundData.ChasingSound))
+            LightningEntityManager::Instance().SetPlayerHealth(std::max(0.0f, LightningEntityManager::Instance().GetPlayerHealth() - damage));
+            damageCooldown = 1.0f;
+            OmegaTechTextSystem.Write(TextFormat("Took %.0f damage from enemy!", damage));
+            if (OmegaTechData.PanicCounter != 240)
+                OmegaTechData.PanicCounter += 2;
+            if (OmegaTechData.Ticker % 2 == 0)
             {
-                PlaySound(OmegaTechSoundData.ChasingSound);
+                if (!IsSoundPlaying(OmegaTechSoundData.ChasingSound))
+                    PlaySound(OmegaTechSoundData.ChasingSound);
             }
         }
+    }
+
+    // Death / respawn check
+    if (LightningEntityManager::Instance().GetPlayerHealth() <= 0.0f)
+    {
+        LightningEntityManager::Instance().SetPlayerHealth(100.0f);
+        LightningEntityManager::Instance().SetPlayerMana(100.0f);
+        OmegaTechData.Deaths++;
+        OZ_INFO("Player died! Death #%d", OmegaTechData.Deaths);
+        OmegaTechTextSystem.Write(TextFormat("You died! Death #%d", OmegaTechData.Deaths));
+        PawnSystem::Instance().RespawnPlayerAtStart(OmegaTechData.MainCamera);
+        // Refill items from save
+        LoadSave();
     }
 }
 
@@ -1803,17 +1259,17 @@ void UpdatePlayer()
 {
     if (IsKeyDown(KEY_W) || GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_Y) != 0 && !Debug)
     {
-        if (HeadBob)
+        if (g_playerMovement.HeadBob)
         {
             if (OmegaTechData.Ticker % 4 == 0)
             {
-                float bob = (OmegaPlayer.HeadBobDirection == 1) ? 0.05f : -0.05f;
+                float bob = (g_playerMovement.HeadBobDirection == 1) ? 0.05f : -0.05f;
                 OmegaTechData.MainCamera.target.y += bob;
-                if (OmegaPlayer.HeadBob >= 1)
-                    OmegaPlayer.HeadBobDirection = 0;
-                else if (OmegaPlayer.HeadBob <= -1)
-                    OmegaPlayer.HeadBobDirection = 1;
-                OmegaPlayer.HeadBob += (OmegaPlayer.HeadBobDirection == 1) ? 1 : -1;
+                if (g_playerMovement.HeadBob >= 1)
+                    g_playerMovement.HeadBobDirection = 0;
+                else if (g_playerMovement.HeadBob <= -1)
+                    g_playerMovement.HeadBobDirection = 1;
+                g_playerMovement.HeadBob += (g_playerMovement.HeadBobDirection == 1) ? 1 : -1;
             }
         }
         if (!IsSoundPlaying(OmegaTechSoundData.WalkingSound))
@@ -1829,12 +1285,7 @@ void UpdatePlayer()
         }
     }
 
-    OmegaPlayer.PlayerBounds = (BoundingBox){(Vector3){OmegaTechData.MainCamera.position.x - OmegaPlayer.Width / 2,
-                                                       OmegaTechData.MainCamera.position.y - OmegaPlayer.Height,
-                                                       OmegaTechData.MainCamera.position.z - OmegaPlayer.Width / 2},
-                                             (Vector3){OmegaTechData.MainCamera.position.x + OmegaPlayer.Width / 2,
-                                                       OmegaTechData.MainCamera.position.y,
-                                                       OmegaTechData.MainCamera.position.z + OmegaPlayer.Width / 2}};
+    g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
 }
 
 void UpdateNoiseEmitters()
@@ -1862,93 +1313,12 @@ void SaveGame()
 
     TFlags += L':';
 
-    if (OmegaTechGameObjects.Object1Owned)
-        TFlags += L'1';
-    else
+    // EntityManager hotbar+equipment state (replaces owned flags)
     {
-        TFlags += L'0';
+        std::string emState = LightningEntityManager::Instance().SerializeState();
+        TFlags += wstring(emState.begin(), emState.end());
     }
-    if (OmegaTechGameObjects.Object2Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Object3Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Object4Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Object5Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    // Armory slots (positions 106-107)
-    if (OmegaTechGameObjects.Armory1Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Armory2Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    // Jewelry slots (positions 108-109)
-    if (OmegaTechGameObjects.Jewelry1Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Jewelry2Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    // RPG expansion equipment (positions 110-114)
-    if (OmegaTechGameObjects.HelmetOwned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.BootsOwned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.LegsOwned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Accessory1Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
-    if (OmegaTechGameObjects.Accessory2Owned)
-        TFlags += L'1';
-    else
-    {
-        TFlags += L'0';
-    }
+    TFlags += L':';
     // Backpack data
     TFlags += L':';
     for (int i = 0; i < BACKPACK_SLOTS; i++)
@@ -1991,38 +1361,21 @@ void LoadSave()
         }
     }
 
-    if (TFlags[101] == L'1')
-        OmegaTechGameObjects.Object1Owned = true;
-    if (TFlags[102] == L'1')
-        OmegaTechGameObjects.Object2Owned = true;
-    if (TFlags[103] == L'1')
-        OmegaTechGameObjects.Object3Owned = true;
-    if (TFlags[104] == L'1')
-        OmegaTechGameObjects.Object4Owned = true;
-    if (TFlags[105] == L'1')
-        OmegaTechGameObjects.Object5Owned = true;
-    if (TFlags[106] == L'1')
-        OmegaTechGameObjects.Armory1Owned = true;
-    if (TFlags[107] == L'1')
-        OmegaTechGameObjects.Armory2Owned = true;
-    if (TFlags[108] == L'1')
-        OmegaTechGameObjects.Jewelry1Owned = true;
-    if (TFlags[109] == L'1')
-        OmegaTechGameObjects.Jewelry2Owned = true;
-    if (TFlags[110] == L'1')
-        OmegaTechGameObjects.HelmetOwned = true;
-    if (TFlags[111] == L'1')
-        OmegaTechGameObjects.BootsOwned = true;
-    if (TFlags[112] == L'1')
-        OmegaTechGameObjects.LegsOwned = true;
-    if (TFlags[113] == L'1')
-        OmegaTechGameObjects.Accessory1Owned = true;
-    if (TFlags[114] == L'1')
-        OmegaTechGameObjects.Accessory2Owned = true;
+    // Load EntityManager hotbar+equipment state (after first ':')
+    size_t emSectionStart = TFlags.find(L':', 100);
+    size_t emSectionEnd = string::npos;
+    if (emSectionStart != string::npos && emSectionStart + 1 < TFlags.size()) {
+        // EntityManager state ends at the next ':' (which separates from backpack data)
+        emSectionEnd = TFlags.find(L':', emSectionStart + 1);
+        if (emSectionEnd != string::npos) {
+            std::string emState(TFlags.begin() + emSectionStart + 1, TFlags.begin() + emSectionEnd);
+            LightningEntityManager::Instance().DeserializeState(emState);
+        }
+    }
 
-    // Load backpack data (after second ':')
-    size_t bpStart = TFlags.find(L':', 110);
-    if (bpStart != string::npos)
+    // Load backpack data (after EntityManager state section)
+    size_t bpStart = emSectionEnd;
+    if (bpStart != string::npos && bpStart + 1 < TFlags.size())
     {
         wstring bpData = TFlags.substr(bpStart + 1);
         size_t secondColon = bpData.find(L':');
@@ -2078,7 +1431,7 @@ void DrawWorld()
     // Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
     PawnSystem::Instance().UpdateSkyZone(
         OmegaTechData.MainCamera.position,
-        OmegaPlayer.PlayerBounds);
+        g_playerMovement.PlayerBounds);
     bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
 
     // 2D skybox fallback texture (only when no active 3D sky zone)
@@ -2123,8 +1476,14 @@ void DrawWorld()
 
     // GameplaySoundZone — trigger zone-specific music/sound profiles
     {
-        Vector3 pp = OmegaTechData.MainCamera.position;
-        ZoneVolumeNode *soundZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
+        auto& region = PawnSystem::Instance().GetPlayerRegion();
+        // Find the primary gameplay sound zone from the player region
+        ZoneVolumeNode* soundZone = nullptr;
+        if (region.primaryZoneId >= 0) {
+            soundZone = PawnSystem::Instance().GetZone(region.primaryZoneId);
+            if (soundZone && soundZone->zoneType != ZoneType::ZONE_GAMEPLAY_SOUND)
+                soundZone = nullptr;
+        }
         static std::string prevSoundZone;
         static Music defaultWorldMusic;
         static Sound ambienceHandle = {0};
@@ -2172,7 +1531,7 @@ void DrawWorld()
             }
             prevSoundZone = soundZone->name;
         }
-        else if (!soundZone && !prevSoundZone.empty())
+        else if (region.primaryZoneId < 0 && !prevSoundZone.empty())
         {
             // Exited sound zone — stop ambience loop, restore default music
             if (ambienceHandle.frameCount > 0)
@@ -2224,7 +1583,7 @@ void DrawWorld()
         for (int idx : nearIndices)
         {
             if (idx >= 0 && idx < (int)vols.size() &&
-                CheckCollisionBoxes(OmegaPlayer.PlayerBounds, vols[idx].aabb))
+                CheckCollisionBoxes(g_playerMovement.PlayerBounds, vols[idx].aabb))
             {
                 // Skip volumes whose top is at or below the player's feet —
                 // these are floors/surfaces the player stands on, not obstacles.
@@ -2238,7 +1597,7 @@ void DrawWorld()
 
     // OZONE ground clamp â€” OZONE heightmap first, then brush primitives
     // (only when WDL heightmap and ClipBox didn't already provide ground)
-    if (!OmegaPlayer.isFlying && !OmegaPlayer.isNoClip)
+    if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
     {
         Vector3 cp = OmegaTechData.MainCamera.position;
 
@@ -2253,12 +1612,12 @@ void DrawWorld()
             if (cp.y <= hmY + eyeHeight + 0.1f)
             {
                 OmegaTechData.MainCamera.position.y = hmY + eyeHeight;
-                OmegaPlayer.velocityY = 0.0f;
-                OmegaPlayer.onGround = true;
+                g_playerMovement.velocityY = 0.0f;
+                g_playerMovement.onGround = true;
             }
             else
             {
-                OmegaPlayer.onGround = false;
+                g_playerMovement.onGround = false;
             }
         }
         else
@@ -2288,17 +1647,17 @@ void DrawWorld()
                 if (cp.y <= brushTop + eyeHeight + 0.1f)
                 {
                     OmegaTechData.MainCamera.position.y = brushTop + eyeHeight;
-                    OmegaPlayer.velocityY = 0.0f;
-                    OmegaPlayer.onGround = true;
+                    g_playerMovement.velocityY = 0.0f;
+                    g_playerMovement.onGround = true;
                 }
                 else
                 {
-                    OmegaPlayer.onGround = false;
+                    g_playerMovement.onGround = false;
                 }
             }
             else
             {
-                OmegaPlayer.onGround = false;
+                g_playerMovement.onGround = false;
             }
         }
     }
@@ -2354,28 +1713,29 @@ void DrawWorld()
     }
     if (ObjectCollision)
     {
-        if (!OmegaPlayer.isNoClip)
+        if (!g_playerMovement.isNoClip)
         {
-            OmegaTechData.MainCamera.position.x = OmegaPlayer.OldX;
-            OmegaTechData.MainCamera.position.y = OmegaPlayer.OldY;
-            OmegaTechData.MainCamera.position.z = OmegaPlayer.OldZ;
+            OmegaTechData.MainCamera.position.x = g_playerMovement.OldX;
+            OmegaTechData.MainCamera.position.y = g_playerMovement.OldY;
+            OmegaTechData.MainCamera.position.z = g_playerMovement.OldZ;
         }
         ObjectCollision = false;
     }
 
     // Zone reverb — apply simulated DSP (volume/muffle) while inside reverb zone
     {
-        ZoneVolumeNode *reverbZone = PawnSystem::Instance().CheckZoneCollision(
-            OmegaTechData.MainCamera.position, OmegaPlayer.PlayerBounds);
+        auto& region = PawnSystem::Instance().GetPlayerRegion();
+        bool inReverb = region.HasZoneType(ZoneType::ZONE_REVERB);
+        // Get reverb params from combined env (or highest-priority reverb zone)
+        float mix = region.combinedEnv.reverbMix;
+        float decay = region.combinedEnv.reverbDecay;
         static bool wasInReverb = false;
-        bool inReverb = (reverbZone && reverbZone->zoneType == ZoneType::ZONE_REVERB);
         if (inReverb && !wasInReverb)
         {
-            float mix = reverbZone->envOverrides.reverbMix > 0.0f ? reverbZone->envOverrides.reverbMix : 0.35f;
-            float decay = reverbZone->envOverrides.reverbDecay > 0.0f ? reverbZone->envOverrides.reverbDecay : 0.5f;
+            if (mix <= 0.0f) mix = 0.35f;
+            if (decay <= 0.0f) decay = 0.5f;
             float vol = 1.0f - mix * 0.5f;
-            OZ_INFO("ZONE_REVERB entered '%s' — mix=%.2f decay=%.2f vol=%.2f",
-                    reverbZone->name.c_str(), mix, decay, vol);
+            OZ_INFO("ZONE_REVERB entered — mix=%.2f decay=%.2f vol=%.2f", mix, decay, vol);
             if (OmegaTechSoundData.MusicFound)
             {
                 SetMusicVolume(OmegaTechSoundData.BackgroundMusic, vol);
@@ -2473,55 +1833,56 @@ void DrawWorld()
             lem.ClearPendingAmbient();
         }
 
-        // Zone environment override application
+        // Zone environment override application (from combined player region)
         {
+            auto& region = PawnSystem::Instance().GetPlayerRegion();
             static std::string activeEnvZone;
-            Vector3 pp = OmegaTechData.MainCamera.position;
-            ZoneVolumeNode *envZone = PawnSystem::Instance().CheckZoneCollision(pp, OmegaPlayer.PlayerBounds);
-            if (envZone && (envZone->envOverrides.applyFog || envZone->envOverrides.applyAmbient))
+            bool inEnvZone = region.combinedEnv.applyFog || region.combinedEnv.applyAmbient;
+            std::string envZoneName = (region.primaryZoneId >= 0) ? std::to_string(region.primaryZoneId) : "";
+
+            if (inEnvZone && activeEnvZone != envZoneName)
             {
-                if (activeEnvZone != envZone->name)
+                auto &eo = region.combinedEnv;
+                OZ_DEBUG("Zone env: applyFog=%d applyAmbient=%d", eo.applyFog, eo.applyAmbient);
+                if (eo.applyFog && OmegaTechData.Lights.id > 0)
                 {
-                    auto &eo = envZone->envOverrides;
-                    OZ_DEBUG("Zone env: '%s' applyFog=%d applyAmbient=%d",
-                             envZone->name.c_str(), eo.applyFog, eo.applyAmbient);
-                    if (eo.applyFog && OmegaTechData.Lights.id > 0)
-                    {
-                        float fc[3] = {eo.fogR / 255.0f, eo.fogG / 255.0f, eo.fogB / 255.0f};
-                        float fd = eo.fogDensity;
-                        static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
-                        static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
-                        static int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
-                        static int fogEndLoc = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
-                        SetShaderValue(OmegaTechData.Lights, fogColorLoc, fc, SHADER_UNIFORM_VEC3);
-                        SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &fd, SHADER_UNIFORM_FLOAT);
-                        float fs = eo.fogStart, fe = eo.fogEnd;
-                        SetShaderValue(OmegaTechData.Lights, fogStartLoc, &fs, SHADER_UNIFORM_FLOAT);
-                        SetShaderValue(OmegaTechData.Lights, fogEndLoc, &fe, SHADER_UNIFORM_FLOAT);
-                        FogEnabled = true;
-                        FogIntensity = (fd > 0) ? fd : 0.3f;
-                        FogTint = {(unsigned char)eo.fogR, (unsigned char)eo.fogG, (unsigned char)eo.fogB, 255};
-                    }
-                    if (eo.applyAmbient && OmegaTechData.Lights.id > 0)
-                    {
-                        float amb[4] = {eo.ambR / 255.0f * eo.ambIntensity,
-                                        eo.ambG / 255.0f * eo.ambIntensity,
-                                        eo.ambB / 255.0f * eo.ambIntensity, 1.0f};
-                        static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
-                        SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
-                    }
-                    activeEnvZone = envZone->name;
+                    float fc[3] = {eo.fogR / 255.0f, eo.fogG / 255.0f, eo.fogB / 255.0f};
+                    float fd = eo.fogDensity;
+                    static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+                    static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+                    static int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
+                    static int fogEndLoc = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
+                    SetShaderValue(OmegaTechData.Lights, fogColorLoc, fc, SHADER_UNIFORM_VEC3);
+                    SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &fd, SHADER_UNIFORM_FLOAT);
+                    float fs = eo.fogStart, fe = eo.fogEnd;
+                    SetShaderValue(OmegaTechData.Lights, fogStartLoc, &fs, SHADER_UNIFORM_FLOAT);
+                    SetShaderValue(OmegaTechData.Lights, fogEndLoc, &fe, SHADER_UNIFORM_FLOAT);
+                    FogEnabled = true;
+                    FogIntensity = (fd > 0) ? fd : 0.3f;
+                    FogTint = {(unsigned char)eo.fogR, (unsigned char)eo.fogG, (unsigned char)eo.fogB, 255};
                 }
+                if (eo.applyAmbient && OmegaTechData.Lights.id > 0)
+                {
+                    float amb[4] = {eo.ambR / 255.0f * eo.ambIntensity,
+                                    eo.ambG / 255.0f * eo.ambIntensity,
+                                    eo.ambB / 255.0f * eo.ambIntensity, 1.0f};
+                    static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
+                    SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
+                }
+                activeEnvZone = envZoneName;
             }
-            else if (!activeEnvZone.empty())
+            else if (!inEnvZone && !activeEnvZone.empty())
             {
-                // Exited env zone — restore defaults
-                OZ_DEBUG("Zone env: restoring defaults");
+                // Exited env zone — restore defaults from WorldInfo
+                OZ_DEBUG("Zone env: restoring WorldInfo defaults");
                 if (OmegaTechData.Lights.id > 0)
                 {
-                    float defFogColor[3] = {0.7f, 0.7f, 0.8f};
-                    float defFogDensity = 1.0f;
-                    float defFogStart = 10.0f, defFogEnd = 100.0f;
+                    auto& wi = PawnSystem::Instance().GetWorldInfo();
+                    float defFogColor[3] = {wi.defaultEnv.fogR / 255.0f,
+                                            wi.defaultEnv.fogG / 255.0f,
+                                            wi.defaultEnv.fogB / 255.0f};
+                    float defFogDensity = wi.defaultEnv.fogDensity;
+                    float defFogStart = wi.defaultEnv.fogStart, defFogEnd = wi.defaultEnv.fogEnd;
                     static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
                     static int fogColorLoc = GetShaderLocation(OmegaTechData.Lights, "fogColor");
                     static int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");

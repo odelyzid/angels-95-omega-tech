@@ -1,14 +1,18 @@
 #include "WindowsCompat.hpp"
 #include "raylib.h"
 #include "Settings.hpp"
+#include "Pawn/PlayerMovement.hpp"
 #include "Pawn/Player.hpp"
+#include "PPGIO.hpp"
 #include "Pawn/Items.hpp"
 #include "Editor.hpp"
 #include "Renderer/Video.hpp"
 #include "ParticleDemon/ParticleDemon.hpp"
 #include "Parasite/ParasiteScript.hpp"
 #include "Encoder/Encoder.hpp"
-#include "Pawn/Entities.hpp"
+// Entities.hpp removed
+
+static PlayerMovement g_playerMovement;
 
 #include <string>
 #include <iostream>
@@ -19,8 +23,6 @@
 using namespace std;
 
 #define MaxCachedModels 200
-// This Whole Fucker Breaks Render Logic for Models and Entities inside Editor Viewport
-// TODO: Refactor / Remove entire Abrivation for this class as it should only be handled by the PawnSystem 
 
 static wstring WorldData;
 static wstring OtherWDLData;
@@ -56,85 +58,16 @@ class GameModels
         Image HeightMapImage = {0};
         bool HeightMapReady = false;
 
-        // OBJ Models
-
         Model HeightMap;
         Texture2D HeightMapTexture;
 
-        Model Model1;
-        Texture2D Model1Texture;
+        static const int MAX_WDL_MODELS = 20;
+        Model wdlModels[MAX_WDL_MODELS + 1]{};
+        Texture2D wdlModelTextures[MAX_WDL_MODELS + 1]{};
 
-        Model Model2;
-        Texture2D Model2Texture;
-
-        Model Model3;
-        Texture2D Model3Texture;
-
-        Model Model4;
-        Texture2D Model4Texture;
-
-        Model Model5;
-        Texture2D Model5Texture;
-
-        Model Model6;
-        Texture2D Model6Texture;
-
-        Model Model7;
-        Texture2D Model7Texture;
-
-        Model Model8;
-        Texture2D Model8Texture;
-
-        Model Model9;
-        Texture2D Model9Texture;
-
-        Model Model10;
-        Texture2D Model10Texture;
-
-        Model Model11;
-        Texture2D Model11Texture;
-
-        Model Model12;
-        Texture2D Model12Texture;
-
-        Model Model13;
-        Texture2D Model13Texture;
-
-        Model Model14;
-        Texture2D Model14Texture;
-
-        Model Model15;
-        Texture2D Model15Texture;
-
-        Model Model16;
-        Texture2D Model16Texture;
-
-        Model Model17;
-        Texture2D Model17Texture;
-
-        Model Model18;
-        Texture2D Model18Texture;
-
-        Model Model19;
-        Texture2D Model19Texture;
-
-        Model Model20;
-        Texture2D Model20Texture;
-
-        // GLTS Models
-
-        // For Faster Rendering.
-
-        Model FastModel1;
-        Texture2D FastModel1Texture;
-        Model FastModel2;
-        Texture2D FastModel2Texture;
-        Model FastModel3;
-        Texture2D FastModel3Texture;
-        Model FastModel4;
-        Texture2D FastModel4Texture;
-        Model FastModel5;
-        Texture2D FastModel5Texture;
+        // Weapon object models (Object1-5, loaded from EntityDef mesh paths)
+        Model objectModels[5]{};
+        bool objectModelsLoaded[5] = {false, false, false, false, false};
 };
 
 static GameModels WDLModels;

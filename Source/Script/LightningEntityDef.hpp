@@ -78,4 +78,15 @@ struct EntityDef {
     std::string skybox;
     std::string music;
     std::string sourcePath;  // where this was parsed from
+
+    // Player stat defaults (used when spawning "Player" entity)
+    float defaultHealth = 100.0f;
+    float defaultMaxHealth = 100.0f;
+    float defaultMana = 0.0f;
+    float defaultMaxMana = 100.0f;
+    float defaultPsychicEnergy = 0.0f;
+    float defaultMaxPsychicEnergy = 100.0f;
+    int defaultLevel = 1;
+    int defaultXP = 0;
+    int defaultXPToNext = 100;
 };

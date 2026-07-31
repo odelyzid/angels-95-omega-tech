@@ -90,11 +90,47 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
 // ---------------------------------------------------------------------------
 // Init — called at startup after registry is populated
 // ---------------------------------------------------------------------------
+LightningEntityManager::LightningEntityManager() {
+    for (int i = 0; i < HOTBAR_SIZE; i++) m_hotbar[i] = -1;
+    for (int i = 0; i < EQUIP_SLOT_COUNT; i++) m_equipment[i] = -1;
+    m_selectedSlot = 0;
+    m_playerEntityIndex = -1;
+}
+
 void LightningEntityManager::Init() {
     for (int i = 0; i < HOTBAR_SIZE; i++) m_hotbar[i] = -1;
+    for (int i = 0; i < EQUIP_SLOT_COUNT; i++) m_equipment[i] = -1;
     m_selectedSlot = 0;
+    m_playerEntityIndex = -1;
     m_instances.clear();
     m_resources.clear();
+    m_soundCache.clear();
+    m_pendingFog = false;
+    m_pendingSkybox.clear();
+    m_pendingAmbient = false;
+
+    // Auto-spawn player entity
+    int playerIdx = Spawn("Player");
+    if (playerIdx >= 0) {
+        m_playerEntityIndex = playerIdx;
+        EntityInstance* p = Get(playerIdx);
+        if (p && p->def) {
+            // Populate runtimeStats from EntityDef defaults
+            p->runtimeStats["health"] = p->def->defaultHealth;
+            p->runtimeStats["max_health"] = p->def->defaultMaxHealth;
+            p->runtimeStats["mana"] = p->def->defaultMana;
+            p->runtimeStats["max_mana"] = p->def->defaultMaxMana;
+            p->runtimeStats["psychic_energy"] = p->def->defaultPsychicEnergy;
+            p->runtimeStats["max_psychic_energy"] = p->def->defaultMaxPsychicEnergy;
+            p->runtimeStats["level"] = (float)p->def->defaultLevel;
+            p->runtimeStats["xp"] = (float)p->def->defaultXP;
+            p->runtimeStats["xp_to_next"] = (float)p->def->defaultXPToNext;
+        }
+        OZ_INFO("LightningEntityManager: player entity spawned at idx %d", playerIdx);
+    } else {
+        OZ_WARN("LightningEntityManager: could not spawn player entity");
+    }
+
     OZ_INFO("LightningEntityManager: ready, registry has %d defs",
             LightningEntityRegistry::Instance().Count());
 }
@@ -211,6 +247,10 @@ void LightningEntityManager::Despawn(int index) {
     for (int s = 0; s < HOTBAR_SIZE; s++) {
         if (m_hotbar[s] == index) m_hotbar[s] = -1;
     }
+    // Remove from equipment slots if present
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        if (m_equipment[s] == index) m_equipment[s] = -1;
+    }
 
     // Swap with last to keep array compact
     if (index < (int)m_instances.size() - 1) {
@@ -218,6 +258,10 @@ void LightningEntityManager::Despawn(int index) {
         // Update hotbar references
         for (int s = 0; s < HOTBAR_SIZE; s++) {
             if (m_hotbar[s] == (int)m_instances.size() - 1) m_hotbar[s] = index;
+        }
+        // Update equipment references
+        for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+            if (m_equipment[s] == (int)m_instances.size() - 1) m_equipment[s] = index;
         }
     }
     m_instances.pop_back();
@@ -326,6 +370,17 @@ void* LightningEntityManager::GetTexture(int idx) const {
 
 void* LightningEntityManager::GetIcon(int idx) const {
     return GetTexture(idx);
+}
+
+int LightningEntityManager::PrecacheModelForDef(const std::string& defName) {
+    const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
+    if (!def || def->mesh.empty()) return -1;
+    return CacheModel(def->mesh);
+}
+
+Model* LightningEntityManager::GetModelByResourceIdx(int idx) const {
+    if (idx < 0 || idx >= (int)m_resources.size() || m_resources[idx].type != 1) return nullptr;
+    return const_cast<Model*>(&m_resources[idx].model);
 }
 
 void LightningEntityManager::UncacheResource(int idx) {
@@ -451,4 +506,143 @@ void LightningEntityManager::TriggerZoneAction(const std::string& zoneName,
         for (int step = 0; step < 50 && inst->ctx.HasMore(); step++)
             inst->ctx.ExecuteNext();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Equipment slots
+// ---------------------------------------------------------------------------
+int LightningEntityManager::EquipmentAt(int slot) const {
+    if (slot < 0 || slot >= EQUIP_SLOT_COUNT) return -1;
+    return m_equipment[slot];
+}
+
+void LightningEntityManager::EquipmentAssign(int slot, int instanceIndex) {
+    if (slot < 0 || slot >= EQUIP_SLOT_COUNT) return;
+    // If slot is occupied, despawn old instance first
+    if (m_equipment[slot] >= 0) {
+        Despawn(m_equipment[slot]);
+    }
+    m_equipment[slot] = instanceIndex;
+}
+
+void LightningEntityManager::EquipmentUnequip(int slot) {
+    if (slot < 0 || slot >= EQUIP_SLOT_COUNT) return;
+    if (m_equipment[slot] >= 0) {
+        Despawn(m_equipment[slot]);
+        m_equipment[slot] = -1;
+    }
+}
+
+void LightningEntityManager::EquipmentClear() {
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        if (m_equipment[s] >= 0) {
+            Despawn(m_equipment[s]);
+            m_equipment[s] = -1;
+        }
+    }
+}
+
+int LightningEntityManager::EquipmentFindFreeSlot() const {
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        if (m_equipment[s] < 0) return s;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Player stat accessors
+// ---------------------------------------------------------------------------
+float LightningEntityManager::GetPlayerStat(const std::string& name, float defaultVal) const {
+    if (m_playerEntityIndex < 0 || m_playerEntityIndex >= (int)m_instances.size())
+        return defaultVal;
+    auto it = m_instances[m_playerEntityIndex].runtimeStats.find(name);
+    return (it != m_instances[m_playerEntityIndex].runtimeStats.end()) ? it->second : defaultVal;
+}
+
+void LightningEntityManager::SetPlayerStat(const std::string& name, float val) {
+    if (m_playerEntityIndex >= 0 && m_playerEntityIndex < (int)m_instances.size())
+        m_instances[m_playerEntityIndex].runtimeStats[name] = val;
+}
+
+float LightningEntityManager::GetPlayerHealth() const { return GetPlayerStat("health", 100.0f); }
+float LightningEntityManager::GetPlayerMaxHealth() const { return GetPlayerStat("max_health", 100.0f); }
+void LightningEntityManager::SetPlayerHealth(float v) { SetPlayerStat("health", v); }
+
+float LightningEntityManager::GetPlayerMana() const { return GetPlayerStat("mana", 0.0f); }
+float LightningEntityManager::GetPlayerMaxMana() const { return GetPlayerStat("max_mana", 100.0f); }
+void LightningEntityManager::SetPlayerMana(float v) { SetPlayerStat("mana", v); }
+
+float LightningEntityManager::GetPlayerPsychicEnergy() const { return GetPlayerStat("psychic_energy", 0.0f); }
+float LightningEntityManager::GetPlayerMaxPsychicEnergy() const { return GetPlayerStat("max_psychic_energy", 100.0f); }
+void LightningEntityManager::SetPlayerPsychicEnergy(float v) { SetPlayerStat("psychic_energy", v); }
+
+int LightningEntityManager::GetPlayerLevel() const { return (int)GetPlayerStat("level", 1.0f); }
+void LightningEntityManager::SetPlayerLevel(int v) { SetPlayerStat("level", (float)v); }
+
+int LightningEntityManager::GetPlayerXP() const { return (int)GetPlayerStat("xp", 0.0f); }
+void LightningEntityManager::SetPlayerXP(int v) { SetPlayerStat("xp", (float)v); }
+
+int LightningEntityManager::GetPlayerXPToNext() const { return (int)GetPlayerStat("xp_to_next", 100.0f); }
+void LightningEntityManager::SetPlayerXPToNext(int v) { SetPlayerStat("xp_to_next", (float)v); }
+
+// ---------------------------------------------------------------------------
+// Serialization — compact hotbar + equipment state for TF.sav
+// Format: "hotbar:def1,def2,...|equip:def1,,,,...|"
+// Empty slots are empty strings (consecutive commas).
+// ---------------------------------------------------------------------------
+std::string LightningEntityManager::SerializeState() const {
+    std::string result;
+    // Hotbar
+    result += "hotbar:";
+    for (int s = 0; s < HOTBAR_SIZE; s++) {
+        if (s > 0) result += ",";
+        int idx = m_hotbar[s];
+        if (idx >= 0 && idx < (int)m_instances.size() && m_instances[idx].def)
+            result += m_instances[idx].def->name;
+    }
+    result += "|equip:";
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        if (s > 0) result += ",";
+        int idx = m_equipment[s];
+        if (idx >= 0 && idx < (int)m_instances.size() && m_instances[idx].def)
+            result += m_instances[idx].def->name;
+    }
+    result += "|";
+    return result;
+}
+
+bool LightningEntityManager::DeserializeState(const std::string& data) {
+    // Parse "hotbar:def1,def2,...|equip:def1,def2,...|"
+    // First clear existing
+    for (int s = 0; s < HOTBAR_SIZE; s++) m_hotbar[s] = -1;
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) m_equipment[s] = -1;
+
+    auto parseSection = [&](const std::string& prefix, int* arr, int arrSize) {
+        size_t p = data.find(prefix);
+        if (p == std::string::npos) return;
+        p += prefix.size();
+        size_t end = data.find('|', p);
+        if (end == std::string::npos) end = data.size();
+        std::string section = data.substr(p, end - p);
+        size_t start = 0;
+        for (int s = 0; s < arrSize; s++) {
+            size_t comma = section.find(',', start);
+            std::string name = (comma == std::string::npos)
+                ? section.substr(start)
+                : section.substr(start, comma - start);
+            // Trim whitespace
+            while (!name.empty() && (name[0] == ' ' || name[0] == '\t')) name.erase(0, 1);
+            while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+            if (!name.empty()) {
+                int idx = Spawn(name);
+                if (idx >= 0) arr[s] = idx;
+            }
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+    };
+
+    parseSection("hotbar:", m_hotbar, HOTBAR_SIZE);
+    parseSection("equip:", m_equipment, EQUIP_SLOT_COUNT);
+    return true;
 }

@@ -774,22 +774,19 @@ auto CycleInstruction(){
                 if (SplitValue(Instruction, 0 ) == "ownobj"){
                     int ObjectId = StringToInt(SplitValue(Instruction, 1));
 
-                    switch (ObjectId){
-                        case 1:
-                            OmegaTechGameObjects.Object1Owned = true;
-                            break;
-                        case 2:
-                            OmegaTechGameObjects.Object2Owned = true;
-                            break;
-                        case 3:
-                            OmegaTechGameObjects.Object3Owned = true;
-                            break;
-                        case 4:
-                            OmegaTechGameObjects.Object4Owned = true;
-                            break;
-                        case 5:
-                            OmegaTechGameObjects.Object5Owned = true;
-                            break;
+                    if (ObjectId >= 1 && ObjectId <= 5) {
+                        char defName[16];
+                        snprintf(defName, sizeof(defName), "Object%d", ObjectId);
+                        auto& lem = LightningEntityManager::Instance();
+                        int idx = lem.Spawn(defName);
+                        if (idx >= 0) {
+                            for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
+                                if (lem.HotbarAt(s) < 0) {
+                                    lem.HotbarAssign(s, idx);
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     FoundInstruction = true;

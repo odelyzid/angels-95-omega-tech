@@ -4,7 +4,7 @@
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Script/LightningEntityManager.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
-#include "Player.hpp"
+#include "PlayerMovement.hpp"
 #include "Items.hpp"
 #include "../Log.hpp"
 #include <cmath>
@@ -228,6 +228,18 @@ PlayerStartNode* PawnSystem::GetFirstPlayerStart() {
     return nullptr;
 }
 
+void PawnSystem::RespawnPlayerAtStart(Camera3D& camera) {
+    PlayerStartNode* ps = GetFirstPlayerStart();
+    if (ps) {
+        camera.position = ps->position;
+        camera.position.y += 2.0f;
+        camera.target = {ps->position.x, ps->position.y + 2.0f, ps->position.z - 5.0f};
+    } else {
+        camera.position = {0.0f, 5.0f, 0.0f};
+        camera.target = {0.0f, 5.0f, -5.0f};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Projectile nodes
 // ---------------------------------------------------------------------------
@@ -349,15 +361,16 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
 
             const ItemDBEntry* def = (itemId > 0) ? GetItemDef(itemId) : nullptr;
             if (def) {
+                auto& lem = LightningEntityManager::Instance();
                 switch (def->category) {
                     case ItemCategory::HEALTH_VIAL:
-                        OmegaPlayer.Health = std::min(OmegaPlayer.Health + (float)def->value, OmegaPlayer.MaxHealth);
+                        lem.SetPlayerHealth(std::min(lem.GetPlayerHealth() + (float)def->value, lem.GetPlayerMaxHealth()));
                         break;
                     case ItemCategory::MANA_VIAL:
-                        OmegaPlayer.Mana = std::min(OmegaPlayer.Mana + (float)def->value, OmegaPlayer.MaxMana);
+                        lem.SetPlayerMana(std::min(lem.GetPlayerMana() + (float)def->value, lem.GetPlayerMaxMana()));
                         break;
                     case ItemCategory::ENERGY_CRYSTAL:
-                        OmegaPlayer.PsychicEnergy = std::min(OmegaPlayer.PsychicEnergy + (float)def->value, OmegaPlayer.MaxPsychicEnergy);
+                        lem.SetPlayerPsychicEnergy(std::min(lem.GetPlayerPsychicEnergy() + (float)def->value, lem.GetPlayerMaxPsychicEnergy()));
                         break;
                     case ItemCategory::COIN:
                         gInventory.coins += def->value;
@@ -366,8 +379,22 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                         gInventory.AddToBackpack(itemId, 1);
                         break;
                 }
+            } else if (edef && edef->type == EntityType::WEAPON) {
+                int instIdx = LightningEntityManager::Instance().Spawn(edef->name);
+                if (instIdx >= 0) {
+                    for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
+                        if (LightningEntityManager::Instance().HotbarAt(s) < 0) {
+                            LightningEntityManager::Instance().HotbarAssign(s, instIdx);
+                            break;
+                        }
+                    }
+                }
             }
             OZ_INFO("Pickup collected: %s (itemId=%d)", n.typeName.c_str(), itemId);
+            m_pickupFeedback.collected = true;
+            m_pickupFeedback.typeName = n.typeName;
+            m_pickupFeedback.itemId = itemId;
+            m_pickupFeedback.flashTimer = 0.5f;
         }
     }
 }
@@ -538,14 +565,26 @@ void PawnSystem::Update(Vector3 playerPos, float dt) {
 // ---------------------------------------------------------------------------
 // DrawAll - draw pawn billboards
 // ---------------------------------------------------------------------------
-void PawnSystem::DrawAll(Camera3D& camera) {
+void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
 
         if (p.sprite.id != 0) {
-            DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
+            if (litShader.id > 0) {
+                float size = 2.0f;
+                Mesh plane = GenMeshPlane(size, size, 1, 1);
+                Model model = LoadModelFromMesh(plane);
+                model.materials[0].shader = litShader;
+                model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = p.sprite;
+                Vector3 cp = camera.position;
+                float yaw = atan2f(cp.x - p.position.x, cp.z - p.position.z) * RAD2DEG;
+                DrawModelEx(model, p.position, {0, 1, 0}, yaw, {1, 1, 1}, WHITE);
+                UnloadModel(model);
+            } else {
+                DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
+            }
         } else {
-            EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f);
+            EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f, litShader);
         }
     }
 }
@@ -573,17 +612,41 @@ void PawnSystem::ClearEmitters() {
 // ---------------------------------------------------------------------------
 // DrawEntities - draw player starts, pickups, zones, emitters as billboards
 // ---------------------------------------------------------------------------
-void PawnSystem::DrawEntities(Camera3D& camera) {
+void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
     // Player start billboards
     for (auto& n : m_playerStarts) {
         EngineBillboard::Draw(camera, "PlayerStart",
-            {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f);
+            {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f, litShader);
     }
 
     // Pickup billboards with bobbing
     for (auto& n : m_pickups) {
         if (!n.active) continue;
-        EngineBillboard::DrawPickup(camera, n.typeName.c_str(), n.position, 0.8f);
+        const EntityDef* edef = LightningEntityRegistry::Instance().Find(n.typeName);
+        if (edef && edef->type == EntityType::WEAPON) {
+            float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
+            Vector3 pos = {n.position.x, n.position.y + 0.5f + bob, n.position.z};
+            auto meshIt = edef->stats.strings.find("mesh");
+            auto texIt = edef->stats.strings.find("texture");
+            if (meshIt != edef->stats.strings.end() && texIt != edef->stats.strings.end()) {
+                std::string meshPath = "GameData/Global/gun/" + n.typeName + "/" + meshIt->second;
+                std::string texPath = "GameData/Global/gun/" + n.typeName + "/" + texIt->second;
+                Model mdl = LoadModel(meshPath.c_str());
+                if (mdl.meshCount > 0) {
+                    Texture2D t = LoadTexture(texPath.c_str());
+                    if (t.id > 0)
+                        mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = t;
+                    if (litShader.id > 0)
+                        mdl.materials[0].shader = litShader;
+                    float yaw = atan2f(camera.position.x - pos.x, camera.position.z - pos.z) * RAD2DEG;
+                    DrawModelEx(mdl, pos, {0, 1, 0}, yaw, {1.5f, 1.5f, 1.5f}, WHITE);
+                    UnloadModel(mdl);
+                    if (t.id > 0) UnloadTexture(t);
+                }
+            }
+        } else {
+            EngineBillboard::DrawPickup(camera, n.typeName.c_str(), n.position, 0.8f, litShader);
+        }
     }
 
     // Zone billboards at center of bounding box
@@ -597,15 +660,15 @@ void PawnSystem::DrawEntities(Camera3D& camera) {
         if (n.zoneType == ZoneType::ZONE_WATER) icon = "ZoneWater";
         else if (n.zoneType == ZoneType::ZONE_LADDER) icon = "ZoneLadder";
         else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
-    else if (n.zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) icon = "ZoneSound";
+        else if (n.zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) icon = "ZoneSound";
         else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
-        EngineBillboard::Draw(camera, icon, center, 1.0f);
+        EngineBillboard::Draw(camera, icon, center, 1.0f, litShader);
     }
 
     // Sound / music emitter billboards
     for (auto& n : m_emitters) {
         const char* icon = (n.type == EmitterType::SOUND) ? "Sound" : "Music";
-        EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f);
+        EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f, litShader);
     }
 }
 
@@ -666,5 +729,114 @@ void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
 PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {
     static std::unordered_map<uint32_t, PatrolState> states;
     return states[p.id];
+}
+
+// ---------------------------------------------------------------------------
+// GetActiveZones — returns all zones overlapping the given position/bounds,
+// sorted by priority (highest first), then by volume (smallest first).
+// ---------------------------------------------------------------------------
+std::vector<ZoneVolumeNode*> PawnSystem::GetActiveZones(Vector3 pos, BoundingBox bounds) {
+    std::vector<ZoneVolumeNode*> result;
+    for (auto& z : m_zones) {
+        // Point test
+        bool inside = (pos.x >= z.bounds.min.x && pos.x <= z.bounds.max.x &&
+                       pos.y >= z.bounds.min.y && pos.y <= z.bounds.max.y &&
+                       pos.z >= z.bounds.min.z && pos.z <= z.bounds.max.z);
+        // Fallback to box test
+        if (!inside)
+            inside = CheckCollisionBoxes(bounds, z.bounds);
+        if (inside)
+            result.push_back(&z);
+    }
+    // Sort: highest priority first, then smallest volume
+    std::sort(result.begin(), result.end(), [](ZoneVolumeNode* a, ZoneVolumeNode* b) {
+        if (a->priority != b->priority) return a->priority > b->priority;
+        float va = (a->bounds.max.x - a->bounds.min.x) *
+                   (a->bounds.max.y - a->bounds.min.y) *
+                   (a->bounds.max.z - a->bounds.min.z);
+        float vb = (b->bounds.max.x - b->bounds.min.x) *
+                   (b->bounds.max.y - b->bounds.min.y) *
+                   (b->bounds.max.z - b->bounds.min.z);
+        return va < vb;
+    });
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// PointRegion::Rebuild — rebuild active zone set from a sorted list
+// ---------------------------------------------------------------------------
+void PointRegion::Rebuild(const std::vector<ZoneVolumeNode*>& activeZones) {
+    std::unordered_set<int> newIds;
+    ZoneEnvOverrides merged;
+
+    for (auto* z : activeZones) {
+        if (!z) continue;
+        newIds.insert((int)z->id);
+        // Merge env overrides (later zones in sorted order override earlier)
+        if (z->envOverrides.applyFog) {
+            merged.applyFog = true;
+            merged.fogR = z->envOverrides.fogR;
+            merged.fogG = z->envOverrides.fogG;
+            merged.fogB = z->envOverrides.fogB;
+            merged.fogDensity = z->envOverrides.fogDensity;
+            merged.fogStart = z->envOverrides.fogStart;
+            merged.fogEnd = z->envOverrides.fogEnd;
+        }
+        if (z->envOverrides.applyAmbient) {
+            merged.applyAmbient = true;
+            merged.ambR = z->envOverrides.ambR;
+            merged.ambG = z->envOverrides.ambG;
+            merged.ambB = z->envOverrides.ambB;
+            merged.ambIntensity = z->envOverrides.ambIntensity;
+        }
+        // Reverb always uses the highest-priority zone's values
+        if (z->zoneType == ZoneType::ZONE_REVERB || z->envOverrides.reverbMix > 0.0f) {
+            merged.reverbMix = z->envOverrides.reverbMix;
+            merged.reverbDecay = z->envOverrides.reverbDecay;
+        }
+    }
+
+    // Compute enter/exit sets
+    enteredZoneIds.clear();
+    exitedZoneIds.clear();
+    for (int id : newIds) {
+        if (activeZoneIds.find(id) == activeZoneIds.end())
+            enteredZoneIds.insert(id);
+    }
+    for (int id : activeZoneIds) {
+        if (newIds.find(id) == newIds.end())
+            exitedZoneIds.insert(id);
+    }
+
+    activeZoneIds = std::move(newIds);
+    combinedEnv = merged;
+    lastPrimaryZoneId = primaryZoneId;
+    if (activeZoneIds.empty()) {
+        primaryZoneId = -1;
+        primaryZoneType = ZoneType::ZONE_WATER;
+    } else {
+        primaryZoneId = *activeZoneIds.begin();
+        // Find type from the first active zone (highest priority after sorting)
+        // Since we received sorted zones, the first entry is highest priority
+        primaryZoneType = (!activeZones.empty() && activeZones[0])
+            ? activeZones[0]->zoneType : ZoneType::ZONE_WATER;
+    }
+}
+
+bool PointRegion::HasZoneId(int id) const {
+    return activeZoneIds.find(id) != activeZoneIds.end();
+}
+
+void PointRegion::CommitFrame() {
+    enteredZoneIds.clear();
+    exitedZoneIds.clear();
+}
+
+// ---------------------------------------------------------------------------
+// UpdatePlayerRegion — single-pass zone scan for the player
+// ---------------------------------------------------------------------------
+void PawnSystem::UpdatePlayerRegion(Vector3 playerPos, BoundingBox playerBounds) {
+    auto active = GetActiveZones(playerPos, playerBounds);
+    m_playerRegion.Rebuild(active);
 }
 

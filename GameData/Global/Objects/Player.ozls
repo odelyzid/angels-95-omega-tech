@@ -1,0 +1,13 @@
+entity "Player" : upgrade {
+    stats {
+        health = 100
+        max_health = 100
+        mana = 0
+        max_mana = 100
+        psychic_energy = 0
+        max_psychic_energy = 100
+        level = 1
+        xp = 0
+        xp_to_next = 100
+    }
+}

@@ -16,6 +16,10 @@
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Server/WDLParser.hpp"
 #include "../../Source/Physics/OzBsp.hpp"
+#include "../../Source/Renderer/LitLightning.hpp"
+#ifdef _WIN32
+#include <GL/gl.h>
+#endif
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -238,9 +242,6 @@ static RayCollision RaycastTestStarts(Ray ray, EditorSelection& out) {
 }
 
 static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
-    const int sbW = 200;
-    mousePos.x -= (float)sbW;
-    mousePos.y -= 28.0f;
     Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
 #ifdef DEBUG_EDITOR_TRACE
     EditorLog("MouseAt: x=%.0f y=%.0f)", mousePos.x, mousePos.y);
@@ -310,8 +311,23 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
 
 static void EditorPickEntity() {
     Vector2 mousePos = GetMousePosition();
-    
+    EditorSelection prevSel = g_sel;
+
     if (EditorRaycastAt(mousePos, g_sel)) {
+        // Toggle: clicking the same entity deselects
+        if (g_sel.type == prevSel.type && g_sel.index == prevSel.index) {
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+            OmegaTechEditor.DrawModel = false;
+            return;
+        }
+        // Clicking a different zone while one is selected = deselect
+        if (prevSel.type != SelType::NONE && g_sel.type == SelType::ZONE) {
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+            OmegaTechEditor.DrawModel = false;
+            return;
+        }
         EditorLog("Selected: %s (type=%d idx=%d x=%f y=%f z=%f)",
                   g_sel.name.c_str(), (int)g_sel.type, g_sel.index, (float)g_sel.pos.x, (float)g_sel.pos.y, (float)g_sel.pos.z);
         OmegaTechEditor.DrawModel = true;
@@ -448,32 +464,6 @@ static void OpenPropertiesForSelection() {
     g_editorPanels.propsTargetRotation = g_sel.rotation;
     ShowPropertiesPanel(true);
     EditorLog("Properties for %s idx=%d", g_sel.name.c_str(), g_sel.index);
-}
-
-static void ShowNativeContextMenu() {
-#ifdef _WIN32
-    HWND hWnd = (HWND)GetWindowHandle();
-    if (!hWnd || g_sel.type == SelType::NONE) return;
-
-    HMENU hMenu = CreatePopupMenu();
-    AppendMenuA(hMenu, MF_STRING, IDM_PROPERTIES, "Properties");
-    AppendMenuA(hMenu, MF_STRING, IDM_DELETE_ENTITY, "Delete");
-    AppendMenuA(hMenu, MF_STRING, IDM_DUPLICATE_ENTITY, "Duplicate");
-    // "Apply Texture to Surface" if a texture is selected and entity is a surface
-    if (!g_editorPanels.activeTexturePath.empty() &&
-        (g_sel.type == SelType::BRUSH || g_sel.type == SelType::MODEL)) {
-        AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuA(hMenu, MF_STRING, IDM_APPLY_TEXTURE, "Apply Texture to Surface");
-    }
-    AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hMenu, MF_STRING, IDM_CANCEL, "Cancel");
-
-    POINT pt;
-    GetCursorPos(&pt);
-    SetForegroundWindow(hWnd);
-    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_LEFTALIGN, pt.x, pt.y, 0, hWnd, NULL);
-    DestroyMenu(hMenu);
-#endif
 }
 
 // Editor log file (appended to System/AngelEd.log)
@@ -1144,7 +1134,7 @@ int main(int argc, char **argv){
 
         // Viewport bounds check — all raycasts only fire when mouse is inside 3D viewport
         Vector2 _mp = GetMousePosition();
-        bool _inViewport = (_mp.x >= 200.0f && _mp.y >= 28.0f);
+        bool _inViewport = (_mp.x >= (float)GetStatsSidebarWidth() && _mp.y >= 28.0f);
 
         // Hover raycast (throttled every 4 frames for performance)
         {
@@ -1164,9 +1154,8 @@ int main(int argc, char **argv){
         // Left-click: select entity (red highlight)
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !OmegaTechEditor.DrawModel) {
             Vector2 mp = GetMousePosition();
-            if (mp.x >= 200.0f && mp.y >= 28.0f) {
+            if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f)
                 EditorPickEntity();
-            }
         }
 
         // Right-click: drag resizes placement ghost; click picks entity + native context menu
@@ -1176,16 +1165,47 @@ int main(int argc, char **argv){
             if (LastClickTime != 0) DoubleClick = true;
             else LastClickTime = 1;
         }
-        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && g_rbDown) {
+        // Only apply drag threshold when in placement mode (DrawModel);
+        // otherwise any right-click is a context menu click regardless of tiny movement.
+        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && g_rbDown && OmegaTechEditor.DrawModel) {
             Vector2 delta = GetMouseDelta();
             if (fabsf(delta.x) > 3.0f || fabsf(delta.y) > 3.0f) g_rbDown = false;
         }
         if (IsMouseButtonReleased(MOUSE_RIGHT_BUTTON) && g_rbDown) {
             g_rbDown = false;
-            if (_inViewport && !OmegaTechEditor.DrawModel) {
+            // Re-check viewport bounds with fresh cursor position
+            Vector2 _mp_rel = GetMousePosition();
+            bool _inVpRel = (_mp_rel.x >= (float)GetStatsSidebarWidth() && _mp_rel.y >= 28.0f);
+            if (_inVpRel && !OmegaTechEditor.DrawModel) {
                 EditorPickEntity();
                 if (g_sel.type != SelType::NONE) {
-                    ShowNativeContextMenu();
+                    // Native Win32 context menu with TPM_RETURNCMD (avoids WM_COMMAND routing issues)
+                    #ifdef _WIN32
+                    HWND hWnd = (HWND)GetWindowHandle();
+                    if (hWnd) {
+                        HMENU hMenu = CreatePopupMenu();
+                        AppendMenuA(hMenu, MF_STRING, IDM_PROPERTIES, "Properties");
+                        AppendMenuA(hMenu, MF_STRING, IDM_DELETE_ENTITY, "Delete");
+                        AppendMenuA(hMenu, MF_STRING, IDM_DUPLICATE_ENTITY, "Duplicate");
+                        if (!g_editorPanels.activeTexturePath.empty() &&
+                            (g_sel.type == SelType::BRUSH || g_sel.type == SelType::MODEL)) {
+                            AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
+                            AppendMenuA(hMenu, MF_STRING, IDM_APPLY_TEXTURE, "Apply Texture to Surface");
+                        }
+                        POINT pt;
+                        GetCursorPos(&pt);
+                        SetForegroundWindow(hWnd);
+                        int cmd = TrackPopupMenu(hMenu,
+                            TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                            pt.x, pt.y, 0, hWnd, NULL);
+                        DestroyMenu(hMenu);
+                        // Handle the returned command directly
+                        if (cmd == IDM_PROPERTIES) OpenPropertiesForSelection();
+                        else if (cmd == IDM_DELETE_ENTITY) DeleteSelectedEntity();
+                        else if (cmd == IDM_DUPLICATE_ENTITY) DuplicateSelectedEntity();
+                        else if (cmd == IDM_APPLY_TEXTURE) g_editorPanels.actionApplyTextureToSel = true;
+                    }
+                    #endif
                 }
             }
         }
@@ -1278,12 +1298,27 @@ int main(int argc, char **argv){
             ClearZoneApplyFlags();
         }
 
+        // Submit lights and viewPos for Lit mode
+        if (OTEditor.ViewMode == LightingMode::LIT && OTEditor.LitFogShader.id > 0) {
+            auto& pawnLights = PawnSystem::Instance().GetLights();
+            float dt = GetFrameTime();
+            LitLightning_Update(pawnLights, OTEditor.LitFogShader, OTEditor.MainCamera, dt);
+            if (OTEditor.ViewPosLoc >= 0) {
+                Vector3 camPos = OTEditor.MainCamera.position;
+                SetShaderValue(OTEditor.LitFogShader, OTEditor.ViewPosLoc, &camPos, SHADER_UNIFORM_VEC3);
+            }
+        }
+
         ClearBackground(BLACK);
 
         // Apply lighting mode before 3D rendering
+        rlDrawRenderBatchActive();
         if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
-            rlDisableBackfaceCulling();
-            rlDisableDepthMask();
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            glDisable(GL_CULL_FACE);
+        } else {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glEnable(GL_CULL_FACE);
         }
 
         BeginMode3D(OTEditor.MainCamera);
@@ -1311,9 +1346,14 @@ int main(int argc, char **argv){
             }
         }
 
-        // Pawn system 
-        PawnSystem::Instance().DrawAll(OTEditor.MainCamera);
-        PawnSystem::Instance().DrawEntities(OTEditor.MainCamera);
+        // Pawn system (use lit shader for billboards when in lit/unlit mode)
+        {
+            Shader bbShader = {0};
+            if (OTEditor.ViewMode == LightingMode::LIT) bbShader = OTEditor.LitFogShader;
+            else if (OTEditor.ViewMode == LightingMode::UNLIT) bbShader = OTEditor.UnlitShader;
+            PawnSystem::Instance().DrawAll(OTEditor.MainCamera, bbShader);
+            PawnSystem::Instance().DrawEntities(OTEditor.MainCamera, bbShader);
+        }
 
         // Zone volume wireframes
         {
@@ -1662,11 +1702,10 @@ int main(int argc, char **argv){
 
         EndMode3D();
 
-        // Reset lighting mode state
-        if (OTEditor.ViewMode == LightingMode::WIREFRAME) {
-            rlEnableBackfaceCulling();
-            rlEnableDepthMask();
-        }
+        // Reset lighting mode state (always restore defaults)
+        rlDrawRenderBatchActive();
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glEnable(GL_CULL_FACE);
 
         EndTextureMode();
 
@@ -1739,25 +1778,20 @@ int main(int argc, char **argv){
                     LightingMode prev = OTEditor.ViewMode;
                     OTEditor.ViewMode = (LightingMode)li;
                     if (prev != OTEditor.ViewMode) {
-                        static std::vector<Shader> savedModelShaders;
-                        if (OTEditor.ViewMode == LightingMode::UNLIT) {
-                            savedModelShaders.resize(WDLModels.models.size());
-                            for (size_t i = 0; i < WDLModels.models.size(); i++) {
-                                auto& m = WDLModels.models[i];
-                                savedModelShaders[i] = (m.loaded && m.model.meshCount > 0)
-                                    ? m.model.materials[0].shader : Shader{0};
+                        if (OTEditor.ViewMode == LightingMode::UNLIT && OTEditor.UnlitShader.id > 0) {
+                            for (auto& m : WDLModels.models)
                                 if (m.loaded && m.model.meshCount > 0)
-                                    m.model.materials[0].shader = Shader{0};
-                            }
-                            OzoneLoader::Instance().SetLitFogShaderEnabled(false);
-                        } else if (prev == LightingMode::UNLIT) {
-                            for (size_t i = 0; i < WDLModels.models.size() && i < savedModelShaders.size(); i++) {
-                                auto& m = WDLModels.models[i];
-                                if (m.loaded && m.model.meshCount > 0 && savedModelShaders[i].id > 0)
-                                    m.model.materials[0].shader = savedModelShaders[i];
-                            }
-                            savedModelShaders.clear();
-                            OzoneLoader::Instance().SetLitFogShaderEnabled(true);
+                                    m.model.materials[0].shader = OTEditor.UnlitShader;
+                            if (WDLModels.HeightMapReady)
+                                WDLModels.HeightMap.materials[0].shader = OTEditor.UnlitShader;
+                            OzoneLoader::Instance().SetLitFogShader(OTEditor.UnlitShader);
+                        } else if (prev == LightingMode::UNLIT && OTEditor.LitFogShader.id > 0) {
+                            for (auto& m : WDLModels.models)
+                                if (m.loaded && m.model.meshCount > 0)
+                                    m.model.materials[0].shader = OTEditor.LitFogShader;
+                            if (WDLModels.HeightMapReady)
+                                WDLModels.HeightMap.materials[0].shader = OTEditor.LitFogShader;
+                            OzoneLoader::Instance().SetLitFogShader(OTEditor.LitFogShader);
                         }
                     }
                 }
@@ -1768,94 +1802,29 @@ int main(int argc, char **argv){
             tBtn("PolyTexInfo","Pickup",6);
         }
 
-        // Draw the 3D viewport render target (offset by sidebar width)
-        int sbW = 200;
-        DrawTexturePro(Target.texture, (Rectangle){0, 0, (float)Target.texture.width, -(float)Target.texture.height},
-                       (Rectangle){(float)sbW, 28, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - 28)}, (Vector2){0,0}, 0, WHITE);
-        DrawFPS(GetScreenWidth() - 60, 36);
-
-        // Left sidebar overlay (always visible) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â CSG brushes + tools
+        // Draw the 3D viewport render target (offset by native stats sidebar)
+        int sbW = GetStatsSidebarWidth();
+        const int tbH = 28;
+        LayoutStatsSidebar(GetScreenWidth(), GetScreenHeight(), tbH, sbW);
         {
-            const int sbW = 200;
-            Color bg = {25, 25, 30, 220};
-            DrawRectangle(0, 28, sbW, GetScreenHeight() - 28, bg);
-            DrawRectangleLines(0, 28, sbW, GetScreenHeight() - 28, (Color){60, 60, 70, 255});
-
-            int y = 36;
-            DrawText("CSG Brushes", 10, y, 16, WHITE); y += 24;
-
-            // Primitive type display with icons
-            {
-                const char* primLabels[] = {"Box", "Cylinder", "Sphere", "Pyramid", "Plane"};
-                const char* primIcons[] = {"BBCube", "BBCylinder", "BBSphere", "BBGeneric", "BBSheet"};
-                int prim = g_editorPanels.actionCsgPlace >= 0 ? g_editorPanels.actionCsgPlace : 0;
-                auto& ico = EditorIcons::Instance();
-                for (int pi = 0; pi < 5; pi++) {
-                    int px = 10 + pi * 36;
-                    Color pc = (pi == prim) ? (Color){70, 90, 120, 255} : (Color){40, 40, 45, 255};
-                    DrawRectangle(px, y, 32, 24, pc);
-                    if (ico.Has(primIcons[pi])) ico.Draw(primIcons[pi], px + 6, y + 2, 16, WHITE);
-                    else DrawText(primLabels[pi], px + 2, y + 6, 10, LIGHTGRAY);
-                    if (CheckCollisionPointRec(GetMousePosition(), {(float)px, (float)y, 32, 24}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                        { g_editorPanels.actionCsgPlace = pi; g_placeMode = PlaceMode::MODEL; }
-                }
-                y += 28;
-            }
-
-            // CSG operation with icons
-            {
-                const char* csgLabels[] = {"SOLID", "ADD", "SUB", "INTERSECT", "DE_RESC"};
-                const char* csgIcons[] = {nullptr, "ModeAdd", "ModeSubtract", "ModeIntersect", "ModeDeintersect"};
-                int op = OmegaTechEditor.CSGOperation;
-                auto& ico = EditorIcons::Instance();
-                for (int oi = 0; oi < 5; oi++) {
-                    int px = 10 + oi * 36;
-                    Color oc = (oi == op) ? (Color){70, 90, 120, 255} : (Color){40, 40, 45, 255};
-                    DrawRectangle(px, y, 32, 24, oc);
-                    if (oi > 0 && ico.Has(csgIcons[oi])) ico.Draw(csgIcons[oi], px + 6, y + 2, 16, WHITE);
-                    else DrawText(csgLabels[oi], px + 2, y + 6, 10, LIGHTGRAY);
-                    if (CheckCollisionPointRec(GetMousePosition(), {(float)px, (float)y, 32, 24}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                        { OmegaTechEditor.CSGOperation = oi; }
-                }
-                y += 28;
-            }
-
-            // Placement info
-            DrawText(TextFormat("Pos: %.1f %.1f %.1f", OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z),
-                     10, y, 12, SKYBLUE); y += 16;
-            DrawText(TextFormat("Size: %.1f x %.1f x %.1f", OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L),
-                     10, y, 12, SKYBLUE); y += 16;
-            DrawText(TextFormat("Rot: %.0f  Scale: %.1f", OmegaTechEditor.R, OmegaTechEditor.S),
-                     10, y, 12, SKYBLUE); y += 22;
-
-            // Collision volume stats
-            int volCount = OzoneLoader::Instance().GetCollisionVolumes().size();
+            const char* modeStr =
+                g_placeMode == PlaceMode::MODEL ? "MODEL" :
+                g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
+                g_placeMode == PlaceMode::NODE ? "NODE" : "ENV";
+            int volCount = (int)OzoneLoader::Instance().GetCollisionVolumes().size();
             int chunkCount = OzoneLoader::Instance().GetChunkManager().CellCount();
-            DrawText(TextFormat("Collision: %d vols", volCount), 10, y, 12, volCount > 500 ? RED : DARKGREEN); y += 14;
-            DrawText(TextFormat("Chunks: %d", chunkCount), 10, y, 12, DARKGREEN); y += 22;
-
-            // Mode display
-            DrawText(TextFormat("Mode: %s", g_placeMode == PlaceMode::MODEL ? "MODEL" :
-                   g_placeMode == PlaceMode::PICKUP ? "PICKUP" :
-                   g_placeMode == PlaceMode::NODE ? "NODE" : "ENV"), 10, y, 13, WHITE); y += 18;
-            DrawText("1=Model 2=Pickup 3=Node 4=Env", 10, y, 10, DARKGRAY); y += 18;
-
-            // Heightmap button
-            DrawText("---", 10, y, 12, GRAY); y += 18;
-            DrawText("[H] Heightmap Editor", 10, y, 12, YELLOW); y += 16;
-            DrawText("[F5] Model Browser  [F6] Sound", 10, y, 10, DARKGRAY); y += 13;
-            DrawText("[F7] Textures  [F8] Pawn Manager", 10, y, 10, DARKGRAY); y += 13;
-            DrawText("[F12] Zone Properties", 10, y, 10, DARKGRAY); y += 16;
-
-            // Camera info
-            DrawText("---", 10, y, 12, GRAY); y += 18;
-            DrawText("Camera:", 10, y, 13, WHITE); y += 16;
-            DrawText(TextFormat("%.1f %.1f %.1f", OTEditor.MainCamera.position.x,
-                     OTEditor.MainCamera.position.y, OTEditor.MainCamera.position.z),
-                     10, y, 11, PURPLE); y += 14;
-            DrawText("MMB=Pan S+MMB=Y Alt+MMB=Orbit", 10, y, 9, DARKGRAY); y += 12;
-            DrawText("Scroll=Dolly Home=Reset", 10, y, 9, DARKGRAY);
+            UpdateStatsSidebar(
+                OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z,
+                OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L,
+                OmegaTechEditor.R, OmegaTechEditor.S,
+                volCount, chunkCount, modeStr,
+                OTEditor.MainCamera.position.x,
+                OTEditor.MainCamera.position.y,
+                OTEditor.MainCamera.position.z);
         }
+        DrawTexturePro(Target.texture, (Rectangle){0, 0, (float)Target.texture.width, -(float)Target.texture.height},
+                       (Rectangle){(float)sbW, (float)tbH, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - tbH)}, (Vector2){0,0}, 0, WHITE);
+        DrawFPS(GetScreenWidth() - 60, 36);
 
         // WorldGraph selection handler — set g_sel from explorer double-click
         if (g_editorPanels.actionSelectFromGraph >= 0) {
@@ -2193,6 +2162,19 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_F10)) TogglePickupPanel();
         if (IsKeyPressed(KEY_F11)) ToggleFullscreen();  // supersedes old F11 handling
         if (IsKeyPressed(KEY_F12)) ToggleEnvPanel();
+
+        // Selection shortcuts
+        if (IsKeyPressed(KEY_ESCAPE) && g_sel.type != SelType::NONE) {
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+            OmegaTechEditor.DrawModel = false;
+        }
+        if (IsKeyPressed(KEY_DELETE) && g_sel.type != SelType::NONE) {
+            DeleteSelectedEntity();
+        }
+        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_D) && g_sel.type != SelType::NONE) {
+            DuplicateSelectedEntity();
+        }
 
         // Camera shortcuts
         if (IsKeyPressed(KEY_HOME)) { SetViewPerspective(); ResetCamera(); }

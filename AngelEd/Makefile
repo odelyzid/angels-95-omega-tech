@@ -90,9 +90,15 @@ $(BUILD_DIR)/OzAssetMapper.o: ../Source/Package/OzAssetMapper.cpp ../Source/Pack
 $(BUILD_DIR)/WorldChunk.o: ../Source/Physics/WorldChunk.cpp ../Source/Physics/WorldChunk.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/WorldChunk.cpp -o $@
 
+$(BUILD_DIR)/LitLightning.o: ../Source/Renderer/LitLightning.cpp ../Source/Renderer/LitLightning.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/LitLightning.cpp -o $@
+
+$(BUILD_DIR)/rlights.o: ../Source/rlights/rlights.cpp ../Source/rlights/rlights.h | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/rlights/rlights.cpp -o $@
+
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/WDLParser.o $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
-             $(BUILD_DIR)/WorldChunk.o
+             $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/rlights.o
 
 # 5c. Editor Windows resource
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)

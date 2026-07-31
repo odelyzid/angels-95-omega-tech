@@ -19,12 +19,13 @@ struct EntityInstance {
     float cooldownRemaining = 0.0f;
 };
 
-// LightningEntityManager — runtime entity instances + dynamic hotbar
+// LightningEntityManager — runtime entity instances + dynamic hotbar + equipment
 // Replaces Objects.hpp with a fully dynamic 512-entity / 8-slot system
 class LightningEntityManager {
 public:
     static constexpr int MAX_ENTITIES = 512;
     static constexpr int HOTBAR_SIZE = 8;
+    static constexpr int EQUIP_SLOT_COUNT = 8;
 
     static LightningEntityManager& Instance() {
         static LightningEntityManager instance;
@@ -48,22 +49,59 @@ public:
     int  SelectedSlot() const { return m_selectedSlot; }
     EntityInstance* SelectedEntity() const;
 
+    // --- Equipment slots ---
+    int  EquipmentAt(int slot) const;           // returns instance index or -1
+    void EquipmentAssign(int slot, int instanceIndex);
+    void EquipmentUnequip(int slot);            // despawns equipped instance
+    void EquipmentClear();                      // despawns all equipped
+    int  EquipmentFindFreeSlot() const;         // first empty slot, or -1
+
     // Returns the model pointer from the cache by index
     void* GetModel(int idx) const;
     void* GetTexture(int idx) const;
     void* GetIcon(int idx) const;
+
+    // Pre-load a model for a named entity def and return resource slot index (or -1)
+    int PrecacheModelForDef(const std::string& defName);
+    // Get model by pre-cached index
+    Model* GetModelByResourceIdx(int idx) const;
 
     // --- Input + rendering ---
     void HandleInput();
     void DrawHotbar();
 
     // --- Projectile spawning (for weapon entities) ---
-    // Spawns a projectile from the selected weapon's entity stats.
-    // Returns the projectile index in PawnSystem, or -1.
     int FireSelectedWeapon(const Vector3& origin, const Vector3& direction);
 
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
+
+    // --- Player entity ---
+    bool HasPlayerEntity() const { return m_playerEntityIndex >= 0; }
+    int  PlayerEntityIndex() const { return m_playerEntityIndex; }
+
+    // Player stat accessors (read/write to player entity runtimeStats)
+    float GetPlayerStat(const std::string& name, float defaultVal = 0.0f) const;
+    void  SetPlayerStat(const std::string& name, float val);
+    float GetPlayerHealth() const;
+    float GetPlayerMaxHealth() const;
+    void  SetPlayerHealth(float v);
+    float GetPlayerMana() const;
+    float GetPlayerMaxMana() const;
+    void  SetPlayerMana(float v);
+    float GetPlayerPsychicEnergy() const;
+    float GetPlayerMaxPsychicEnergy() const;
+    void  SetPlayerPsychicEnergy(float v);
+    int   GetPlayerLevel() const;
+    void  SetPlayerLevel(int v);
+    int   GetPlayerXP() const;
+    void  SetPlayerXP(int v);
+    int   GetPlayerXPToNext() const;
+    void  SetPlayerXPToNext(int v);
+
+    // --- Serialization (for save/load) ---
+    std::string SerializeState() const;  // compact string of hotbar + equipment state
+    bool DeserializeState(const std::string& data);  // restore from SerializeState()
 
     // --- Script side-effect query (called by host after Update) ---
     bool HasPendingFog() const { return m_pendingFog; }
@@ -84,10 +122,16 @@ public:
     void ClearPendingAmbient() { m_pendingAmbient = false; }
 
 private:
-    LightningEntityManager() = default;
+    LightningEntityManager();
     std::vector<EntityInstance> m_instances;
     int m_hotbar[HOTBAR_SIZE];
     int m_selectedSlot = 0;
+
+    // Equipment slots — instance index, -1 = empty
+    int m_equipment[EQUIP_SLOT_COUNT];
+
+    // Player entity index (set during Init)
+    int m_playerEntityIndex = -1;
 
     // Cached model/texture/icon handles
     struct CachedResource {
@@ -104,7 +148,7 @@ private:
     bool m_pendingAmbient = false;
     float m_ambientR = 0.0f, m_ambientG = 0.0f, m_ambientB = 0.0f;
 
-    // Simple one-shot sound cache: path → loaded Sound
+    // Simple one-shot sound cache: path -> loaded Sound
     struct CachedSound { Sound sound; float timer = 0.0f; };
     std::unordered_map<std::string, CachedSound> m_soundCache;
 

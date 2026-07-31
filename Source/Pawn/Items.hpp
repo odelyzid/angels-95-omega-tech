@@ -3,6 +3,7 @@
 
 #include <string>
 #include "raylib.h"
+#include "../Script/LightningEntityManager.hpp"
 
 enum class ItemCategory {
     WEAPON = 0,
@@ -183,20 +184,18 @@ struct InventorySystem {
         const ItemDBEntry* def = GetItemDef(itemId);
         if (!def) return false;
 
+        auto& lem = LightningEntityManager::Instance();
         switch (def->category) {
             case ItemCategory::HEALTH_VIAL:
-                OmegaPlayer.Health = (OmegaPlayer.Health + def->value > OmegaPlayer.MaxHealth)
-                    ? OmegaPlayer.MaxHealth : OmegaPlayer.Health + def->value;
+                lem.SetPlayerHealth(std::min(lem.GetPlayerHealth() + (float)def->value, lem.GetPlayerMaxHealth()));
                 RemoveFromBackpack(bpSlot);
                 return true;
             case ItemCategory::MANA_VIAL:
-                OmegaPlayer.Mana = (OmegaPlayer.Mana + def->value > OmegaPlayer.MaxMana)
-                    ? OmegaPlayer.MaxMana : OmegaPlayer.Mana + def->value;
+                lem.SetPlayerMana(std::min(lem.GetPlayerMana() + (float)def->value, lem.GetPlayerMaxMana()));
                 RemoveFromBackpack(bpSlot);
                 return true;
             case ItemCategory::ENERGY_CRYSTAL:
-                OmegaPlayer.PsychicEnergy = (OmegaPlayer.PsychicEnergy + def->value > OmegaPlayer.MaxPsychicEnergy)
-                    ? OmegaPlayer.MaxPsychicEnergy : OmegaPlayer.PsychicEnergy + def->value;
+                lem.SetPlayerPsychicEnergy(std::min(lem.GetPlayerPsychicEnergy() + (float)def->value, lem.GetPlayerMaxPsychicEnergy()));
                 RemoveFromBackpack(bpSlot);
                 return true;
             default:

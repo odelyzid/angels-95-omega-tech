@@ -30,6 +30,7 @@ struct OzoneRenderable {
     float scale = 1.0f;
     float rotation = 0.0f;
     Model model;                 // generated raylib Model (meshes + materials)
+    Shader defaultShader = {0};  // saved original shader before LitFogShader override
     bool loaded = false;
     int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
     int texSlot = 0;             // 0=auto, 1..N = index into tileset textures
@@ -91,7 +92,7 @@ public:
                          const std::vector<float>& args);
 
     void LoadWorldTextures(const std::string& worldDir);
-    void SetLitFogShader(Shader shader) { s_litFogShader = shader; }
+    void SetLitFogShader(Shader shader);
     void SetLitFogShaderEnabled(bool enabled);
     void ApplyTexSlotToModel(Model& model, int slot);
 

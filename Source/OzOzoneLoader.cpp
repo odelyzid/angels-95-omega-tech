@@ -171,6 +171,16 @@ OzoneLoader& OzoneLoader::Instance() {
 Shader OzoneLoader::s_litFogShader = {0};
 Shader OzoneLoader::s_backupLitFogShader = {0};
 
+void OzoneLoader::SetLitFogShader(Shader shader) {
+    s_litFogShader = shader;
+    for (auto& r : m_renderables) {
+        if (r.loaded && r.model.meshCount > 0 && shader.id > 0)
+            r.model.materials[0].shader = shader;
+    }
+    if (m_hmReady && m_hmModel.meshCount > 0 && shader.id > 0)
+        m_hmModel.materials[0].shader = shader;
+}
+
 void OzoneLoader::SetLitFogShaderEnabled(bool enabled) {
     if (enabled) {
         s_litFogShader = s_backupLitFogShader;
@@ -446,7 +456,6 @@ bool OzoneLoader::LoadFile(const char* path) {
     size_t slash = p.find_last_of("/\\");
     if (slash != std::string::npos) {
         worldDir = p.substr(0, slash + 1);
-        LoadWorldTextures(worldDir);
         // Extract world name for GameData path resolution (e.g. "world_EngineTest.ozone" → "EngineTest")
         std::string fname = p.substr(slash + 1);
         std::string prefix = "world_";
@@ -454,6 +463,14 @@ bool OzoneLoader::LoadFile(const char* path) {
         if (fname.rfind(prefix, 0) == 0 && fname.size() > prefix.size() + suffix.size()) {
             std::string worldName = fname.substr(prefix.size(), fname.size() - prefix.size() - suffix.size());
             gameDataWorldDir = std::string("GameData/Worlds/") + worldName + "/";
+            // Prefer GameData tileset over package directory
+            if (fs::exists(gameDataWorldDir + "oztex/tileset/")) {
+                LoadWorldTextures(gameDataWorldDir);
+            } else {
+                LoadWorldTextures(worldDir);
+            }
+        } else {
+            LoadWorldTextures(worldDir);
         }
     }
 
@@ -520,6 +537,23 @@ bool OzoneLoader::LoadFile(const char* path) {
     m_renderables.push_back(r);
     }
 
+    // Post-process: assign zoneId to lights based on containing zone
+    {
+        auto& lights = PawnSystem::Instance().GetLights();
+        auto& zones = PawnSystem::Instance().GetZones();
+        for (auto& l : lights) {
+            l.zoneId = -1; // default: affects all zones
+            for (auto& z : zones) {
+                if (l.position.x >= z.bounds.min.x && l.position.x <= z.bounds.max.x &&
+                    l.position.y >= z.bounds.min.y && l.position.y <= z.bounds.max.y &&
+                    l.position.z >= z.bounds.min.z && l.position.z <= z.bounds.max.z) {
+                    l.zoneId = (int)z.id;
+                    break; // first containing zone wins
+                }
+            }
+        }
+    }
+
     RebuildCollisionVolumes();
     OZ_INFO("OzoneLoader: loaded %zu primitives, %zu collision volumes from %s",
             primitives.size(), m_collisionVolumes.size(), path);
@@ -574,6 +608,22 @@ bool OzoneLoader::LoadString(const char* data) {
         r.texSlot = (int)prim.args[6];
     if (r.texSlot > 0) ApplyTexSlotToModel(r.model, r.texSlot);
     m_renderables.push_back(r);
+    }
+    // Post-process: assign zoneId to lights based on containing zone
+    {
+        auto& lights = PawnSystem::Instance().GetLights();
+        auto& zones = PawnSystem::Instance().GetZones();
+        for (auto& l : lights) {
+            l.zoneId = -1;
+            for (auto& z : zones) {
+                if (l.position.x >= z.bounds.min.x && l.position.x <= z.bounds.max.x &&
+                    l.position.y >= z.bounds.min.y && l.position.y <= z.bounds.max.y &&
+                    l.position.z >= z.bounds.min.z && l.position.z <= z.bounds.max.z) {
+                    l.zoneId = (int)z.id;
+                    break;
+                }
+            }
+        }
     }
     RebuildCollisionVolumes();
     return true;
