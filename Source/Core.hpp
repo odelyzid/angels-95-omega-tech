@@ -22,6 +22,7 @@ bool ObjectCollision = false;
 extern bool g_showCollisionDebug;
 
 static char g_world_to_load[256] = "EngineTest";
+static bool g_skipMenu = false;
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -356,7 +357,14 @@ auto LoadWorld()
             }
         }
 
-        if (GameDataEncoded)
+        bool isDirectWdl = (strstr(g_world_to_load, ".wdl") != nullptr);
+        if (isDirectWdl)
+        {
+            WorldData = LoadFile(g_world_to_load);
+            OtherWDLData = L"";
+            CacheWDL();
+        }
+        else if (GameDataEncoded)
         {
             WorldData = Encode(LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", g_world_to_load)), MainKey);
         }
@@ -376,12 +384,19 @@ auto LoadWorld()
         PawnSystem::Instance().ClearEmitters();
         PawnSystem::Instance().DespawnAll();
 
-        char ozonePath[512];
-        snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
-        if (IsPathFile(ozonePath))
-            OzoneLoader::Instance().LoadFile(ozonePath);
+        if (!isDirectWdl)
+        {
+            char ozonePath[512];
+            snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
+            if (IsPathFile(ozonePath))
+                OzoneLoader::Instance().LoadFile(ozonePath);
+            else
+                LoadEntitiesFromWDL();
+        }
         else
+        {
             LoadEntitiesFromWDL();
+        }
 
         if (OmegaTechSoundData.MusicFound)
             StopMusicStream(OmegaTechSoundData.BackgroundMusic);
@@ -620,6 +635,15 @@ void PlaySplashScreen()
 
 void PlayHomeScreen()
 {
+    if (g_skipMenu)
+    {
+        g_skipMenu = false;
+        UnloadRenderTexture(Target);
+        Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+        OmegaTechData.Deaths = 1;
+        return;
+    }
+
     TitleMenu menu;
 
     while (!menu.Tick() && !WindowShouldClose())
