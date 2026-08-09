@@ -76,6 +76,9 @@ public:
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
 
+    // --- Execute a named action label on an instance ---
+    void RunAction(EntityInstance* inst, const std::string& actionName);
+
     // --- Player entity ---
     bool HasPlayerEntity() const { return m_playerEntityIndex >= 0; }
     int  PlayerEntityIndex() const { return m_playerEntityIndex; }

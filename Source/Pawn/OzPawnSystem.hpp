@@ -212,6 +212,7 @@ struct SkyZoneNode {
     bool bHighDetail = false;      // high/low detail variant toggle
     uint32_t skyEntityInstance = UINT32_MAX; // index into LightningEntityManager
     std::string skyboxPath;        // current skybox texture path
+    Texture2D skyboxTex{0};        // loaded skybox texture (unloaded on clear)
     std::string name;              // matching .ozls entity name for script hookup
     bool active = false;
     float intensity = 1.0f;
@@ -313,6 +314,7 @@ public:
 
     // Draw entities (billboards for player starts, pickups, zones, emitters)
     void DrawEntities(Camera3D& camera, Shader litShader = {0});
+    void ClearWeaponPickupCache();
 
     // Sky zone node management
     int AddSkyZone(const SkyZoneNode& node);
@@ -370,6 +372,13 @@ private:
     // Sky zone state
     std::vector<SkyZoneNode> m_skyZones;
     int m_activeSkyZoneIndex = -1;
+
+    // Weapon pickup model cache (keyed by typeName)
+    struct WeaponPickupCache {
+        Model model{0};
+        Texture2D texture{0};
+    };
+    std::unordered_map<std::string, WeaponPickupCache> m_weaponPickupCache;
 
     // World metadata + zone portal system
     WorldInfo m_worldInfo;

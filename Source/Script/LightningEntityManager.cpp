@@ -20,8 +20,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     // Check cooldown
     if (ent->cooldownRemaining > 0.0f) return -1;
 
-    // Read weapon stats from entity def
-    auto& stats = ent->def->stats.floats;
+    // Read weapon stats — runtimeStats overrides prototype def
     float projectileSpeed = 20.0f;
     float projectileDamage = 10.0f;
     float lifetime = 2.0f;
@@ -30,8 +29,10 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     float fireRate = 0.25f;  // seconds between shots
 
     auto readStat = [&](const std::string& key, float defVal) -> float {
-        auto it = stats.find(key);
-        return (it != stats.end()) ? it->second : defVal;
+        auto rit = ent->runtimeStats.find(key);
+        if (rit != ent->runtimeStats.end()) return rit->second;
+        auto dit = ent->def->stats.floats.find(key);
+        return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
     };
     projectileSpeed = readStat("projectile_speed", 20.0f);
     projectileDamage = readStat("damage", 10.0f);
@@ -273,11 +274,30 @@ EntityInstance* LightningEntityManager::Get(int index) {
 }
 
 // ---------------------------------------------------------------------------
+// RunAction — execute a named action label on an instance
+// ---------------------------------------------------------------------------
+void LightningEntityManager::RunAction(EntityInstance* inst, const std::string& actionName) {
+    if (!inst || !inst->def) return;
+    int labelLine = inst->ctx.FindJumpLabel(actionName);
+    if (labelLine < 0) return;
+    inst->ctx.Reset();
+    while (inst->ctx.ProgramCounter() < labelLine && inst->ctx.HasMore())
+        inst->ctx.ExecuteNext();
+    for (int step = 0; step < 30 && inst->ctx.HasMore(); step++)
+        inst->ctx.ExecuteNext();
+}
+
+// ---------------------------------------------------------------------------
 // Hotbar
 // ---------------------------------------------------------------------------
 void LightningEntityManager::HotbarAssign(int slot, int instanceIndex) {
     if (slot < 0 || slot >= HOTBAR_SIZE) return;
+    int oldIdx = m_hotbar[slot];
+    if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
+        RunAction(&m_instances[oldIdx], "on_unequip");
     m_hotbar[slot] = instanceIndex;
+    if (instanceIndex >= 0 && instanceIndex < (int)m_instances.size())
+        RunAction(&m_instances[instanceIndex], "on_equip");
 }
 
 void LightningEntityManager::HotbarSwap(int slotA, int slotB) {
@@ -291,7 +311,14 @@ int LightningEntityManager::HotbarAt(int slot) const {
 }
 
 void LightningEntityManager::SelectSlot(int slot) {
-    if (slot >= 0 && slot < HOTBAR_SIZE) m_selectedSlot = slot;
+    if (slot < 0 || slot >= HOTBAR_SIZE) return;
+    int oldIdx = m_hotbar[m_selectedSlot];
+    if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
+        RunAction(&m_instances[oldIdx], "on_unequip");
+    m_selectedSlot = slot;
+    int newIdx = m_hotbar[slot];
+    if (newIdx >= 0 && newIdx < (int)m_instances.size())
+        RunAction(&m_instances[newIdx], "on_equip");
 }
 
 EntityInstance* LightningEntityManager::SelectedEntity() const {
@@ -518,11 +545,16 @@ int LightningEntityManager::EquipmentAt(int slot) const {
 
 void LightningEntityManager::EquipmentAssign(int slot, int instanceIndex) {
     if (slot < 0 || slot >= EQUIP_SLOT_COUNT) return;
-    // If slot is occupied, despawn old instance first
+    // Fire on_unequip on old occupant, then despawn
     if (m_equipment[slot] >= 0) {
-        Despawn(m_equipment[slot]);
+        int oldIdx = m_equipment[slot];
+        if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
+            RunAction(&m_instances[oldIdx], "on_unequip");
+        Despawn(oldIdx);
     }
     m_equipment[slot] = instanceIndex;
+    if (instanceIndex >= 0 && instanceIndex < (int)m_instances.size())
+        RunAction(&m_instances[instanceIndex], "on_equip");
 }
 
 void LightningEntityManager::EquipmentUnequip(int slot) {

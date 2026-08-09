@@ -1434,18 +1434,29 @@ void DrawWorld()
         g_playerMovement.PlayerBounds);
     bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
 
-    // 2D skybox fallback texture (only when no active 3D sky zone)
-    if (!inSkyZone && OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0)
+    // 2D skybox background — render the active zone's skybox texture or fallback
     {
-        float sw = (float)Target.texture.width;
-        float sh = (float)Target.texture.height;
-        float tx = (float)WDLModels.Skybox.width;
-        float ty = (float)WDLModels.Skybox.height;
-        float scale = (tx > 0 && ty > 0) ? fmaxf(sw / tx, sh / ty) : 1.0f;
-        DrawTexturePro(WDLModels.Skybox,
-                       (Rectangle){0, 0, tx, ty},
-                       (Rectangle){sw * 0.5f, sh * 0.5f, tx * scale, ty * scale},
-                       (Vector2){tx * scale * 0.5f, ty * scale * 0.5f}, 0, WHITE);
+        Texture2D skyTex = {0};
+        if (inSkyZone) {
+            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
+            if (sky && sky->skyboxTex.id > 0)
+                skyTex = sky->skyboxTex;
+            else if (WDLModels.Skybox.id > 0)
+                skyTex = WDLModels.Skybox;
+        } else if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
+            skyTex = WDLModels.Skybox;
+        }
+        if (skyTex.id > 0) {
+            float sw = (float)Target.texture.width;
+            float sh = (float)Target.texture.height;
+            float tx = (float)skyTex.width;
+            float ty = (float)skyTex.height;
+            float scale = (tx > 0 && ty > 0) ? fmaxf(sw / tx, sh / ty) : 1.0f;
+            DrawTexturePro(skyTex,
+                           (Rectangle){0, 0, tx, ty},
+                           (Rectangle){sw * 0.5f, sh * 0.5f, tx * scale, ty * scale},
+                           (Vector2){tx * scale * 0.5f, ty * scale * 0.5f}, 0, WHITE);
+        }
     }
 
     BeginMode3D(OmegaTechData.MainCamera);
@@ -1782,45 +1793,35 @@ void DrawWorld()
         }
 
         // Apply pending Skybox changes from script contexts
-        // (if activeSkyZone present, SyncSkyboxState stored path — load texture here)
+        // Loads into active SkyZoneNode's skyboxTex (or WDLModels.Skybox fallback)
         {
             SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
-            if (sky && !sky->skyboxPath.empty())
-            {
-                std::string path = sky->skyboxPath;
-                OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
-                Texture2D newSky = LoadTextureWithFallback(path.c_str());
-                if (newSky.id > 0)
-                {
-                    if (WDLModels.Skybox.id > 0)
-                        UnloadTexture(WDLModels.Skybox);
-                    WDLModels.Skybox = newSky;
-                    OmegaTechData.SkyboxEnabled = true;
-                }
-                else
-                {
-                    OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
-                }
+            std::string path;
+            if (sky && !sky->skyboxPath.empty()) {
+                path = sky->skyboxPath;
                 sky->skyboxPath.clear();
+            } else if (lem.HasPendingSkybox()) {
+                path = lem.PendingSkybox();
+                lem.ClearPendingSkybox();
             }
-            else if (lem.HasPendingSkybox())
-            {
-                // Fallback: no active sky zone, apply directly
-                std::string path = lem.PendingSkybox();
+            if (!path.empty()) {
                 OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
                 Texture2D newSky = LoadTextureWithFallback(path.c_str());
-                if (newSky.id > 0)
-                {
+                if (newSky.id > 0) {
+                    // Load into zone's dedicated texture slot
+                    if (sky) {
+                        if (sky->skyboxTex.id > 0)
+                            UnloadTexture(sky->skyboxTex);
+                        sky->skyboxTex = newSky;
+                    }
+                    // Also set global fallback so 2D path works if leaving the zone
                     if (WDLModels.Skybox.id > 0)
                         UnloadTexture(WDLModels.Skybox);
                     WDLModels.Skybox = newSky;
                     OmegaTechData.SkyboxEnabled = true;
-                }
-                else
-                {
+                } else {
                     OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
                 }
-                lem.ClearPendingSkybox();
             }
         }
 

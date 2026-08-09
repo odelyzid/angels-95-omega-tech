@@ -308,6 +308,7 @@ void PawnSystem::RemovePickup(int id) {
 }
 
 void PawnSystem::ClearPickups() {
+    ClearWeaponPickupCache();
     m_pickups.clear();
 }
 
@@ -455,6 +456,13 @@ int PawnSystem::AddSkyZone(const SkyZoneNode& node) {
 }
 
 void PawnSystem::RemoveSkyZone(int id) {
+    // Unload texture before removal
+    for (auto& z : m_skyZones) {
+        if (z.id == (uint32_t)id && z.skyboxTex.id > 0) {
+            UnloadTexture(z.skyboxTex);
+            break;
+        }
+    }
     auto it = std::remove_if(m_skyZones.begin(), m_skyZones.end(),
         [id](const SkyZoneNode& n) { return n.id == (uint32_t)id; });
     m_skyZones.erase(it, m_skyZones.end());
@@ -463,6 +471,8 @@ void PawnSystem::RemoveSkyZone(int id) {
 }
 
 void PawnSystem::ClearSkyZones() {
+    for (auto& z : m_skyZones)
+        if (z.skyboxTex.id > 0) UnloadTexture(z.skyboxTex);
     m_skyZones.clear();
     m_activeSkyZoneIndex = -1;
 }
@@ -610,6 +620,17 @@ void PawnSystem::ClearEmitters() {
 }
 
 // ---------------------------------------------------------------------------
+// ClearWeaponPickupCache — unload all cached weapon pickup models
+// ---------------------------------------------------------------------------
+void PawnSystem::ClearWeaponPickupCache() {
+    for (auto& [name, entry] : m_weaponPickupCache) {
+        if (entry.model.meshCount > 0) UnloadModel(entry.model);
+        if (entry.texture.id > 0) UnloadTexture(entry.texture);
+    }
+    m_weaponPickupCache.clear();
+}
+
+// ---------------------------------------------------------------------------
 // DrawEntities - draw player starts, pickups, zones, emitters as billboards
 // ---------------------------------------------------------------------------
 void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
@@ -629,19 +650,26 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
             auto meshIt = edef->stats.strings.find("mesh");
             auto texIt = edef->stats.strings.find("texture");
             if (meshIt != edef->stats.strings.end() && texIt != edef->stats.strings.end()) {
-                std::string meshPath = "GameData/Global/gun/" + n.typeName + "/" + meshIt->second;
-                std::string texPath = "GameData/Global/gun/" + n.typeName + "/" + texIt->second;
-                Model mdl = LoadModel(meshPath.c_str());
-                if (mdl.meshCount > 0) {
-                    Texture2D t = LoadTexture(texPath.c_str());
-                    if (t.id > 0)
-                        mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = t;
-                    if (litShader.id > 0)
-                        mdl.materials[0].shader = litShader;
+                // Use cached model+texture per weapon type
+                auto cacheIt = m_weaponPickupCache.find(n.typeName);
+                if (cacheIt == m_weaponPickupCache.end()) {
+                    // First encounter — load and cache
+                    std::string meshPath = "GameData/Global/gun/" + n.typeName + "/" + meshIt->second;
+                    std::string texPath = "GameData/Global/gun/" + n.typeName + "/" + texIt->second;
+                    WeaponPickupCache entry;
+                    entry.model = LoadModel(meshPath.c_str());
+                    if (entry.model.meshCount > 0) {
+                        entry.texture = LoadTexture(texPath.c_str());
+                        if (entry.texture.id > 0)
+                            entry.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = entry.texture;
+                        if (litShader.id > 0)
+                            entry.model.materials[0].shader = litShader;
+                    }
+                    cacheIt = m_weaponPickupCache.emplace(n.typeName, entry).first;
+                }
+                if (cacheIt->second.model.meshCount > 0) {
                     float yaw = atan2f(camera.position.x - pos.x, camera.position.z - pos.z) * RAD2DEG;
-                    DrawModelEx(mdl, pos, {0, 1, 0}, yaw, {1.5f, 1.5f, 1.5f}, WHITE);
-                    UnloadModel(mdl);
-                    if (t.id > 0) UnloadTexture(t);
+                    DrawModelEx(cacheIt->second.model, pos, {0, 1, 0}, yaw, {1.5f, 1.5f, 1.5f}, WHITE);
                 }
             }
         } else {
