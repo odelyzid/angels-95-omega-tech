@@ -1,0 +1,147 @@
+// LightningEntityRegistry unit tests
+// Compile: g++ -O0 -g --std=c++20 -I ../Source -DOMEGA_TEST_ENV LightngEntityRegistry.test.cpp ../Source/Script/LightningEntityRegistry.cpp ../Source/Script/LightningScriptParser.cpp ../Source/Script/LightningScriptContext.cpp ../Source/Log.cpp -o test_registry
+
+#include "../Source/Script/LightningEntityRegistry.hpp"
+#include "../Source/Script/LightningScriptParser.hpp"
+#include <cstdio>
+#include <cassert>
+
+static int tests_total = 0, tests_passed = 0;
+#define TEST(name) do { tests_total++; fprintf(stdout, "  TEST: %s ... ", name);
+#define PASS() do { tests_passed++; fprintf(stdout, "PASS\n"); } while(0)
+#define FAIL(msg) do { fprintf(stdout, "FAIL: %s\n", msg); return 1; } while(0)
+#define CHECK(cond) do { if (!(cond)) { fprintf(stdout, "FAIL: %s\n", #cond); return 1; } } while(0)
+#define CHECK_EQ(a, b) do { if ((a) != (b)) { fprintf(stdout, "FAIL: expected %d, got %d\n", (int)(a), (int)(b)); return 1; } } while(0)
+#define CHECK_PTR(ptr) do { if (!(ptr)) { fprintf(stdout, "FAIL: expected non-null pointer\n"); return 1; } } while(0)
+#define CHECK_NULL(ptr) do { if ((ptr)) { fprintf(stdout, "FAIL: expected null pointer\n"); return 1; } } while(0)
+#define END_TEST() } while(0)
+
+static int test_register_and_find() {
+    TEST("Register and Find by name");
+    auto& reg = LightningEntityRegistry::Instance();
+    // Clear by re-initializing (simulate fresh state)
+    // We can't easily clear, so use a unique name
+    EntityDef def;
+    def.name = "test_sword";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["damage"] = 30.0f;
+    CHECK(reg.Register(def));
+    const EntityDef* found = reg.Find("test_sword");
+    CHECK_PTR(found);
+    CHECK(found->name == "test_sword");
+    CHECK(found->type == EntityType::WEAPON);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_find_non_existent() {
+    TEST("Find non-existent entity returns nullptr");
+    auto& reg = LightningEntityRegistry::Instance();
+    CHECK_NULL(reg.Find("NonExistentEntity12345"));
+    PASS(); return 0; END_TEST();
+}
+
+static int test_find_by_type() {
+    TEST("FindByType returns correct subset");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def1, def2, def3;
+    def1.name = "type_test_weapon";
+    def1.type = EntityType::WEAPON;
+    def2.name = "type_test_armor";
+    def2.type = EntityType::ARMOR;
+    def3.name = "type_test_weapon2";
+    def3.type = EntityType::WEAPON;
+    reg.Register(def1);
+    reg.Register(def2);
+    reg.Register(def3);
+    std::vector<const EntityDef*> weapons;
+    reg.FindByType(EntityType::WEAPON, weapons);
+    CHECK(weapons.size() >= 2);
+    bool found1 = false, found3 = false;
+    for (auto* d : weapons) {
+        if (d->name == "type_test_weapon") found1 = true;
+        if (d->name == "type_test_weapon2") found3 = true;
+    }
+    CHECK(found1);
+    CHECK(found3);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_register_duplicate() {
+    TEST("Register duplicate overwrites existing");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def1, def2;
+    def1.name = "dup_test";
+    def1.type = EntityType::WEAPON;
+    def1.stats.floats["damage"] = 10.0f;
+    reg.Register(def1);
+    const EntityDef* first = reg.Find("dup_test");
+    CHECK_PTR(first);
+    float firstDamage = first->stats.floats.at("damage");
+    // Register updated version
+    def2.name = "dup_test";
+    def2.type = EntityType::ARMOR;
+    def2.stats.floats["defense"] = 20.0f;
+    reg.Register(def2);
+    const EntityDef* second = reg.Find("dup_test");
+    CHECK_PTR(second);
+    CHECK(second->type == EntityType::ARMOR);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_count_increases() {
+    TEST("Count increases after Register");
+    auto& reg = LightningEntityRegistry::Instance();
+    int before = reg.Count();
+    EntityDef def;
+    def.name = "count_test_item";
+    def.type = EntityType::PICKUP;
+    reg.Register(def);
+    CHECK(reg.Count() > before);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_parse_and_register() {
+    TEST("Parse then Register produces findable entity");
+    std::string ozls = R"(
+        entity "parsed_rifle" : weapon {
+            stats { damage = 35 fire_rate = 0.2 }
+        }
+    )";
+    EntityDef parsed = LightningScriptParser::Parse(ozls, "parsed.ozls");
+    CHECK(parsed.name == "parsed_rifle");
+    auto& reg = LightningEntityRegistry::Instance();
+    reg.Register(parsed);
+    const EntityDef* found = reg.Find("parsed_rifle");
+    CHECK_PTR(found);
+    CHECK(found->type == EntityType::WEAPON);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_get_all_keys() {
+    TEST("GetAll contains registered names");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "getall_test_key";
+    def.type = EntityType::CONSUMABLE;
+    reg.Register(def);
+    const auto& all = reg.GetAll();
+    CHECK(all.find("getall_test_key") != all.end());
+    PASS(); return 0; END_TEST();
+}
+
+int main() {
+    fprintf(stdout, "LightningEntityRegistry Tests:\n");
+    fprintf(stdout, "==============================\n");
+    int failures = 0;
+    failures += test_register_and_find();
+    failures += test_find_non_existent();
+    failures += test_find_by_type();
+    failures += test_register_duplicate();
+    failures += test_count_increases();
+    failures += test_parse_and_register();
+    failures += test_get_all_keys();
+    fprintf(stdout, "==============================\n");
+    fprintf(stdout, "%d/%d passed, %d failed\n",
+            tests_passed, tests_total, tests_total - tests_passed);
+    return failures;
+}

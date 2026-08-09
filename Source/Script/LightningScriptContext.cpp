@@ -152,28 +152,42 @@ bool LightningScriptContext::ExecuteNext() {
     } else if (opcode == "if") {
         std::string cond;
         std::getline(ls, cond);
-        // Trim
+        // Trim and strip surrounding parentheses
         size_t cs = cond.find_first_not_of(" \t");
         if (cs != std::string::npos) cond = cond.substr(cs);
         size_t ce = cond.find_last_not_of(" \t\r\n");
         if (ce != std::string::npos) cond = cond.substr(0, ce + 1);
+        // Strip matching parens around the whole condition
+        while (cond.size() >= 2 && cond.front() == '(' && cond.back() == ')')
+            cond = cond.substr(1, cond.size() - 2);
+        // Trim again after stripping parens
+        cs = cond.find_first_not_of(" \t");
+        if (cs != std::string::npos) cond = cond.substr(cs);
 
         if (!EvalCondition(cond)) {
-            // Skip to matching else or endif
+            // Skip if-body; stop before else or at endif
             int depth = 1;
             m_pc++;
+            bool foundElse = false;
             while (m_pc < (int)m_lines.size() && depth > 0) {
                 const std::string& sl = m_lines[m_pc];
                 if (sl.rfind("if", 0) == 0 && sl.size() > 2 && std::isblank(sl[2])) depth++;
                 else if (sl.rfind("endif", 0) == 0) depth--;
-                else if (sl.rfind("else", 0) == 0 && depth == 1) depth--;
-                else if (sl.rfind("}") != std::string::npos) { /* handle block end */ }
+                else if (sl.rfind("else", 0) == 0 && depth == 1) { foundElse = true; break; }
                 if (depth > 0) m_pc++;
             }
-            if (m_pc < (int)m_lines.size()) m_pc++;
+            if (foundElse) {
+                // Land past the else line so the else-body executes
+                m_pc++;
+                if (m_pc < (int)m_lines.size() && m_lines[m_pc].rfind("endif", 0) == 0)
+                    m_pc = (int)m_lines.size(); // empty else block
+            } else {
+                if (m_pc < (int)m_lines.size()) m_pc++;
+            }
             return true;
         }
         m_pc++;
+        return true;
 
     } else if (opcode == "else") {
         // Skip to endif

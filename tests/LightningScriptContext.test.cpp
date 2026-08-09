@@ -117,6 +117,148 @@ static int test_set_cooldown() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_goto_jump() {
+    TEST("goto jumps forward and backward");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_goto");
+    CHECK(ctx.Load("$x = 0\nloop:\n$x += 1\nif ($x < 3)\ngoto loop\nendif\n$x += 10"));
+    // $x=0, loop:, $x+=1→1, if(1<3)=true→goto, $x+=1→2, if(2<3)=true→goto, $x+=1→3, if(3<3)=false, $x+=10→13
+    int steps = 0;
+    while (ctx.HasMore() && steps < 20) { ctx.ExecuteNext(); steps++; }
+    CHECK_EQ(ctx.GetInt("x"), 13);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_else_branch() {
+    TEST("else branch executes correctly");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_else");
+    CHECK(ctx.Load("$flag = 1\nif ($flag == 1)\n$result = 10\nelse\n$result = 20\nendif"));
+    ctx.ExecuteNext(); // $flag = 1
+    ctx.ExecuteNext(); // if true — fall through
+    ctx.ExecuteNext(); // $result = 10
+    ctx.ExecuteNext(); // endif
+    CHECK_EQ(ctx.GetInt("result"), 10);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_else_branch_false() {
+    TEST("else branch when condition is false");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_else_false");
+    CHECK(ctx.Load("$flag = 0\nif ($flag == 1)\n$result = 10\nelse\n$result = 20\nendif"));
+    ctx.ExecuteNext(); // $flag = 0
+    ctx.ExecuteNext(); // if false — skip past if-body to else-body
+    ctx.ExecuteNext(); // $result = 20
+    ctx.ExecuteNext(); // endif
+    CHECK_EQ(ctx.GetInt("result"), 20);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_string_vars() {
+    TEST("string variable set/get");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_str");
+    ctx.SetStr("name", "Skaarj");
+    CHECK(ctx.GetStr("name") == "Skaarj");
+    CHECK(ctx.GetStr("nonexistent") == "");
+    CHECK(ctx.GetStr("nonexistent", "default") == "default");
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pop_sound() {
+    TEST("PopPendingSound returns and clears");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_pop_sound");
+    CHECK(ctx.Load("play_sound \"explosion.wav\""));
+    ctx.ExecuteNext();
+    std::string sound = ctx.PopPendingSound();
+    CHECK(sound == "explosion.wav");
+    CHECK(ctx.PopPendingSound() == ""); // cleared
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pop_skybox() {
+    TEST("PopPendingSkybox returns skybox path");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_pop_sky");
+    CHECK(ctx.Load("set_skybox \"red_sun\""));
+    ctx.ExecuteNext();
+    std::string sky = ctx.PopPendingSkybox();
+    CHECK(sky == "red_sun");
+    PASS(); return 0; END_TEST();
+}
+
+static int test_restore_skybox() {
+    TEST("restore_skybox clears pending skybox");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_restore_sky");
+    CHECK(ctx.Load("set_skybox \"foo\"\nrestore_skybox"));
+    ctx.ExecuteNext();
+    CHECK(ctx.PopPendingSkybox() == "foo");
+    ctx.ExecuteNext(); // restore
+    CHECK(ctx.PopPendingSkybox() == ""); // should be empty
+    PASS(); return 0; END_TEST();
+}
+
+static int test_rtflag_stores_result() {
+    TEST("rtflag reads flag and stores in result");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_rtflag");
+    CHECK(ctx.Load("wtflag 5 1\nrtflag 5"));
+    ctx.ExecuteNext(); // wtflag 5 1
+    CHECK_EQ(ctx.GetFlag(5), 1);
+    ctx.ExecuteNext(); // rtflag 5 — stores in m_intVars["result"]
+    CHECK_EQ(ctx.GetInt("result"), 1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_empty_script() {
+    TEST("empty script has no lines and no crash");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_empty");
+    CHECK(ctx.Load(""));
+    CHECK(!ctx.HasMore());
+    CHECK_EQ(ctx.LineCount(), 0);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_reset_rewinds() {
+    TEST("Reset() rewinds program counter");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_reset");
+    CHECK(ctx.Load("$a = 1\n$a = 2\n$a = 3"));
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetInt("a"), 1);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetInt("a"), 2);
+    ctx.Reset();
+    CHECK_EQ(ctx.ProgramCounter(), 0);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetInt("a"), 1); // back to start
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pc_values() {
+    TEST("ProgramCounter returns correct values");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_pc");
+    CHECK(ctx.Load("$a = 1\n$a = 2\n$a = 3"));
+    CHECK_EQ(ctx.ProgramCounter(), 0);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.ProgramCounter(), 1);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.ProgramCounter(), 2);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.ProgramCounter(), 3);
+    CHECK(!ctx.HasMore());
+    PASS(); return 0; END_TEST();
+}
+
+static int test_find_unknown_label() {
+    TEST("FindJumpLabel returns -1 for unknown");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_unknown_label");
+    CHECK(ctx.Load("$a = 1\nloop:\n$a += 1"));
+    CHECK_EQ(ctx.FindJumpLabel("nonexistent"), -1);
+    CHECK(ctx.FindJumpLabel("loop") >= 0);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_set_fog() {
     TEST("set_fog stores fog vars");
     LightningScriptContext ctx;
@@ -197,6 +339,18 @@ int main() {
     failures += test_restore_fog();
     failures += test_restore_ambient();
     failures += test_unknown_opcode_warns();
+    failures += test_goto_jump();
+    failures += test_else_branch();
+    failures += test_else_branch_false();
+    failures += test_string_vars();
+    failures += test_pop_sound();
+    failures += test_pop_skybox();
+    failures += test_restore_skybox();
+    failures += test_rtflag_stores_result();
+    failures += test_empty_script();
+    failures += test_reset_rewinds();
+    failures += test_pc_values();
+    failures += test_find_unknown_label();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

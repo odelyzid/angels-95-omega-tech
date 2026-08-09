@@ -152,11 +152,24 @@ test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEnt
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)
 
-test: test_parser test_entity_manager
-	@echo "--- LightningScriptParser Tests ---"
+test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp
+	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)
+
+test: test_parser test_context test_registry test_entity_manager test_pawn_system
+	@echo "=== LightningScriptParser Tests ==="
 	./test_parser
-	@echo "--- LightningEntityManager Tests ---"
+	@echo ""
+	@echo "=== LightningScriptContext Tests ==="
+	./test_context
+	@echo ""
+	@echo "=== LightningEntityRegistry Tests ==="
+	./test_registry
+	@echo ""
+	@echo "=== LightningEntityManager Tests ==="
 	./test_entity_manager
+	@echo ""
+	@echo "=== OzPawnSystem Tests ==="
+	./test_pawn_system
 
 clean:
 	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry
