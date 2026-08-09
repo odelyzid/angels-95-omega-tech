@@ -641,6 +641,7 @@ int main(int argc, char** argv){
         if (strcmp(argv[i], "--world") == 0) {
             strncpy(g_world_to_load, argv[i + 1], sizeof(g_world_to_load) - 1);
             g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
+            g_skipMenu = true;
             i++;
         }
     }

@@ -753,6 +753,31 @@ void OzoneLoader::RebuildCollisionVolumes() {
         m_collisionVolumes.push_back(cv);
     }
 
+    // Phase 2b: copy texture settings from renderables to collision volumes
+    // when the counts match (no CSG merging occurred).
+    {
+        int rCount = 0;
+        for (auto& r : m_renderables) {
+            if (!r.loaded) continue;
+            if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+                r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+                r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+                r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+                r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
+                r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+                continue;
+            if (rCount < (int)m_collisionVolumes.size()) {
+                m_collisionVolumes[rCount].texScaleU = r.texScaleU;
+                m_collisionVolumes[rCount].texScaleV = r.texScaleV;
+                m_collisionVolumes[rCount].texOffsetU = r.texOffsetU;
+                m_collisionVolumes[rCount].texOffsetV = r.texOffsetV;
+                m_collisionVolumes[rCount].texSlot = r.texSlot;
+                m_collisionVolumes[rCount].texPath = r.texPath;
+            }
+            rCount++;
+        }
+    }
+
     // Phase 3: rebuild spatial partition from processed volumes
     std::vector<WorldChunkManager::Volume> wcVols;
     wcVols.reserve(vols.size());
@@ -791,6 +816,174 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     r.csgOp = csgOp;
     m_renderables.push_back(r);
     return (int)m_renderables.size() - 1;
+}
+
+// ---------------------------------------------------------------------------
+// ApplyRenderableUV -- modify texture UV tiling/offset on a renderable's mesh
+// The transform is: new_u = old_u * su + ou, new_v = old_v * sv + ov
+// This updates both the CPU-side texcoords and the GPU vertex buffer.
+// Stores the params on the renderable so they can be re-applied after rebuild.
+// ---------------------------------------------------------------------------
+void OzoneLoader::ApplyRenderableUV(int idx, float su, float sv, float ou, float ov) {
+    OzoneRenderable* r = Get(idx);
+    if (!r || !r->loaded || r->model.meshCount == 0) return;
+    Mesh& mesh = r->model.meshes[0];
+    if (!mesh.texcoords) return;
+
+    // Undo previous transform first so transforms don't compound
+    float invSu = (r->texScaleU != 0.0f) ? 1.0f / r->texScaleU : 1.0f;
+    float invSv = (r->texScaleV != 0.0f) ? 1.0f / r->texScaleV : 1.0f;
+    for (int i = 0; i < mesh.vertexCount; i++) {
+        float baseU = (mesh.texcoords[i*2 + 0] - r->texOffsetU) * invSu;
+        float baseV = (mesh.texcoords[i*2 + 1] - r->texOffsetV) * invSv;
+        mesh.texcoords[i*2 + 0] = baseU * su + ou;
+        mesh.texcoords[i*2 + 1] = baseV * sv + ov;
+    }
+
+    // Store new params
+    r->texScaleU = su;
+    r->texScaleV = sv;
+    r->texOffsetU = ou;
+    r->texOffsetV = ov;
+
+    // Upload updated UVs to GPU (attribute index 1 = texcoords)
+    UpdateMeshBuffer(mesh, 1, mesh.texcoords,
+                     mesh.vertexCount * 2 * (int)sizeof(float), 0);
+}
+
+// ---------------------------------------------------------------------------
+// ApplyRenderableTexture -- load a custom texture from a file path and apply
+// it to the renderable's model material. Replaces any tileset or previous
+// custom texture. Stores the path on the renderable for persistence.
+// Returns true if the texture was loaded and applied successfully.
+// ---------------------------------------------------------------------------
+bool OzoneLoader::ApplyRenderableTexture(int idx, const char* path) {
+    OzoneRenderable* r = Get(idx);
+    if (!r || !r->loaded || r->model.meshCount == 0) return false;
+
+    Texture2D tex = LoadTextureWithFallback(path);
+    if (tex.id == 0) return false;
+
+    // Unload previous custom texture if any
+    if (r->customTex.id > 0) UnloadTexture(r->customTex);
+
+    r->customTex = tex;
+    r->texPath = path ? path : "";
+    r->texSlot = 0; // custom texture overrides tileset
+
+    r->model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+    if (GetLitFogShader().id > 0)
+        r->model.materials[0].shader = GetLitFogShader();
+
+    OZ_INFO("Applied custom texture to renderable %d: %s", idx, path);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// RemoveRenderable -- remove a brush renderable at the given index.
+// Unloads the model and custom texture, then erases from the list.
+// ---------------------------------------------------------------------------
+void OzoneLoader::RemoveRenderable(int idx) {
+    OzoneRenderable* r = Get(idx);
+    if (!r) return;
+    if (r->customTex.id > 0) UnloadTexture(r->customTex);
+    if (r->loaded) UnloadModel(r->model);
+    m_renderables.erase(m_renderables.begin() + idx);
+}
+
+// ---------------------------------------------------------------------------
+// FindRenderableByCollisionVol -- given a collision volume index, find the
+// best-matching renderable by comparing world-space AABB centers.
+// Returns -1 if no match found (counts differ, merged volumes, etc.)
+// ---------------------------------------------------------------------------
+int OzoneLoader::FindRenderableByCollisionVol(int cvIdx) {
+    if (cvIdx < 0 || cvIdx >= (int)m_collisionVolumes.size()) return -1;
+    BoundingBox target = m_collisionVolumes[cvIdx].aabb;
+    float targetCx = (target.min.x + target.max.x) * 0.5f;
+    float targetCy = (target.min.y + target.max.y) * 0.5f;
+    float targetCz = (target.min.z + target.max.z) * 0.5f;
+
+    int bestIdx = -1;
+    float bestDist = 1e9f;
+    for (size_t i = 0; i < m_renderables.size(); i++) {
+        auto& r = m_renderables[i];
+        if (!r.loaded || r.model.meshCount == 0) continue;
+        BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
+        float cx = r.position.x + (mb.min.x + mb.max.x) * 0.5f * r.scale;
+        float cy = r.position.y + (mb.min.y + mb.max.y) * 0.5f * r.scale;
+        float cz = r.position.z + (mb.min.z + mb.max.z) * 0.5f * r.scale;
+        float dx = cx - targetCx, dy = cy - targetCy, dz = cz - targetCz;
+        float dist = dx*dx + dy*dy + dz*dz;
+        if (dist < bestDist) { bestDist = dist; bestIdx = (int)i; }
+    }
+    // Only return match if close enough (within half the target's longest axis)
+    float maxDim = fmaxf(target.max.x - target.min.x,
+                         fmaxf(target.max.y - target.min.y, target.max.z - target.min.z));
+    if (bestDist > maxDim * maxDim * 0.25f) return -1;
+    return bestIdx;
+}
+
+// ---------------------------------------------------------------------------
+// UpdateBrushRenderable -- regenerate a brush renderable's mesh from new
+// position, size, and rotation. Preserves texture slot, custom texture,
+// and UV transform. Called from the editor Properties panel when the user
+// applies changes.
+// ---------------------------------------------------------------------------
+void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vector3& size, float rot) {
+    OzoneRenderable* r = Get(idx);
+    if (!r || !r->loaded) return;
+    if (r->typeId < 0 || r->typeId > 4) return; // only primitive types 0..4
+
+    // Save texture state to re-apply on the new mesh
+    int oldTexSlot = r->texSlot;
+    std::string oldTexPath = r->texPath;
+    Texture2D oldCustomTex = r->customTex;
+    float oldSu = r->texScaleU;
+    float oldSv = r->texScaleV;
+    float oldOu = r->texOffsetU;
+    float oldOv = r->texOffsetV;
+
+    // Build new model with the requested size
+    Model newModel = {0};
+    switch (r->typeId) {
+        case 0: newModel = BuildBox(size.x, size.y, size.z); break;
+        case 1: newModel = BuildCylinder(size.x, size.y, size.z, 16); break;
+        case 2: newModel = BuildSphere(size.x, 16); break;
+        case 3: newModel = BuildPyramid(size.x, size.z, size.y); break;
+        case 4: newModel = BuildPlane(0, 1, 0, 0); break;
+    }
+    if (newModel.meshCount == 0) return;
+
+    // Re-apply tileset texture (only if no custom texture overrides it)
+    if (oldCustomTex.id > 0) {
+        newModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = oldCustomTex;
+        if (GetLitFogShader().id > 0)
+            newModel.materials[0].shader = GetLitFogShader();
+    } else if (oldTexSlot > 0) {
+        ApplyTexSlotToModel(newModel, oldTexSlot);
+    }
+
+    // Re-apply UV transform on the fresh mesh
+    if (newModel.meshes[0].texcoords) {
+        Mesh& m = newModel.meshes[0];
+        for (int i = 0; i < m.vertexCount; i++) {
+            m.texcoords[i*2 + 0] = m.texcoords[i*2 + 0] * oldSu + oldOu;
+            m.texcoords[i*2 + 1] = m.texcoords[i*2 + 1] * oldSv + oldOv;
+        }
+        UpdateMeshBuffer(m, 1, m.texcoords, m.vertexCount * 2 * (int)sizeof(float), 0);
+    }
+
+    // Replace old model
+    UnloadModel(r->model);
+    r->model = newModel;
+
+    // Update transform
+    r->position = pos;
+    r->rotation = rot;
+
+    // Re-apply the Y-center adjustment for cylinder/pyramid
+    if (r->typeId == 1) r->position.y -= size.z / 2.0f;  // cylinder: h = size.z
+    if (r->typeId == 3) r->position.y -= size.y / 2.0f;  // pyramid: h = size.y
 }
 
 // ---------------------------------------------------------------------------
@@ -900,6 +1093,7 @@ float OzoneLoader::SampleHeightmapY(float px, float pz) const {
 // ---------------------------------------------------------------------------
 void OzoneLoader::Unload() {
     for (auto& r : m_renderables) {
+        if (r.customTex.id > 0) UnloadTexture(r.customTex);
         if (r.loaded) UnloadModel(r.model);
     }
     m_renderables.clear();

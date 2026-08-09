@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <filesystem>
 #include <algorithm>
 #include <string>
@@ -29,6 +30,14 @@ EditorPanelState g_editorPanels;
 extern int WorldGraph_GetModelCount();
 extern void WorldGraph_GetModelData(int index, float& outX, float& outY, float& outZ, float& outR, float& outS);
 extern const char* WorldGraph_GetModelName(int index);
+// Selection accessors
+extern int Editor_GetSelectedType();
+extern int Editor_GetSelectedIndex();
+// Editor state accessors for toolbox sidebar
+extern int Editor_GetCsgOperation();
+extern void Editor_SetCsgOperation(int op);
+extern int Editor_GetPlaceMode();
+extern void Editor_SetPlaceMode(int mode);
 
 static HINSTANCE g_hInst = nullptr;
 static HWND g_hRaylibWnd = nullptr;
@@ -1939,8 +1948,20 @@ static const int ID_LP_OUTER  = 412;
 
 void ShowLightProps(bool show) {
     g_editorPanels.showLightProps = show;
-    if (g_editorPanels.hLightProps)
-        ShowWindow((HWND)g_editorPanels.hLightProps, show ? SW_SHOW : SW_HIDE);
+    if (show && g_editorPanels.hLightProps) {
+        // Set target from current selection if a light is selected
+        int selType = Editor_GetSelectedType();
+        int selIdx  = Editor_GetSelectedIndex();
+        if (selType == 5 && selIdx >= 0) { // SelType::LIGHT = 5
+            g_editorPanels.lightPropTarget = selIdx;
+        }
+        // Populate controls from the target light
+        SendMessage((HWND)g_editorPanels.hLightProps, WM_USER + 50, 0, 0);
+        ShowWindow((HWND)g_editorPanels.hLightProps, SW_SHOW);
+        SetForegroundWindow((HWND)g_editorPanels.hLightProps);
+    } else if (g_editorPanels.hLightProps) {
+        ShowWindow((HWND)g_editorPanels.hLightProps, SW_HIDE);
+    }
 }
 
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -2002,6 +2023,34 @@ static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         CreateButton(hwnd, L"Close", x + 90, y, 80, 26, ID_LP_CLOSE);
         break;
     }
+    case WM_USER + 50: {
+        // Populate controls from the target light node
+        auto& lights = PawnSystem::Instance().GetLights();
+        int idx = g_editorPanels.lightPropTarget;
+        if (idx >= 0 && idx < (int)lights.size()) {
+            LightNode& ln = lights[idx];
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_R), SB_CTL, ln.color.r, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_G), SB_CTL, ln.color.g, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_B), SB_CTL, ln.color.b, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_INTENS), SB_CTL, (int)(ln.intensity * 100), TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_RADIUS), SB_CTL, (int)ln.radius, TRUE);
+            SendMessage(GetDlgItem(hwnd, ID_LP_TYPE), CB_SETCURSEL, (int)ln.type, 0);
+            SendMessage(GetDlgItem(hwnd, ID_LP_EFFECT), CB_SETCURSEL, (int)ln.effect, 0);
+            // Recompute angle from cosine
+            float innerDeg = acosf(ln.innerCone) * RAD2DEG;
+            float outerDeg = acosf(ln.outerCone) * RAD2DEG;
+            SetWindowTextW(GetDlgItem(hwnd, ID_LP_INNER), std::to_wstring(innerDeg).c_str());
+            SetWindowTextW(GetDlgItem(hwnd, ID_LP_OUTER), std::to_wstring(outerDeg).c_str());
+            SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_SETCHECK, ln.castShadow ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_SETCHECK, 0, 0); // reserved
+        }
+        g_editorPanels.lightColorR = (float)SendDlgItemMessage(hwnd, ID_LP_R, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightColorG = (float)SendDlgItemMessage(hwnd, ID_LP_G, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightColorB = (float)SendDlgItemMessage(hwnd, ID_LP_B, SBM_GETPOS, 0, 0);
+        g_editorPanels.lightIntensity = SendDlgItemMessage(hwnd, ID_LP_INTENS, SBM_GETPOS, 0, 0) / 100.0f;
+        g_editorPanels.lightRadius = (float)SendDlgItemMessage(hwnd, ID_LP_RADIUS, SBM_GETPOS, 0, 0);
+        break;
+    }
     case WM_HSCROLL: {
         g_editorPanels.lightColorR = (float)SendDlgItemMessage(hwnd, ID_LP_R, SBM_GETPOS, 0, 0);
         g_editorPanels.lightColorG = (float)SendDlgItemMessage(hwnd, ID_LP_G, SBM_GETPOS, 0, 0);
@@ -2018,6 +2067,16 @@ static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.lightEffect = (int)SendMessage(GetDlgItem(hwnd, ID_LP_EFFECT), CB_GETCURSEL, 0, 0);
             g_editorPanels.lightFlare = SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_GETCHECK, 0, 0) != 0;
             g_editorPanels.lightCorona = SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_GETCHECK, 0, 0) != 0;
+            // Read spot angles
+            auto readEditFloat = [hwnd](int id, float def) -> float {
+                wchar_t buf[64];
+                HWND h = GetDlgItem(hwnd, id);
+                if (!h) return def;
+                GetWindowTextW(h, buf, 64);
+                return (float)wcstod(buf, nullptr);
+            };
+            g_editorPanels.lightInnerAngle = readEditFloat(ID_LP_INNER, 15.0f);
+            g_editorPanels.lightOuterAngle = readEditFloat(ID_LP_OUTER, 45.0f);
             g_editorPanels.actionApplyLight = true;
         }
         break;
@@ -2262,6 +2321,37 @@ static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 g_editorPanels.actionSelectFromGraphPos[2] = e.posZ;
             }
         }
+        if (nm->idFrom == ID_WG_LIST && nm->code == NM_RCLICK) {
+            // Right-click context menu
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel >= 0 && sel < (int)g_worldGraphEntries.size()) {
+                auto& e = g_worldGraphEntries[sel];
+                // First select the entity (same as double-click)
+                g_editorPanels.actionSelectFromGraph = e.selIndex;
+                g_editorPanels.actionSelectFromGraphType = e.selType;
+                g_editorPanels.actionSelectFromGraphName = e.name;
+                g_editorPanels.actionSelectFromGraphPos[0] = e.posX;
+                g_editorPanels.actionSelectFromGraphPos[1] = e.posY;
+                g_editorPanels.actionSelectFromGraphPos[2] = e.posZ;
+                // Then show popup menu
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuA(hMenu, MF_STRING, 1001, "Properties");
+                AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuA(hMenu, MF_STRING, 1002, "Delete");
+                AppendMenuA(hMenu, MF_STRING, 1003, "Duplicate");
+                POINT pt;
+                GetCursorPos(&pt);
+                int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
+                DestroyMenu(hMenu);
+                if (cmd == 1001) {
+                    g_editorPanels.actionWorldGraphProperties = sel;
+                } else if (cmd == 1002) {
+                    g_editorPanels.actionWorldGraphDelete = e.selIndex;
+                } else if (cmd == 1003) {
+                    g_editorPanels.actionWorldGraphDup = e.selIndex;
+                }
+            }
+        }
         break;
     }
     case WM_COMMAND: {
@@ -2392,7 +2482,7 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 if (!hCtrl) return def;
                 wchar_t buf[64];
                 GetWindowTextW(hCtrl, buf, 64);
-                return (float)_wtof(buf);
+                return (float)wcstod(buf, nullptr);
             };
             g_editorPanels.propPosX = readFloat(ID_PP_POSX, 0);
             g_editorPanels.propPosY = readFloat(ID_PP_POSY, 0);
@@ -2406,7 +2496,6 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.propTexOffsetU = readFloat(ID_PP_TEX_OFF_U, 0.0f);
             g_editorPanels.propTexOffsetV = readFloat(ID_PP_TEX_OFF_V, 0.0f);
             g_editorPanels.actionApplyProperties = true;
-            ShowPropertiesPanel(false);
         }
         break;
     }
@@ -2428,16 +2517,31 @@ void ShowPropertiesPanel(bool show) {
         g_editorPanels.propScale = g_editorPanels.propsTargetScale;
         // For brush/zone, derive size from position data if needed
         if (g_editorPanels.propsTargetType == 1) { // BRUSH
-            auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
             int idx = g_editorPanels.propsTargetIndex;
-            if (idx >= 0 && idx < (int)vols.size()) {
-                g_editorPanels.propSizeX = vols[idx].aabb.max.x - vols[idx].aabb.min.x;
-                g_editorPanels.propSizeY = vols[idx].aabb.max.y - vols[idx].aabb.min.y;
-                g_editorPanels.propSizeZ = vols[idx].aabb.max.z - vols[idx].aabb.min.z;
-                g_editorPanels.propTexScaleU = vols[idx].texScaleU;
-                g_editorPanels.propTexScaleV = vols[idx].texScaleV;
-                g_editorPanels.propTexOffsetU = vols[idx].texOffsetU;
-                g_editorPanels.propTexOffsetV = vols[idx].texOffsetV;
+            // Prefer reading UV values from the renderable (source of truth)
+            if (idx >= 0 && idx < OzoneLoader::Instance().Count()) {
+                OzoneRenderable* r = OzoneLoader::Instance().Get(idx);
+                if (r && r->loaded) {
+                    BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+                    g_editorPanels.propSizeX = mb.max.x - mb.min.x;
+                    g_editorPanels.propSizeY = mb.max.y - mb.min.y;
+                    g_editorPanels.propSizeZ = mb.max.z - mb.min.z;
+                    g_editorPanels.propTexScaleU = r->texScaleU;
+                    g_editorPanels.propTexScaleV = r->texScaleV;
+                    g_editorPanels.propTexOffsetU = r->texOffsetU;
+                    g_editorPanels.propTexOffsetV = r->texOffsetV;
+                }
+            } else {
+                auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+                if (idx >= 0 && idx < (int)vols.size()) {
+                    g_editorPanels.propSizeX = vols[idx].aabb.max.x - vols[idx].aabb.min.x;
+                    g_editorPanels.propSizeY = vols[idx].aabb.max.y - vols[idx].aabb.min.y;
+                    g_editorPanels.propSizeZ = vols[idx].aabb.max.z - vols[idx].aabb.min.z;
+                    g_editorPanels.propTexScaleU = vols[idx].texScaleU;
+                    g_editorPanels.propTexScaleV = vols[idx].texScaleV;
+                    g_editorPanels.propTexOffsetU = vols[idx].texOffsetU;
+                    g_editorPanels.propTexOffsetV = vols[idx].texOffsetV;
+                }
             }
         } else if (g_editorPanels.propsTargetType == 7) { // ZONE
             auto& zones = PawnSystem::Instance().GetZones();
@@ -2461,7 +2565,7 @@ void ShowPropertiesPanel(bool show) {
 }
 
 // =====================================================================
-// Stats Sidebar — docked native left panel (stats only, no CSG)
+// Stats Sidebar â€” docked native left panel (stats + toolbox)
 // =====================================================================
 static const int ID_SB_TITLE   = 900;
 static const int ID_SB_POS     = 901;
@@ -2474,6 +2578,20 @@ static const int ID_SB_CAM_L   = 907;
 static const int ID_SB_CAM     = 908;
 static const int ID_SB_SEP1    = 909;
 static const int ID_SB_SEP2    = 910;
+// Toolbox button IDs
+static const int ID_TB_CSG_BOX    = 920;
+static const int ID_TB_CSG_CYL    = 921;
+static const int ID_TB_CSG_SPH    = 922;
+static const int ID_TB_CSG_PYR    = 923;
+static const int ID_TB_CSG_PLN    = 924;
+static const int ID_TB_OP_SOLID   = 925;
+static const int ID_TB_OP_ADD     = 926;
+static const int ID_TB_OP_SUB     = 927;
+static const int ID_TB_OP_INTER   = 928;
+static const int ID_TB_MODE_CAM   = 929;
+static const int ID_TB_MODE_MOVE  = 930;
+static const int ID_TB_MODE_SCALE = 931;
+static const int ID_TB_MODE_ROT   = 932;
 
 static HWND g_sbPos = nullptr, g_sbSize = nullptr, g_sbRot = nullptr;
 static HWND g_sbColl = nullptr, g_sbChunks = nullptr, g_sbMode = nullptr;
@@ -2533,7 +2651,8 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         if (!g_sbBgBrush)
             g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
 
-        int x = 10, y = 10, lw = STATS_SIDEBAR_W - 20;
+        int x = 10, y = 10, lw = STATS_SIDEBAR_W - 20, bw = 75, bh = 24, gap = 4;
+        // --- Stats section ---
         CreateLabel(hwnd, L"Stats", x, y, lw, 20, ID_SB_TITLE); y += 28;
         g_sbPos    = CreateLabel(hwnd, L"Pos: 0 0 0", x, y, lw, 18, ID_SB_POS); y += 20;
         g_sbSize   = CreateLabel(hwnd, L"Size: 0 x 0 x 0", x, y, lw, 18, ID_SB_SIZE); y += 20;
@@ -2545,6 +2664,55 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         CreateLabel(hwnd, L"---", x, y, lw, 16, ID_SB_SEP2); y += 20;
         CreateLabel(hwnd, L"Camera:", x, y, lw, 18, ID_SB_CAM_L); y += 20;
         g_sbCam    = CreateLabel(hwnd, L"0.0 0.0 0.0", x, y, lw, 18, ID_SB_CAM);
+        y += 10;
+
+        // --- Primitives section ---
+        CreateLabel(hwnd, L"Primitives", x, y, lw, 18, 950); y += 22;
+        CreateButton(hwnd, L"Cube",     x, y, bw, bh, ID_TB_CSG_BOX);
+        CreateButton(hwnd, L"Cylinder", x + bw + gap, y, bw, bh, ID_TB_CSG_CYL); y += bh + gap;
+        CreateButton(hwnd, L"Sphere",   x, y, bw, bh, ID_TB_CSG_SPH);
+        CreateButton(hwnd, L"Pyramid",  x + bw + gap, y, bw, bh, ID_TB_CSG_PYR); y += bh + gap;
+        CreateButton(hwnd, L"Plane",    x, y, bw, bh, ID_TB_CSG_PLN); y += bh + 10;
+
+        // --- CSG Op section ---
+        CreateLabel(hwnd, L"CSG Op", x, y, lw, 18, 951); y += 22;
+        CreateButton(hwnd, L"Solid",    x, y, bw, bh, ID_TB_OP_SOLID);
+        CreateButton(hwnd, L"Add",      x + bw + gap, y, bw, bh, ID_TB_OP_ADD); y += bh + gap;
+        CreateButton(hwnd, L"Sub",      x, y, bw, bh, ID_TB_OP_SUB);
+        CreateButton(hwnd, L"Inter",    x + bw + gap, y, bw, bh, ID_TB_OP_INTER); y += bh + 10;
+
+        // --- Tool Mode section ---
+        CreateLabel(hwnd, L"Tool", x, y, lw, 18, 952); y += 22;
+        CreateButton(hwnd, L"Cam",      x, y, bw, bh, ID_TB_MODE_CAM);
+        CreateButton(hwnd, L"Move",     x + bw + gap, y, bw, bh, ID_TB_MODE_MOVE); y += bh + gap;
+        CreateButton(hwnd, L"Scale",    x, y, bw, bh, ID_TB_MODE_SCALE);
+        CreateButton(hwnd, L"Rotate",   x + bw + gap, y, bw, bh, ID_TB_MODE_ROT);
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        switch (id) {
+            // --- Primitives ---
+            case ID_TB_CSG_BOX:  g_editorPanels.actionCsgPlace = 0; break;
+            case ID_TB_CSG_CYL:  g_editorPanels.actionCsgPlace = 1; break;
+            case ID_TB_CSG_SPH:  g_editorPanels.actionCsgPlace = 2; break;
+            case ID_TB_CSG_PYR:  g_editorPanels.actionCsgPlace = 3; break;
+            case ID_TB_CSG_PLN:  g_editorPanels.actionCsgPlace = 4; break;
+            // --- CSG Operations (commit immediately) ---
+            case ID_TB_OP_SOLID: Editor_SetCsgOperation(0); Editor_SetPlaceMode(0);
+                g_editorPanels.actionCsgCommitNow = 0; break;
+            case ID_TB_OP_ADD:   Editor_SetCsgOperation(1); Editor_SetPlaceMode(0);
+                g_editorPanels.actionCsgCommitNow = 1; break;
+            case ID_TB_OP_SUB:   Editor_SetCsgOperation(2); Editor_SetPlaceMode(0);
+                g_editorPanels.actionCsgCommitNow = 2; break;
+            case ID_TB_OP_INTER: Editor_SetCsgOperation(3); Editor_SetPlaceMode(0);
+                g_editorPanels.actionCsgCommitNow = 3; break;
+            // --- Tool Modes ---
+            case ID_TB_MODE_CAM:   g_editorPanels.currentToolMode = 0; Editor_SetPlaceMode(0); break;
+            case ID_TB_MODE_MOVE:  g_editorPanels.currentToolMode = 1; Editor_SetPlaceMode(0); break;
+            case ID_TB_MODE_SCALE: g_editorPanels.currentToolMode = 2; Editor_SetPlaceMode(0); break;
+            case ID_TB_MODE_ROT:   g_editorPanels.currentToolMode = 3; Editor_SetPlaceMode(0); break;
+        }
         break;
     }
     case WM_CTLCOLORSTATIC: {

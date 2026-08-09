@@ -63,8 +63,15 @@ struct EditorPanelState {
     int lightType = 1;         // 0=directional, 1=point, 2=spot
     int lightEffect = 0;       // 0=none, 1=watery, 2=torch, 3=fire, 4=lamp
     bool lightFlare = false, lightCorona = false;
+    float lightInnerAngle = 15.0f;   // spot inner cone half-angle (degrees)
+    float lightOuterAngle = 45.0f;   // spot outer cone half-angle (degrees)
     bool actionApplyLight = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
+    int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
+    int actionCsgCommitNow = -1; // CSG operation to place immediately (-1 = inactive)
+    int actionWorldGraphProperties = -1; // WorldGraph item index to open properties
+    int actionWorldGraphDelete = -1; // WorldGraph entity index to delete
+    int actionWorldGraphDup = -1;    // WorldGraph entity index to duplicate
 
     // Active texture tracking (for context menu apply + auto-apply)
     std::string activeTexturePath;   // currently selected texture in browser

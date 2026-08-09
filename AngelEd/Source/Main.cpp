@@ -354,11 +354,15 @@ static void DeleteSelectedEntity() {
     else if (g_sel.type == SelType::PICKUP)
         PawnSystem::Instance().RemovePickup(g_sel.index);
     else if (g_sel.type == SelType::BRUSH) {
-        auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-        if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
-            vols.erase(vols.begin() + g_sel.index);
-            OzoneLoader::Instance().RebuildCollisionVolumes();
+        // First try to remove the renderable (reliable index if from OzPrimitives)
+        if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
+            OzoneLoader::Instance().RemoveRenderable(g_sel.index);
+        } else {
+            // Index is a collision volume index — find matching renderable
+            int rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(g_sel.index);
+            if (rIdx >= 0) OzoneLoader::Instance().RemoveRenderable(rIdx);
         }
+        OzoneLoader::Instance().RebuildCollisionVolumes();
     } else if (g_sel.type == SelType::LIGHT) {
         PawnSystem::Instance().RemoveLight(g_sel.index);
     } else if (g_sel.type == SelType::ZONE) {
@@ -852,6 +856,14 @@ const char* WorldGraph_GetModelName(int index) {
     return lm ? lm->name.c_str() : TextFormat("Model%d", mid);
 }
 
+// Selection accessors for Win32 dialogs
+int Editor_GetSelectedType() { return (int)g_sel.type; }
+int Editor_GetSelectedIndex() { return g_sel.index; }
+int Editor_GetCsgOperation() { return OmegaTechEditor.CSGOperation; }
+void Editor_SetCsgOperation(int op) { OmegaTechEditor.CSGOperation = op; }
+int Editor_GetPlaceMode() { return (int)g_placeMode; }
+void Editor_SetPlaceMode(int mode) { g_placeMode = (PlaceMode)mode; }
+
 // ---------------------------------------------------------------------------
 // Native Win32 Menu Bar — window subclass intercepts WM_COMMAND from menus
 // ---------------------------------------------------------------------------
@@ -867,7 +879,7 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_SAVE_AS:       FileSaveAs(); return 0;
             case IDM_PLAY_TEST:     { std::string tempPath = "System/Cache/editor_test.wdl";
                 std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
-                std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" Angels95.exe --world " + tempPath).c_str()); } } return 0;
+                std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" System\\Angels95.exe --world " + tempPath).c_str()); } } return 0;
             case IDM_EXIT:          CloseWindow(); return 0;
             case IDM_MODEL_BRW:     ToggleModelBrowser(); return 0;
             case IDM_SOUND_MGR:     ToggleSoundMgr(); return 0;
@@ -1378,7 +1390,25 @@ int main(int argc, char **argv){
             float ps = OmegaTechEditor.S, pr = OmegaTechEditor.R;
 
             if (g_placeMode == PlaceMode::MODEL) {
-                if (EMID > 0) {
+                if (EMID >= 200) {
+                    // OZONE primitive ghost
+                    int primType = EMID - 200;
+                    Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
+                    Vector3 center = {px, py, pz};
+                    DrawBoundingBox((BoundingBox){{px - size.x*0.5f, py - size.y*0.5f, pz - size.z*0.5f},
+                                                  {px + size.x*0.5f, py + size.y*0.5f, pz + size.z*0.5f}}, ORANGE);
+                    if (primType == 0) { // Box
+                        DrawCubeWires(center, size.x, size.y, size.z, (Color){255,165,0,180});
+                    } else if (primType == 1) { // Cylinder
+                        DrawCylinderWires(center, size.x*0.5f, size.x*0.5f, size.y, 16, ORANGE);
+                    } else if (primType == 2) { // Sphere
+                        DrawSphereWires(center, size.x*0.5f, 12, 12, ORANGE);
+                    } else if (primType == 3) { // Pyramid
+                        DrawCubeWires(center, size.x, size.y, size.z, ORANGE);
+                    } else if (primType == 4) { // Plane
+                        DrawCubeWires(center, size.x, 0.1f, size.z, ORANGE);
+                    }
+                } else if (EMID > 0) {
                     LoadedModel* lm = WDLModels.GetModelByWDLId(EMID);
                     if (lm) DrawModelEx(lm->model, {px,py,pz},{0,pr,0},pr,{ps,ps,ps},WHITE);
                 } else if (EMID == -1) {
@@ -1483,15 +1513,27 @@ int main(int argc, char **argv){
                         if ((int)pk.id == idx) { pk.position = newPos; break; }
                     }
                 } else if (g_sel.type == SelType::BRUSH) {
-                    auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-                    if (idx >= 0 && idx < (int)vols.size()) {
-                        Vector3 sz = {vols[idx].aabb.max.x - vols[idx].aabb.min.x,
-                                      vols[idx].aabb.max.y - vols[idx].aabb.min.y,
-                                      vols[idx].aabb.max.z - vols[idx].aabb.min.z};
-                        vols[idx].aabb.min = {newPos.x - sz.x*0.5f, newPos.y - sz.y*0.5f, newPos.z - sz.z*0.5f};
-                        vols[idx].aabb.max = {newPos.x + sz.x*0.5f, newPos.y + sz.y*0.5f, newPos.z + sz.z*0.5f};
-                        OzoneLoader::Instance().RebuildCollisionVolumes();
+                    // Try to update the renderable position so the visual moves
+                    int rIdx = -1;
+                    if (idx >= 0 && idx < OzoneLoader::Instance().Count()) {
+                        rIdx = idx; // renderable index
+                    } else {
+                        rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(idx);
                     }
+                    if (rIdx >= 0) {
+                        OzoneRenderable* r = OzoneLoader::Instance().Get(rIdx);
+                        if (r) {
+                            BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+                            Vector3 center = {r->position.x + (mb.min.x + mb.max.x) * 0.5f * r->scale,
+                                              r->position.y + (mb.min.y + mb.max.y) * 0.5f * r->scale,
+                                              r->position.z + (mb.min.z + mb.max.z) * 0.5f * r->scale};
+                            Vector3 delta = {r->position.x - center.x,
+                                             r->position.y - center.y,
+                                             r->position.z - center.z};
+                            r->position = {newPos.x + delta.x, newPos.y + delta.y, newPos.z + delta.z};
+                        }
+                    }
+                    OzoneLoader::Instance().RebuildCollisionVolumes();
                 } else if (g_sel.type == SelType::LIGHT) {
                     LightNode* l = PawnSystem::Instance().GetLight(idx);
                     if (l) l->position = newPos;
@@ -1565,14 +1607,18 @@ int main(int argc, char **argv){
 
                 // CSG: push brush through processor for OZONE primitives (EMID >= 200)
                 if (EMID >= 200 && g_placeMode == PlaceMode::MODEL) {
+                    // X, Y, Z is the center position from the gizmo
+                    float hw = OmegaTechEditor.W * 0.5f;
+                    float hh = OmegaTechEditor.H * 0.5f;
+                    float hd = OmegaTechEditor.L * 0.5f;
                     CsgBrush brush;
                     brush.op = (CsgOp)OmegaTechEditor.CSGOperation;
-                    brush.minX = OmegaTechEditor.X;
-                    brush.minY = OmegaTechEditor.Y;
-                    brush.minZ = OmegaTechEditor.Z;
-                    brush.maxX = OmegaTechEditor.X + OmegaTechEditor.W;
-                    brush.maxY = OmegaTechEditor.Y + OmegaTechEditor.H;
-                    brush.maxZ = OmegaTechEditor.Z + OmegaTechEditor.L;
+                    brush.minX = OmegaTechEditor.X - hw;
+                    brush.minY = OmegaTechEditor.Y - hh;
+                    brush.minZ = OmegaTechEditor.Z - hd;
+                    brush.maxX = OmegaTechEditor.X + hw;
+                    brush.maxY = OmegaTechEditor.Y + hh;
+                    brush.maxZ = OmegaTechEditor.Z + hd;
                     g_csgProc.Apply(brush);
                     int merges = g_csgProc.MergePass();
                     // Rebuild OzoneLoader collision volumes from CSG result
@@ -1583,24 +1629,19 @@ int main(int argc, char **argv){
                               (int)brush.op, (int)vols.size(), merges);
                     // Add brush renderable so it's visible in the viewport
                     int primType = EMID - 200;
-                    Vector3 center = {OmegaTechEditor.X + OmegaTechEditor.W * 0.5f,
-                                      OmegaTechEditor.Y + OmegaTechEditor.H * 0.5f,
-                                      OmegaTechEditor.Z + OmegaTechEditor.L * 0.5f};
+                    Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
                     Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
-                    int ridx = OzoneLoader::Instance().AddBrushRenderable(
-                        primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
-                        OmegaTechEditor.CSGOperation);
+                int ridx = OzoneLoader::Instance().AddBrushRenderable(
+                    primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
+                    (int)OmegaTechEditor.CSGOperation);
                     if (ridx >= 0) {
                         EditorLog("Brush renderable added idx=%d prim=%d", ridx, primType);
                         // Auto-apply preselected texture to new brush
-                        if (!g_editorPanels.activeTexturePath.empty()) {
-                            auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-                            if (!vols.empty()) {
-                                vols.back().texPath = g_editorPanels.activeTexturePath;
-                                vols.back().texSlot = 1;
-                                EditorLog("Auto-applied texture to new brush: %s",
-                                          g_editorPanels.activeTexturePath.c_str());
-                            }
+                        if (!g_editorPanels.activeTexturePath.empty() && ridx >= 0) {
+                            OzoneLoader::Instance().ApplyRenderableTexture(
+                                ridx, g_editorPanels.activeTexturePath.c_str());
+                            EditorLog("Auto-applied texture to new brush %d: %s", ridx,
+                                      g_editorPanels.activeTexturePath.c_str());
                         }
                     }
                 }
@@ -1758,7 +1799,7 @@ int main(int argc, char **argv){
                     if (f.is_open()) {
                         f << worldData;
                         f.close();
-                        std::string cmd = std::string("start \"\" Angels95.exe --world ") + tempPath;
+                        std::string cmd = std::string("start \"\" System\\Angels95.exe --world ") + tempPath;
                         system(cmd.c_str());
                         EditorLog("Launched: %s", cmd.c_str());
                     }
@@ -1843,6 +1884,21 @@ int main(int argc, char **argv){
             OmegaTechEditor.DrawModel = true;
             SnapGizmoToSelection(g_sel);
         }
+        // WorldGraph context menu: open properties
+        if (g_editorPanels.actionWorldGraphProperties >= 0) {
+            OpenPropertiesForSelection();
+            g_editorPanels.actionWorldGraphProperties = -1;
+        }
+        // WorldGraph context menu: delete
+        if (g_editorPanels.actionWorldGraphDelete >= 0) {
+            if (g_sel.type != SelType::NONE) DeleteSelectedEntity();
+            g_editorPanels.actionWorldGraphDelete = -1;
+        }
+        // WorldGraph context menu: duplicate
+        if (g_editorPanels.actionWorldGraphDup >= 0) {
+            if (g_sel.type != SelType::NONE) DuplicateSelectedEntity();
+            g_editorPanels.actionWorldGraphDup = -1;
+        }
 
         // Properties apply handler — write values back from native panel
         if (g_editorPanels.actionApplyProperties) {
@@ -1862,22 +1918,32 @@ int main(int argc, char **argv){
                     if ((int)pk.id == tgtIdx) { pk.position = {px, py, pz}; break; }
                 }
             } else if (tgtType == SelType::BRUSH) {
-                auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-                if (tgtIdx >= 0 && tgtIdx < (int)vols.size()) {
-                    float sx = g_editorPanels.propSizeX;
-                    float sy = g_editorPanels.propSizeY;
-                    float sz = g_editorPanels.propSizeZ;
-                    if (sx < 0.01f) sx = 1.0f;
-                    if (sy < 0.01f) sy = 1.0f;
-                    if (sz < 0.01f) sz = 1.0f;
-                    vols[tgtIdx].aabb.min = {px - sx*0.5f, py - sy*0.5f, pz - sz*0.5f};
-                    vols[tgtIdx].aabb.max = {px + sx*0.5f, py + sy*0.5f, pz + sz*0.5f};
-                    vols[tgtIdx].texScaleU = g_editorPanels.propTexScaleU;
-                    vols[tgtIdx].texScaleV = g_editorPanels.propTexScaleV;
-                    vols[tgtIdx].texOffsetU = g_editorPanels.propTexOffsetU;
-                    vols[tgtIdx].texOffsetV = g_editorPanels.propTexOffsetV;
-                    OzoneLoader::Instance().RebuildCollisionVolumes();
+                float sx = g_editorPanels.propSizeX;
+                float sy = g_editorPanels.propSizeY;
+                float sz = g_editorPanels.propSizeZ;
+                if (sx < 0.01f) sx = 1.0f;
+                if (sy < 0.01f) sy = 1.0f;
+                if (sz < 0.01f) sz = 1.0f;
+                Vector3 newSize = {sx, sy, sz};
+                // Resolve renderable index: try direct, then find by AABB
+                int rIdx = -1;
+                if (tgtIdx >= 0 && tgtIdx < OzoneLoader::Instance().Count()) {
+                    rIdx = tgtIdx;
+                } else {
+                    rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(tgtIdx);
                 }
+                if (rIdx >= 0) {
+                    OzoneLoader::Instance().UpdateBrushRenderable(
+                        rIdx, (Vector3){px, py, pz}, newSize, prot);
+                    OzoneLoader::Instance().ApplyRenderableUV(
+                        rIdx,
+                        g_editorPanels.propTexScaleU,
+                        g_editorPanels.propTexScaleV,
+                        g_editorPanels.propTexOffsetU,
+                        g_editorPanels.propTexOffsetV);
+                }
+                // Rebuild collision volumes from the updated renderable
+                OzoneLoader::Instance().RebuildCollisionVolumes();
             } else if (tgtType == SelType::LIGHT) {
                 LightNode* l = PawnSystem::Instance().GetLight(tgtIdx);
                 if (l) l->position = {px, py, pz};
@@ -1929,12 +1995,19 @@ int main(int argc, char **argv){
         if (g_editorPanels.actionApplyTextureToSel) {
             if (!g_editorPanels.activeTexturePath.empty() && g_sel.type != SelType::NONE) {
                 if (g_sel.type == SelType::BRUSH) {
-                    auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-                    if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
-                        vols[g_sel.index].texPath = g_editorPanels.activeTexturePath;
-                        vols[g_sel.index].texSlot = 1;
-                        EditorLog("Applied texture to brush idx=%d: %s", g_sel.index,
-                                  g_editorPanels.activeTexturePath.c_str());
+                    bool applied = false;
+                    if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
+                        applied = OzoneLoader::Instance().ApplyRenderableTexture(
+                            g_sel.index, g_editorPanels.activeTexturePath.c_str());
+                    }
+                    if (!applied) {
+                        auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
+                        if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
+                            vols[g_sel.index].texPath = g_editorPanels.activeTexturePath;
+                            vols[g_sel.index].texSlot = 1;
+                            EditorLog("Applied texture to brush collision idx=%d: %s",
+                                      g_sel.index, g_editorPanels.activeTexturePath.c_str());
+                        }
                     }
                 } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
                     int mid = CachedModels[g_sel.index].ModelId;
@@ -2091,9 +2164,58 @@ int main(int argc, char **argv){
             OmegaTechEditor.DrawModel = true;
             int primType = g_editorPanels.actionCsgPlace;
             // Map primitive type to EMID
-        
             EMID = 200 + primType;
+            // Initialize placement ghost at camera target with default size
+            OmegaTechEditor.X = OTEditor.MainCamera.target.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.target.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.target.z;
+            OmegaTechEditor.W = 4.0f;
+            OmegaTechEditor.H = 4.0f;
+            OmegaTechEditor.L = 4.0f;
+            OmegaTechEditor.S = 1.0f;
+            OmegaTechEditor.R = 0.0f;
             g_editorPanels.actionCsgPlace = -1;
+        }
+        // CSG commit immediately (from Solid/Add/Sub/Inter buttons)
+        if (g_editorPanels.actionCsgCommitNow >= 0) {
+            if (g_placeMode == PlaceMode::MODEL) {
+                // Default to box if no primitive is selected
+                if (EMID < 200) {
+                    EMID = 200; // Box
+                    OmegaTechEditor.X = OTEditor.MainCamera.target.x;
+                    OmegaTechEditor.Y = OTEditor.MainCamera.target.y;
+                    OmegaTechEditor.Z = OTEditor.MainCamera.target.z;
+                    OmegaTechEditor.W = 4.0f;
+                    OmegaTechEditor.H = 4.0f;
+                    OmegaTechEditor.L = 4.0f;
+                }
+                // Same CSG placement logic as ENTER key
+                float hw = OmegaTechEditor.W * 0.5f;
+                float hh = OmegaTechEditor.H * 0.5f;
+                float hd = OmegaTechEditor.L * 0.5f;
+                CsgBrush brush;
+                brush.op = (CsgOp)OmegaTechEditor.CSGOperation;
+                brush.minX = OmegaTechEditor.X - hw;
+                brush.minY = OmegaTechEditor.Y - hh;
+                brush.minZ = OmegaTechEditor.Z - hd;
+                brush.maxX = OmegaTechEditor.X + hw;
+                brush.maxY = OmegaTechEditor.Y + hh;
+                brush.maxZ = OmegaTechEditor.Z + hd;
+                g_csgProc.Apply(brush);
+                int merges = g_csgProc.MergePass();
+                OzoneLoader::Instance().RebuildCollisionVolumes();
+                int primType = EMID - 200;
+                Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
+                int ridx = OzoneLoader::Instance().AddBrushRenderable(
+                    primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
+                    (int)brush.op);
+                if (ridx >= 0) {
+                    EditorLog("CSG commit: op=%d prim=%d at (%.1f,%.1f,%.1f) size=(%.1f,%.1f,%.1f)",
+                              (int)brush.op, primType, center.x, center.y, center.z, size.x, size.y, size.z);
+                }
+            }
+            g_editorPanels.actionCsgCommitNow = -1;
         }
         if (g_editorPanels.actionRefreshBrowser) {
             ScanModelBrowserFiles();
@@ -2114,12 +2236,34 @@ int main(int argc, char **argv){
             }
             g_editorPanels.actionGenerateHeightmap = false;
         }
-        // Light Properties apply handler — stores properties for export
+        // Light Properties apply handler — write panel values to LightNode
         if (g_editorPanels.actionApplyLight) {
-            EditorLog("Light properties set: color=(%.0f,%.0f,%.0f) intensity=%.1f radius=%.0f type=%d effect=%d",
-                g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
-                g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
-                g_editorPanels.lightType, g_editorPanels.lightEffect);
+            int idx = g_editorPanels.lightPropTarget;
+            if (idx >= 0) {
+                auto& lights = PawnSystem::Instance().GetLights();
+                if (idx < (int)lights.size()) {
+                    LightNode& ln = lights[idx];
+                    ln.color.r = (unsigned char)g_editorPanels.lightColorR;
+                    ln.color.g = (unsigned char)g_editorPanels.lightColorG;
+                    ln.color.b = (unsigned char)g_editorPanels.lightColorB;
+                    ln.intensity = g_editorPanels.lightIntensity;
+                    ln.radius = g_editorPanels.lightRadius;
+                    ln.type = (LitLightType)g_editorPanels.lightType;
+                    ln.effect = (LitLightEffect)g_editorPanels.lightEffect;
+                    // Spot cone angles: edit fields are in degrees, LightNode stores cos(half-angle)
+                    float innerRad = g_editorPanels.lightInnerAngle * DEG2RAD;
+                    float outerRad = g_editorPanels.lightOuterAngle * DEG2RAD;
+                    ln.innerCone = cosf(innerRad);
+                    ln.outerCone = cosf(outerRad);
+                    ln.castShadow = g_editorPanels.lightFlare;
+                    EditorLog("Applied light properties to idx=%d: color=(%.0f,%.0f,%.0f) "
+                              "intensity=%.1f radius=%.0f type=%d effect=%d",
+                        idx,
+                        g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
+                        g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
+                        g_editorPanels.lightType, g_editorPanels.lightEffect);
+                }
+            }
             g_editorPanels.actionApplyLight = false;
         }
 

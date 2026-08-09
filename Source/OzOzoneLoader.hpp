@@ -35,6 +35,12 @@ struct OzoneRenderable {
     int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
     int texSlot = 0;             // 0=auto, 1..N = index into tileset textures
     int surfaceFlags = 0;        // SURF_* bitmask for surface behavior
+    float texScaleU = 1.0f;      // texture tiling/repeat U
+    float texScaleV = 1.0f;      // texture tiling/repeat V
+    float texOffsetU = 0.0f;     // texture shift U
+    float texOffsetV = 0.0f;     // texture shift V
+    std::string texPath;         // filesystem/package path to custom texture (empty = use tileset)
+    Texture2D customTex = {0};   // loaded custom texture (id=0 if using tileset)
 };
 
 // Collision AABB for an OZONE brush primitive.
@@ -68,6 +74,21 @@ public:
     // Editor: add a brush renderable so it becomes visible in the viewport
     int AddBrushRenderable(int primType, const Vector3& pos, const Vector3& size,
                            float rot, float scale, int csgOp);
+
+    // Apply UV transform to a renderable's mesh (updates texcoords on GPU)
+    void ApplyRenderableUV(int idx, float su, float sv, float ou, float ov);
+
+    // Editor: remove a brush renderable by index (used for delete)
+    void RemoveRenderable(int idx);
+
+    // Editor: find the renderable index whose world AABB best matches a collision volume
+    int FindRenderableByCollisionVol(int cvIdx);
+
+    // Editor: regenerate a brush renderable with new position/size/rotation
+    void UpdateBrushRenderable(int idx, const Vector3& pos, const Vector3& size, float rot);
+
+    // Editor: apply a custom texture file to a renderable's model material
+    bool ApplyRenderableTexture(int idx, const char* path);
 
     // Spatial partitioning for efficient collision queries
     const WorldChunkManager& GetChunkManager() const { return m_chunkManager; }
