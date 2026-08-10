@@ -209,10 +209,8 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
 
     std::string typeName = ReadToken(s);
     def.type = EntityTypeFromName(typeName);
-    if (def.type == EntityType::UNKNOWN) {
-        fprintf(stderr, "[LightningParser] %s: unknown entity type '%s'\n", sourcePath.c_str(), typeName.c_str());
-        return def;
-    }
+    if (def.type == EntityType::UNKNOWN)
+        fprintf(stderr, "[LightningParser] %s: unknown entity type '%s' — parsing body anyway\n", sourcePath.c_str(), typeName.c_str());
 
     Expect(s, "{");
 

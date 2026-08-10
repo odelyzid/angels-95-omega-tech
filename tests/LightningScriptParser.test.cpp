@@ -214,7 +214,8 @@ static int test_parse_pawn() {
     )";
     EntityDef def = LightningScriptParser::Parse(ozls, "test_pawn.ozls");
     CHECK(def.name == "Skaarj");
-    CHECK(def.type == EntityType::PAWN);
+    // EntityType::PAWN removed — parser now warns but continues parsing body
+    CHECK(def.type == EntityType::UNKNOWN);
     CHECK_APROX(def.stats.floats["speed"], 3.0f, 0.001f);
     CHECK_APROX(def.stats.floats["aggro_range"], 12.0f, 0.001f);
     CHECK_APROX(def.stats.floats["max_health"], 150.0f, 0.001f);

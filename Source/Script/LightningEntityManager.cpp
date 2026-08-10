@@ -4,7 +4,6 @@
 #include "../Log.hpp"
 #ifndef OMEGA_TEST_ENV
 #include "../Pawn/OzPawnSystem.hpp"
-#include "../Renderer/LitLightning.hpp"
 #endif
 #include <algorithm>
 #include <cstdio>

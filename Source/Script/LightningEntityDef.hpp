@@ -13,7 +13,6 @@ enum class EntityType : uint8_t {
     UPGRADE,
     PICKUP,
     PROJECTILE,
-    PAWN,
     SKYZONE,
     UNKNOWN
 };
@@ -26,7 +25,6 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::UPGRADE:    return "upgrade";
         case EntityType::PICKUP:     return "pickup";
         case EntityType::PROJECTILE: return "projectile";
-        case EntityType::PAWN:       return "pawn";
         case EntityType::SKYZONE:    return "skyzone";
         default:                     return "unknown";
     }
@@ -39,7 +37,6 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "upgrade")    return EntityType::UPGRADE;
     if (n == "pickup")     return EntityType::PICKUP;
     if (n == "projectile") return EntityType::PROJECTILE;
-    if (n == "pawn")       return EntityType::PAWN;
     if (n == "skyzone")    return EntityType::SKYZONE;
     return EntityType::UNKNOWN;
 }
