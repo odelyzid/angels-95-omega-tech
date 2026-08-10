@@ -4,6 +4,7 @@
 #include "../Network/Network.hpp"
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
@@ -60,6 +61,18 @@ constexpr const char* npc_state_string(NpcState s) {
     }
 }
 
+struct ServerPawnDef {
+    std::string name;
+    float speed = 1.5f;
+    float aggro_range = 6.0f;
+    float attack_range = 1.5f;
+    float damage = 10.0f;
+    int max_health = 100;
+    float return_range = 15.0f;
+    float give_up_range = 20.0f;
+    int attack_cooldown_max = 30;
+};
+
 struct ServerNPC {
     bool active = true;
     NpcState state = NpcState::PATROL;
@@ -70,16 +83,17 @@ struct ServerNPC {
     float patrol_radius = 3.0f;
     NetVec3 spawn_pos{0, 0, 0};
     float state_timer = 0;
-    float state_accumulator = 0; // for timed state transitions
+    float state_accumulator = 0;
     int health = 100;
     int max_health = 100;
-    float aggro_range = 6.0f;    // distance to start chasing
-    float return_range = 15.0f;  // distance from spawn to start returning
-    float give_up_range = 20.0f; // distance from spawn to give up chase
+    float aggro_range = 6.0f;
+    float return_range = 15.0f;
+    float give_up_range = 20.0f;
     float damage = 10.0f;
     float attack_range = 1.5f;
-    int attack_cooldown = 0;      // ticks between attacks
-    int attack_cooldown_max = 30; // 3 seconds at 10 ticks/s
+    int attack_cooldown = 0;
+    int attack_cooldown_max = 30;
+    std::string typeName;        // e.g. "Walker", "Skaarj" — from .cfg or hardcoded
 };
 
 // ---------------------------------------------------------------------------

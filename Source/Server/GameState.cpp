@@ -8,7 +8,64 @@
 #include <limits>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 #include <sys/stat.h>
+
+namespace fs = std::filesystem;
+
+static std::unordered_map<std::string, ServerPawnDef> g_serverPawnDefs;
+static bool g_serverPawnDefsLoaded = false;
+
+static void load_server_pawn_defs() {
+    if (g_serverPawnDefsLoaded) return;
+    const char* defsDir = "GameData/Global/PawnDefs";
+    if (!fs::exists(defsDir)) {
+        // Fallback hardcoded defs (match .cfg values)
+        auto add = [&](const char* name, float speed, float aggro, float attack, float dmg, int hp) {
+            ServerPawnDef& d = g_serverPawnDefs[name];
+            d.name = name; d.speed = speed; d.aggro_range = aggro;
+            d.attack_range = attack; d.damage = dmg; d.max_health = hp;
+        };
+        add("Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100);
+        add("Skaarj", 2.5f, 10.0f, 2.0f, 20.0f, 150);
+        add("Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250);
+        add("Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80);
+        g_serverPawnDefsLoaded = true;
+        return;
+    }
+    int loaded = 0;
+    for (auto& entry : fs::directory_iterator(defsDir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext != ".cfg") continue;
+        std::ifstream f(entry.path());
+        if (!f.is_open()) continue;
+        std::string name; float speed=1.5f, aggro=6.0f, attack=1.5f, dmg=10.0f; int hp=100;
+        std::string line;
+        while (std::getline(f, line)) {
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            if (line.empty() || line[0]=='#' || line[0]==';') continue;
+            size_t eq = line.find('='); if (eq==std::string::npos) continue;
+            std::string k = line.substr(0,eq), v = line.substr(eq+1);
+            k.erase(0,k.find_first_not_of(" \t")); k.erase(k.find_last_not_of(" \t")+1);
+            v.erase(0,v.find_first_not_of(" \t")); v.erase(v.find_last_not_of(" \t\r")+1);
+            if (k=="name") name=v; else if (k=="speed") speed=std::stof(v);
+            else if (k=="aggroRange") aggro=std::stof(v);
+            else if (k=="attackRange") attack=std::stof(v);
+            else if (k=="damage") dmg=std::stof(v);
+            else if (k=="maxHealth") hp=std::stoi(v);
+        }
+        if (!name.empty()) {
+            ServerPawnDef& d = g_serverPawnDefs[name];
+            d.name=name; d.speed=speed; d.aggro_range=aggro;
+            d.attack_range=attack; d.damage=dmg; d.max_health=hp;
+            loaded++;
+        }
+    }
+    OZ_INFO("Server: loaded %d pawn defs from %s", loaded, defsDir);
+    g_serverPawnDefsLoaded = true;
+}
 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
@@ -88,7 +145,15 @@ void GameState::init_worlds(const std::string& gamedata_dir,
 }
 
 void GameState::init_global_npcs_and_pickups(WorldState& ws) {
-    // Spawn NPCs for this world (10 NPCs, similar to Angels95's spawn_npcs)
+    // Load pawn defs from .cfg files (or fallback hardcoded)
+    load_server_pawn_defs();
+    // Collect available type names for random assignment
+    std::vector<std::string> pawnTypes;
+    for (auto& [name, def] : g_serverPawnDefs)
+        pawnTypes.push_back(name);
+    if (pawnTypes.empty()) pawnTypes.push_back("Walker");
+
+    // Spawn NPCs for this world (10 NPCs, using .cfg stats)
     for (int i = 0; i < 10; i++) {
         ServerNPC npc;
         float angle = (2 * 3.14159265f / 10) * i;
@@ -97,7 +162,22 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
         npc.spawn_pos.y = 0;
         npc.spawn_pos.z = radius * std::sin(angle);
         npc.position = npc.spawn_pos;
-        npc.speed = 1.5f + (i % 3) * 0.5f;
+        // Assign random pawn type from loaded defs
+        const std::string& typeName = pawnTypes[i % pawnTypes.size()];
+        npc.typeName = typeName;
+        auto it = g_serverPawnDefs.find(typeName);
+        if (it != g_serverPawnDefs.end()) {
+            auto& d = it->second;
+            npc.speed = d.speed;
+            npc.aggro_range = d.aggro_range;
+            npc.attack_range = d.attack_range;
+            npc.damage = d.damage;
+            npc.max_health = d.max_health;
+            npc.health = d.max_health;
+            npc.return_range = d.return_range;
+            npc.give_up_range = d.give_up_range;
+            npc.attack_cooldown_max = d.attack_cooldown_max;
+        }
         npc.patrol_radius = 3.0f;
         npc.state = NpcState::PATROL;
         ws.global_npcs.push_back(npc);
