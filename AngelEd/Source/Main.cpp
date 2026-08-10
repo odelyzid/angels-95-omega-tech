@@ -1621,19 +1621,15 @@ int main(int argc, char **argv){
                     brush.maxZ = OmegaTechEditor.Z + hd;
                     g_csgProc.Apply(brush);
                     int merges = g_csgProc.MergePass();
-                    // Rebuild OzoneLoader collision volumes from CSG result
-                    OzoneLoader::Instance().RebuildCollisionVolumes();
-                    std::vector<CsgProcessor::Volume> vols;
-                    g_csgProc.GetVolumes(vols);
-                    EditorLog("CSG: op=%d volumes=%d merges=%d",
-                              (int)brush.op, (int)vols.size(), merges);
-                    // Add brush renderable so it's visible in the viewport
+                    // Add brush renderable first so it's in m_renderables for rebuild
                     int primType = EMID - 200;
                     Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
                     Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
                 int ridx = OzoneLoader::Instance().AddBrushRenderable(
                     primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
                     (int)OmegaTechEditor.CSGOperation);
+                    // Rebuild collision volumes (includes the new brush)
+                    OzoneLoader::Instance().RebuildCollisionVolumes();
                     if (ridx >= 0) {
                         EditorLog("Brush renderable added idx=%d prim=%d", ridx, primType);
                         // Auto-apply preselected texture to new brush
@@ -2202,14 +2198,15 @@ int main(int argc, char **argv){
                 brush.maxY = OmegaTechEditor.Y + hh;
                 brush.maxZ = OmegaTechEditor.Z + hd;
                 g_csgProc.Apply(brush);
-                int merges = g_csgProc.MergePass();
-                OzoneLoader::Instance().RebuildCollisionVolumes();
+                g_csgProc.MergePass();
                 int primType = EMID - 200;
                 Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
                 Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
                 int ridx = OzoneLoader::Instance().AddBrushRenderable(
                     primType, center, size, OmegaTechEditor.R, OmegaTechEditor.S,
                     (int)brush.op);
+                // Rebuild collision volumes (includes the new brush)
+                OzoneLoader::Instance().RebuildCollisionVolumes();
                 if (ridx >= 0) {
                     EditorLog("CSG commit: op=%d prim=%d at (%.1f,%.1f,%.1f) size=(%.1f,%.1f,%.1f)",
                               (int)brush.op, primType, center.x, center.y, center.z, size.x, size.y, size.z);
