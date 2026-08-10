@@ -24,15 +24,12 @@ PawnSystem& PawnSystem::Instance() {
 // Find a registered PawnDef by name (case-insensitive)
 // ---------------------------------------------------------------------------
 PawnDef* PawnSystem::FindDef(const char* name) {
+    if (!name) return nullptr;
     for (auto& d : m_defs) {
-        const char* a = name;
-        const char* b = d.name;
-        while (*a && *b) {
-            if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b))
-                break;
-            a++; b++;
-        }
-        if (*a == *b) return &d;
+        if (d.name.size() == strlen(name) &&
+            std::equal(d.name.begin(), d.name.end(), name,
+                       [](char a, char b) { return std::tolower((unsigned char)a) == std::tolower((unsigned char)b); }))
+            return &d;
     }
     return nullptr;
 }
@@ -55,8 +52,7 @@ int PawnSystem::AllocSlot() {
 // RegisterDef
 // ---------------------------------------------------------------------------
 void PawnSystem::RegisterDef(const PawnDef& def) {
-    // Don't register duplicates
-    if (FindDef(def.name)) return;
+    if (FindDef(def.name.c_str())) return;
     m_defs.push_back(def);
 }
 
@@ -94,17 +90,15 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
 
     // Load sprite and scream using def paths or convention (with package fallback)
     {
-        const char* spritePath = def->sprite_path;
-        if (spritePath && spritePath[0])
-            p.sprite = LoadTextureWithFallback(spritePath);
+        if (!def->sprite_path.empty())
+            p.sprite = LoadTextureWithFallback(def->sprite_path.c_str());
         if (p.sprite.id == 0) {
             std::string fallbackSprite = std::string("GameData/Global/Pawn/") + defName + ".png";
             p.sprite = LoadTextureWithFallback(fallbackSprite.c_str());
         }
 
-        const char* screamPath = def->scream_path;
-        if (screamPath && screamPath[0])
-            p.scream = LoadSoundWithFallback(screamPath);
+        if (!def->scream_path.empty())
+            p.scream = LoadSoundWithFallback(def->scream_path.c_str());
         if (p.scream.frameCount == 0) {
             std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
             p.scream = LoadSoundWithFallback(fallbackScream.c_str());

@@ -71,14 +71,14 @@ struct GameplaySoundProfile {
 // Template definition shared between spawn calls; stored in an internal
 // registry so Spawn() can be called by name.
 struct PawnDef {
-    const char* name;           // logical name, e.g. "Walker"
+    std::string name;           // logical name, e.g. "Walker"
     float speed = 1.5f;
     float aggroRange = 6.0f;
     float attackRange = 1.5f;
     float damage = 10.0f;
     int maxHealth = 100;
-    const char* sprite_path = nullptr;  // texture path (convention: GameData/Global/Pawn/<name>.png)
-    const char* scream_path = nullptr;  // sound path (convention: GameData/Global/Pawn/<name>.wav)
+    std::string sprite_path;    // texture path (convention: GameData/Global/Pawn/<name>.png)
+    std::string scream_path;    // sound path (convention: GameData/Global/Pawn/<name>.wav)
 };
 
 // A single spawned pawn instance.

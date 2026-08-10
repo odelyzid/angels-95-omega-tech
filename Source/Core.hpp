@@ -16,6 +16,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 bool FloorCollision = true;
 bool ObjectCollision = false;
@@ -509,11 +511,69 @@ void OmegaTechInit()
     // Initialize engine billboard system
     EngineBillboard::Init();
 
-    // Register pawn definitions for NPC system
-    PawnSystem::Instance().RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
-    PawnSystem::Instance().RegisterDef({"Skaarj", 2.0f, 8.0f, 2.0f, 15.0f, 150});
-    PawnSystem::Instance().RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
-    PawnSystem::Instance().RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
+    // Register pawn definitions from .cfg files (data-driven)
+    {
+        auto& ps = PawnSystem::Instance();
+        const char* defsDir = "GameData/Global/PawnDefs";
+        namespace fs = std::filesystem;
+        if (fs::exists(defsDir)) {
+            int loaded = 0;
+            for (auto& entry : std::filesystem::directory_iterator(defsDir)) {
+                if (!entry.is_regular_file()) continue;
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext != ".cfg") continue;
+                std::ifstream f(entry.path());
+                if (!f.is_open()) continue;
+                std::string name, sp, sc;
+                float speed = 1.5f, aggroRange = 6.0f, attackRange = 1.5f, damage = 10.0f;
+                int maxHealth = 100;
+                std::string line;
+                while (std::getline(f, line)) {
+                    line.erase(0, line.find_first_not_of(" \t\r\n"));
+                    if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+                    size_t eq = line.find('=');
+                    if (eq == std::string::npos) continue;
+                    std::string key = line.substr(0, eq);
+                    std::string val = line.substr(eq + 1);
+                    key.erase(0, key.find_first_not_of(" \t"));
+                    key.erase(key.find_last_not_of(" \t") + 1);
+                    val.erase(0, val.find_first_not_of(" \t"));
+                    val.erase(val.find_last_not_of(" \t\r") + 1);
+                    if (key == "name") name = val;
+                    else if (key == "speed") speed = std::stof(val);
+                    else if (key == "aggroRange") aggroRange = std::stof(val);
+                    else if (key == "attackRange") attackRange = std::stof(val);
+                    else if (key == "damage") damage = std::stof(val);
+                    else if (key == "maxHealth") maxHealth = std::stoi(val);
+                    else if (key == "sprite_path") sp = val;
+                    else if (key == "scream_path") sc = val;
+                }
+                if (!name.empty()) {
+                    PawnDef def;
+                    def.name = name;
+                    def.speed = speed;
+                    def.aggroRange = aggroRange;
+                    def.attackRange = attackRange;
+                    def.damage = damage;
+                    def.maxHealth = maxHealth;
+                    def.sprite_path = sp;
+                    def.scream_path = sc;
+                    ps.RegisterDef(def);
+                    loaded++;
+                }
+            }
+            OZ_INFO("Loaded %d pawn definitions from %s", loaded, defsDir);
+        } else {
+            // Fallback if no config directory exists
+            OZ_INFO("PawnDefs dir not found, using hardcoded defaults");
+            PawnDef d;
+            d.name="Walker"; d.speed=1.5f; d.aggroRange=6.0f; d.attackRange=1.5f; d.damage=10.0f; d.maxHealth=100; ps.RegisterDef(d);
+            d.name="Skaarj"; d.speed=2.5f; d.aggroRange=10.0f; d.attackRange=2.0f; d.damage=20.0f; d.maxHealth=150; ps.RegisterDef(d);
+            d.name="Brute"; d.speed=1.0f; d.aggroRange=4.0f; d.attackRange=1.5f; d.damage=30.0f; d.maxHealth=250; ps.RegisterDef(d);
+            d.name="Floater"; d.speed=1.2f; d.aggroRange=8.0f; d.attackRange=3.0f; d.damage=15.0f; d.maxHealth=80; ps.RegisterDef(d);
+        }
+    }
 
     OmegaTechData.InitCamera();
 

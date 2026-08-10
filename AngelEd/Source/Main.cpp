@@ -1061,16 +1061,19 @@ int main(int argc, char **argv){
                 }
                 if (!name.empty()) {
                     PawnDef def;
-                    def.name = strdup(name.c_str());
+                    def.name = name;
                     def.speed = speed;
                     def.aggroRange = aggroRange;
                     def.attackRange = attackRange;
                     def.damage = damage;
                     def.maxHealth = maxHealth;
-                    def.sprite_path = sp.empty() ? nullptr : strdup(sp.c_str());
-                    def.scream_path = sc.empty() ? nullptr : strdup(sc.c_str());
+                    def.sprite_path = sp;
+                    def.scream_path = sc;
                     ps.RegisterDef(def);
-                    PawnManagerAddPawn(name.c_str(), (std::string("GameData/Models/") + name + ".obj").c_str());
+                    if (!sp.empty())
+                        PawnManagerAddPawn(name.c_str(), sp.c_str());
+                    else
+                        PawnManagerAddPawn(name.c_str(), (std::string("GameData/Global/Pawn/") + name + ".png").c_str());
                     loaded++;
                     EditorLog("Loaded pawn def: %s", name.c_str());
                 }
@@ -1079,14 +1082,19 @@ int main(int argc, char **argv){
         } else {
             // Legacy fallback if no config directory exists
             EditorLog("WARN: %s not found, using hardcoded defaults", defsDir);
-            ps.RegisterDef({"Walker", 1.5f, 6.0f, 1.5f, 10.0f, 100});
-            ps.RegisterDef({"Skaarj", 2.5f, 10.0f, 2.0f, 20.0f, 150});
-            ps.RegisterDef({"Brute", 1.0f, 4.0f, 1.5f, 30.0f, 250});
-            ps.RegisterDef({"Floater", 1.2f, 8.0f, 3.0f, 15.0f, 80});
-            PawnManagerAddPawn("Walker", "GameData/Models/Walker.obj");
-            PawnManagerAddPawn("Skaarj", "GameData/Models/Skaarj.obj");
-            PawnManagerAddPawn("Brute", "GameData/Models/Brute.obj");
-            PawnManagerAddPawn("Floater", "GameData/Models/Floater.obj");
+            {
+                PawnDef d; d.name="Walker"; d.speed=1.5f; d.aggroRange=6.0f; d.attackRange=1.5f; d.damage=10.0f; d.maxHealth=100; ps.RegisterDef(d);
+                PawnManagerAddPawn("Walker", "GameData/Global/Pawn/Walker.png");
+            } {
+                PawnDef d; d.name="Skaarj"; d.speed=2.5f; d.aggroRange=10.0f; d.attackRange=2.0f; d.damage=20.0f; d.maxHealth=150; ps.RegisterDef(d);
+                PawnManagerAddPawn("Skaarj", "GameData/Global/Pawn/Skaarj.png");
+            } {
+                PawnDef d; d.name="Brute"; d.speed=1.0f; d.aggroRange=4.0f; d.attackRange=1.5f; d.damage=30.0f; d.maxHealth=250; ps.RegisterDef(d);
+                PawnManagerAddPawn("Brute", "GameData/Global/Pawn/Brute.png");
+            } {
+                PawnDef d; d.name="Floater"; d.speed=1.2f; d.aggroRange=8.0f; d.attackRange=3.0f; d.damage=15.0f; d.maxHealth=80; ps.RegisterDef(d);
+                PawnManagerAddPawn("Floater", "GameData/Global/Pawn/Floater.png");
+            }
         }
     }
 
