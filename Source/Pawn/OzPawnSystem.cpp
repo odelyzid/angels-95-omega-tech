@@ -105,6 +105,12 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
         }
     }
 
+    // Optionally create a LightningScript entity instance for script hooks
+#ifndef OMEGA_TEST_ENV
+    int lemIdx = LightningEntityManager::Instance().Spawn(defName);
+    if (lemIdx >= 0) p.scriptInstanceIndex = lemIdx;
+#endif
+
     OZ_DEBUG("Pawn spawned: id=%d def=%s sprite=%d scream=%d at (%.1f, %.1f, %.1f)",
              p.id, defName, p.sprite.id, p.scream.frameCount, pos.x, pos.y, pos.z);
     return (int)p.id;
@@ -117,6 +123,10 @@ void PawnSystem::Despawn(int id) {
     for (size_t i = 0; i < m_pawns.size(); i++) {
         if (m_pawns[i].active && m_pawns[i].id == (uint32_t)id) {
             OZ_DEBUG("Pawn despawned: id=%d def=%s", id, m_pawns[i].defName.c_str());
+#ifndef OMEGA_TEST_ENV
+            if (m_pawns[i].scriptInstanceIndex >= 0)
+                LightningEntityManager::Instance().Despawn(m_pawns[i].scriptInstanceIndex);
+#endif
             if (m_pawns[i].sprite.id != 0) UnloadTexture(m_pawns[i].sprite);
             if (m_pawns[i].scream.frameCount != 0) UnloadSound(m_pawns[i].scream);
             m_pawns[i].active = false;
@@ -746,6 +756,24 @@ void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
     p.prevState = p.state;
     p.state = newState;
     p.stateTimer = 0.0f;
+
+    // Fire LightningScript hook on state change if entity instance exists
+#ifndef OMEGA_TEST_ENV
+    if (p.scriptInstanceIndex >= 0) {
+        const char* action = nullptr;
+        switch (newState) {
+            case PawnState::CHASE:  action = "on_chase"; break;
+            case PawnState::PATROL: action = "on_patrol"; break;
+            case PawnState::RETURN: action = "on_return"; break;
+            case PawnState::DEAD:   action = "on_death"; break;
+            default: break;
+        }
+        if (action) {
+            auto* inst = LightningEntityManager::Instance().Get(p.scriptInstanceIndex);
+            LightningEntityManager::Instance().RunAction(inst, action);
+        }
+    }
+#endif
 }
 
 PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {

@@ -500,6 +500,17 @@ void GameState::tick_npcs(WorldState& ws, float dt) {
                     }
                 }
                 break;
+
+            case NpcState::DEAD:
+                npc.death_timer += dt;
+                if (npc.death_timer >= 10.0f) {
+                    npc.state = NpcState::IDLE;
+                    npc.state_timer = 0;
+                    npc.health = npc.max_health;
+                    npc.position = npc.spawn_pos;
+                    npc.death_timer = 0.0f;
+                }
+                break;
         }
 
         // Decrement attack cooldown

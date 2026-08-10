@@ -366,10 +366,6 @@ auto LoadWorld()
             OtherWDLData = L"";
             CacheWDL();
         }
-        else if (GameDataEncoded)
-        {
-            WorldData = Encode(LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", g_world_to_load)), MainKey);
-        }
         else
         {
             WorldData = L"";

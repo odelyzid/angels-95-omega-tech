@@ -76,12 +76,7 @@ static std::vector<ResourceEntry> g_soundFiles;
 // Texture target model names (set from Main.cpp after model loading)
 static std::vector<std::string> g_textureTargetNames;
 
-// Pawn data (editor-local, distinct from oz_pawn_system.h::PawnDef)
-struct EditorPawnDef {
-    std::string name;
-    std::string meshPath;
-};
-static std::vector<EditorPawnDef> g_pawns;
+// Pawn defs managed by PawnSystem (shared with runtime)
 
 // Model preview sequence number (for refresh)
 static int g_previewSeq = 0;
@@ -913,17 +908,8 @@ void ShowPawnManager(bool show) {
         ShowWindow((HWND)g_editorPanels.hPawnMgr, show ? SW_SHOW : SW_HIDE);
 }
 
-void PawnManagerAddPawn(const char* name, const char* meshPath) {
-    g_pawns.push_back({name, meshPath});
-    if (g_editorPanels.hPawnMgr) {
-        SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
-    }
-}
-
-int GetPawnCount() { return (int)g_pawns.size(); }
-const char* GetPawnName(int index) {
-    if (index < 0 || index >= (int)g_pawns.size()) return nullptr;
-    return g_pawns[index].name.c_str();
+void PawnManagerAddPawn(const char*, const char*) {
+    // Legacy no-op — defs managed by PawnSystem
 }
 
 PawnTreeNode BuildPawnTree() {
@@ -1102,13 +1088,7 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                         *pipe = '\0';
                         const char* defName = pipe + 1;
                         if (strlen(defName) > 0) {
-                            // Find index in g_pawns list
-                            for (int i = 0; i < (int)g_pawns.size(); i++) {
-                                if (g_pawns[i].name == defName) {
-                                    g_editorPanels.actionSpawnPawn = i;
-                                    break;
-                                }
-                            }
+                            g_editorPanels.actionSpawnPawn = defName;
                         }
                     }
                 }

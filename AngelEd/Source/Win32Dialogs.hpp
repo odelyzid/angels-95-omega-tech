@@ -39,7 +39,7 @@ struct EditorPanelState {
     int actionNodeType = -1;
     int actionPlaceModel = -1;
     bool actionRefreshBrowser = false;
-    int actionSpawnPawn = -1;
+    std::string actionSpawnPawn;
     std::string actionTexturePath;
     int actionTextureTarget = -1;
     std::string actionPreviewSoundPath;

@@ -49,7 +49,7 @@ struct ServerPlayer {
 // ---------------------------------------------------------------------------
 // NpcEntity (from Angels95, C++20)
 // ---------------------------------------------------------------------------
-enum class NpcState : uint8_t { IDLE, PATROL, CHASE, RETURN };
+enum class NpcState : uint8_t { IDLE, PATROL, CHASE, RETURN, DEAD };
 
 constexpr const char* npc_state_string(NpcState s) {
     switch (s) {
@@ -57,6 +57,7 @@ constexpr const char* npc_state_string(NpcState s) {
         case NpcState::PATROL: return "patrol";
         case NpcState::CHASE:  return "chase";
         case NpcState::RETURN: return "return";
+        case NpcState::DEAD:   return "dead";
         default:               return "?";
     }
 }
@@ -93,6 +94,7 @@ struct ServerNPC {
     float attack_range = 1.5f;
     int attack_cooldown = 0;
     int attack_cooldown_max = 30;
+    float death_timer = 0.0f;    // respawn countdown when in DEAD state
     std::string typeName;        // e.g. "Walker", "Skaarj" — from .cfg or hardcoded
 };
 

@@ -9,7 +9,6 @@
 #include "Renderer/Video.hpp"
 #include "ParticleDemon/ParticleDemon.hpp"
 #include "Parasite/ParasiteScript.hpp"
-#include "Encoder/Encoder.hpp"
 // Entities.hpp removed
 
 static PlayerMovement g_playerMovement;

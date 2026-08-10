@@ -105,7 +105,8 @@ struct Pawn {
 
     Texture2D sprite;       // billboard frame (loaded externally)
     Sound scream;           // aggro sound (loaded externally)
-    std::string defName;  // name of the pawn definition (e.g., "Walker", "Skaarj")
+    std::string defName;    // name of the pawn definition (e.g., "Walker", "Skaarj")
+    int scriptInstanceIndex = -1; // LightningEntityManager instance index, -1 = none
 };
 
 // Player start node - position and orientation for player spawn

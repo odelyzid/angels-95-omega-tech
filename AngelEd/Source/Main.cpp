@@ -2272,13 +2272,10 @@ int main(int argc, char **argv){
             g_editorPanels.actionApplyLight = false;
         }
 
-        if (g_editorPanels.actionSpawnPawn >= 0) {
-            int idx = g_editorPanels.actionSpawnPawn;
-            if (idx >= 0 && idx < GetPawnCount()) {
-                Vector3 pos = OTEditor.MainCamera.position;
-                PawnSystem::Instance().Spawn(pos, GetPawnName(idx));
-            }
-            g_editorPanels.actionSpawnPawn = -1;
+        if (!g_editorPanels.actionSpawnPawn.empty()) {
+            Vector3 pos = OTEditor.MainCamera.position;
+            PawnSystem::Instance().Spawn(pos, g_editorPanels.actionSpawnPawn.c_str());
+            g_editorPanels.actionSpawnPawn.clear();
         }
 
         // Mode switching
