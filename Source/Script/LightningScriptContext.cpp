@@ -303,6 +303,23 @@ bool LightningScriptContext::ExecuteNext() {
         SetStr("__skybox", "");
         m_pc++;
 
+    } else if (opcode == "spawn_pawn") {
+        // spawn_pawn "name" x y z
+        std::string name;
+        ls >> name;
+        {
+            size_t a = name.find_first_not_of(" \t\"");
+            size_t b = name.find_last_not_of(" \t\"\r\n");
+            if (a != std::string::npos && b != std::string::npos) name = name.substr(a, b - a + 1);
+        }
+        float x, y, z;
+        ls >> x >> y >> z;
+        SetStr("__pawn_name", name);
+        SetFloat("__pawn_x", x);
+        SetFloat("__pawn_y", y);
+        SetFloat("__pawn_z", z);
+        m_pc++;
+
     } else {
         OZ_WARN("LightningScript: unknown opcode '%s' at line %d", opcode.c_str(), m_pc);
         m_pc++;
@@ -449,4 +466,20 @@ bool LightningScriptContext::PopPendingAmbient(float& r, float& g, float& b) {
     if (it_g != m_floatVars.end()) { g = it_g->second; m_floatVars.erase(it_g); }
     if (it_b != m_floatVars.end()) { b = it_b->second; m_floatVars.erase(it_b); }
     return true;
+}
+
+LightningScriptContext::PawnSpawnRequest LightningScriptContext::PopPendingPawnSpawn() {
+    PawnSpawnRequest req;
+    auto it = m_strVars.find("__pawn_name");
+    if (it == m_strVars.end() || it->second.empty()) return req;
+    req.name = it->second;
+    m_strVars.erase(it);
+    auto it_x = m_floatVars.find("__pawn_x");
+    auto it_y = m_floatVars.find("__pawn_y");
+    auto it_z = m_floatVars.find("__pawn_z");
+    if (it_x != m_floatVars.end()) { req.x = it_x->second; m_floatVars.erase(it_x); }
+    if (it_y != m_floatVars.end()) { req.y = it_y->second; m_floatVars.erase(it_y); }
+    if (it_z != m_floatVars.end()) { req.z = it_z->second; m_floatVars.erase(it_z); }
+    req.valid = true;
+    return req;
 }

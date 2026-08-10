@@ -259,6 +259,23 @@ static int test_find_unknown_label() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_spawn_pawn_opcode() {
+    TEST("spawn_pawn stores name and position for host");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_spawn_pawn");
+    CHECK(ctx.Load("spawn_pawn \"Walker\" 10.0 5.0 20.0"));
+    ctx.ExecuteNext();
+    auto req = ctx.PopPendingPawnSpawn();
+    CHECK(req.valid);
+    CHECK(req.name == "Walker");
+    CHECK_APROX(req.x, 10.0f, 0.001f);
+    CHECK_APROX(req.y, 5.0f, 0.001f);
+    CHECK_APROX(req.z, 20.0f, 0.001f);
+    auto req2 = ctx.PopPendingPawnSpawn();
+    CHECK(!req2.valid);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_set_fog() {
     TEST("set_fog stores fog vars");
     LightningScriptContext ctx;
@@ -351,6 +368,7 @@ int main() {
     failures += test_reset_rewinds();
     failures += test_pc_values();
     failures += test_find_unknown_label();
+    failures += test_spawn_pawn_opcode();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

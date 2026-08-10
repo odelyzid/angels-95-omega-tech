@@ -52,11 +52,18 @@ public:
     void RegisterJumpLabel(const std::string& label, int line);
     int  FindJumpLabel(const std::string& label) const;
 
+    struct PawnSpawnRequest {
+        std::string name;
+        float x = 0, y = 0, z = 0;
+        bool valid = false;
+    };
+
     // Pop pending side-effects (called by host after script execution)
     std::string PopPendingSound();              // returns __last_sound and clears it
     bool PopPendingFog(float& r, float& g, float& b, float& density);
     std::string PopPendingSkybox();             // returns __skybox name or empty
     bool PopPendingAmbient(float& r, float& g, float& b);
+    PawnSpawnRequest PopPendingPawnSpawn();     // returns __pawn_name and position
 
 private:
     std::vector<std::string> m_lines;

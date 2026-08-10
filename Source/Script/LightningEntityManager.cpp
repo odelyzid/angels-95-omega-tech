@@ -4,6 +4,7 @@
 #include "../Log.hpp"
 #ifndef OMEGA_TEST_ENV
 #include "../Pawn/OzPawnSystem.hpp"
+#include "../Renderer/LitLightning.hpp"
 #endif
 #include <algorithm>
 #include <cstdio>
@@ -175,6 +176,16 @@ void LightningEntityManager::Update(float dt) {
                 m_pendingAmbient = true;
                 m_ambientR = ar; m_ambientG = ag; m_ambientB = ab;
             }
+
+            // Process pending pawn spawn from spawn_pawn opcode
+#ifndef OMEGA_TEST_ENV
+            auto pawnReq = inst.ctx.PopPendingPawnSpawn();
+            if (pawnReq.valid && !pawnReq.name.empty()) {
+                PawnSystem::Instance().Spawn(
+                    {pawnReq.x, pawnReq.y, pawnReq.z},
+                    pawnReq.name.c_str());
+            }
+#endif
         }
     }
 
