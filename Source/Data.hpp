@@ -116,8 +116,8 @@ class CollisionData{
 
 };
 
-static int CachedCollisionCounter = 0;
-static CollisionData CachedCollision[MaxCachedModels];
+inline int CachedCollisionCounter = 0;
+inline CollisionData CachedCollision[MaxCachedModels];
 
 class GameSounds
 {

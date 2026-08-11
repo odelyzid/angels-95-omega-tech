@@ -19,24 +19,24 @@
 #include <filesystem>
 #include <fstream>
 
-inline bool FloorCollision = true;
-inline bool ObjectCollision = false;
-extern bool g_showCollisionDebug;
+bool FloorCollision = true;
+bool ObjectCollision = false;
+bool g_showCollisionDebug = false;
 
-inline char g_world_to_load[256] = "EngineTest";
-inline char g_world_dir_override[256] = "";
-inline bool g_skipMenu = false;
+char g_world_to_load[256] = "EngineTest";
+char g_world_dir_override[256] = "";
+bool g_skipMenu = false;
 
-extern int ScriptTimer;
+int ScriptTimer = 0;
 
 // Cross-world state that must be reset on each LoadWorld()
-inline float g_damageCooldown = 0.0f;
-inline std::string g_prevSoundZone;
-inline Music g_defaultWorldMusic = {0};
-inline Sound g_ambienceHandle = {0};
-inline std::string g_ambienceZoneName;
-inline bool g_wasInReverb = false;
-inline std::string g_activeEnvZone;
+float g_damageCooldown = 0.0f;
+std::string g_prevSoundZone;
+Music g_defaultWorldMusic = {0};
+Sound g_ambienceHandle = {0};
+std::string g_ambienceZoneName;
+bool g_wasInReverb = false;
+std::string g_activeEnvZone;
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -775,7 +775,7 @@ void PlayHomeScreen()
     OmegaTechData.Deaths = 1;
 }
 
-int ScriptTimer = 0; // definition (extern declared above)
+// ScriptTimer defined above in global section
 inline float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
 bool NextCollision = false;
 

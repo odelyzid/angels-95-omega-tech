@@ -269,7 +269,7 @@ static void FireWeapon() {
 // Inventory overlay (draw when Tab pressed)
 // ---------------------------------------------------------------------------
 // ---- Debug Console ----
-bool g_showCollisionDebug = false;
+// g_showCollisionDebug defined in Core.hpp
 static bool g_consoleOpen = false;
 static char g_consoleBuf[256] = "";
 static int g_consoleCursor = 0;
