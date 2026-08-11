@@ -20,6 +20,56 @@ zone sky -100 -100 -30 100 100 80
 add box 0 0 -0.5 180 0.5 180 0
 
 # ==============================================================================
+# SURROUNDING TERRAIN — hills and rocky formations around the map edge
+# ==============================================================================
+# Northern hills
+add box -30 89 3 40 8 12 0
+add box 20 88 4 30 10 10 0
+add box 50 87 2 20 6 8 0
+add box -10 85 5 20 12 6 0
+add box -70 86 3 20 8 10 0
+add cyl -40 90 4 2.0 3.0 8 16 0
+add cyl 30 85 5 1.5 2.5 10 16 0
+add cyl -60 88 3 1.5 2.0 6 16 0
+
+# Southern hills
+add box -30 -88 3 40 8 12 0
+add box 20 -87 4 30 10 10 0
+add box 50 -86 2 20 6 8 0
+add box -70 -85 5 20 12 6 0
+add cyl -40 -89 4 2.0 3.0 8 16 0
+add cyl 30 -87 5 1.5 2.5 10 16 0
+add cyl 60 -88 2 1.0 1.5 5 16 0
+
+# Eastern mesa / plateau
+add box 86 -20 3 10 8 30 0
+add box 88 15 5 8 12 20 0
+add box 85 -50 2 12 6 20 0
+add box 90 40 4 6 10 15 0
+add cyl 88 -30 5 1.5 2.0 10 16 0
+add cyl 87 25 3 2.0 3.0 8 16 0
+add cyl 86 -55 4 1.0 1.5 8 16 0
+
+# Western dunes
+add box -88 -20 3 10 8 30 0
+add box -86 15 5 8 12 20 0
+add box -85 -50 2 12 6 20 0
+add box -90 40 4 6 10 15 0
+add cyl -87 -30 5 1.5 2.0 10 16 0
+add cyl -86 25 3 2.0 3.0 8 16 0
+add cyl -90 0 4 2.5 3.5 8 16 0
+
+# Corner hills (filling the diagonals)
+add box 80 80 3 16 8 16 0
+add box -80 80 3 16 8 16 0
+add box 80 -80 3 16 8 16 0
+add box -80 -80 3 16 8 16 0
+add cyl 80 80 5 1.5 2.0 10 16 0
+add cyl -80 80 5 1.5 2.0 10 16 0
+add cyl 80 -80 5 1.5 2.0 10 16 0
+add cyl -80 -80 5 1.5 2.0 10 16 0
+
+# ==============================================================================
 # OUTDOOR AREA 1: WEST APPROACH — open desert with rock cover
 # ==============================================================================
 add cyl -60 10 3 1.5 2.0 6 12 0

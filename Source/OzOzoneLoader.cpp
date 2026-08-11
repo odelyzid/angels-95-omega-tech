@@ -276,12 +276,12 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
-    // Walls (h >= 1.0) get 2x UV tiling so the 32x32 tileset texture
+    // Walls (h >= 1.0) get 16x UV tiling so the 32x32 tileset texture
     // doesn't look stretched across large faces
     if (h >= 1.0f && mesh.texcoords) {
         for (int i = 0; i < mesh.vertexCount; i++) {
-            mesh.texcoords[i*2 + 0] *= 2.0f;
-            mesh.texcoords[i*2 + 1] *= 2.0f;
+            mesh.texcoords[i*2 + 0] *= 16.0f;
+            mesh.texcoords[i*2 + 1] *= 16.0f;
         }
         UpdateMeshBuffer(mesh, 1, mesh.texcoords,
                          mesh.vertexCount * 2 * (int)sizeof(float), 0);
