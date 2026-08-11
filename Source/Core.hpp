@@ -96,7 +96,7 @@ public:
     }
 };
 
-static EngineData OmegaTechData;
+inline EngineData OmegaTechData;
 
 void LoadEntitiesFromWDL()
 {
@@ -776,7 +776,7 @@ void PlayHomeScreen()
 }
 
 int ScriptTimer = 0; // definition (extern declared above)
-static float X, Y, Z, S, Rotation, W, H, L;
+inline float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
 bool NextCollision = false;
 
 void CacheWDL()

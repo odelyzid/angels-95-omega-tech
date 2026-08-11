@@ -11,7 +11,7 @@
 #include "Parasite/ParasiteScript.hpp"
 // Entities.hpp removed
 
-static PlayerMovement g_playerMovement;
+inline PlayerMovement g_playerMovement;
 
 #include <string>
 #include <iostream>
@@ -23,16 +23,16 @@ using namespace std;
 
 #define MaxCachedModels 200
 
-static wstring WorldData;
-static wstring OtherWDLData;
+inline wstring WorldData;
+inline wstring OtherWDLData;
 
 
-static int R = 0;
-static int G = 0;
-static int B = 0;
+inline int R = 0;
+inline int G = 0;
+inline int B = 0;
 
-int Direction = 1;
-bool FadeDone = false;
+inline int Direction = 1;
+inline bool FadeDone = false;
 Color FadeColor = (Color){R, G, B, 255};
 
 void PlayFade()
@@ -69,7 +69,7 @@ class GameModels
         bool objectModelsLoaded[5] = {false, false, false, false, false};
 };
 
-static GameModels WDLModels;
+inline GameModels WDLModels;
 
 class GameData{
     public:
@@ -93,8 +93,8 @@ class GameData{
 
 };
 
-static int CachedModelCounter = 0;
-static GameData CachedModels[MaxCachedModels];
+inline int CachedModelCounter = 0;
+inline GameData CachedModels[MaxCachedModels];
 
 class CollisionData{
     public:
@@ -136,4 +136,4 @@ class GameSounds
         bool MusicFound = false;
 };
 
-static GameSounds OmegaTechSoundData;
+inline GameSounds OmegaTechSoundData;
