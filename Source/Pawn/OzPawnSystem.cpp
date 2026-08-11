@@ -585,15 +585,7 @@ void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
 
         if (p.sprite.id != 0) {
             if (litShader.id > 0) {
-                float size = 2.0f;
-                Mesh plane = GenMeshPlane(size, size, 1, 1);
-                Model model = LoadModelFromMesh(plane);
-                model.materials[0].shader = litShader;
-                model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = p.sprite;
-                Vector3 cp = camera.position;
-                float yaw = atan2f(cp.x - p.position.x, cp.z - p.position.z) * RAD2DEG;
-                DrawModelEx(model, p.position, {0, 1, 0}, yaw, {1, 1, 1}, WHITE);
-                UnloadModel(model);
+                EngineBillboard::DrawSprite(camera, p.sprite, p.position, 2.0f, WHITE, litShader);
             } else {
                 DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
             }

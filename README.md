@@ -55,6 +55,20 @@ The server scans `GameData/Worlds/` for subdirectories containing `World.wdl`. L
 
 ---
 
+## Changelog
+
+### b52 — 2026-08-11
+- **Fix: extreme low FPS / log spam** — `EngineBillboard` was recreating a mesh model (`GenMeshPlane` → `LoadModelFromMesh` → `DrawModelEx` → `UnloadModel`) every frame for every billboard entity (pawns, pickups, zones, emitters). Added a single cached model created at init and reused across all draws. Eliminates the per-frame VAO upload/download cycle logged as "VAO: [ID 36] Mesh uploaded successfully to VRAM (GPU)" / "Unloaded vertex array data from VRAM (GPU)".
+- Files: `Source/Renderer/EngineBillboard.hpp`, `Source/Pawn/OzPawnSystem.cpp`
+
+### b51 — 2026-07-30
+- Phase 7: complete——fix: actually revert ALL inline globals (was failing silently), remove UpdateBounds from DrawWorld
+- Fix: ScanWorlds fallback for multi-CWD + CWD diagnostics + compiled zones scan
+- Fix: revert all inline globals back to regular (single-TU safe), fix WorldData path for Ozone loading
+- Fix: remove EngineSaveLoad.cpp module, restore inline save/load in Core.hpp
+- Fix: convert remaining static globals to inline for multi-TU compatibility
+- Phase 1-7: crash fixes, server security, multiplayer UI, editor fixes, refactoring, tests
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

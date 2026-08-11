@@ -256,7 +256,7 @@ bool LoadFlag = false;
 
 auto LoadWorld()
 {
-    OZ_INFO("LoadWorld: loading world %d", OmegaTechData.LevelIndex);
+    OZ_INFO("LoadWorld: loading world %d (frame=%llu)", OmegaTechData.LevelIndex, (unsigned long long)OmegaTechData.Ticker);
     PlayFade();
     PawnSystem::Instance().ClearLights();
 
