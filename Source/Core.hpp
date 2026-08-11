@@ -1,4 +1,4 @@
-#include "Data.hpp"
+﻿#include "Data.hpp"
 #include "Log.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Audio/OzSoundLoader.hpp"
@@ -96,7 +96,7 @@ public:
     }
 };
 
-inline EngineData OmegaTechData;
+EngineData OmegaTechData;
 
 void LoadEntitiesFromWDL()
 {
@@ -779,7 +779,7 @@ void PlayHomeScreen()
 }
 
 // ScriptTimer defined above in global section
-inline float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
+float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
 bool NextCollision = false;
 
 void CacheWDL()
@@ -1273,7 +1273,7 @@ void WDLProcess()
     }
 
     // Stand on heightmap terrain (preferred) or ClipBox platforms
-    // Skipped when flying or noclipping â€” player controls Y manually
+    // Skipped when flying or noclipping Ã¢â‚¬â€ player controls Y manually
     if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
     {
         float groundY = SampleHeightmapGroundY(
@@ -1320,7 +1320,7 @@ void UpdateEntities()
     Vector3 playerPos = OmegaTechData.MainCamera.position;
     float dt = GetFrameTime();
 
-    // Single-pass zone scan for player — replaces 4 separate CheckZoneCollision calls
+    // Single-pass zone scan for player â€” replaces 4 separate CheckZoneCollision calls
     PawnSystem::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
 
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
@@ -1565,16 +1565,13 @@ void DrawWorld()
     BeginTextureMode(Target);
     ClearBackground(BLACK);
 
-    // Update player bounds from current camera position for collision/zone checks
-    g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
-
     // Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
     PawnSystem::Instance().UpdateSkyZone(
         OmegaTechData.MainCamera.position,
         g_playerMovement.PlayerBounds);
     bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
 
-    // 2D skybox background — render the active zone's skybox texture or fallback
+    // 2D skybox background â€” render the active zone's skybox texture or fallback
     {
         Texture2D skyTex = {0};
         if (inSkyZone) {
@@ -1602,7 +1599,7 @@ void DrawWorld()
     BeginMode3D(OmegaTechData.MainCamera);
 
     // -----------------------------------------------------------------------
-    // SKY PASS — render SURF_FAKEBACKDROP brushes from a virtual camera
+    // SKY PASS â€” render SURF_FAKEBACKDROP brushes from a virtual camera
     // positioned at the active SkyZoneNode's origin, tracking player look dir.
     // -----------------------------------------------------------------------
     if (inSkyZone)
@@ -1625,7 +1622,7 @@ void DrawWorld()
         }
     }
 
-    // GameplaySoundZone — trigger zone-specific music/sound profiles
+    // GameplaySoundZone â€” trigger zone-specific music/sound profiles
     {
         auto& region = PawnSystem::Instance().GetPlayerRegion();
         // Find the primary gameplay sound zone from the player region
@@ -1680,7 +1677,7 @@ void DrawWorld()
         }
         else if (region.primaryZoneId < 0 && !g_prevSoundZone.empty())
         {
-            // Exited sound zone — stop ambience loop, restore default music
+            // Exited sound zone â€” stop ambience loop, restore default music
             if (g_ambienceHandle.frameCount > 0)
             {
                 StopSound(g_ambienceHandle);
@@ -1732,7 +1729,7 @@ void DrawWorld()
             if (idx >= 0 && idx < (int)vols.size() &&
                 CheckCollisionBoxes(g_playerMovement.PlayerBounds, vols[idx].aabb))
             {
-                // Skip volumes whose top is at or below the player's feet —
+                // Skip volumes whose top is at or below the player's feet â€”
                 // these are floors/surfaces the player stands on, not obstacles.
                 if (vols[idx].aabb.max.y <= playerFeet + 0.1f)
                     continue;
@@ -1742,7 +1739,7 @@ void DrawWorld()
         }
     }
 
-    // OZONE ground clamp â€” OZONE heightmap first, then brush primitives
+    // OZONE ground clamp Ã¢â‚¬â€ OZONE heightmap first, then brush primitives
     // (only when WDL heightmap and ClipBox didn't already provide ground)
     if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
     {
@@ -1869,7 +1866,7 @@ void DrawWorld()
         ObjectCollision = false;
     }
 
-    // Zone reverb — apply simulated DSP (volume/muffle) while inside reverb zone
+    // Zone reverb â€” apply simulated DSP (volume/muffle) while inside reverb zone
     {
         auto& region = PawnSystem::Instance().GetPlayerRegion();
         bool inReverb = region.HasZoneType(ZoneType::ZONE_REVERB);
@@ -1881,7 +1878,7 @@ void DrawWorld()
             if (mix <= 0.0f) mix = 0.35f;
             if (decay <= 0.0f) decay = 0.5f;
             float vol = 1.0f - mix * 0.5f;
-            OZ_INFO("ZONE_REVERB entered — mix=%.2f decay=%.2f vol=%.2f", mix, decay, vol);
+            OZ_INFO("ZONE_REVERB entered â€” mix=%.2f decay=%.2f vol=%.2f", mix, decay, vol);
             if (OmegaTechSoundData.MusicFound)
             {
                 SetMusicVolume(OmegaTechSoundData.BackgroundMusic, vol);
@@ -1891,7 +1888,7 @@ void DrawWorld()
         }
         else if (!inReverb && g_wasInReverb)
         {
-            OZ_INFO("ZONE_REVERB exited — restoring audio");
+            OZ_INFO("ZONE_REVERB exited â€” restoring audio");
             if (OmegaTechSoundData.MusicFound)
             {
                 SetMusicVolume(OmegaTechSoundData.BackgroundMusic, 1.0f);
@@ -2008,7 +2005,7 @@ void DrawWorld()
             }
             else if (!inEnvZone && !g_activeEnvZone.empty())
             {
-                // Exited env zone — restore defaults from WorldInfo
+                // Exited env zone â€” restore defaults from WorldInfo
                 OZ_DEBUG("Zone env: restoring WorldInfo defaults");
                 if (OmegaTechData.Lights.id > 0)
                 {
