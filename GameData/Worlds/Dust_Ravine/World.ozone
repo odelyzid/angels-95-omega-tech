@@ -1,0 +1,407 @@
+OZONE
+# Dust_Ravine — Desert fortress with connected halls, corridors, and outdoor areas
+# OZONE Z-up: x=east, y=north, z=up
+# Uses Dessert_Dreams texture set (sand floor, stone walls, rock columns, sky ceiling)
+# Scaled for player dimensions (Height=10, Width=2)
+#
+# Layout:
+#   West Approach (open desert) ──┬── Fortress ──┬── East Ruins Garden
+#                                  │              │
+#                                  └── South Canyon
+
+# ==============================================================================
+# Sky zone — covers the entire map
+# ==============================================================================
+zone sky -100 -100 -30 100 100 80
+
+# ==============================================================================
+# Ground — massive desert floor
+# ==============================================================================
+add box 0 0 -0.5 180 0.5 180 0
+
+# ==============================================================================
+# OUTDOOR AREA 1: WEST APPROACH — open desert with rock cover
+# ==============================================================================
+add cyl -60 10 3 1.5 2.0 6 12 0
+add cyl -50 -5 3 1.0 1.5 5 12 0
+add cyl -70 -10 3 1.2 1.8 6 12 0
+add box -60 -15 2 10 4 8 0
+add cyl -70 5 3 0.8 1.2 5 12 0
+
+add box -55 15 2 12 4 1.5 0
+add box -65 -20 2 1.5 4 10 0
+add box -50 20 2 8 4 1 0
+
+# ==============================================================================
+# OUTDOOR AREA 2: SOUTH CANYON — ravine with tall rock walls on flanks
+# ==============================================================================
+add box 0 -55 2 50 4 1 0
+add box 25 -70 2 1 4 30 0
+add box -25 -70 2 1 4 30 0
+
+add cyl 15 -65 3 1.0 1.5 6 12 0
+add cyl -15 -60 3 1.2 1.6 7 12 0
+add cyl 0 -75 3 0.8 1.2 5 12 0
+
+add box 10 -65 1 6 2 8 0
+add box -10 -70 1 8 2 6 0
+add box 0 -80 2 4 4 4 0
+
+# ==============================================================================
+# OUTDOOR AREA 3: EAST RUINS GARDEN — broken walls, columns, rubble
+# ==============================================================================
+add box 65 30 5 0.5 10 50 0
+add box 50 55 5 30 10 0.5 0
+
+add box 55 20 4 6 8 1 0
+add box 65 10 3 4 6 5 0
+add box 50 40 4 8 8 1 0
+
+add cyl 60 25 2 1.0 0.6 4 12 0
+add cyl 55 45 2 0.8 0.5 3 12 0
+add cyl 60 35 5 0.5 0.5 10 16 0
+add cyl 50 20 5 0.5 0.5 10 16 0
+
+add box 55 30 1 4 2 4 0
+add box 65 40 1 3 2 3 0
+
+# ==============================================================================
+# FORTRESS — outer perimeter walls
+# ==============================================================================
+add box 0 50 5 80 10 0.5 0
+add box -40 25 5 0.5 10 50 0
+add box 40 25 5 0.5 10 50 0
+
+add box -25 0 5 30 10 0.5 0
+add box 25 0 5 30 10 0.5 0
+
+# Fortress interior ground floor
+add box 0 20 -0.25 80 0.5 50 0
+
+# ==============================================================================
+# FORTRESS — ENTRY HALL (south end, through main gate)
+# ==============================================================================
+add box 0 10 -0.25 20 0.5 16 0
+
+add box -10 10 5 0.5 10 16 0
+add box 10 10 5 0.5 10 16 0
+
+add box -7 18 5 6 10 0.5 0
+add box 7 18 5 6 10 0.5 0
+add box -15 2 5 10 10 0.5 0
+add box 15 2 5 10 10 0.5 0
+
+add cyl -5 10 5 0.4 0.4 10 16 0
+add cyl 5 10 5 0.4 0.4 10 16 0
+
+# ==============================================================================
+# FORTRESS — GREAT HALL (center-north)
+# ==============================================================================
+add box 0 36 -0.25 20 0.5 28 0
+
+add box -7 22 5 6 10 0.5 0
+add box 7 22 5 6 10 0.5 0
+add box 0 50 5 20 10 0.5 0
+add box 10 36 5 0.5 10 28 0
+add box -10 36 5 0.5 10 28 0
+
+add cyl -5 30 5 0.6 0.6 10 16 0
+add cyl 5 30 5 0.6 0.6 10 16 0
+add cyl -5 42 5 0.6 0.6 10 16 0
+add cyl 5 42 5 0.6 0.6 10 16 0
+
+# Ceiling slabs with open center gap for upper gallery view
+add box -5 36 10 10 0.5 28 0
+add box 5 36 10 10 0.5 28 0
+
+# Throne platform at north end
+add box 0 48 2 8 4 4 0
+
+# ==============================================================================
+# CORRIDOR: Entry Hall → Great Hall
+# ==============================================================================
+add box 0 20 -0.25 8 0.5 4 0
+add box -4 20 5 0.5 10 4 0
+add box 4 20 5 0.5 10 4 0
+add box 0 20 10 8 0.5 4 0
+
+# ==============================================================================
+# FORTRESS — ARMORY (east wing)
+# ==============================================================================
+add box 25 30 -0.25 22 0.5 16 0
+add box 25 38 5 22 10 0.5 0
+add box 36 30 5 0.5 10 16 0
+add box 25 22 5 22 10 0.5 0
+
+# Armory columns and racks
+add cyl 22 27 5 0.4 0.4 10 16 0
+add cyl 28 33 5 0.4 0.4 10 16 0
+
+add box 25 30 10 22 0.5 16 0
+
+add box 20 30 2 3 4 8 0
+add box 30 30 2 3 4 8 0
+
+# ==============================================================================
+# FORTRESS — SHRINE (west wing)
+# ==============================================================================
+add box -25 30 -0.25 22 0.5 16 0
+add box -25 38 5 22 10 0.5 0
+add box -36 30 5 0.5 10 16 0
+add box -25 22 5 22 10 0.5 0
+
+add box -25 30 2 4 4 4 0
+add cyl -25 30 5 0.3 0.3 8 16 0
+
+add box -25 30 10 22 0.5 16 0
+
+# ==============================================================================
+# CORRIDORS: Great Hall → Armory
+# ==============================================================================
+add box 12 30 -0.25 4 0.5 12 0
+add box 10 24 5 0.5 10 4 0
+add box 10 44 5 0.5 10 12 0
+add box 14 24 5 0.5 10 4 0
+add box 14 36 5 0.5 10 4 0
+add box 12 36 5 4 10 0.5 0
+add box 12 24 5 4 10 0.5 0
+add box 12 30 10 4 0.5 12 0
+
+# ==============================================================================
+# CORRIDORS: Great Hall → Shrine
+# ==============================================================================
+add box -12 30 -0.25 4 0.5 12 0
+add box -10 24 5 0.5 10 4 0
+add box -10 44 5 0.5 10 12 0
+add box -14 24 5 0.5 10 4 0
+add box -14 36 5 0.5 10 4 0
+add box -12 36 5 4 10 0.5 0
+add box -12 24 5 4 10 0.5 0
+add box -12 30 10 4 0.5 12 0
+
+# ==============================================================================
+# UPPER GALLERY (second floor, overlooks Great Hall through open ceiling gap)
+# ==============================================================================
+add box 0 48 10 20 0.5 4 0
+add box 0 50 12.5 20 5 0.5 0
+
+add box 8 36 10 4 0.5 28 0
+add box 10 36 12.5 0.5 5 28 0
+
+add box -8 36 10 4 0.5 28 0
+add box -10 36 12.5 0.5 5 28 0
+
+# Stairs to upper gallery (stepped boxes)
+add box 8 18 5 4 10 7 0
+add box 8 18 8.5 4 3 7 0
+add box -8 18 5 4 10 7 0
+add box -8 18 8.5 4 3 7 0
+
+# ==============================================================================
+# CORRIDOR: Fortress → East Ruins (covered passage)
+# ==============================================================================
+add box 42 24 -0.25 12 0.5 4 0
+add box 48 24 5 0.5 10 4 0
+add box 36 24 5 0.5 10 4 0
+add box 42 26 5 12 10 0.5 0
+add box 42 22 5 12 10 0.5 0
+add box 42 24 10 12 0.5 4 0
+
+# ==============================================================================
+# UNDERGROUND TUNNELS — connect areas below ground level
+# ==============================================================================
+
+# Tunnel A: West Approach → Fortress (basement under Great Hall)
+add box -24 36 -6 32 0.5 6 0
+add box -24 39 -6 32 5 0.5 0
+add box -24 33 -6 32 5 0.5 0
+add box -24 36 -1.5 32 0.5 6 0
+
+# Tunnel entrance from West Approach (sloped ramp down)
+add box -40 36 -3 4 6 6 0
+
+# Tunnel B: Fortress Basement (below Great Hall)
+add box 0 36 -6 16 0.5 24 0
+add box 8 36 -6 0.5 5 24 0
+add box -8 36 -6 0.5 5 24 0
+add box 0 48 -6 16 5 0.5 0
+add box 0 24 -6 16 5 0.5 0
+add box 0 36 -0.25 16 0.5 24 0
+
+add cyl -3 30 -3 0.4 0.4 6 16 0
+add cyl 3 42 -3 0.4 0.4 6 16 0
+
+# Tunnel C: Fortress Basement → South Canyon
+add box 0 11 -6 6 0.5 34 0
+add box 3 11 -6 0.5 5 34 0
+add box -3 11 -6 0.5 5 34 0
+add box 0 11 -1.5 6 0.5 34 0
+
+# Stairs up from tunnel to South Canyon
+add box 0 -5 -3 6 6 4 0
+
+# ==============================================================================
+# Player start — west approach, facing fortress
+# ==============================================================================
+playerstart -70 0 0 90
+
+# ==============================================================================
+# NPC spawns — spread across all areas
+# ==============================================================================
+
+# West Approach (starting area)
+npc Walker -60 10 0
+npc Walker -55 -15 0
+npc Skaarj -50 0 0
+npc Walker -45 25 0
+
+# South Canyon
+npc Brute 0 -65 0
+npc Skaarj 15 -55 0
+npc Walker -15 -60 0
+npc Floater 0 -75 0
+
+# Fortress Entry Hall
+npc Walker -5 12 0
+npc Walker 5 10 0
+
+# Fortress Great Hall
+npc Walker -5 35 0
+npc Walker 5 40 0
+npc Skaarj -5 45 0
+npc Brute 5 30 0
+
+# Fortress Armory
+npc Brute 25 28 0
+npc Walker 28 35 0
+
+# Fortress Shrine
+npc Skaarj -25 28 0
+npc Floater -25 35 0
+
+# Upper Gallery
+npc Skaarj 0 48 10
+npc Floater 8 40 10
+
+# Underground
+npc Brute 0 36 -6
+npc Walker 0 30 -6
+npc Walker -24 36 -6
+npc Skaarj 0 15 -6
+
+# East Ruins
+npc Walker 55 20 0
+npc Skaarj 60 40 0
+npc Floater 50 30 0
+npc Brute 60 15 0
+
+# ==============================================================================
+# Pickups — scattered strategically
+# ==============================================================================
+
+# West Approach
+pickup HealthVial -65 5 3
+pickup ManaVial -60 -10 3
+pickup automag -55 15 2
+
+# Entry Hall
+pickup HealthVial 0 8 3
+pickup Key -5 12 0
+
+# Great Hall
+pickup ManaVial -5 35 3
+pickup HealthVial 5 45 3
+pickup Powerup 0 48 3
+
+# Armory
+pickup automag 22 27 2
+pickup Coin 28 33 0
+
+# Shrine
+pickup EnergyCrystal -25 30 3
+pickup Key -22 35 0
+
+# Upper Gallery
+pickup HealthVial 8 40 10
+pickup ManaVial -8 30 10
+
+# Underground
+pickup EnergyCrystal -3 30 -6
+pickup Powerup 3 42 -6
+pickup HealthVial -24 36 -3
+pickup Coin 0 15 -6
+
+# South Canyon
+pickup HealthVial 0 -65 3
+pickup ManaVial 10 -60 3
+pickup Key -10 -70 0
+
+# East Ruins
+pickup ManaVial 55 20 3
+pickup EnergyCrystal 60 35 3
+pickup Coin 50 45 0
+
+# ==============================================================================
+# Zone volumes
+# ==============================================================================
+zone reverb -10 22 0 10 50 10
+zone water -3 30 -8 3 36 -2
+zone sound -36 22 0 -14 38 10
+zone sky -30 -80 0 30 -40 20
+
+# ==============================================================================
+# Lights
+# ==============================================================================
+
+# Desert sun (directional) — warm ambient fill
+light directional -80 -80 100 255 220 180 1.2
+
+# West Approach — warm ambient
+light point -60 10 4 200 180 150 0.5 30
+light point -55 -10 4 200 180 150 0.5 30
+
+# Entry Hall
+light point 0 10 4 255 200 150 0.8 25
+
+# Great Hall — torch-lit warm glow
+light point -5 30 4 255 180 80 0.9 25 1
+light point 5 42 4 255 180 80 0.9 25 1
+light point 0 48 4 255 220 160 1.0 20
+
+# Armory — cool workshop light
+light point 22 27 4 180 200 255 0.7 20
+light point 28 33 4 180 200 255 0.7 20
+
+# Shrine — mystical blue glow
+light point -25 30 4 100 180 255 0.8 25 2
+
+# Upper Gallery
+light point 0 48 11 255 200 100 0.5 20
+light point 8 30 11 200 200 220 0.4 20
+light point -8 40 11 200 200 220 0.4 20
+
+# Corridors
+light point 12 30 4 200 180 200 0.4 15
+light point -12 30 4 200 180 200 0.4 15
+light point 42 24 4 200 200 200 0.4 15
+
+# Underground — dim red emergency
+light point 0 36 -4 180 40 40 0.6 20
+light point -3 30 -4 120 120 150 0.4 15
+light point 3 42 -4 120 120 150 0.4 15
+light point -24 36 -4 180 180 150 0.4 20
+
+# South Canyon — cool moonlight
+light point 0 -65 4 180 200 220 0.5 30
+light point 15 -55 4 200 180 150 0.4 25
+light point -15 -60 4 200 180 150 0.4 25
+
+# East Ruins — warm ruin glow
+light point 55 20 4 200 200 180 0.5 25
+light point 60 35 4 200 200 180 0.5 25
+light point 50 45 4 200 200 180 0.5 25
+
+# Fortress outer walls — torch sconces
+light point -40 25 4 255 180 80 0.6 25 1
+light point 40 25 4 255 180 80 0.6 25 1
+light point 0 50 4 255 180 80 0.6 25 1

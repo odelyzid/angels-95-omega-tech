@@ -57,6 +57,10 @@ The server scans `GameData/Worlds/` for subdirectories containing `World.wdl`. L
 
 ## Changelog
 
+### b53 — 2026-08-11
+- **New map: Dust_Ravine** — Desert fortress complex with connected hallways, rooms, corridors, underground tunnels, and three distinct outdoor areas (West Approach, South Canyon, East Ruins Garden). Uses the Dessert_Dreams texture set. 28 NPC spawns, 24 pickups, 22 lights across multiple interior and exterior zones.
+- Files: `GameData/Worlds/Dust_Ravine/World.ozone`, `GameData/Worlds/Dust_Ravine/skyzone_dust.ozls`
+
 ### b52 — 2026-08-11
 - **Fix: extreme low FPS / log spam** — `EngineBillboard` was recreating a mesh model (`GenMeshPlane` → `LoadModelFromMesh` → `DrawModelEx` → `UnloadModel`) every frame for every billboard entity (pawns, pickups, zones, emitters). Added a single cached model created at init and reused across all draws. Eliminates the per-frame VAO upload/download cycle logged as "VAO: [ID 36] Mesh uploaded successfully to VRAM (GPU)" / "Unloaded vertex array data from VRAM (GPU)".
 - Files: `Source/Renderer/EngineBillboard.hpp`, `Source/Pawn/OzPawnSystem.cpp`

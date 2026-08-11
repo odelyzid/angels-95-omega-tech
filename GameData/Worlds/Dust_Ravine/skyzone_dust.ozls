@@ -1,0 +1,19 @@
+entity "zone_sky_0" : skyzone {
+    fog_color = (0.8, 0.6, 0.4)
+    fog_density = 0.002
+    ambient_light = (0.5, 0.4, 0.3)
+    skybox = "GameData/Worlds/Dust_Ravine/Models/Skybox.png"
+    actions {
+        on_enter {
+            set_fog 0.8 0.6 0.4 0.002
+            set_ambient 0.5 0.4 0.3
+            set_skybox "GameData/Worlds/Dust_Ravine/Models/Skybox.png"
+            say "Entered Dust_Ravine — fortress ahead, enemies in every hall"
+        }
+        on_exit {
+            restore_fog
+            restore_skybox
+            say "Exited Dust_Ravine sky zone"
+        }
+    }
+}
