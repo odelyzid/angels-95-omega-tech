@@ -67,15 +67,62 @@ static TitleMenuTextures& GetMenuTex() { static TitleMenuTextures tex; tex.Load(
 
 static std::vector<WorldEntry> ScanWorlds() {
     std::vector<WorldEntry> worlds;
-    const char* base = "GameData/Worlds";
-    if (!fs::exists(base)) return worlds;
-    for (auto& entry : fs::directory_iterator(base)) {
-        if (!entry.is_directory()) continue;
-        std::string dirName = entry.path().filename().string();
-        std::string wdl = entry.path().string() + "/World.wdl";
-        std::string oz  = entry.path().string() + "/World.ozone";
-        if (IsPathFile(wdl.c_str()) || IsPathFile(oz.c_str())) {
-            worlds.push_back({dirName, dirName});
+    // Try multiple base directories in case CWD differs
+    const char* candidates[] = {"GameData/Worlds", "../GameData/Worlds", "System/../GameData/Worlds"};
+    for (auto base : candidates) {
+        if (!fs::exists(base)) continue;
+        for (auto& entry : fs::directory_iterator(base)) {
+            if (!entry.is_directory()) continue;
+            std::string dirName = entry.path().filename().string();
+            // Skip non-world directories (they won't have world data)
+            if (dirName == "Legacy") continue;
+            std::string wdl = entry.path().string() + "/World.wdl";
+            std::string oz  = entry.path().string() + "/World.ozone";
+            if ((fs::exists(wdl) || fs::exists(oz)) && dirName != "." && dirName != "..") {
+                bool dup = false;
+                for (auto& w : worlds) if (w.dirName == dirName) { dup = true; break; }
+                if (!dup) worlds.push_back({dirName, dirName});
+            }
+        }
+        if (!worlds.empty()) break; // found some, stop searching
+    }
+    // Fallback: scan compiled zones in System/Data/Zones/
+    if (worlds.empty()) {
+        const char* zoneDirs[] = {"System/Data/Zones", "../System/Data/Zones"};
+        for (auto zd : zoneDirs) {
+            if (!fs::exists(zd)) continue;
+            for (auto& entry : fs::directory_iterator(zd)) {
+                if (!entry.is_regular_file()) continue;
+                std::string fname = entry.path().filename().string();
+                if (fname.rfind("world_", 0) == 0 && fname.size() > 6) {
+                    std::string dirName = fname.substr(6);
+                    size_t dot = dirName.rfind(".ozone");
+                    if (dot != std::string::npos) dirName = dirName.substr(0, dot);
+                    bool dup = false;
+                    for (auto& w : worlds) if (w.dirName == dirName) { dup = true; break; }
+                    if (!dup) worlds.push_back({dirName, dirName});
+                }
+            }
+            if (!worlds.empty()) break;
+        }
+    }
+    // Ultimate fallback: hardcoded known worlds
+    if (worlds.empty()) {
+        const char* known[] = {"Dessert_Dreams", "EngineTest"};
+        for (auto name : known) {
+            // Verify the world actually has an ozone file somewhere
+            std::string paths[] = {
+                std::string("GameData/Worlds/") + name + "/World.ozone",
+                std::string("../GameData/Worlds/") + name + "/World.ozone",
+                std::string("System/Data/Zones/world_") + name + ".ozone",
+                std::string("../System/Data/Zones/world_") + name + ".ozone"
+            };
+            for (auto& p : paths) {
+                if (fs::exists(p)) {
+                    worlds.push_back({name, name});
+                    break;
+                }
+            }
         }
     }
     return worlds;

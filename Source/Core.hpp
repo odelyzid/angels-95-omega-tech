@@ -518,6 +518,9 @@ void DrawLights()
 void OmegaTechInit()
 {
     OZ_INFO("=== OmegaTech Engine starting ===");
+    OZ_INFO("CWD: %s", fs::current_path().string().c_str());
+    OZ_INFO("GameData/Worlds exists: %d", (int)fs::exists("GameData/Worlds"));
+    OZ_INFO("System/Data/Zones exists: %d", (int)fs::exists("System/Data/Zones"));
     LoadLaunchConfig();
     ParasiteScriptTFlagWipe();
 
