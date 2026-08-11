@@ -88,7 +88,8 @@ enum PaneType : int {
     PANE_STATS,
     PANE_SETTINGS,
     PANE_CHARACTER,
-    PANE_HELP
+    PANE_HELP,
+    PANE_MULTIPLAYER
 };
 
 struct Pane {
@@ -160,7 +161,7 @@ private:
 
     Rectangle m_frameRect, m_innerRect, m_titleBar, m_menuBar, m_contentArea, m_helpBar;
 
-    static constexpr int TAB_COUNT = 7;
+    static constexpr int TAB_COUNT = 8;
     static const char* TAB_NAMES[TAB_COUNT];
     Rectangle m_tabRects[TAB_COUNT];
     int m_hoveredTab = -1, m_openTab = -1, m_hoveredItem = -1;
@@ -175,6 +176,10 @@ private:
 
     char m_charName[64];
     int m_teamColor = 0, m_gameTypeFilter = 0, m_settingsSubPage = 0;
+    char m_joinIPBuffer[64] = "127.0.0.1";
+    char m_hostPortBuffer[16] = "27015";
+    std::string m_selectedServerWorld;
+    int m_multiplayerSubPage = 0; // 0=Join, 1=Host
 
     Rectangle m_minBtn, m_maxBtn, m_closeBtn;
     bool m_dragging = false;
@@ -283,7 +288,7 @@ private:
     int GetDropdownItemCount(int tab) {
         switch (tab) {
             case 0: return 2; case 1: return 3; case 4: return 3;
-            case 2: case 3: case 5: case 6: return 1;
+            case 2: case 3: case 5: case 6: case 7: return 1;
             default: return 0;
         }
     }
@@ -297,6 +302,7 @@ private:
             case 4: return item == 0 ? "Video Settings" : (item == 1 ? "Audio Settings" : "Controls");
             case 5: return "Configure Character";
             case 6: return "About Angels95";
+            case 7: return "Multiplayer Lobby";
             default: return "";
         }
     }
@@ -310,6 +316,7 @@ private:
             case PANE_SETTINGS:  return "Settings";
             case PANE_CHARACTER: return "Character Configuration";
             case PANE_HELP:      return "About Angels95";
+            case PANE_MULTIPLAYER: return "Multiplayer Lobby";
             default:             return "";
         }
     }
@@ -353,6 +360,7 @@ private:
             case PANE_SETTINGS:  w = 480; h = 340; break;
             case PANE_CHARACTER: w = 440; h = 260; break;
             case PANE_HELP:      w = 520; h = 360; break;
+            case PANE_MULTIPLAYER: w = 480; h = 340; break;
             default:             w = 400; h = 300; break;
         }
     }
@@ -432,6 +440,18 @@ private:
 
     void HandlePaneContentClick(PaneType type, Vector2 mp, Rectangle contentRect) {
         switch (type) {
+            case PANE_MULTIPLAYER: {
+                float bx = contentRect.x + 12, by = contentRect.y + 40;
+                auto checkBtn = [&](int idx, Rectangle r) {
+                    if (CheckCollisionPointRec(mp, r)) {
+                        PlaySound(OmegaTechSoundData.UIClick);
+                        m_multiplayerSubPage = idx;
+                    }
+                };
+                checkBtn(0, {bx, by, 140, 32});
+                checkBtn(1, {bx, by + 40, 140, 32});
+                break;
+            }
             case PANE_CAMPAIGN:
             case PANE_PRACTICE: {
                 bool campaign = (type == PANE_CAMPAIGN);
@@ -507,6 +527,7 @@ private:
             case 4: OpenPane(PANE_SETTINGS); break;
             case 5: OpenPane(PANE_CHARACTER); break;
             case 6: OpenPane(PANE_HELP); break;
+            case 7: OpenPane(PANE_MULTIPLAYER); break;
             default: break;
         }
     }
@@ -658,6 +679,7 @@ private:
             case PANE_SETTINGS:  DrawSettingsPage(area); break;
             case PANE_CHARACTER: DrawCharacterPage(area); break;
             case PANE_HELP:      DrawHelpPage(area); break;
+            case PANE_MULTIPLAYER: DrawMultiplayerPage(area); break;
         }
     }
 
@@ -785,6 +807,77 @@ private:
         }
     }
 
+    void DrawMultiplayerPage(Rectangle area) {
+        DrawPageHeader(area, "Multiplayer Lobby");
+        float bx = area.x + 12, by = area.y + 40;
+        auto drawTabBtn = [&](int idx, const char* label, Rectangle r) {
+            bool h = CheckCollisionPointRec(GetMousePosition(), r);
+            auto& t = GetMenuTex();
+            DrawTexturePro(h ? t.btnHover : t.btnNormal, {0,0,64,64}, r, {0,0}, 0, h ? WHITE : (Color){200,200,200,255});
+            DrawText(label, (int)(r.x + (r.width - MeasureText(label, 13))/2), (int)(r.y + 9), 13, h ? WHITE : LIGHTGRAY);
+        };
+        drawTabBtn(0, "Join Game", {bx, by, 140, 32});
+        drawTabBtn(1, "Host Game", {bx, by + 40, 140, 32});
+
+        float sx = bx + 160, sw = area.x + area.width - sx - 12;
+        Rectangle sub = {sx, by, sw, area.y + area.height - by - 8};
+        DrawRectangleRec(sub, (Color){8,16,36,180});
+        int y = (int)(sub.y + 4);
+
+        if (m_multiplayerSubPage == 0) {
+            DrawText("Join a Game Server", (int)(sx + 8), y, 14, WHITE); y += 24;
+            DrawText("Server IP:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
+            GuiTextBox({sx + 80, (float)y, 160, 22}, m_joinIPBuffer, sizeof(m_joinIPBuffer), true);
+            y += 30;
+            DrawText("Port:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
+            GuiTextBox({sx + 80, (float)y, 80, 22}, m_hostPortBuffer, sizeof(m_hostPortBuffer), true);
+            y += 34;
+            if (GuiButton({sx + 8, (float)y, 140, 24}, "Connect")) {
+                PlaySound(OmegaTechSoundData.UIClick);
+                std::strncpy(m_joinIP, m_joinIPBuffer, sizeof(m_joinIP) - 1);
+                m_joinIP[sizeof(m_joinIP) - 1] = '\0';
+                m_joinServer = true;
+                m_exit = true;
+            }
+            y += 30;
+            DrawText("Enter the server IP address and port,", (int)(sx + 8), y, 11, (Color){140,160,180,200}); y += 14;
+            DrawText("then click Connect to join.", (int)(sx + 8), y, 11, (Color){140,160,180,200});
+        } else {
+            DrawText("Host a Game Server", (int)(sx + 8), y, 14, WHITE); y += 24;
+            DrawText("World:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
+            // World dropdown
+            {
+                static int worldSel = 0;
+                if (worldSel >= (int)m_worlds.size()) worldSel = 0;
+                std::string wl;
+                for (size_t i = 0; i < m_worlds.size(); i++) {
+                    if (i) wl += ";";
+                    wl += m_worlds[i].name;
+                }
+                if (!wl.empty()) {
+                    GuiDropdownBox({sx + 60, (float)y, sw - 68, 22}, wl.c_str(), &worldSel, false);
+                    if (worldSel >= 0 && worldSel < (int)m_worlds.size())
+                        m_selectedServerWorld = m_worlds[worldSel].dirName;
+                }
+            }
+            y += 30;
+            DrawText("Port:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
+            GuiTextBox({sx + 80, (float)y, 80, 22}, m_hostPortBuffer, sizeof(m_hostPortBuffer), true);
+            y += 34;
+            if (GuiButton({sx + 8, (float)y, 140, 24}, "Start Server")) {
+                PlaySound(OmegaTechSoundData.UIClick);
+                if (!m_selectedServerWorld.empty()) {
+                    m_selectedWorld = m_selectedServerWorld;
+                    m_startServer = true;
+                    m_exit = true;
+                }
+            }
+            y += 30;
+            DrawText("Select a world and port, then click", (int)(sx + 8), y, 11, (Color){140,160,180,200}); y += 14;
+            DrawText("Start Server to host a game.", (int)(sx + 8), y, 11, (Color){140,160,180,200});
+        }
+    }
+
     void DrawHelpPage(Rectangle area) {
         DrawPageHeader(area, "About Angels95 / OmegaTech Engine");
         const char* l[] = {
@@ -813,6 +906,7 @@ private:
             if (m_openTab == 4) return m_hoveredItem == 0 ? "Configure video and graphics" : (m_hoveredItem == 1 ? "Adjust audio volume" : "Configure keyboard and mouse");
             if (m_openTab == 5) return "Customize your character";
             if (m_openTab == 6) return "About Angels95 and the OmegaTech Engine";
+            if (m_openTab == 7) return "Join or host a multiplayer game";
         }
         if (!m_panes.empty()) {
             int idx = GetPaneAtPoint(GetMousePosition());
@@ -825,6 +919,7 @@ private:
                     case PANE_SETTINGS:  return "Configure game settings";
                     case PANE_CHARACTER: return "Customize your character";
                     case PANE_HELP:      return "About Angels95 / OmegaTech Engine";
+                    case PANE_MULTIPLAYER: return "Join or host a multiplayer game";
                 }
             }
         }
@@ -834,5 +929,5 @@ private:
 
 const char* TitleMenu::TAB_NAMES[TitleMenu::TAB_COUNT] = {
     "Campaign", "Practice Session", "Seraphic Realm",
-    "Stats", "Settings", "Character", "Help"
+    "Stats", "Settings", "Character", "Help", "Multiplayer"
 };

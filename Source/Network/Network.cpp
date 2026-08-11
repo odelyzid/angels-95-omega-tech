@@ -210,29 +210,133 @@ void NetworkServer::update() {
             }
         }
 
-        if (!player && m_player_count < m_players.size()) {
-            for (auto& p : m_players) {
-                if (!p.connected) {
-                    player = &p;
-                    player->id = static_cast<uint32_t>(&p - m_players.data());
-                    std::snprintf(player->ip_address, sizeof(player->ip_address),
-                                  "%s", client_ip);
-                    player->port = client_port;
-                    player->connected = true;
-                    player->last_ping = now_seconds();
-                    player->last_seen = now_seconds();
-                    m_player_count++;
-                    if (m_callbacks.on_player_join)
-                        m_callbacks.on_player_join(p);
+        if (player) {
+            player->last_seen = now_seconds();
+        }
+
+        // ---- 3-way handshake: unknown client -> challenge -> auth ----
+        auto msgType = static_cast<MessageType>(msg.type);
+
+        if (!player && (msgType == MessageType::PLAYER_JOIN || msgType == MessageType::CLIENT_AUTH)) {
+            // Check for existing pending connection from this IP:port
+            PendingConnection* pending = nullptr;
+            for (auto& p : m_pending) {
+                if (std::strcmp(p.ip_address, client_ip) == 0 && p.port == client_port) {
+                    pending = &p;
                     break;
                 }
+            }
+
+            if (msgType == MessageType::PLAYER_JOIN) {
+                // Rate-limit: count pending from this IP
+                int ipCount = 0;
+                double now = now_seconds();
+                for (auto& p : m_pending) {
+                    if (std::strcmp(p.ip_address, client_ip) == 0) ipCount++;
+                }
+                if (ipCount >= MAX_PENDING_PER_IP) {
+                    printf("Handshake rejected: too many pending from %s\n", client_ip);
+                    continue; // drop silently
+                }
+
+                if (!pending) {
+                    // Create new pending connection
+                    PendingConnection pc;
+                    std::strncpy(pc.ip_address, client_ip, sizeof(pc.ip_address) - 1);
+                    pc.ip_address[sizeof(pc.ip_address) - 1] = '\0';
+                    pc.port = client_port;
+                    pc.challenge_token = m_next_challenge++;
+                    pc.start_time = now_seconds();
+                    pc.retries = 0;
+                    m_pending.push_back(pc);
+                    pending = &m_pending.back();
+                } else {
+                    // Re-send challenge (client may have lost it)
+                    if (now - pending->start_time > PENDING_TIMEOUT) {
+                        // Expired — remove and drop
+                        m_pending.erase(std::remove_if(m_pending.begin(), m_pending.end(),
+                            [&](const PendingConnection& p) { return &p == pending; }), m_pending.end());
+                        continue;
+                    }
+                }
+
+                // Send challenge to client
+                NetworkMessage challenge;
+                challenge.magic = MAGIC;
+                challenge.type = static_cast<uint32_t>(MessageType::SERVER_CHALLENGE);
+                challenge.size = sizeof(pending->challenge_token);
+                challenge.sequence = m_message_sequence++;
+                challenge.timestamp = static_cast<uint32_t>(now_seconds());
+                memcpy(challenge.payload, &pending->challenge_token, sizeof(pending->challenge_token));
+
+                struct sockaddr_in addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sin_family = AF_INET;
+                addr.sin_port = htons(client_port);
+                inet_pton(AF_INET, client_ip, &addr.sin_addr);
+                sendto(TO_SOCK(m_socket_fd),
+                       sock_sendto_buf(&challenge, sizeof(challenge)), 0,
+                       (struct sockaddr*)&addr, sizeof(addr));
+                printf("Challenge sent to %s:%u (token=%u)\n", client_ip, client_port, pending->challenge_token);
+                continue;
+            }
+
+            if (msgType == MessageType::CLIENT_AUTH) {
+                if (!pending) {
+                    printf("CLIENT_AUTH from %s:%u without pending challenge\n", client_ip, client_port);
+                    continue;
+                }
+
+                // Verify token
+                uint32_t received_token = 0;
+                if (msg.size >= sizeof(received_token))
+                    memcpy(&received_token, msg.payload, sizeof(received_token));
+
+                if (received_token != pending->challenge_token) {
+                    printf("CLIENT_AUTH from %s:%u: invalid token (got %u, expected %u)\n",
+                           client_ip, client_port, received_token, pending->challenge_token);
+                    // Allow retries
+                    pending->retries++;
+                    if (pending->retries >= 3) {
+                        m_pending.erase(std::remove_if(m_pending.begin(), m_pending.end(),
+                            [&](const PendingConnection& p) { return &p == pending; }), m_pending.end());
+                    }
+                    continue;
+                }
+
+                // Token valid — create player
+                for (auto& p : m_players) {
+                    if (!p.connected) {
+                        player = &p;
+                        player->id = static_cast<uint32_t>(&p - m_players.data());
+                        std::snprintf(player->name, sizeof(player->name), "Player_%u", player->id + 1);
+                        std::snprintf(player->ip_address, sizeof(player->ip_address), "%s", client_ip);
+                        player->port = client_port;
+                        player->connected = true;
+                        player->last_ping = now_seconds();
+                        player->last_seen = now_seconds();
+                        m_player_count++;
+                        // Remove pending entry
+                        m_pending.erase(std::remove_if(m_pending.begin(), m_pending.end(),
+                            [&](const PendingConnection& pc) {
+                                return std::strcmp(pc.ip_address, client_ip) == 0 && pc.port == client_port;
+                            }), m_pending.end());
+                        printf("Player %s (id=%u) authenticated from %s:%u\n",
+                               player->name, player->id, client_ip, client_port);
+                        if (m_callbacks.on_player_join)
+                            m_callbacks.on_player_join(*player);
+                        break;
+                    }
+                }
+                if (!player) {
+                    printf("Server full, rejecting %s:%u\n", client_ip, client_port);
+                }
+                continue; // CLIENT_AUTH handled, don't fall through to message routing
             }
         }
 
         if (player) {
-            player->last_seen = now_seconds();
-
-            switch (static_cast<MessageType>(msg.type)) {
+            switch (msgType) {
                 case MessageType::PING: {
                     NetworkMessage pong;
                     pong.magic = MAGIC;
@@ -244,8 +348,8 @@ void NetworkServer::update() {
                     break;
                 }
                 case MessageType::PLAYER_JOIN:
-                    printf("Player %s joined from %s:%u\n",
-                           player->name, client_ip, client_port);
+                case MessageType::CLIENT_AUTH:
+                    // Already handled above
                     break;
                 case MessageType::PLAYER_LEAVE:
                     printf("Player %s left\n", player->name);
@@ -264,9 +368,15 @@ void NetworkServer::update() {
 
     double now = now_seconds();
 
-    // Timeouts
+    // Pending connection timeouts
+    double now_pending = now_seconds();
+    m_pending.erase(std::remove_if(m_pending.begin(), m_pending.end(),
+        [&](const PendingConnection& p) { return now_pending - p.start_time > PENDING_TIMEOUT; }),
+        m_pending.end());
+
+    // Player timeouts
     for (auto& p : m_players) {
-        if (p.connected && now - p.last_seen > TIMEOUT_INTERVAL) {
+        if (p.connected && now_pending - p.last_seen > TIMEOUT_INTERVAL) {
             printf("Player %s timed out\n", p.name);
             p.connected = false;
             m_player_count--;
@@ -318,6 +428,7 @@ NetworkClient::~NetworkClient() { disconnect(); }
 
 bool NetworkClient::connect(const char* server_ip, uint16_t port) {
     if (m_connected) return true;
+    if (m_connecting) return false; // already in handshake
     if (!winsock_init()) return false;
 
     m_socket_fd = (int)socket(AF_INET, SOCK_DGRAM, 0);
@@ -341,9 +452,14 @@ bool NetworkClient::connect(const char* server_ip, uint16_t port) {
     m_server_ip = server_ip;
     m_server_port = port;
     m_connecting = true;
+    m_connected = false;
+    m_challenge_token = 0;
+    m_handshake_retries = 0;
+    m_handshake_start = now_seconds();
     m_last_ping_time = now_seconds();
     m_last_pong_time = now_seconds();
 
+    // Send initial hello
     NetworkMessage join;
     join.magic = MAGIC;
     join.type = static_cast<uint32_t>(MessageType::PLAYER_JOIN);
@@ -356,11 +472,7 @@ bool NetworkClient::connect(const char* server_ip, uint16_t port) {
                            (struct sockaddr*)&m_server_address,
                            sizeof(m_server_address));
     if (bytes == sizeof(join)) {
-        m_connected = true;
-        m_connecting = false;
-        if (m_callbacks.on_connected) m_callbacks.on_connected();
-
-        printf("Client: connected to %s:%u\n", server_ip, port);
+        printf("Client: handshake started with %s:%u\n", server_ip, port);
         return true;
     }
 
@@ -372,31 +484,60 @@ bool NetworkClient::connect(const char* server_ip, uint16_t port) {
 }
 
 void NetworkClient::disconnect() {
-    if (!m_connected) return;
-
-    NetworkMessage leave;
-    leave.magic = MAGIC;
-    leave.type = static_cast<uint32_t>(MessageType::PLAYER_LEAVE);
-    leave.size = 0;
-    leave.sequence = m_message_sequence++;
-    leave.timestamp = static_cast<uint32_t>(now_seconds());
-
-    sendto(TO_SOCK(m_socket_fd),
-           sock_sendto_buf(&leave, sizeof(leave)), 0,
-           (struct sockaddr*)&m_server_address, sizeof(m_server_address));
-
+    bool wasConnected = m_connected;
     m_connected = false;
+    m_connecting = false;
+
+    if (wasConnected && sock_fd_good(m_socket_fd)) {
+        NetworkMessage leave;
+        leave.magic = MAGIC;
+        leave.type = static_cast<uint32_t>(MessageType::PLAYER_LEAVE);
+        leave.size = 0;
+        leave.sequence = m_message_sequence++;
+        leave.timestamp = static_cast<uint32_t>(now_seconds());
+
+        sendto(TO_SOCK(m_socket_fd),
+               sock_sendto_buf(&leave, sizeof(leave)), 0,
+               (struct sockaddr*)&m_server_address, sizeof(m_server_address));
+    }
+
     if (m_callbacks.on_disconnected) m_callbacks.on_disconnected();
 
-    close_sock(m_socket_fd);
-    m_socket_fd = -1;
+    if (sock_fd_good(m_socket_fd)) {
+        close_sock(m_socket_fd);
+        m_socket_fd = -1;
+    }
     winsock_cleanup();
 }
 
 void NetworkClient::update() {
     if (!m_connected && !m_connecting) return;
 
-    if (!m_connected) return;
+    double now = now_seconds();
+
+    // Handshake timeout/retry
+    if (m_connecting && !m_connected) {
+        if (now - m_handshake_start > HANDSHAKE_TIMEOUT) {
+            if (m_handshake_retries >= MAX_HANDSHAKE_RETRIES) {
+                fprintf(stderr, "Client: handshake failed after %d retries\n", m_handshake_retries);
+                disconnect();
+                return;
+            }
+            // Retry: send JOIN again
+            m_handshake_retries++;
+            m_handshake_start = now;
+            NetworkMessage join;
+            join.magic = MAGIC;
+            join.type = static_cast<uint32_t>(MessageType::PLAYER_JOIN);
+            join.size = 0;
+            join.sequence = m_message_sequence++;
+            join.timestamp = static_cast<uint32_t>(now);
+            sendto(TO_SOCK(m_socket_fd),
+                   sock_sendto_buf(&join, sizeof(join)), 0,
+                   (struct sockaddr*)&m_server_address, sizeof(m_server_address));
+        }
+        // Still in handshake — receive only challenge messages
+    }
 
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
@@ -411,9 +552,37 @@ void NetworkClient::update() {
         if (static_cast<size_t>(bytes) < sizeof(NetworkMessage)) continue;
         if (msg.magic != MAGIC) continue;
 
-        switch (static_cast<MessageType>(msg.type)) {
+        auto rcvType = static_cast<MessageType>(msg.type);
+
+        // Handle handshake challenge when connecting
+        if (m_connecting && rcvType == MessageType::SERVER_CHALLENGE) {
+            uint32_t token = 0;
+            if (msg.size >= sizeof(token))
+                memcpy(&token, msg.payload, sizeof(token));
+            m_challenge_token = token;
+
+            // Respond with CLIENT_AUTH
+            NetworkMessage auth;
+            auth.magic = MAGIC;
+            auth.type = static_cast<uint32_t>(MessageType::CLIENT_AUTH);
+            auth.size = sizeof(token);
+            auth.sequence = m_message_sequence++;
+            auth.timestamp = static_cast<uint32_t>(now);
+            memcpy(auth.payload, &token, sizeof(token));
+            sendto(TO_SOCK(m_socket_fd),
+                   sock_sendto_buf(&auth, sizeof(auth)), 0,
+                   (struct sockaddr*)&m_server_address, sizeof(m_server_address));
+
+            m_connected = true;
+            m_connecting = false;
+            printf("Client: authenticated with server (token=%u)\n", token);
+            if (m_callbacks.on_connected) m_callbacks.on_connected();
+            continue;
+        }
+
+        switch (rcvType) {
             case MessageType::PONG:
-                m_last_pong_time = now_seconds();
+                m_last_pong_time = now;
                 break;
             case MessageType::PING: {
                 NetworkMessage pong;
@@ -432,7 +601,6 @@ void NetworkClient::update() {
         }
     }
 
-    double now = now_seconds();
     if (now - m_last_pong_time > TIMEOUT_INTERVAL) {
         fprintf(stderr, "Server timeout, disconnecting\n");
         disconnect();

@@ -68,7 +68,9 @@ enum class MessageType : uint32_t {
     PLAYER_KILL = 16,
     PLAYER_ACTION = 17,
     PICKUP_COLLECTED = 18,
-    NPC_DAMAGE = 19
+    NPC_DAMAGE = 19,
+    SERVER_CHALLENGE = 20,
+    CLIENT_AUTH = 21
 };
 
 struct NetworkPlayer {
@@ -255,6 +257,19 @@ private:
     uint32_t    m_message_sequence = 0;
     double      m_last_heartbeat = 0;
     ServerCallbacks m_callbacks;
+
+    // Pending connection tracking (3-way handshake)
+    static constexpr int MAX_PENDING_PER_IP = 3;
+    static constexpr double PENDING_TIMEOUT = 5.0;
+    struct PendingConnection {
+        char ip_address[IP_STRING_MAX];
+        uint16_t port;
+        uint32_t challenge_token;
+        double start_time;
+        int retries;
+    };
+    std::vector<PendingConnection> m_pending;
+    uint32_t m_next_challenge = 1;
 };
 
 // ---------------------------------------------------------------------------
@@ -294,6 +309,13 @@ private:
     double      m_last_ping_time = 0;
     double      m_last_pong_time = 0;
     ClientCallbacks m_callbacks;
+
+    // Handshake state
+    int         m_handshake_retries = 0;
+    uint32_t    m_challenge_token = 0;
+    double      m_handshake_start = 0;
+    static constexpr int MAX_HANDSHAKE_RETRIES = 5;
+    static constexpr double HANDSHAKE_TIMEOUT = 2.0;
 };
 
 // ---------------------------------------------------------------------------

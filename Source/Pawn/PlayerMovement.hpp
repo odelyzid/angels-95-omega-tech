@@ -3,6 +3,8 @@
 
 // PlayerMovement — per-frame physics and movement state
 // Stat fields (Health, Mana, PsychicEnergy, Level, XP) are in LightningEntityManager player entity
+constexpr float PLAYER_EYE_HEIGHT = 2.0f;
+
 class PlayerMovement {
 public:
     float Height = 10.0f;

@@ -36,7 +36,7 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
-          LitLightning.o rlights.o)
+          LitLightning.o rlights.o EngineSaveLoad.o)
 
 .PHONY: all clean test
 all: OTENGINE AngelServ ozpack
@@ -87,6 +87,10 @@ $(BUILD_DIR)/LitLightning.o: Source/Renderer/LitLightning.cpp Source/Renderer/Li
 
 $(BUILD_DIR)/rlights.o: Source/rlights/rlights.cpp Source/rlights/rlights.h | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/rlights/rlights.cpp -o $@
+
+# 5i. Engine Save/Load module
+$(BUILD_DIR)/EngineSaveLoad.o: Source/EngineSaveLoad.cpp Source/Core.hpp Source/Data.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/EngineSaveLoad.cpp -o $@
 
 $(BUILD_DIR)/OzOzoneLoader.o: Source/OzOzoneLoader.cpp Source/OzOzoneLoader.hpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/OzOzoneLoader.cpp -o $@
@@ -155,21 +159,33 @@ test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/Lightni
 test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system
+test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
+
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_network
 	@echo "=== LightningScriptParser Tests ==="
-	./test_parser
+	-./test_parser
 	@echo ""
 	@echo "=== LightningScriptContext Tests ==="
-	./test_context
+	-./test_context
 	@echo ""
 	@echo "=== LightningEntityRegistry Tests ==="
-	./test_registry
+	-./test_registry
 	@echo ""
 	@echo "=== LightningEntityManager Tests ==="
-	./test_entity_manager
+	-./test_entity_manager
 	@echo ""
 	@echo "=== OzPawnSystem Tests ==="
-	./test_pawn_system
+	-./test_pawn_system
+	@echo ""
+	@echo "=== WDLParser Tests ==="
+	-./test_wdl_parser
+	@echo ""
+	@echo "=== Network Packet Tests ==="
+	-./test_network
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_network

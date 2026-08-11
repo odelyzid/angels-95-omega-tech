@@ -877,9 +877,30 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_OPEN:          { std::string p; if (ChooseOpenWorldFile(p)) g_pendingOpenPath = fs::path(p); } return 0;
             case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); return 0;
             case IDM_SAVE_AS:       FileSaveAs(); return 0;
-            case IDM_PLAY_TEST:     { std::string tempPath = "System/Cache/editor_test.wdl";
-                std::wstring wstr = OTEditor.WorldData; std::string wd(wstr.begin(), wstr.end());
-                std::ofstream f(tempPath); if (f.is_open()) { f << wd; f.close(); system(("start \"\" System\\Angels95.exe --world " + tempPath).c_str()); } } return 0;
+            case IDM_PLAY_TEST: {
+                std::string worldDir = g_documentPath.parent_path().filename().string();
+                std::string ext = g_documentPath.extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                std::string worldArg;
+                if (ext == ".ozone") {
+                    worldArg = g_documentPath.string();
+                } else {
+                    std::string tempPath = "System/Cache/editor_test.wdl";
+                    std::wstring wstr = OTEditor.WorldData;
+                    std::string wd(wstr.begin(), wstr.end());
+                    std::ofstream f(tempPath);
+                    if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
+                }
+                if (!worldArg.empty()) {
+                    if (IsPathFile("System/Angels95.exe")) {
+                        std::string cmd = "start \"\" System\\Angels95.exe --world \"" + worldArg + "\" --world-dir " + worldDir;
+                        EditorLog("Launching: %s", cmd.c_str());
+                        system(cmd.c_str());
+                    } else {
+                        EditorLog("ERROR: System/Angels95.exe not found");
+                    }
+                }
+            } return 0;
             case IDM_EXIT:          CloseWindow(); return 0;
             case IDM_MODEL_BRW:     ToggleModelBrowser(); return 0;
             case IDM_SOUND_MGR:     ToggleSoundMgr(); return 0;
@@ -1795,15 +1816,21 @@ int main(int argc, char **argv){
                 DrawRectangleRec(r, hover ? (Color){50,100,50,255} : (Color){35,80,35,255});
                 DrawText(lbl, bx + 4, 7, 12, WHITE);
                 if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    // Save world to temp file and launch client
-                    std::string tempPath = "System/Cache/editor_test.wdl";
-                    std::wstring wstr = OTEditor.WorldData;
-                    std::string worldData(wstr.begin(), wstr.end());
-                    std::ofstream f(tempPath);
-                    if (f.is_open()) {
-                        f << worldData;
-                        f.close();
-                        std::string cmd = std::string("start \"\" System\\Angels95.exe --world ") + tempPath;
+                    std::string worldDir = g_documentPath.parent_path().filename().string();
+                    std::string ext = g_documentPath.extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    std::string worldArg;
+                    if (ext == ".ozone") {
+                        worldArg = g_documentPath.string();
+                    } else {
+                        std::string tempPath = "System/Cache/editor_test.wdl";
+                        std::wstring wstr = OTEditor.WorldData;
+                        std::string wd(wstr.begin(), wstr.end());
+                        std::ofstream f(tempPath);
+                        if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
+                    }
+                    if (!worldArg.empty()) {
+                        std::string cmd = "start \"\" System\\Angels95.exe --world \"" + worldArg + "\" --world-dir " + worldDir;
                         system(cmd.c_str());
                         EditorLog("Launched: %s", cmd.c_str());
                     }
@@ -1823,20 +1850,18 @@ int main(int argc, char **argv){
                     LightingMode prev = OTEditor.ViewMode;
                     OTEditor.ViewMode = (LightingMode)li;
                     if (prev != OTEditor.ViewMode) {
-                        if (OTEditor.ViewMode == LightingMode::UNLIT && OTEditor.UnlitShader.id > 0) {
+                        Shader targetShader;
+                        if (OTEditor.ViewMode == LightingMode::LIT || OTEditor.ViewMode == LightingMode::WIREFRAME)
+                            targetShader = OTEditor.LitFogShader;
+                        else
+                            targetShader = OTEditor.UnlitShader;
+                        if (targetShader.id > 0) {
                             for (auto& m : WDLModels.models)
                                 if (m.loaded && m.model.meshCount > 0)
-                                    m.model.materials[0].shader = OTEditor.UnlitShader;
+                                    m.model.materials[0].shader = targetShader;
                             if (WDLModels.HeightMapReady)
-                                WDLModels.HeightMap.materials[0].shader = OTEditor.UnlitShader;
-                            OzoneLoader::Instance().SetLitFogShader(OTEditor.UnlitShader);
-                        } else if (prev == LightingMode::UNLIT && OTEditor.LitFogShader.id > 0) {
-                            for (auto& m : WDLModels.models)
-                                if (m.loaded && m.model.meshCount > 0)
-                                    m.model.materials[0].shader = OTEditor.LitFogShader;
-                            if (WDLModels.HeightMapReady)
-                                WDLModels.HeightMap.materials[0].shader = OTEditor.LitFogShader;
-                            OzoneLoader::Instance().SetLitFogShader(OTEditor.LitFogShader);
+                                WDLModels.HeightMap.materials[0].shader = targetShader;
+                            OzoneLoader::Instance().SetLitFogShader(targetShader);
                         }
                     }
                 }

@@ -8,6 +8,7 @@
 #include "OzoneParser.hpp"
 #include "GameState.hpp"
 #include "../Log.hpp"
+#include "../IniConfig.hpp"
 
 #include <csignal>
 #include <cstring>
@@ -32,6 +33,9 @@ static std::string g_gamedata_dir = "GameData";
 static int g_http_port = 8080;
 static std::mutex g_print_mutex;
 static std::vector<std::string> g_world_list;
+static std::string g_auth_token;
+static std::string g_server_name = "Angels95 Server";
+static std::chrono::steady_clock::time_point g_server_start_time;
 
 static GameState g_game_state;
 
@@ -510,31 +514,87 @@ static void handle_http_client(int cfd) {
                 return;
             }
 
-            // Try testozones/sample.ozone (fallback)
-            std::string sample_path = "testozones/" + std::string(name);
-            auto sample_prims = OzoneParser::parse_file(sample_path);
-            if (!sample_prims.empty()) {
-                std::string json = "{\"ok\":true,\"format\":\"ozone\",\"world\":";
-                json += json_escape(name);
-                json += ",\"brushes\":[";
-                bool first = true;
-                for (const auto& p : sample_prims) {
-                    append_ozone_json(json, p, first);
-                    first = false;
-                }
-                json += "]}";
-                http_respond_json(cfd, json.c_str());
-                close(cfd);
-                return;
-            }
-
             http_respond_404(cfd);
+            close(cfd);
+            return;
+        }
+
+        if (strcmp(path, "/status") == 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - g_server_start_time).count();
+            std::string json = "{\"ok\":true,\"server_name\":\"";
+            json += json_escape(g_server_name);
+            json += "\",\"players\":";
+            json += std::to_string(g_game_server->player_count());
+            json += ",\"max_players\":";
+            json += std::to_string(net::MAX_PLAYERS);
+            json += ",\"uptime_seconds\":";
+            json += std::to_string(elapsed);
+            json += ",\"worlds\":";
+            json += std::to_string(g_game_state.world_count());
+            json += "}";
+            http_respond_json(cfd, json.c_str());
+            close(cfd);
+            return;
+        }
+
+        if (strcmp(path, "/worlds") == 0) {
+            std::string json = "{\"ok\":true,\"worlds\":[";
+            for (size_t i = 0; i < g_world_list.size(); ++i) {
+                if (i) json += ',';
+                json += json_escape(g_world_list[i]);
+            }
+            json += "]}";
+            http_respond_json(cfd, json.c_str());
+            close(cfd);
+            return;
+        }
+
+        if (strcmp(path, "/players") == 0) {
+            std::string json = "{\"ok\":true,\"players\":[";
+            bool first = true;
+            for (const auto& p : g_game_server->players()) {
+                if (!p.connected) continue;
+                if (!first) json += ',';
+                first = false;
+                json += "{\"id\":";
+                json += std::to_string(p.id);
+                json += ",\"name\":";
+                json += json_escape(p.name);
+                json += ",\"ip\":";
+                json += json_escape(p.ip_address);
+                json += "}";
+            }
+            json += "]}";
+            http_respond_json(cfd, json.c_str());
             close(cfd);
             return;
         }
     }
 
     if (strcmp(method, "POST") == 0 && strcmp(path, "/auth/login") == 0) {
+        if (!g_auth_token.empty()) {
+            // Extract body after headers (\r\n\r\n)
+            const char* body = std::strstr(req, "\r\n\r\n");
+            if (!body) body = std::strstr(req, "\n\n");
+            body = body ? body + (body[0] == '\r' ? 4 : 2) : "";
+            // Look for "token":"..." in body
+            bool valid = false;
+            const char* t = std::strstr(body, "\"token\":\"");
+            if (t) {
+                t += 9;
+                const char* end = std::strchr(t, '"');
+                if (end) {
+                    std::string token(t, end - t);
+                    valid = (g_auth_token == token);
+                }
+            }
+            if (!valid) {
+                http_respond_json(cfd, "{\"ok\":false,\"error\":\"invalid_token\"}");
+                close(cfd);
+                return;
+            }
+        }
         http_respond_json(cfd, "{\"ok\":true,\"token\":\"dev\"}");
         close(cfd);
         return;
@@ -547,12 +607,12 @@ static void handle_http_client(int cfd) {
 static void http_server_thread(int port) {
     int lfd = http_listen(port);
     if (lfd < 0) {
-        fprintf(stderr, "HTTP: failed to listen on port %d\n", port);
+        OZ_ERROR("HTTP: failed to listen on port %d", port);
         return;
     }
     {
         std::lock_guard<std::mutex> lock(g_print_mutex);
-        printf("HTTP: map server on http://127.0.0.1:%d\n", port);
+        OZ_INFO("HTTP: map server on http://127.0.0.1:%d", port);
     }
 
     fd_set master_fds;
@@ -603,8 +663,8 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
 }
 
 static void on_player_join(net::NetworkPlayer& player) {
-    printf("Player %s (id=%u) joined from %s:%u\n",
-           player.name, player.id, player.ip_address, player.port);
+    OZ_INFO("Player %s (id=%u) joined from %s:%u",
+            player.name, player.id, player.ip_address, player.port);
     g_game_state.add_player(player.id, player.name);
 
     std::string world_list = "{\"type\":\"world_list\",\"worlds\":[";
@@ -631,7 +691,7 @@ static void on_player_join(net::NetworkPlayer& player) {
             synced++;
         });
     }
-    printf("Synced %d pickups to player %s\n", synced, player.name);
+    OZ_INFO("Synced %d pickups to player %s", synced, player.name);
 }
 
 static void on_player_leave(net::NetworkPlayer& player) {
@@ -901,9 +961,31 @@ static void on_server_message(const net::NetworkMessage& msg,
 // Environment setup
 // ---------------------------------------------------------------------------
 static void scan_worlds(const std::string& dir) {
+#ifdef _WIN32
+    std::string pattern = dir + "/*";
+    WIN32_FIND_DATAA ffd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        OZ_ERROR("scan: couldnt open %s", dir.c_str());
+        return;
+    }
+    do {
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (ffd.cFileName[0] == '.') continue;
+            std::string wdl = dir + "/" + ffd.cFileName + "/World.wdl";
+            std::string ozone = dir + "/" + ffd.cFileName + "/World.ozone";
+            struct stat ss;
+            if (stat(wdl.c_str(), &ss) == 0 || stat(ozone.c_str(), &ss) == 0) {
+                g_world_list.push_back(ffd.cFileName);
+                OZ_INFO("Found world: %s", ffd.cFileName);
+            }
+        }
+    } while (FindNextFileA(hFind, &ffd) != 0);
+    FindClose(hFind);
+#else
     DIR* d = opendir(dir.c_str());
     if (!d) {
-        fprintf(stderr, "scan: couldnt open %s\n", dir.c_str());
+        OZ_ERROR("scan: couldnt open %s", dir.c_str());
         return;
     }
     struct dirent* entry;
@@ -917,11 +999,12 @@ static void scan_worlds(const std::string& dir) {
             struct stat ss;
             if (stat(wdl.c_str(), &ss) == 0 || stat(ozone.c_str(), &ss) == 0) {
                 g_world_list.push_back(entry->d_name);
-                printf("Found world: %s\n", entry->d_name);
+                OZ_INFO("Found world: %s", entry->d_name);
             }
         }
     }
     closedir(d);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -948,9 +1031,9 @@ int main(int argc, char** argv) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    printf("AngelServ build 50 starting\n");
-    printf("Game port: UDP %d\n",  game_port);
-    printf("HTTP port: %d\n",     http_port);
+    OZ_INFO("AngelServ build 50 starting");
+    OZ_INFO("Game port: UDP %d",  game_port);
+    OZ_INFO("HTTP port: %d",     http_port);
     printf("Data dir:  %s\n",     g_gamedata_dir.c_str());
 
     // Scan worlds
@@ -1033,6 +1116,7 @@ int main(int argc, char** argv) {
         // Broadcast NPC state to all players every 4 ticks (2.5/sec)
         if (tick % 4 == 0) {
             for (const auto& world : g_game_state.worlds()) {
+                // Global NPCs
                 for (size_t i = 0; i < world.global_npcs.size(); i++) {
                     const auto& n = world.global_npcs[i];
                     if (!n.active) continue;
@@ -1053,6 +1137,30 @@ int main(int argc, char** argv) {
                     bmsg.timestamp = static_cast<uint32_t>(time(nullptr));
                     memcpy(bmsg.payload, &nsud, sizeof(nsud));
                     g_game_server->broadcast_message(bmsg);
+                }
+                // Partition NPCs
+                for (const auto& part : world.partitions) {
+                    for (size_t i = 0; i < part.npcs.size(); i++) {
+                        const auto& n = part.npcs[i];
+                        if (!n.active) continue;
+                        net::NpcStateUpdateData nsud;
+                        nsud.world_index = world.world_index;
+                        nsud.npc_index = static_cast<int>(i);
+                        nsud.partition_index = part.id;
+                        nsud.position = n.position;
+                        nsud.yaw = n.yaw;
+                        nsud.state = static_cast<int>(n.state);
+                        nsud.health = n.health;
+                        nsud.active = n.active;
+                        net::NetworkMessage bmsg;
+                        bmsg.magic = net::MAGIC;
+                        bmsg.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
+                        bmsg.size = sizeof(nsud);
+                        bmsg.sequence = 0;
+                        bmsg.timestamp = static_cast<uint32_t>(time(nullptr));
+                        memcpy(bmsg.payload, &nsud, sizeof(nsud));
+                        g_game_server->broadcast_message(bmsg);
+                    }
                 }
             }
         }

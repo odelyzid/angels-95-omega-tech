@@ -19,12 +19,24 @@
 #include <filesystem>
 #include <fstream>
 
-bool FloorCollision = true;
-bool ObjectCollision = false;
+inline bool FloorCollision = true;
+inline bool ObjectCollision = false;
 extern bool g_showCollisionDebug;
 
-static char g_world_to_load[256] = "EngineTest";
-static bool g_skipMenu = false;
+inline char g_world_to_load[256] = "EngineTest";
+inline char g_world_dir_override[256] = "";
+inline bool g_skipMenu = false;
+
+extern int ScriptTimer;
+
+// Cross-world state that must be reset on each LoadWorld()
+inline float g_damageCooldown = 0.0f;
+inline std::string g_prevSoundZone;
+inline Music g_defaultWorldMusic = {0};
+inline Sound g_ambienceHandle = {0};
+inline std::string g_ambienceZoneName;
+inline bool g_wasInReverb = false;
+inline std::string g_activeEnvZone;
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -252,54 +264,59 @@ auto LoadWorld()
     g_playerMovement.onGround = false;
     g_playerMovement.velocityY = 0.0f;
 
-    if (OmegaTechData.Deaths != 3)
+    // Reset cross-world state that would otherwise persist across LoadWorld calls
+    g_damageCooldown = 0.0f;
+    g_prevSoundZone.clear();
+    g_defaultWorldMusic = Music{0};
+    if (g_ambienceHandle.frameCount > 0)
     {
+        StopSound(g_ambienceHandle);
+        UnloadSound(g_ambienceHandle);
+    }
+    g_ambienceHandle = {0};
+    g_ambienceZoneName.clear();
+    g_wasInReverb = false;
+    g_activeEnvZone.clear();
+    ScriptTimer = 0;
 
+    {
         OmegaTechData.PanicCounter = 0;
 
         LightningEntityManager::Instance().SetPlayerHealth(100.0f);
 
         OmegaTechData.SkyboxEnabled = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE1.mp3", g_world_to_load)))
+        const char* worldAssetDir = g_world_dir_override[0] ? g_world_dir_override : g_world_to_load;
+
+        for (int ne = 1; ne <= 3; ne++)
         {
-            StopMusicStream(OmegaTechSoundData.NESound1);
-            OmegaTechSoundData.NESound1 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE1.mp3", g_world_to_load));
-        }
-        else
-        {
-            UnloadMusicStream(OmegaTechSoundData.NESound1);
-        }
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE2.mp3", g_world_to_load)))
-        {
-            StopMusicStream(OmegaTechSoundData.NESound2);
-            OmegaTechSoundData.NESound2 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE2.mp3", g_world_to_load));
-        }
-        else
-        {
-            UnloadMusicStream(OmegaTechSoundData.NESound2);
-        }
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE3.mp3", g_world_to_load)))
-        {
-            StopMusicStream(OmegaTechSoundData.NESound3);
-            OmegaTechSoundData.NESound3 = LoadMusicStream(TextFormat("GameData/Worlds/%s/NoiseEmitter/NE3.mp3", g_world_to_load));
-        }
-        else
-        {
-            UnloadMusicStream(OmegaTechSoundData.NESound3);
+            const char* path = TextFormat("GameData/Worlds/%s/NoiseEmitter/NE%d.mp3", worldAssetDir, ne);
+            auto getStream = [&](Music& ms) {
+                if (IsPathFile(path)) {
+                    StopMusicStream(ms);
+                    UnloadMusicStream(ms);
+                    ms = LoadMusicStream(path);
+                } else {
+                    UnloadMusicStream(ms);
+                }
+            };
+            if (ne == 1) getStream(OmegaTechSoundData.NESound1);
+            else if (ne == 2) getStream(OmegaTechSoundData.NESound2);
+            else getStream(OmegaTechSoundData.NESound3);
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Skybox.png", g_world_to_load)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Skybox.png", worldAssetDir)))
         {
-
-            WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Skybox.png", g_world_to_load));
+            if (WDLModels.Skybox.id > 0)
+                UnloadTexture(WDLModels.Skybox);
+            WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Skybox.png", worldAssetDir));
             OmegaTechData.SkyboxEnabled = true;
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", g_world_to_load)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", worldAssetDir)))
         {
             ParasiteScriptInit();
-            LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", g_world_to_load));
+            LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", worldAssetDir));
             for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
             {
                 CycleInstruction();
@@ -314,24 +331,30 @@ auto LoadWorld()
         }
         WDLModels.HeightMapReady = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", g_world_to_load)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", worldAssetDir)))
         {
-            WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/HeightMapTexture.png", g_world_to_load));
-            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", g_world_to_load));
-            ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
-            int X = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 0);
-            int Y = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 1);
-            int Z = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", g_world_to_load), 2);
-            WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
-            Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
-            OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
-                    OmegaTechData.LevelIndex, X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount,
-                    WDLModels.HeightMapTexture.id,
-                    WDLModels.HeightMapImage.width, WDLModels.HeightMapImage.height);
-            WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
-            WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
-            WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+            WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/HeightMapTexture.png", worldAssetDir));
+            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", worldAssetDir));
             WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
+            if (WDLModels.HeightMapReady)
+            {
+                ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+                int X = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 0);
+                int Y = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 1);
+                int Z = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 2);
+                WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
+                Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
+                OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
+                        OmegaTechData.LevelIndex, X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount,
+                        WDLModels.HeightMapTexture.id,
+                        WDLModels.HeightMapImage.width, WDLModels.HeightMapImage.height);
+                WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
+                if (WDLModels.HeightMap.materialCount > 0)
+                {
+                    WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
+                    WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+                }
+            }
         }
         else
         {
@@ -341,14 +364,17 @@ auto LoadWorld()
         for (int mid = 1; mid <= GameModels::MAX_WDL_MODELS; mid++)
         {
             char modelPath[256], texPath[256];
-            snprintf(modelPath, sizeof(modelPath), "GameData/Worlds/%s/Models/Model%d.obj", g_world_to_load, mid);
-            snprintf(texPath, sizeof(texPath), "GameData/Worlds/%s/Models/Model%dTexture.png", g_world_to_load, mid);
+            snprintf(modelPath, sizeof(modelPath), "GameData/Worlds/%s/Models/Model%d.obj", worldAssetDir, mid);
+            snprintf(texPath, sizeof(texPath), "GameData/Worlds/%s/Models/Model%dTexture.png", worldAssetDir, mid);
             if (IsPathFile(modelPath))
             {
                 WDLModels.wdlModels[mid] = LoadModel(modelPath);
                 WDLModels.wdlModelTextures[mid] = LoadTexture(texPath);
-                WDLModels.wdlModels[mid].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.wdlModelTextures[mid];
-                WDLModels.wdlModels[mid].materials[0].shader = OmegaTechData.Lights;
+                if (WDLModels.wdlModels[mid].materialCount > 0)
+                {
+                    WDLModels.wdlModels[mid].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.wdlModelTextures[mid];
+                    WDLModels.wdlModels[mid].materials[0].shader = OmegaTechData.Lights;
+                }
             }
             else
             {
@@ -369,7 +395,7 @@ auto LoadWorld()
         else
         {
             WorldData = L"";
-            WorldData = LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", g_world_to_load));
+            WorldData = LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", worldAssetDir));
             OtherWDLData = L"";
             CacheWDL();
         }
@@ -385,7 +411,7 @@ auto LoadWorld()
         if (!isDirectWdl)
         {
             char ozonePath[512];
-            snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", g_world_to_load);
+            snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", worldAssetDir);
             if (IsPathFile(ozonePath))
                 OzoneLoader::Instance().LoadFile(ozonePath);
             else
@@ -397,13 +423,16 @@ auto LoadWorld()
         }
 
         if (OmegaTechSoundData.MusicFound)
+        {
             StopMusicStream(OmegaTechSoundData.BackgroundMusic);
+            UnloadMusicStream(OmegaTechSoundData.BackgroundMusic);
+        }
 
         OmegaTechSoundData.MusicFound = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Music/Main.mp3", g_world_to_load)))
+        if (IsPathFile(TextFormat("GameData/Worlds/%s/Music/Main.mp3", worldAssetDir)))
         {
-            OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("GameData/Worlds/%s/Music/Main.mp3", g_world_to_load));
+            OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("GameData/Worlds/%s/Music/Main.mp3", worldAssetDir));
             OmegaTechSoundData.MusicFound = true;
             PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
         }
@@ -712,6 +741,7 @@ void PlayHomeScreen()
     {
         UnloadRenderTexture(Target);
         Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+        OmegaTechData.Deaths = 1;
     }
 
     if (menu.GetSelectedWorld())
@@ -730,12 +760,22 @@ void PlayHomeScreen()
     {
         SetServerJoinIP = "127.0.0.1";
         SetServerJoinFlag = true;
+        // Launch dedicated server as a subprocess
+        int serverPort = 27015;
+        std::string cmd = "start /B \"\" System\\AngelServ.exe --port " +
+                          std::to_string(serverPort) + " --dir GameData";
+        int result = std::system(cmd.c_str());
+        if (result == 0) {
+            OZ_INFO("Launched AngelServ.exe on port %d", serverPort);
+        } else {
+            OZ_ERROR("Failed to launch AngelServ.exe");
+        }
     }
 
     OmegaTechData.Deaths = 1;
 }
 
-static int ScriptTimer = 0;
+int ScriptTimer = 0; // definition (extern declared above)
 static float X, Y, Z, S, Rotation, W, H, L;
 bool NextCollision = false;
 
@@ -834,9 +874,9 @@ void CWDLProcess()
         H = CachedCollision[i].H;
         L = CachedCollision[i].L;
 
-        if (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z || CachedModels[i].ModelId == -1)
+        if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z))
         {
-            if (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X || CachedModels[i].ModelId == -1)
+            if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X))
             {
                 if (CheckCollisionBoxSphere((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2, OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2, OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2}, 1.0))
                 {
@@ -858,9 +898,9 @@ void CWDLProcess()
         S = CachedModels[i].S;
         Rotation = CachedModels[i].R;
 
-        if (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z || CachedModels[i].ModelId == -1)
+        if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z))
         {
-            if (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X || CachedModels[i].ModelId == -1)
+            if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X))
             {
 
                 int mid = CachedModels[i].ModelId;
@@ -1123,7 +1163,7 @@ void WDLProcess()
                     if (ScriptTimer == 0)
                     {
                         ParasiteScriptInit();
-                        LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Script%i.ps", g_world_to_load, int(ToFloat(WReadValue(Instruction, 6, Instruction.size() - 1)))));
+                        LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Script%i.ps", g_world_dir_override[0] ? g_world_dir_override : g_world_to_load, int(ToFloat(WReadValue(Instruction, 6, Instruction.size() - 1)))));
 
                         for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
                         {
@@ -1238,11 +1278,11 @@ void WDLProcess()
             OmegaTechData.MainCamera.position.z);
         if (groundY > -50000.0f)
         {
-            const float eyeHeight = 2.0f;
+
             // Only snap if at or below ground (allows jumping above terrain)
-            if (OmegaTechData.MainCamera.position.y <= groundY + eyeHeight + 0.1f)
+            if (OmegaTechData.MainCamera.position.y <= groundY + PLAYER_EYE_HEIGHT + 0.1f)
             {
-                OmegaTechData.MainCamera.position.y = groundY + eyeHeight;
+                OmegaTechData.MainCamera.position.y = groundY + PLAYER_EYE_HEIGHT;
                 g_playerMovement.velocityY = 0.0f;
                 g_playerMovement.onGround = true;
             }
@@ -1253,10 +1293,10 @@ void WDLProcess()
         }
         else if (FoundPlatform)
         {
-            const float eyeHeight = 2.0f;
-            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + eyeHeight + 0.1f)
+
+            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + PLAYER_EYE_HEIGHT + 0.1f)
             {
-                OmegaTechData.MainCamera.position.y = PlatformHeight + eyeHeight;
+                OmegaTechData.MainCamera.position.y = PlatformHeight + PLAYER_EYE_HEIGHT;
                 g_playerMovement.velocityY = 0.0f;
                 g_playerMovement.onGround = true;
             }
@@ -1303,13 +1343,12 @@ void UpdateEntities()
 
     // Check if any pawn is attacking the player (contact damage)
     {
-        static float damageCooldown = 0.0f;
-        damageCooldown -= dt;
+        g_damageCooldown -= dt;
         float damage = 0;
-        if (damageCooldown <= 0.0f && PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
+        if (g_damageCooldown <= 0.0f && PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
         {
             LightningEntityManager::Instance().SetPlayerHealth(std::max(0.0f, LightningEntityManager::Instance().GetPlayerHealth() - damage));
-            damageCooldown = 1.0f;
+            g_damageCooldown = 1.0f;
             OmegaTechTextSystem.Write(TextFormat("Took %.0f damage from enemy!", damage));
             if (OmegaTechData.PanicCounter != 240)
                 OmegaTechData.PanicCounter += 2;
@@ -1428,8 +1467,9 @@ void SaveGame()
 void LoadSave()
 {
     wstring TFlags = LoadFile("GameData/Saves/TF.sav");
+    size_t tfLen = TFlags.size();
 
-    for (int i = 0; i <= 99; i++)
+    for (int i = 0; i <= 99 && i < (int)tfLen; i++)
     {
         if (TFlags[i] == L'1')
         {
@@ -1472,10 +1512,12 @@ void LoadSave()
             size_t comma = pair.find(L',');
             if (comma != string::npos)
             {
-                int id = stoi(pair.substr(0, comma));
-                int qty = stoi(pair.substr(comma + 1));
-                gInventory.backpack[slotIdx].itemId = id;
-                gInventory.backpack[slotIdx].quantity = qty;
+                try {
+                    int id = stoi(pair.substr(0, comma));
+                    int qty = stoi(pair.substr(comma + 1));
+                    gInventory.backpack[slotIdx].itemId = id;
+                    gInventory.backpack[slotIdx].quantity = qty;
+                } catch (...) { }
             }
             pos = semi + 1;
             slotIdx++;
@@ -1484,21 +1526,33 @@ void LoadSave()
         if (secondColon != string::npos)
         {
             wstring coinStr = bpData.substr(secondColon + 1);
-            if (!coinStr.empty())
-                gInventory.coins = stoi(coinStr);
+            if (!coinStr.empty()) {
+                try { gInventory.coins = stoi(coinStr); } catch (...) { }
+            }
         }
     }
 
     wstring Position = LoadFile("GameData/Saves/POS.sav");
 
-    OmegaTechData.LevelIndex = int(ToFloat(WSplitValue(Position, 3)));
+    if (!Position.empty())
+    {
+        try {
+            OmegaTechData.LevelIndex = int(ToFloat(WSplitValue(Position, 3)));
+        } catch (...) {
+            OmegaTechData.LevelIndex = 1;
+        }
 
-    SetCameraFlag = true;
+        SetCameraFlag = true;
 
-    int X = ToFloat(WSplitValue(Position, 0));
-    int Y = ToFloat(WSplitValue(Position, 1));
-    int Z = ToFloat(WSplitValue(Position, 2));
-    SetCameraPos = {float(X), float(Y), float(Z)};
+        try {
+            int X = ToFloat(WSplitValue(Position, 0));
+            int Y = ToFloat(WSplitValue(Position, 1));
+            int Z = ToFloat(WSplitValue(Position, 2));
+            SetCameraPos = {float(X), float(Y), float(Z)};
+        } catch (...) {
+            SetCameraPos = {0.0f, 10.0f, 0.0f};
+        }
+    }
 
     ExtraWDLInstructions = LoadFile("GameData/Saves/Script.sav");
 }
@@ -1507,6 +1561,9 @@ void DrawWorld()
 {
     BeginTextureMode(Target);
     ClearBackground(BLACK);
+
+    // Update player bounds from current camera position for collision/zone checks
+    g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
 
     // Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
     PawnSystem::Instance().UpdateSkyZone(
@@ -1575,18 +1632,14 @@ void DrawWorld()
             if (soundZone && soundZone->zoneType != ZoneType::ZONE_GAMEPLAY_SOUND)
                 soundZone = nullptr;
         }
-        static std::string prevSoundZone;
-        static Music defaultWorldMusic;
-        static Sound ambienceHandle = {0};
-        static std::string ambienceZoneName;
         if (soundZone && soundZone->zoneType == ZoneType::ZONE_GAMEPLAY_SOUND)
         {
             auto &sp = soundZone->soundProfile;
-            if (!sp.music_on_enter.empty() && prevSoundZone != soundZone->name)
+            if (!sp.music_on_enter.empty() && g_prevSoundZone != soundZone->name)
             {
                 // Save default world music before crossfading
-                if (prevSoundZone.empty() && OmegaTechSoundData.MusicFound)
-                    defaultWorldMusic = OmegaTechSoundData.BackgroundMusic;
+                if (g_prevSoundZone.empty() && OmegaTechSoundData.MusicFound)
+                    g_defaultWorldMusic = OmegaTechSoundData.BackgroundMusic;
                 StopMusicStream(OmegaTechSoundData.BackgroundMusic);
                 Music newMusic = LoadMusicWithFallback(sp.music_on_enter.c_str());
                 if (newMusic.ctxData != nullptr)
@@ -1598,49 +1651,49 @@ void DrawWorld()
             }
             if (!sp.ambience_loop.empty())
             {
-                if (ambienceZoneName != soundZone->name)
+                if (g_ambienceZoneName != soundZone->name)
                 {
-                    if (ambienceHandle.frameCount > 0)
+                    if (g_ambienceHandle.frameCount > 0)
                     {
-                        StopSound(ambienceHandle);
-                        UnloadSound(ambienceHandle);
-                        ambienceHandle = {0};
+                        StopSound(g_ambienceHandle);
+                        UnloadSound(g_ambienceHandle);
+                        g_ambienceHandle = {0};
                     }
-                    ambienceHandle = LoadSoundWithFallback(sp.ambience_loop.c_str());
-                    if (ambienceHandle.frameCount > 0)
-                        PlaySound(ambienceHandle);
-                    ambienceZoneName = soundZone->name;
+                    g_ambienceHandle = LoadSoundWithFallback(sp.ambience_loop.c_str());
+                    if (g_ambienceHandle.frameCount > 0)
+                        PlaySound(g_ambienceHandle);
+                    g_ambienceZoneName = soundZone->name;
                 }
-                if (ambienceHandle.frameCount > 0 && !IsSoundPlaying(ambienceHandle))
-                    PlaySound(ambienceHandle);
+                if (g_ambienceHandle.frameCount > 0 && !IsSoundPlaying(g_ambienceHandle))
+                    PlaySound(g_ambienceHandle);
             }
-            if (!sp.sfx_on_enter.empty() && prevSoundZone != soundZone->name)
+            if (!sp.sfx_on_enter.empty() && g_prevSoundZone != soundZone->name)
             {
                 Sound sfx = LoadSoundWithFallback(sp.sfx_on_enter.c_str());
                 if (sfx.frameCount > 0)
                     PlaySound(sfx);
             }
-            prevSoundZone = soundZone->name;
+            g_prevSoundZone = soundZone->name;
         }
-        else if (region.primaryZoneId < 0 && !prevSoundZone.empty())
+        else if (region.primaryZoneId < 0 && !g_prevSoundZone.empty())
         {
             // Exited sound zone — stop ambience loop, restore default music
-            if (ambienceHandle.frameCount > 0)
+            if (g_ambienceHandle.frameCount > 0)
             {
-                StopSound(ambienceHandle);
-                UnloadSound(ambienceHandle);
-                ambienceHandle = {0};
+                StopSound(g_ambienceHandle);
+                UnloadSound(g_ambienceHandle);
+                g_ambienceHandle = {0};
             }
-            ambienceZoneName.clear();
-            if (defaultWorldMusic.ctxData != nullptr)
+            g_ambienceZoneName.clear();
+            if (g_defaultWorldMusic.ctxData != nullptr)
             {
                 StopMusicStream(OmegaTechSoundData.BackgroundMusic);
-                OmegaTechSoundData.BackgroundMusic = defaultWorldMusic;
+                OmegaTechSoundData.BackgroundMusic = g_defaultWorldMusic;
                 OmegaTechSoundData.MusicFound = true;
                 PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
-                defaultWorldMusic = Music{0};
+                g_defaultWorldMusic = Music{0};
             }
-            prevSoundZone.clear();
+            g_prevSoundZone.clear();
         }
     }
 
@@ -1666,7 +1719,7 @@ void DrawWorld()
     // OZONE brush collision - chunk-accelerated query
     {
         Vector3 cp = OmegaTechData.MainCamera.position;
-        float playerFeet = cp.y - 2.0f; // eyeHeight
+        float playerFeet = cp.y - PLAYER_EYE_HEIGHT;
         auto &chunkMgr = OzoneLoader::Instance().GetChunkManager();
         std::vector<int> nearIndices;
         chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
@@ -1699,10 +1752,10 @@ void DrawWorld()
                         : -99999.0f;
         if (hmY > -50000.0f)
         {
-            const float eyeHeight = 2.0f;
-            if (cp.y <= hmY + eyeHeight + 0.1f)
+
+            if (cp.y <= hmY + PLAYER_EYE_HEIGHT + 0.1f)
             {
-                OmegaTechData.MainCamera.position.y = hmY + eyeHeight;
+                OmegaTechData.MainCamera.position.y = hmY + PLAYER_EYE_HEIGHT;
                 g_playerMovement.velocityY = 0.0f;
                 g_playerMovement.onGround = true;
             }
@@ -1734,10 +1787,10 @@ void DrawWorld()
             }
             if (brushTop > -50000.0f)
             {
-                const float eyeHeight = 2.0f;
-                if (cp.y <= brushTop + eyeHeight + 0.1f)
+
+                if (cp.y <= brushTop + PLAYER_EYE_HEIGHT + 0.1f)
                 {
-                    OmegaTechData.MainCamera.position.y = brushTop + eyeHeight;
+                    OmegaTechData.MainCamera.position.y = brushTop + PLAYER_EYE_HEIGHT;
                     g_playerMovement.velocityY = 0.0f;
                     g_playerMovement.onGround = true;
                 }
@@ -1820,8 +1873,7 @@ void DrawWorld()
         // Get reverb params from combined env (or highest-priority reverb zone)
         float mix = region.combinedEnv.reverbMix;
         float decay = region.combinedEnv.reverbDecay;
-        static bool wasInReverb = false;
-        if (inReverb && !wasInReverb)
+        if (inReverb && !g_wasInReverb)
         {
             if (mix <= 0.0f) mix = 0.35f;
             if (decay <= 0.0f) decay = 0.5f;
@@ -1834,7 +1886,7 @@ void DrawWorld()
             DspReverb::SetMix(mix);
             DspReverb::SetDecay(decay);
         }
-        else if (!inReverb && wasInReverb)
+        else if (!inReverb && g_wasInReverb)
         {
             OZ_INFO("ZONE_REVERB exited — restoring audio");
             if (OmegaTechSoundData.MusicFound)
@@ -1844,7 +1896,7 @@ void DrawWorld()
             DspReverb::SetMix(0.0f);
             DspReverb::SetDecay(0.5f);
         }
-        wasInReverb = inReverb;
+        g_wasInReverb = inReverb;
     }
 
     // LightningScript entity tick
@@ -1917,11 +1969,10 @@ void DrawWorld()
         // Zone environment override application (from combined player region)
         {
             auto& region = PawnSystem::Instance().GetPlayerRegion();
-            static std::string activeEnvZone;
             bool inEnvZone = region.combinedEnv.applyFog || region.combinedEnv.applyAmbient;
             std::string envZoneName = (region.primaryZoneId >= 0) ? std::to_string(region.primaryZoneId) : "";
 
-            if (inEnvZone && activeEnvZone != envZoneName)
+            if (inEnvZone && g_activeEnvZone != envZoneName)
             {
                 auto &eo = region.combinedEnv;
                 OZ_DEBUG("Zone env: applyFog=%d applyAmbient=%d", eo.applyFog, eo.applyAmbient);
@@ -1950,9 +2001,9 @@ void DrawWorld()
                     static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
                     SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
                 }
-                activeEnvZone = envZoneName;
+                g_activeEnvZone = envZoneName;
             }
-            else if (!inEnvZone && !activeEnvZone.empty())
+            else if (!inEnvZone && !g_activeEnvZone.empty())
             {
                 // Exited env zone — restore defaults from WorldInfo
                 OZ_DEBUG("Zone env: restoring WorldInfo defaults");
@@ -1976,7 +2027,7 @@ void DrawWorld()
                 FogEnabled = false;
                 FogIntensity = 0.3f;
                 FogTint = {200, 200, 210, 255};
-                activeEnvZone.clear();
+                g_activeEnvZone.clear();
             }
         }
     }

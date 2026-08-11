@@ -389,6 +389,26 @@ static void ExecuteConsoleCommand(const char* cmd) {
     } else if (strcmp(cmd, "/showcollisions") == 0) {
         g_showCollisionDebug = !g_showCollisionDebug;
         OZ_INFO("Collision debug %s", g_showCollisionDebug ? "ON" : "OFF");
+    } else if (strncmp(cmd, "/connect ", 9) == 0) {
+        const char* ip = cmd + 9;
+        while (*ip == ' ') ip++;
+        if (*ip) {
+            SetServerJoinIP = ip;
+            SetServerJoinFlag = true;
+            OZ_INFO("Connecting to %s:27015", ip);
+        } else {
+            OZ_WARN("Usage: /connect <ip>");
+        }
+    } else if (strcmp(cmd, "/disconnect") == 0) {
+        if (g_network_enabled) {
+            g_client.disconnect();
+            g_network_enabled = false;
+            OZ_INFO("Disconnected from server");
+        } else {
+            OZ_WARN("Not connected to any server");
+        }
+    } else if (strcmp(cmd, "/servers") == 0) {
+        OZ_INFO("Use the Multiplayer tab in the main menu to discover servers");
     }
 }
 
@@ -643,6 +663,10 @@ int main(int argc, char** argv){
             g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
             g_skipMenu = true;
             i++;
+        } else if (strcmp(argv[i], "--world-dir") == 0) {
+            strncpy(g_world_dir_override, argv[i + 1], sizeof(g_world_dir_override) - 1);
+            g_world_dir_override[sizeof(g_world_dir_override) - 1] = '\0';
+            i++;
         }
     }
 
@@ -788,7 +812,6 @@ int main(int argc, char** argv){
 
                 Texture2D tex = clicked ? OmegaTechData.BtnClicked :
                                 hover ? OmegaTechData.BtnHover : OmegaTechData.BtnNormal;
-                // Draw button background
                 if (tex.id > 0) {
                     DrawTexturePro(tex,
                         (Rectangle){0,0,(float)tex.width,(float)tex.height},
@@ -806,6 +829,64 @@ int main(int argc, char** argv){
                     else if (i == 2) { g_gamePaused = false; g_returnToMenu = true; }
                     else if (i == 3) { CloseWindow(); return 0; }
                     }
+            }
+
+            EndDrawing();
+            continue;
+        }
+
+        // Game-over overlay when player has died 3 times
+        if (OmegaTechData.Deaths >= 3) {
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            DrawRectangle(0, 0, sw, sh, (Color){0,0,0,200});
+
+            const char* gameOverText = "GAME OVER";
+            int fontSize = 48;
+            int textW = MeasureText(gameOverText, fontSize);
+            DrawText(gameOverText, (sw - textW) / 2, sh / 2 - 100, fontSize, RED);
+
+            DrawText("You have perished three times...",
+                     (sw - MeasureText("You have perished three times...", 16)) / 2,
+                     sh / 2 - 40, 16, LIGHTGRAY);
+
+            const char* labels[] = {"Restart", "Main Menu"};
+            int btnCount = 2;
+            int btnW = 220, btnH = 50, gap = 10;
+            int totalH = btnCount * btnH + (btnCount - 1) * gap;
+            int startY = sh / 2 + 10;
+
+            for (int i = 0; i < btnCount; i++) {
+                int bx = (sw - btnW) / 2;
+                int by = startY + i * (btnH + gap);
+                Rectangle r = {(float)bx, (float)by, (float)btnW, (float)btnH};
+                bool hover = CheckCollisionPointRec(GetMousePosition(), r);
+                bool clicked = hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+
+                Texture2D tex = clicked ? OmegaTechData.BtnClicked :
+                                hover ? OmegaTechData.BtnHover : OmegaTechData.BtnNormal;
+                if (tex.id > 0) {
+                    DrawTexturePro(tex,
+                        (Rectangle){0,0,(float)tex.width,(float)tex.height},
+                        r, (Vector2){0,0}, 0, WHITE);
+                } else {
+                    DrawRectangleRec(r, (Color){80,20,20,220});
+                    DrawRectangleLinesEx(r, 2, (Color){180,60,60,255});
+                }
+                DrawText(labels[i], bx + (btnW - MeasureText(labels[i], 18)) / 2,
+                         by + (btnH - 18) / 2, 18, WHITE);
+
+                if (clicked) {
+                    if (i == 0) {
+                        OmegaTechData.Deaths = 1;
+                        ShowCursor();
+                        EnableCursor();
+                        LoadWorld();
+                        HideCursor();
+                        DisableCursor();
+                    } else if (i == 1) {
+                        g_returnToMenu = true;
+                    }
+                }
             }
 
             EndDrawing();

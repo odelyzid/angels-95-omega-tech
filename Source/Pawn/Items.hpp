@@ -236,6 +236,6 @@ struct InventorySystem {
     }
 };
 
-static InventorySystem gInventory;
+inline InventorySystem gInventory;
 
 #endif

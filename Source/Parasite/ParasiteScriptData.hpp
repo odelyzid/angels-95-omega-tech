@@ -18,19 +18,19 @@ using namespace std;
 #define MaxTFlag 100
 #define MaxArrays 1
 
-static int VaribleCounter = 0;
-static int JumpPointCounter = 0;
-static int ArrayCounter = 0;
+inline int VaribleCounter = 0;
+inline int JumpPointCounter = 0;
+inline int ArrayCounter = 0;
 
-static wstring ExtraWDLInstructions = L"";
+inline wstring ExtraWDLInstructions = L"";
 
 
 
-static bool SetSceneFlag = false;
-static int SetSceneId = 0;
+inline bool SetSceneFlag = false;
+inline int SetSceneId = 0;
 
-static bool SetCameraFlag = false;
-static Vector3 SetCameraPos = {0,0,0};
+inline bool SetCameraFlag = false;
+inline Vector3 SetCameraPos = {0,0,0};
 
 typedef struct Memory{
     string Name;
