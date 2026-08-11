@@ -32,6 +32,10 @@ struct OzonePrimitive {
     std::string entitySubType;      // for zones: "Water", "Ladder", "Sky", "Reverb"
     int csgOp = 0;                  // CSG operation: 0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC
     int surfaceFlags = 0;           // surface behavior flags (e.g. SURF_FAKEBACKDROP)
+    float texScaleU = 1.0f;         // texture tiling U (applied to mesh UVs)
+    float texScaleV = 1.0f;         // texture tiling V (applied to mesh UVs)
+    float texOffsetU = 0.0f;        // texture shift U
+    float texOffsetV = 0.0f;        // texture shift V
 };
 
 class OzoneParser {

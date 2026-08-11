@@ -276,6 +276,16 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
+    // Walls (h >= 1.0) get 2x UV tiling so the 32x32 tileset texture
+    // doesn't look stretched across large faces
+    if (h >= 1.0f && mesh.texcoords) {
+        for (int i = 0; i < mesh.vertexCount; i++) {
+            mesh.texcoords[i*2 + 0] *= 2.0f;
+            mesh.texcoords[i*2 + 1] *= 2.0f;
+        }
+        UpdateMeshBuffer(mesh, 1, mesh.texcoords,
+                         mesh.vertexCount * 2 * (int)sizeof(float), 0);
+    }
     Model model = LoadModelFromMesh(mesh);
     // Auto-select: slot 1 (floor) if thin, slot 2 (wall) if tall
     Texture2D tex = (m_tilesetTex.size() >= 1 && h < 1.0f) ? m_tilesetTex[0] :
@@ -535,6 +545,13 @@ bool OzoneLoader::LoadFile(const char* path) {
     // Apply texture override if set
     if (r.texSlot > 0) ApplyTexSlotToModel(r.model, r.texSlot);
     m_renderables.push_back(r);
+    // Apply optional texture UV scaling/offset
+    if (prim.texScaleU != 1.0f || prim.texScaleV != 1.0f ||
+        prim.texOffsetU != 0.0f || prim.texOffsetV != 0.0f) {
+        ApplyRenderableUV((int)m_renderables.size() - 1,
+                          prim.texScaleU, prim.texScaleV,
+                          prim.texOffsetU, prim.texOffsetV);
+    }
     }
 
     // Post-process: assign zoneId to lights based on containing zone
@@ -608,6 +625,12 @@ bool OzoneLoader::LoadString(const char* data) {
         r.texSlot = (int)prim.args[6];
     if (r.texSlot > 0) ApplyTexSlotToModel(r.model, r.texSlot);
     m_renderables.push_back(r);
+    if (prim.texScaleU != 1.0f || prim.texScaleV != 1.0f ||
+        prim.texOffsetU != 0.0f || prim.texOffsetV != 0.0f) {
+        ApplyRenderableUV((int)m_renderables.size() - 1,
+                          prim.texScaleU, prim.texScaleV,
+                          prim.texOffsetU, prim.texOffsetV);
+    }
     }
     // Post-process: assign zoneId to lights based on containing zone
     {

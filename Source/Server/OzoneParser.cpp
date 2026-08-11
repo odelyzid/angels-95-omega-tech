@@ -47,11 +47,16 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             while (ls >> s) {
                 try { prim.args.push_back(std::stof(s)); }
                 catch (...) {
-                    // Not a float — check if it's a surfaceFlags token
-                    if (s.rfind("flags=", 0) == 0) {
+                    if (s.rfind("flags=", 0) == 0)
                         prim.surfaceFlags = std::stoi(s.substr(6));
-                    }
-                    break;
+                    else if (s.rfind("texScaleU=", 0) == 0)
+                        prim.texScaleU = std::stof(s.substr(10));
+                    else if (s.rfind("texScaleV=", 0) == 0)
+                        prim.texScaleV = std::stof(s.substr(10));
+                    else if (s.rfind("texOffsetU=", 0) == 0)
+                        prim.texOffsetU = std::stof(s.substr(11));
+                    else if (s.rfind("texOffsetV=", 0) == 0)
+                        prim.texOffsetV = std::stof(s.substr(11));
                 }
             }
         };

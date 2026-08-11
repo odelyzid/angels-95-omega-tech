@@ -58,7 +58,10 @@ The server scans `GameData/Worlds/` for subdirectories containing `World.wdl`. L
 ## Changelog
 
 ### b53 — 2026-08-11
-- **New map: Dust_Ravine** — Desert fortress complex with connected hallways, rooms, corridors, underground tunnels, and three distinct outdoor areas (West Approach, South Canyon, East Ruins Garden). Uses the Dessert_Dreams texture set. 28 NPC spawns, 24 pickups, 22 lights across multiple interior and exterior zones.
+- **New map: Dust_Ravine** — Desert fortress complex with connected hallways, rooms, corridors, underground tunnels, and three distinct outdoor areas (West Approach, South Canyon, East Ruins Garden). Uses the Dessert_Dreams texture set. 24 pickups, 22 lights across multiple interior and exterior zones.
+- **2x texture tiling on all wall brushes** — `BuildBox()` now applies 2x UV tiling to boxes with height >= 1.0, so the 32x32px wall stone texture doesn't look stretched across large faces. Applied globally (all OZONE maps benefit).
+- **OZONE format extension: `texScaleU=N texScaleV=N` tokens** — Parser now supports per-brush texture UV scale/offset tokens (like `flags=N`), stored in `OzoneRenderable` and applied via `ApplyRenderableUV()`.
+- **Fixed overlapping floor geometry in Dust_Ravine** — Removed redundant interior floor boxes at z=-0.25 that overlapped with the global ground plane (z=-0.5), preventing z-fighting.
 - Files: `GameData/Worlds/Dust_Ravine/World.ozone`, `GameData/Worlds/Dust_Ravine/skyzone_dust.ozls`
 
 ### b52 — 2026-08-11
