@@ -36,7 +36,7 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
-          LitLightning.o rlights.o EngineSaveLoad.o)
+          LitLightning.o rlights.o)
 
 .PHONY: all clean test
 all: OTENGINE AngelServ ozpack
@@ -88,10 +88,7 @@ $(BUILD_DIR)/LitLightning.o: Source/Renderer/LitLightning.cpp Source/Renderer/Li
 $(BUILD_DIR)/rlights.o: Source/rlights/rlights.cpp Source/rlights/rlights.h | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/rlights/rlights.cpp -o $@
 
-# 5i. Engine Save/Load module
-$(BUILD_DIR)/EngineSaveLoad.o: Source/EngineSaveLoad.cpp Source/Core.hpp Source/Data.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/EngineSaveLoad.cpp -o $@
-
+# 5i. OzOzoneLoader (OzWorld format loader)
 $(BUILD_DIR)/OzOzoneLoader.o: Source/OzOzoneLoader.cpp Source/OzOzoneLoader.hpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/OzOzoneLoader.cpp -o $@
 
