@@ -35,6 +35,7 @@ struct ServerPlayer {
     int xp = 0;
     int xp_to_next = 100;
     int inventory[5] = {0, 0, 0, 0, 0};  // indices 0-4 match Objects 1-5
+    int ammo = 0;                        // shared ammo pool (refilled by AMMO pickups)
     int world_index = 0;
     double last_seen;
 
@@ -177,6 +178,20 @@ struct ServerPickup {
 };
 
 // ---------------------------------------------------------------------------
+// ServerProjectile — projectile simulated server-side
+// ---------------------------------------------------------------------------
+struct ServerProjectile {
+    uint32_t id = 0;
+    NetVec3 position{0,0,0};
+    NetVec3 velocity{0,0,0};
+    float lifetime = 2.0f;
+    float age = 0.0f;
+    float damage = 10.0f;
+    uint32_t owner_id = UINT32_MAX;
+    bool active = true;
+};
+
+// ---------------------------------------------------------------------------
 // World partition — coordinate-based area of interest management
 // ---------------------------------------------------------------------------
 constexpr int PARTITIONS_PER_WORLD = 64; // 8x8 grid
@@ -203,6 +218,8 @@ struct WorldState {
     std::vector<WorldPartition> partitions;
     std::vector<ServerNPC> global_npcs;   // not partition-locked
     std::vector<ServerPickup> global_pickups; // not partition-locked
+    std::vector<ServerProjectile> projectiles;
+    uint32_t next_projectile_id = 1;
 };
 
 // Pickup collect range (world units)
@@ -240,6 +257,12 @@ public:
 
     // NPC AI tick
     void tick_npcs(WorldState& ws, float dt);
+
+    // Projectile management
+    void spawn_projectile(WorldState& ws, uint32_t owner_id,
+                          const NetVec3& origin, const NetVec3& direction,
+                          float speed, float damage, float lifetime);
+    void tick_projectiles(WorldState& ws, float dt);
 
     // Pickup tick
     void tick_pickups(WorldState& ws, float dt);

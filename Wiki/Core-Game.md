@@ -6,7 +6,9 @@
 |---|---|
 | WASD | Movement (first-person) |
 | Mouse | Look |
-| Left Click | Fire weapon (slot 1) |
+| Left Click (hold) | Fire selected weapon (auto-fire at weapon's fire rate) |
+| Right Click (hold) | Aim Down Sights (tighter crosshair, reduced spread) |
+| R | Reload selected weapon |
 | 1–8 | Select inventory/hotbar slot |
 | Mouse Wheel / Arrow Keys | Cycle slots |
 | E | Collect nearby pickup |
@@ -20,23 +22,77 @@
 - **Health / Mana / Psychic Energy** — three resource pools displayed at top, automatic regeneration (tick-based). Max values default to 100.
 - **Level & XP** — exponential XP curve (`XP_BASE_TO_NEXT=100`, growth 1.3x per level). XP gained from pickups, NPC kills, and exploration.
 - **Hotbar** — 5 weapon slots + 3 equipment slots (8 total). Slot 1 is the default Wand / Energy Bolt weapon.
+- **Ammo counter** — shows current ammunition / magazine capacity for the selected weapon. Turns red when empty.
+- **Crosshair** — 4-line crosshair at screen center. Gap expands with recoil bloom, tightens during ADS.
+- **Muzzle flash** — brief yellow sphere at weapon origin on each shot.
+- **Recoil** — camera pitches upward on fire, recovers over time. Random horizontal kick. Displayed visually via crosshair bloom.
 - **Ping** — displayed when connected to a network server.
+
+## Weapons & Combat
+
+### Weapon Types
+
+Weapons are data-driven via LightningScript entity definitions (`.ozls`). Two types:
+
+**Ranged** — fires projectiles with configurable speed, spread, damage, and projectile count. Examples: `automag` (fire_rate=0.4, magazine=12), `Object1`–`Object5`.
+
+**Melee** — forward range check on swing. Uses `reach` and `swing_speed` stats. No projectiles spawned. Example: `selenite_blade` (reach=3.0, swing_speed=0.8, damage=40).
+
+### Weapon Stats
+
+| Stat | Ranged Default | Melee Default | Description |
+|---|---|---|---|
+| `damage` | 10 | 10 | Damage per hit/projectile |
+| `fire_rate` | 0.25 | — | Seconds between shots (ranged) |
+| `swing_speed` | — | 0.25 | Seconds between swings (melee) |
+| `magazine` | none | — | Ammo capacity (ranged only) |
+| `reload_time` | 2.0 | — | Seconds to reload |
+| `projectile_speed` | 20 | — | Projectile travel speed |
+| `projectile_lifetime` | 2.0 | — | Seconds before projectile expires |
+| `projectile_count` | 1 | — | Projectiles per shot |
+| `spread` | 0 | — | Spread angle in degrees |
+| `reach` | — | 3.0 | Melee attack range |
+| `recoil` | 2.0 | 1.0 | Camera kick intensity |
+
+### Ammo & Reload
+
+- Ranged weapons with a `magazine` stat consume ammo per shot
+- When empty, the weapon auto-reloads (triggering `on_reload` script action)
+- Press **R** to manually reload (resets ammo to `magazine`, sets cooldown to `reload_time`)
+- Ammo is displayed as `Ammo: current/max` in the HUD
+- **AMMO pickups** (type 5) grant ammo to the player's ammo pool server-side
+
+### Projectile System
+
+- Client: projectiles are simulated in `PawnSystem::UpdateProjectiles()` with simple gravity
+- Local single-player: projectiles collide with `Pawn` NPCs (radius 1.5), applying damage directly
+- Multiplayer: `WeaponFireData` sent to server via UDP; server spawns `ServerProjectile` entities
+- Server: `GameState::tick_projectiles()` runs per-world, checking collision against NPCs (global + partition) and other players (owner excluded)
+- Server projectiles use `HIT_RADIUS = 2.0` for collision detection
+
+### Visual Feedback
+
+- **Crosshair**: 4-line white crosshair at screen center. Gap size increases with recoil bloom.
+- **Recoil**: Camera kicks upward on fire; random horizontal component. Recovers at 0.82x per frame.
+- **Crosshair bloom**: Expands on fire, decays at 0.90x per frame (0.75x during ADS).
+- **Muzzle flash**: Yellow sphere at weapon origin, 0.12s duration, shrinks and fades.
+- **ADS**: Right-click to aim. Tighter crosshair (gap 2 vs 5), faster bloom decay, reduced spread.
 
 ## Pickups
 
 Pickup types are **data-driven** via LightningScript entity definitions (`.ozls` files parsed by `LightningEntityRegistry`). The legacy hardcoded types are:
 
-| Type | ID |
-|---|---|
-| Health | 0 |
-| Mana | 1 |
-| Psychic Energy | 2 |
-| Armor | 3 |
-| Weapon | 4 |
-| Ammo | 5 |
-| Key | 6 |
-| Coin | 7 |
-| Powerup | 8 |
+| Type | ID | Effect |
+|---|---|---|
+| Health | 0 | Restores health |
+| Mana | 1 | Restores mana |
+| Psychic Energy | 2 | Restores psychic energy |
+| Armor | 3 | Grants armor HP |
+| Weapon | 4 | Unlocks Object1–5 in inventory |
+| Ammo | 5 | Refills ammo pool (capped at 999) |
+| Key | 6 | Adds key to inventory (grants XP server-side) |
+| Coin | 7 | Currency (grants XP server-side) |
+| Powerup | 8 | Grants XP server-side |
 
 New pickup types can be added by creating `.ozls` entity definition files.
 

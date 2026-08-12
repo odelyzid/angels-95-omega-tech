@@ -53,6 +53,22 @@ stats {
 }
 ```
 
+#### Weapon-Specific Stats
+
+| Stat | Type | Ranged Default | Melee Default | Description |
+|---|---|---|---|---|
+| `damage` | float | 10 | 10 | Damage per projectile or melee hit |
+| `fire_rate` | float | 0.25 | — | Seconds between shots (ranged) |
+| `swing_speed` | float | — | 0.25 | Seconds between swings (melee) |
+| `magazine` | float | none | — | Ammo capacity per magazine (ranged only) |
+| `reload_time` | float | 2.0 | — | Seconds to complete a reload |
+| `projectile_speed` | float | 20 | — | Projectile travel speed in units/sec |
+| `projectile_lifetime` | float | 2.0 | — | Projectile lifespan in seconds |
+| `projectile_count` | float | 1 | — | Number of projectiles per shot |
+| `spread` | float | 0 | — | Random spread angle in degrees |
+| `reach` | float | — | 3.0 | Melee attack range in units |
+| `recoil` | float | 2.0 | 1.0 | Camera recoil kick intensity |
+
 ### Variants Block
 
 Defines alternate configurations (e.g., weapon levels):
@@ -74,7 +90,10 @@ Scripts attached to specific events:
 | `on_use` | Player selects the entity from hotbar and presses E/Enter |
 | `on_equip` | Entity is equipped |
 | `on_unequip` | Entity is unequipped |
-| `on_hit` | Entity projectile hits something |
+| `on_fire` | Ranged weapon fired (before projectile spawn) |
+| `on_swing` | Melee weapon swung (before range check) |
+| `on_hit` | Melee swing connects with a target |
+| `on_reload` | Weapon reload triggered (auto or manual via R key) |
 | `on_collect` | Entity is picked up |
 | `on_zone_enter` | Player enters a skyzone entity |
 | `on_zone_exit` | Player exits a skyzone entity |
@@ -128,31 +147,57 @@ if ($health <= 0) {
 
 Supported operators: `==`, `!=`, `>`, `<`, `>=`, `<=`
 
-## Example: Weapon Entity
+## Example: Ranged Weapon (automag)
 
 ```
-entity EnergyPistol {
-    type = weapon
-    mesh = "GameData/Global/gun/automag/automag_lvl1.obj"
-    texture = "GameData/Global/gun/automag/automag_lvl1_texture.png"
-    icon = "GameData/Global/Items/energy_pistol_icon.png"
-
+entity "automag" : weapon {
+    mesh = "automag_lvl1.obj"
+    texture = "automag_lvl1_texture.png"
     stats {
-        float damage = 25.0
-        float range = 8.0
-        float fire_rate = 0.5
-        int max_ammo = 30
-        vec3 color = 0.2 0.8 1.0
+        damage = 15
+        fire_rate = 0.4
+        range = 50.0
+        magazine = 12
+        reload_time = 2.0
     }
-
-    on_use {
-        set_cooldown 1.5
-        play_sound "GameData/Global/Sounds/energy_shot.wav"
-        say "Fired EnergyPistol"
+    actions {
+        on_fire {
+            say "Bang! (15 damage)"
+            set_cooldown 0.4
+        }
+        on_reload {
+            say "Reloading..."
+        }
     }
+    variants {
+        "lvl1" { mesh_override = "automag_lvl1" }
+        "lvl2" { mesh_override = "automag_lvl2" }
+        "lvl3" { mesh_override = "automag_heavy_rifle_lvl3" }
+    }
+}
+```
 
-    on_hit {
-        say "Hit target"
+## Example: Melee Weapon (selenite_blade)
+
+```
+entity "selenite_blade" : weapon {
+    mesh = "selenite_blade_lvl1.obj"
+    texture = "selenite_blade_lvl1_texture.png"
+    icon = "selenite_blade_icon.png"
+    stats {
+        damage = 40
+        swing_speed = 0.8
+        reach = 3.0
+        stamina_cost = 15
+    }
+    actions {
+        on_swing {
+            say "Slash! (40 damage)"
+            set_cooldown 0.8
+        }
+        on_hit {
+            say "Blade connects!"
+        }
     }
 }
 ```

@@ -269,6 +269,21 @@ void PawnSystem::UpdateProjectiles(float dt) {
         p.position.z += p.velocity.z * dt;
         // Simple gravity on projectiles
         p.velocity.y -= 5.0f * dt;
+
+        // Projectile vs Pawn collision
+        for (auto& pawn : m_pawns) {
+            if (!pawn.active || pawn.state == PawnState::DEAD) continue;
+            float dist = Vector3Distance(p.position, pawn.position);
+            if (dist < 1.5f) {
+                pawn.health -= (int)p.damage;
+                p.active = false;
+                if (pawn.health <= 0) {
+                    pawn.active = false;
+                    pawn.state = PawnState::DEAD;
+                }
+                break;
+            }
+        }
     }
     // Remove inactive projectiles
     m_projectiles.erase(

@@ -259,8 +259,8 @@ uint32_t GameState::add_player(uint32_t id, const char* name)
     player.world_index = 0;
     memset(player.inventory, 0, sizeof(player.inventory));
 
-    // Find first free slot
-    for (int i = 0; i < net::MAX_PLAYERS; i++) {
+    // Find first free slot (check bounds - vector may be empty in tests)
+    for (int i = 0; i < net::MAX_PLAYERS && i < (int)m_players.size(); i++) {
         if (!m_players[i].connected) {
             m_players[i] = player;
             m_player_count++;
@@ -617,6 +617,8 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
             }
             break;
         case PickupType::AMMO:
+            player->ammo = std::min(player->ammo + pickup->value, 999);
+            break;
         case PickupType::POWERUP:
         case PickupType::COIN:
         case PickupType::KEY:
@@ -685,6 +687,89 @@ void GameState::damage_player(ServerPlayer& player, int amount) {
 }
 
 // ---------------------------------------------------------------------------
+// Projectile system
+// ---------------------------------------------------------------------------
+void GameState::spawn_projectile(WorldState& ws, uint32_t owner_id,
+                                 const NetVec3& origin, const NetVec3& direction,
+                                 float speed, float damage, float lifetime) {
+    ServerProjectile p;
+    p.id = ws.next_projectile_id++;
+    p.position = origin;
+    p.velocity = {direction.x * speed, direction.y * speed, direction.z * speed};
+    p.damage = damage;
+    p.lifetime = lifetime;
+    p.owner_id = owner_id;
+    p.active = true;
+    p.age = 0.0f;
+    ws.projectiles.push_back(p);
+}
+
+void GameState::tick_projectiles(WorldState& ws, float dt) {
+    const float HIT_RADIUS = 2.0f;
+    for (auto& p : ws.projectiles) {
+        if (!p.active) continue;
+        p.age += dt;
+        if (p.age >= p.lifetime) { p.active = false; continue; }
+        p.position.x += p.velocity.x * dt;
+        p.position.y += p.velocity.y * dt;
+        p.position.z += p.velocity.z * dt;
+
+        // Check collision with NPCs
+        // Global NPCs
+        for (auto& npc : ws.global_npcs) {
+            if (!npc.active) continue;
+            float dx = p.position.x - npc.position.x;
+            float dy = p.position.y - npc.position.y;
+            float dz = p.position.z - npc.position.z;
+            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (dist < HIT_RADIUS) {
+                p.active = false;
+                damage_npc(npc, (int)p.damage, p.owner_id);
+                break;
+            }
+        }
+        if (!p.active) continue;
+        // Partition NPCs
+        for (auto& part : ws.partitions) {
+            for (auto& npc : part.npcs) {
+                if (!npc.active) continue;
+                float dx = p.position.x - npc.position.x;
+                float dy = p.position.y - npc.position.y;
+                float dz = p.position.z - npc.position.z;
+                float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+                if (dist < HIT_RADIUS) {
+                    p.active = false;
+                    damage_npc(npc, (int)p.damage, p.owner_id);
+                    break;
+                }
+            }
+            if (!p.active) break;
+        }
+        if (!p.active) continue;
+
+        // Check collision with players (skip owner)
+        for (auto& player : m_players) {
+            if (!player.connected) continue;
+            if (player.id == p.owner_id) continue;
+            float dx = p.position.x - player.position.x;
+            float dy = p.position.y - player.position.y;
+            float dz = p.position.z - player.position.z;
+            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (dist < HIT_RADIUS) {
+                p.active = false;
+                damage_player(player, (int)p.damage);
+                break;
+            }
+        }
+    }
+    // Remove inactive
+    ws.projectiles.erase(
+        std::remove_if(ws.projectiles.begin(), ws.projectiles.end(),
+                       [](const ServerProjectile& p) { return !p.active; }),
+        ws.projectiles.end());
+}
+
+// ---------------------------------------------------------------------------
 // Tick all worlds
 // ---------------------------------------------------------------------------
 void GameState::tick(float dt) {
@@ -692,6 +777,7 @@ void GameState::tick(float dt) {
     for (auto &world : m_worlds) {
         tick_npcs(world, dt);
         tick_pickups(world, dt);
+        tick_projectiles(world, dt);
     }
 
     // Player health/magic/penergy regeneration every tick

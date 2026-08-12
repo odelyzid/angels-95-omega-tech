@@ -87,14 +87,18 @@ Uses `OzPack.exe` to create `.oz*` containers from `GameData/` subdirectories.
 ## Testing
 
 ```bash
-make test                # runs test_parser + test_entity_manager
+make test                # runs ALL test suites
 make test_parser         # LightningScriptParser tests
 make test_context        # LightningScriptContext tests
 make test_registry       # LightningEntityRegistry tests
-make test_entity_manager # LightningEntityManager lifecycle tests
+make test_entity_manager # LightningEntityManager lifecycle + ammo/reload/melee tests
+make test_pawn_system    # OzPawnSystem CRUD + projectile collision tests
+make test_wdl_parser     # WDL parser classification tests
+make test_network        # Network packet serialization + find_free_port tests
+make test_game_state     # GameState projectile simulation + AMMO pickup tests
 ```
 
-Tests are standalone `.test.cpp` files compiled directly into executables (no test framework). No raylib dependency — uses `SERVER_CXX` compiler with `-DOMEGA_TEST_ENV`.
+Tests are standalone `.test.cpp` files compiled directly into executables (no test framework). Most use no raylib dependency (`SERVER_CXX` compiler with `-DOMEGA_TEST_ENV`). `test_entity_manager` and `test_pawn_system` link raylib for Vector3/BoundingBox types.
 
 ## Outputs
 

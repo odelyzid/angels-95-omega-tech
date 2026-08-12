@@ -169,6 +169,24 @@ NPC definitions are loaded from `GameData/Global/PawnDefs/*.cfg` (name, speed, a
 
 FSM states: IDLE, PATROL, CHASE, ATTACK, RETURN, DEAD.
 
+NPCs attack via melee range check (no ranged attack capability). Projectile damage from players is detected client-side in `PawnSystem::UpdateProjectiles()` (collision radius 1.5) and server-side in `GameState::tick_projectiles()` (radius 2.0).
+
+## Weapon System
+
+Weapons are data-driven `.ozls` entities of type `weapon`. Two types:
+
+- **Ranged** — fires `ProjectileNode` objects with configurable speed, spread, damage, lifetime. Supports ammo (`magazine` stat), reload (`reload_time`), and cooldown-based auto-fire.
+- **Melee** — forward range check using `reach` stat; no projectile spawn. Runs `on_swing`/`on_hit` script actions.
+
+Key source files:
+
+| File | Role |
+|---|---|
+| `Source/Script/LightningEntityManager.cpp` | `FireSelectedWeapon()` — reads weapon stats, handles ammo/reload/cooldown, runs `on_fire`/`on_swing`/`on_reload` actions, dispatches ranged (projectile) or melee (range check) logic |
+| `Source/Pawn/OzPawnSystem.cpp` | `SpawnProjectile()`, `UpdateProjectiles()` (movement + gravity + pawn collision), `DrawProjectiles()` |
+| `Source/Server/GameState.cpp` | `spawn_projectile()`, `tick_projectiles()` — server-authoritative projectile simulation with NPC and player collision |
+| `Source/Main.cpp` | `FireWeapon()` — camera ray, trigger, recoil, muzzle flash, crosshair, ADS, network send |
+
 Pickup types from LightningScript entity registry (`.ozls` definitions).
 
 ## Known Editor Gaps

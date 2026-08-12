@@ -6,6 +6,7 @@
 #include "Script/LightningEntityDef.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -82,6 +83,13 @@ static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
 
+// Recoil & crosshair state
+static float g_recoilPitch = 0.0f;
+static float g_recoilYaw = 0.0f;
+static float g_crosshairBloom = 0.0f;
+static struct { Vector3 position; float timer; } g_muzzleFlash = {{0,0,0}, 0.0f};
+static bool g_adsActive = false;
+
 
 // ---------------------------------------------------------------------------
 // HUD: draw player stats bars (always visible) 
@@ -155,6 +163,17 @@ static void DrawPlayerHUD() {
         DrawText(TextFormat("Slot %d: %s", selSlot, label),
                  x, y, 12, YELLOW);
         y += 16;
+        // Ammo display for weapons
+        if (selEnt && selEnt->def && selEnt->def->type == EntityType::WEAPON) {
+            auto ait = selEnt->runtimeStats.find("ammo");
+            auto mit = selEnt->runtimeStats.find("magazine");
+            if (ait != selEnt->runtimeStats.end() && mit != selEnt->runtimeStats.end()) {
+                Color ammoCol = (ait->second <= 0.0f) ? RED : WHITE;
+                DrawText(TextFormat("Ammo: %.0f/%.0f", ait->second, mit->second),
+                         x, y, 12, ammoCol);
+                y += 16;
+            }
+        }
     }
 
     // Weapon fire indicator (brief pulse)
@@ -223,44 +242,91 @@ static void DrawRemotePlayers() {
 
 
 // ---------------------------------------------------------------------------
-// Fire weapon helper — delegates to LightningEntityManager 
-// TODO: Move away from Main into WeaponHandler
+// Read a stat from the selected weapon entity
+// ---------------------------------------------------------------------------
+static float SelectedWeaponStat(const std::string& key, float defVal) {
+    EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
+    if (!ent || !ent->def) return defVal;
+    auto dit = ent->def->stats.floats.find(key);
+    return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
+}
+
+// ---------------------------------------------------------------------------
+// Fire weapon helper — delegates to LightningEntityManager
 // ---------------------------------------------------------------------------
 static void FireWeapon() {
     Camera3D& cam = OmegaTechData.MainCamera;
     Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
     Vector3 origin = Vector3Add(cam.position, Vector3Scale(forward, 2.0f));
 
-    // Fire via entity system
-    LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
+    int result = LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
+    if (result < 0) return; // didn't fire
+
+    // Muzzle flash
+    g_muzzleFlash.position = origin;
+    g_muzzleFlash.timer = 0.12f;
+
+    // Apply recoil
+    float recoilKick = SelectedWeaponStat("recoil", result > 0 ? 2.0f : 1.0f);
+    g_recoilPitch += -recoilKick + (float)(rand() % 100 - 50) / 100.0f * recoilKick * 0.3f;
+    g_recoilYaw += (float)(rand() % 100 - 50) / 100.0f * recoilKick * 0.2f;
+    g_crosshairBloom += recoilKick * 1.5f;
+
+    bool isMelee = (result == 0);
+    float damage = SelectedWeaponStat("damage", 10.0f);
+    float reach = isMelee ? SelectedWeaponStat("reach", 3.0f) : 0.0f;
 
     // Send to server
     if (g_network_enabled && g_client.is_connected()) {
-        g_client.send_weapon_fire(
-            origin.x, origin.y, origin.z,
-            forward.x, forward.y, forward.z,
-            1, 10);
-
-        // Client-side NPC hit detection — find nearest NPC along fire ray
-        int hitIdx = -1, hitPart = -1;
-        float hitDist = 1e9f;
-        const auto& cnpc = g_client.npcs();
-        for (size_t i = 0; i < cnpc.size(); i++) {
-            if (!cnpc[i].active) continue;
-            Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
-            Vector3 toNpc = Vector3Subtract(np, origin);
-            float t = Vector3DotProduct(toNpc, forward);
-            if (t < 0) continue;
-            Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
-            float d = Vector3Distance(closest, np);
-            if (d < 2.0f && t < hitDist) {
-                hitDist = t;
-                hitIdx = static_cast<int>(i);
-                hitPart = cnpc[i].partition_index;
+        if (isMelee) {
+            // Melee: range check against network NPCs
+            int hitIdx = -1, hitPart = -1;
+            float hitDist = 1e9f;
+            const auto& cnpc = g_client.npcs();
+            for (size_t i = 0; i < cnpc.size(); i++) {
+                if (!cnpc[i].active) continue;
+                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
+                Vector3 toNpc = Vector3Subtract(np, origin);
+                float t = Vector3DotProduct(toNpc, forward);
+                if (t < 0 || t > reach) continue;
+                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
+                float d = Vector3Distance(closest, np);
+                if (d < 2.0f && t < hitDist) {
+                    hitDist = t;
+                    hitIdx = static_cast<int>(i);
+                    hitPart = cnpc[i].partition_index;
+                }
             }
-        }
-        if (hitIdx >= 0) {
-            g_client.send_npc_damage(0, hitIdx, hitPart, 10);
+            if (hitIdx >= 0) {
+                g_client.send_npc_damage(0, hitIdx, hitPart, (int)damage);
+            }
+        } else {
+            // Ranged: send weapon fire + raycast hit
+            g_client.send_weapon_fire(
+                origin.x, origin.y, origin.z,
+                forward.x, forward.y, forward.z,
+                1, (int)damage);
+
+            int hitIdx = -1, hitPart = -1;
+            float hitDist = 1e9f;
+            const auto& cnpc = g_client.npcs();
+            for (size_t i = 0; i < cnpc.size(); i++) {
+                if (!cnpc[i].active) continue;
+                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
+                Vector3 toNpc = Vector3Subtract(np, origin);
+                float t = Vector3DotProduct(toNpc, forward);
+                if (t < 0) continue;
+                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
+                float d = Vector3Distance(closest, np);
+                if (d < 2.0f && t < hitDist) {
+                    hitDist = t;
+                    hitIdx = static_cast<int>(i);
+                    hitPart = cnpc[i].partition_index;
+                }
+            }
+            if (hitIdx >= 0) {
+                g_client.send_npc_damage(0, hitIdx, hitPart, (int)damage);
+            }
         }
     }
 }
@@ -1000,11 +1066,32 @@ int main(int argc, char** argv){
         }
 
         // Weapon fire AFTER camera so left-click does not disrupt movement
-        if (!ShowInventory && !g_consoleOpen && left_just_pressed) {
+        if (!ShowInventory && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
             EntityInstance* wep = LightningEntityManager::Instance().SelectedEntity();
             if (wep && wep->def && wep->def->type == EntityType::WEAPON) {
                 FireWeapon();
             }
+        }
+
+        // ADS / Zoom (right-click)
+        g_adsActive = !ShowInventory && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
+
+        // Recoil recovery
+        const float RECOIL_DECAY = 0.82f;
+        g_recoilPitch *= RECOIL_DECAY;
+        g_recoilYaw *= RECOIL_DECAY;
+        g_crosshairBloom *= (g_adsActive ? 0.75f : 0.90f);
+        if (fabs(g_recoilPitch) < 0.01f) g_recoilPitch = 0.0f;
+        if (fabs(g_recoilYaw) < 0.01f) g_recoilYaw = 0.0f;
+        if (g_crosshairBloom < 0.1f) g_crosshairBloom = 0.0f;
+
+        // Apply recoil to camera target
+        if (g_recoilPitch != 0.0f || g_recoilYaw != 0.0f) {
+            Camera3D& cam = OmegaTechData.MainCamera;
+            Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+            Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, {0, 1, 0}));
+            cam.target = Vector3Add(cam.target, Vector3Scale({0, 1, 0}, g_recoilPitch * 0.1f));
+            cam.target = Vector3Add(cam.target, Vector3Scale(right, g_recoilYaw * 0.1f));
         }
 
         left_click_was_down = left_click_now;
@@ -1169,6 +1256,13 @@ int main(int argc, char** argv){
         // Remote player models
         DrawRemotePlayers();
 
+        // Muzzle flash
+        if (g_muzzleFlash.timer > 0.0f) {
+            float t = g_muzzleFlash.timer / 0.12f;
+            DrawSphere(g_muzzleFlash.position, 0.5f * t, (Color){255, (unsigned char)(200 * t), 50, 255});
+            g_muzzleFlash.timer -= GetFrameTime();
+        }
+
         // Inventory overlay
         if (ShowInventory) {
             DrawInventoryOverlay();
@@ -1176,6 +1270,19 @@ int main(int argc, char** argv){
 
         // Console overlay (always on top)
         DrawConsole();
+
+        // Crosshair
+        if (!ShowInventory && !g_consoleOpen) {
+            int cx = GetScreenWidth() / 2;
+            int cy = GetScreenHeight() / 2;
+            int gap = (g_adsActive ? 2 : 5) + (int)(g_crosshairBloom * (g_adsActive ? 0.3f : 1.0f));
+            int len = 12;
+            Color col = {255, 255, 255, 180};
+            DrawLine(cx - gap - len, cy, cx - gap, cy, col);
+            DrawLine(cx + gap, cy, cx + gap + len, cy, col);
+            DrawLine(cx, cy - gap - len, cx, cy - gap, col);
+            DrawLine(cx, cy + gap, cx, cy + gap + len, col);
+        }
 
         EndDrawing();
 

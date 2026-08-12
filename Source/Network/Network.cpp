@@ -85,6 +85,7 @@ bool is_valid_ip(const char* ip) {
 }
 
 uint16_t find_free_port() {
+    winsock_init();
     int fd = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return 0;
 

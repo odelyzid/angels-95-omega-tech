@@ -72,6 +72,7 @@ public:
 
     // --- Projectile spawning (for weapon entities) ---
     int FireSelectedWeapon(const Vector3& origin, const Vector3& direction);
+    bool ReloadSelectedWeapon();
 
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);

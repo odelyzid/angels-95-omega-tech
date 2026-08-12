@@ -23,6 +23,7 @@ static void reset_pawn_system() {
     auto& ps = PawnSystem::Instance();
     ps.DespawnAll();
     ps.ClearPlayerStarts();
+    ps.ClearProjectiles();
     ps.ClearPickups();
     ps.ClearZones();
     ps.ClearEmitters();
@@ -203,6 +204,114 @@ static int test_emitter_crud() {
     PASS(); return 0; END_TEST();
 }
 
+// --- Projectile tests (Phase 3) ---
+
+static int test_projectile_spawn() {
+    TEST("SpawnProjectile creates active projectile");
+    reset_pawn_system();
+    auto& ps = PawnSystem::Instance();
+    ProjectileNode p;
+    p.position = {10, 5, 10};
+    p.velocity = {0, 0, -20};
+    p.damage = 25.0f;
+    p.lifetime = 3.0f;
+    p.speed = 20.0f;
+    int idx = ps.SpawnProjectile(p);
+    CHECK(idx >= 0);
+    auto& projs = ps.GetProjectiles();
+    CHECK(projs.size() >= 1);
+    CHECK(projs.back().active);
+    CHECK_APROX(projs.back().position.x, 10.0f, 0.001f);
+    CHECK_APROX(projs.back().damage, 25.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_projectile_movement() {
+    TEST("UpdateProjectiles moves projectile along velocity");
+    reset_pawn_system();
+    auto& ps = PawnSystem::Instance();
+    ProjectileNode p;
+    p.position = {0, 0, 0};
+    p.velocity = {10, 0, 0};
+    p.lifetime = 5.0f;
+    ps.SpawnProjectile(p);
+    auto& projs = ps.GetProjectiles();
+    CHECK(projs.size() == 1);
+    ps.UpdateProjectiles(1.0f);
+    CHECK_APROX(projs[0].position.x, 10.0f, 0.001f);
+    ps.UpdateProjectiles(1.0f);
+    CHECK_APROX(projs[0].position.x, 20.0f, 0.1f); // gravity affects slightly
+    PASS(); return 0; END_TEST();
+}
+
+static int test_projectile_expiry() {
+    TEST("Projectile deactivates after lifetime expires");
+    reset_pawn_system();
+    auto& ps = PawnSystem::Instance();
+    ProjectileNode p;
+    p.position = {0, 0, 0};
+    p.velocity = {0, 0, 0};
+    p.lifetime = 0.5f;
+    ps.SpawnProjectile(p);
+    ps.UpdateProjectiles(0.6f);
+    CHECK(ps.GetProjectiles().empty());
+    PASS(); return 0; END_TEST();
+}
+
+static int test_projectile_pawn_collision() {
+    TEST("Projectile damages pawn on collision");
+    reset_pawn_system();
+    auto& ps = PawnSystem::Instance();
+    // Spawn a pawn
+    PawnDef def;
+    def.name = "ProjectileTarget";
+    def.maxHealth = 100;
+    def.damage = 5.0f;
+    ps.RegisterDef(def);
+    int pawnId = ps.Spawn({5, 0, 5}, "ProjectileTarget");
+    CHECK(pawnId >= 0);
+    Pawn* pawn = ps.Get(pawnId);
+    CHECK(pawn != nullptr);
+    CHECK_EQ(pawn->health, 100);
+    // Spawn projectile headed toward pawn
+    ProjectileNode p;
+    p.position = {0, 0, 5};
+    p.velocity = {20, 0, 0};
+    p.damage = 30.0f;
+    p.lifetime = 5.0f;
+    ps.SpawnProjectile(p);
+    // Tick once — projectile should travel ~20 units and hit pawn at x=5
+    ps.UpdateProjectiles(0.3f);
+    // Pawn should be damaged (health = 100 - 30 = 70)
+    CHECK_EQ(pawn->health, 70);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_projectile_miss() {
+    TEST("Projectile does not damage pawn when it misses");
+    reset_pawn_system();
+    auto& ps = PawnSystem::Instance();
+    PawnDef def;
+    def.name = "MissTarget";
+    def.maxHealth = 50;
+    ps.RegisterDef(def);
+    int pawnId = ps.Spawn({100, 0, 100}, "MissTarget");
+    CHECK(pawnId >= 0);
+    Pawn* pawn = ps.Get(pawnId);
+    CHECK(pawn != nullptr);
+    // Projectile going in opposite direction
+    ProjectileNode p;
+    p.position = {0, 0, 0};
+    p.velocity = {-20, 0, 0};
+    p.damage = 30.0f;
+    p.lifetime = 5.0f;
+    ps.SpawnProjectile(p);
+    ps.UpdateProjectiles(1.0f);
+    // Pawn health should be unchanged
+    CHECK_EQ(pawn->health, 50);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_light_crud() {
     TEST("AddLight and ClearLights");
     auto& ps = PawnSystem::Instance();
@@ -233,6 +342,11 @@ int main() {
     failures += test_skyzone_active();
     failures += test_emitter_crud();
     failures += test_light_crud();
+    failures += test_projectile_spawn();
+    failures += test_projectile_movement();
+    failures += test_projectile_expiry();
+    failures += test_projectile_pawn_collision();
+    failures += test_projectile_miss();
 
     fprintf(stdout, "==================\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

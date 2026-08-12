@@ -802,6 +802,20 @@ static void on_server_message(const net::NetworkMessage& msg,
             net::WeaponFireData wfd;
             memcpy(&wfd, msg.payload, sizeof(wfd));
             wfd.player_id = sender.id;
+            // Spawn server-side projectile
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
+            if (sp) {
+                WorldState* ws = g_game_state.get_world(sp->world_index);
+                if (ws) {
+                    NetVec3 origin = {wfd.origin_x, wfd.origin_y, wfd.origin_z};
+                    NetVec3 dir = {wfd.dir_x, wfd.dir_y, wfd.dir_z};
+                    float speed = 20.0f;
+                    float lifetime = 2.0f;
+                    float damage = (float)wfd.power;
+                    g_game_state.spawn_projectile(*ws, sender.id, origin, dir, speed, damage, lifetime);
+                }
+            }
+            // Relay weapon fire to other players for visual rendering
             net::NetworkMessage relay;
             relay.magic = net::MAGIC;
             relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_ACTION);
@@ -809,7 +823,6 @@ static void on_server_message(const net::NetworkMessage& msg,
             relay.sequence = 0;
             relay.timestamp = static_cast<uint32_t>(time(nullptr));
             memcpy(relay.payload, &wfd, sizeof(wfd));
-            // Broadcast to all other players
             for (const auto& p : g_game_server->players()) {
                 if (p.id != sender.id && p.connected) {
                     g_game_server->send_message(p, relay);

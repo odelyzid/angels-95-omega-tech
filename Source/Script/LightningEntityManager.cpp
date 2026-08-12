@@ -10,7 +10,8 @@
 #include <cstdlib>
 
 // ---------------------------------------------------------------------------
-// FireSelectedWeapon — spawn projectiles from the selected hotbar entity
+// FireSelectedWeapon — spawn projectiles (ranged) or swing-check (melee)
+// Returns: >0 projectiles spawned (ranged), 0 melee swing, -1 didn't fire
 // ---------------------------------------------------------------------------
 int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vector3& direction) {
     EntityInstance* ent = SelectedEntity();
@@ -20,28 +21,91 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     // Check cooldown
     if (ent->cooldownRemaining > 0.0f) return -1;
 
-    // Read weapon stats — runtimeStats overrides prototype def
-    float projectileSpeed = 20.0f;
-    float projectileDamage = 10.0f;
-    float lifetime = 2.0f;
-    int projectileCount = 1;
-    float spreadDeg = 0.0f;
-    float fireRate = 0.25f;  // seconds between shots
-
     auto readStat = [&](const std::string& key, float defVal) -> float {
         auto rit = ent->runtimeStats.find(key);
         if (rit != ent->runtimeStats.end()) return rit->second;
         auto dit = ent->def->stats.floats.find(key);
         return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
     };
-    projectileSpeed = readStat("projectile_speed", 20.0f);
-    projectileDamage = readStat("damage", 10.0f);
-    lifetime = readStat("lifetime", 2.0f);
-    projectileCount = (int)readStat("projectile_count", 1.0f);
-    spreadDeg = readStat("spread", 0.0f);
-    fireRate = readStat("fire_rate", 0.25f);
 
-    // Set cooldown
+    float projectileDamage = readStat("damage", 10.0f);
+    float reach = readStat("reach", 0.0f);
+
+    if (reach > 0.0f) {
+        // ---- MELEE ----
+        float swingSpeed = readStat("swing_speed", readStat("fire_rate", 0.25f));
+        ent->cooldownRemaining = swingSpeed;
+
+        // Run on_swing action
+        int swingLabel = ent->ctx.FindJumpLabel("on_swing");
+        if (swingLabel >= 0) {
+            ent->ctx.Reset();
+            while (ent->ctx.ProgramCounter() < swingLabel && ent->ctx.HasMore())
+                ent->ctx.ExecuteNext();
+            for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
+                ent->ctx.ExecuteNext();
+        }
+
+#ifndef OMEGA_TEST_ENV
+        // Forward range check against PawnSystem NPCs (single-player)
+        const auto& pawns = PawnSystem::Instance().GetPawns();
+        for (const auto& pawn : pawns) {
+            if (!pawn.active) continue;
+            Vector3 toPawn = Vector3Subtract(pawn.position, origin);
+            float t = Vector3DotProduct(toPawn, direction);
+            if (t < 0 || t > reach) continue;
+            Vector3 closest = Vector3Add(origin, Vector3Scale(direction, t));
+            float d = Vector3Distance(closest, pawn.position);
+            if (d < 2.0f) {
+                int hitLabel = ent->ctx.FindJumpLabel("on_hit");
+                if (hitLabel >= 0) {
+                    ent->ctx.Reset();
+                    while (ent->ctx.ProgramCounter() < hitLabel && ent->ctx.HasMore())
+                        ent->ctx.ExecuteNext();
+                    for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
+                        ent->ctx.ExecuteNext();
+                }
+                break;
+            }
+        }
+#endif
+        return 0; // melee swing performed
+    }
+
+    // ---- RANGED ----
+    float projectileSpeed = readStat("projectile_speed", 20.0f);
+    float lifetime = readStat("lifetime", 2.0f);
+    int projectileCount = (int)readStat("projectile_count", 1.0f);
+    float spreadDeg = readStat("spread", 0.0f);
+    float fireRate = readStat("fire_rate", 0.25f);
+
+    // Ammo check
+    float magazine = readStat("magazine", 0.0f);
+    if (magazine > 0.0f) {
+        // Initialize ammo on first fire
+        auto ammoIt = ent->runtimeStats.find("ammo");
+        if (ammoIt == ent->runtimeStats.end()) {
+            ent->runtimeStats["ammo"] = magazine;
+            ammoIt = ent->runtimeStats.find("ammo");
+        }
+        if (ammoIt->second <= 0.0f) {
+            // Out of ammo — auto-reload
+            float reloadTime = readStat("reload_time", 2.0f);
+            ent->cooldownRemaining = reloadTime;
+            ent->runtimeStats["ammo"] = magazine;
+            int reloadLabel = ent->ctx.FindJumpLabel("on_reload");
+            if (reloadLabel >= 0) {
+                ent->ctx.Reset();
+                while (ent->ctx.ProgramCounter() < reloadLabel && ent->ctx.HasMore())
+                    ent->ctx.ExecuteNext();
+                for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
+                    ent->ctx.ExecuteNext();
+            }
+            return -1;
+        }
+        ammoIt->second -= 1.0f;
+    }
+
     ent->cooldownRemaining = fireRate;
 
     // Trigger on_fire script action if defined
@@ -55,15 +119,12 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     }
 
 #ifndef OMEGA_TEST_ENV
-    // Spawn projectiles
     for (int i = 0; i < projectileCount; i++) {
-        // Apply spread
         float spreadRad = spreadDeg * DEG2RAD;
         float angleOffset = (i - (projectileCount - 1) * 0.5f) * spreadRad;
         float yawOffset = (float)(rand() % 1000 - 500) / 500.0f * spreadRad * 0.5f;
 
         Vector3 dir = direction;
-        // Rotate around up vector for horizontal spread
         float cosA = cosf(angleOffset);
         float sinA = sinf(angleOffset);
         Vector3 up = {0, 1, 0};
@@ -71,7 +132,6 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         right = Vector3Normalize(right);
         dir = Vector3Normalize(Vector3Add(dir, Vector3Scale(right, sinA)));
 
-        // Small random vertical spread
         dir.y += yawOffset * 0.3f;
         dir = Vector3Normalize(dir);
 
@@ -81,11 +141,56 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         p.damage = projectileDamage;
         p.lifetime = lifetime;
         p.speed = projectileSpeed;
-        p.ownerId = -1;  // player
+        p.ownerId = -1;
         PawnSystem::Instance().SpawnProjectile(p);
     }
 #endif
     return projectileCount;
+}
+
+// ---------------------------------------------------------------------------
+// ReloadSelectedWeapon — manually reload the selected weapon
+// Returns: true if reload was performed
+// ---------------------------------------------------------------------------
+bool LightningEntityManager::ReloadSelectedWeapon() {
+    EntityInstance* ent = SelectedEntity();
+    if (!ent || !ent->def) return false;
+    if (ent->def->type != EntityType::WEAPON) return false;
+
+    float magazine = 0.0f;
+    {
+        auto rit = ent->runtimeStats.find("magazine");
+        auto dit = ent->def->stats.floats.find("magazine");
+        magazine = (rit != ent->runtimeStats.end()) ? rit->second
+                 : (dit != ent->def->stats.floats.end()) ? dit->second : 0.0f;
+    }
+    if (magazine <= 0.0f) return false; // no magazine stat = no reload needed
+
+    float currentAmmo = 0.0f;
+    auto ammoIt = ent->runtimeStats.find("ammo");
+    if (ammoIt != ent->runtimeStats.end()) currentAmmo = ammoIt->second;
+    if (currentAmmo >= magazine) return false; // already full
+
+    float reloadTime = 0.0f;
+    {
+        auto rit = ent->runtimeStats.find("reload_time");
+        auto dit = ent->def->stats.floats.find("reload_time");
+        reloadTime = (rit != ent->runtimeStats.end()) ? rit->second
+                   : (dit != ent->def->stats.floats.end()) ? dit->second : 2.0f;
+    }
+
+    ent->cooldownRemaining = reloadTime;
+    ent->runtimeStats["ammo"] = magazine;
+
+    int reloadLabel = ent->ctx.FindJumpLabel("on_reload");
+    if (reloadLabel >= 0) {
+        ent->ctx.Reset();
+        while (ent->ctx.ProgramCounter() < reloadLabel && ent->ctx.HasMore())
+            ent->ctx.ExecuteNext();
+        for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
+            ent->ctx.ExecuteNext();
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +551,11 @@ void LightningEntityManager::HandleInput() {
     if (IsKeyPressed(KEY_SIX))   SelectSlot(5);
     if (IsKeyPressed(KEY_SEVEN)) SelectSlot(6);
     if (IsKeyPressed(KEY_EIGHT)) SelectSlot(7);
+
+    // R to reload selected weapon
+    if (IsKeyPressed(KEY_R)) {
+        ReloadSelectedWeapon();
+    }
 
     // Enter/E to use selected item
     if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E)) {

@@ -162,7 +162,10 @@ test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_network
+test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Network/Network.cpp Source/Log.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
+
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_network test_game_state
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -183,6 +186,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo ""
 	@echo "=== Network Packet Tests ==="
 	-./test_network
+	@echo ""
+	@echo "=== GameState Tests ==="
+	-./test_game_state
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_network
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_network test_game_state

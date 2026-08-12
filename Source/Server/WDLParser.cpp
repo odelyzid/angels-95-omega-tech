@@ -121,10 +121,17 @@ std::vector<WDLElement> WDLParser::parse_string(const std::string& content) {
                 }
                 break;
             }
-            case WDLElementType::HEIGHTMAP:
-            case WDLElementType::COLLISION: {
-                // HeightMap/Collision:x:y:z:scale:rotation:
+            case WDLElementType::HEIGHTMAP: {
+                // HeightMap:x:y:z:scale:rotation:
                 for (int c = 0; c < 5 && i < fields.size(); c++, i++) {
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { elem.args.push_back(0.0f); }
+                }
+                break;
+            }
+            case WDLElementType::COLLISION: {
+                // Collision:minX:minY:minZ:maxX:maxY:maxZ:
+                for (int c = 0; c < 6 && i < fields.size(); c++, i++) {
                     try { elem.args.push_back(std::stof(fields[i])); }
                     catch (...) { elem.args.push_back(0.0f); }
                 }
@@ -234,7 +241,14 @@ std::vector<WDLElement> WDLParser::parse_string(const std::string& content) {
                 // C: flag only, no args
                 break;
             default:
-                // Unknown — skip to next colon block
+                // Unknown type — consume subsequent unknown fields as args
+                while (i < fields.size() && !fields[i].empty()) {
+                    WDLElementType next = classify(fields[i]);
+                    if (next != WDLElementType::UNKNOWN) break;
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { elem.args.push_back(0.0f); }
+                    i++;
+                }
                 break;
         }
 

@@ -208,6 +208,251 @@ static int test_player_stats_default() {
     PASS(); return 0; END_TEST();
 }
 
+// --- Ammo / Reload tests (Phase 2) ---
+
+static int test_fire_no_weapon() {
+    TEST("FireSelectedWeapon returns -1 when no weapon selected");
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    // No entity in hotbar
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    int result = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(result, -1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_fire_not_a_weapon() {
+    TEST("FireSelectedWeapon returns -1 for non-weapon entity");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "NotWeapon";
+    def.type = EntityType::PICKUP;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("NotWeapon");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    int result = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(result, -1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_fire_cooldown() {
+    TEST("FireSelectedWeapon returns -1 on cooldown");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "CooldownGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["fire_rate"] = 0.5f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("CooldownGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    // First fire should succeed (ranged)
+    int r1 = em.FireSelectedWeapon(origin, dir);
+    CHECK(r1 > 0); // projectile count
+    // Second fire immediately should fail due to cooldown
+    int r2 = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(r2, -1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_fire_ranged_weapon() {
+    TEST("FireSelectedWeapon returns projectile count for ranged");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "RangedGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["projectile_count"] = 3;
+    def.stats.floats["fire_rate"] = 0.25f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("RangedGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    int result = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(result, 3);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_fire_melee_weapon() {
+    TEST("FireSelectedWeapon returns 0 for melee swing");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "MeleeBlade";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["reach"] = 3.0f;
+    def.stats.floats["swing_speed"] = 0.8f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("MeleeBlade");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    int result = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(result, 0); // 0 = melee swing
+    PASS(); return 0; END_TEST();
+}
+
+static int test_ammo_init_and_decrement() {
+    TEST("Ammo initializes from magazine and decrements per shot");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "AmmoGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["magazine"] = 5;
+    def.stats.floats["fire_rate"] = 0.1f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("AmmoGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK(ent != nullptr);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    // Fire 3 shots
+    for (int i = 0; i < 3; i++) {
+        int r = em.FireSelectedWeapon(origin, dir);
+        CHECK(r > 0);
+        // Wait for cooldown by setting it to 0
+        ent->cooldownRemaining = 0.0f;
+    }
+    auto it = ent->runtimeStats.find("ammo");
+    CHECK(it != ent->runtimeStats.end());
+    CHECK_EQ((int)it->second, 2); // 5 - 3 = 2
+    PASS(); return 0; END_TEST();
+}
+
+static int test_auto_reload_on_empty() {
+    TEST("Auto-reload triggers when ammo reaches 0");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "AutoReloadGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["magazine"] = 2;
+    def.stats.floats["fire_rate"] = 0.1f;
+    def.stats.floats["reload_time"] = 1.5f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("AutoReloadGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK(ent != nullptr);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    // Fire until empty (2 shots)
+    for (int i = 0; i < 2; i++) {
+        int r = em.FireSelectedWeapon(origin, dir);
+        CHECK(r > 0);
+        ent->cooldownRemaining = 0.0f;
+    }
+    // Next fire should auto-reload (return -1) and reset ammo
+    int r = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(r, -1);
+    // Ammo should be back to magazine (2)
+    auto it = ent->runtimeStats.find("ammo");
+    CHECK(it != ent->runtimeStats.end());
+    CHECK_EQ((int)it->second, 2);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_reload_selected() {
+    TEST("ReloadSelectedWeapon refills ammo");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "ReloadGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["magazine"] = 10;
+    def.stats.floats["fire_rate"] = 0.1f;
+    def.stats.floats["reload_time"] = 2.0f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("ReloadGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK(ent != nullptr);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    // Fire 4 shots to deplete some ammo
+    for (int i = 0; i < 4; i++) {
+        em.FireSelectedWeapon(origin, dir);
+        ent->cooldownRemaining = 0.0f;
+    }
+    auto it = ent->runtimeStats.find("ammo");
+    CHECK(it != ent->runtimeStats.end());
+    CHECK_EQ((int)it->second, 6); // 10-4=6
+    // Reload
+    bool reloaded = em.ReloadSelectedWeapon();
+    CHECK(reloaded);
+    CHECK_EQ((int)ent->runtimeStats["ammo"], 10); // back to full
+    PASS(); return 0; END_TEST();
+}
+
+static int test_reload_no_magazine() {
+    TEST("ReloadSelectedWeapon returns false when no magazine stat");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "NoMagWeapon";
+    def.type = EntityType::WEAPON;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("NoMagWeapon");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    bool reloaded = em.ReloadSelectedWeapon();
+    CHECK(!reloaded);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_reload_full_ammo() {
+    TEST("ReloadSelectedWeapon returns false when ammo is full");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "FullAmmoGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["magazine"] = 8;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("FullAmmoGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    // Ammo should be full (not initialized until first fire)
+    // Fire once to init ammo, then reload
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    em.FireSelectedWeapon(origin, dir);
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK(ent != nullptr);
+    ent->cooldownRemaining = 0.0f;
+    // Now ammo = 7 (one shot fired)
+    em.ReloadSelectedWeapon();
+    CHECK_EQ((int)ent->runtimeStats["ammo"], 8);
+    // Try reloading again when full
+    bool reloaded = em.ReloadSelectedWeapon();
+    CHECK(!reloaded);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -243,6 +488,16 @@ int main() {
     failures += test_run_action_no_crash();
     failures += test_player_stats_default();
     failures += test_multi_despawn_cycles();
+    failures += test_fire_no_weapon();
+    failures += test_fire_not_a_weapon();
+    failures += test_fire_cooldown();
+    failures += test_fire_ranged_weapon();
+    failures += test_fire_melee_weapon();
+    failures += test_ammo_init_and_decrement();
+    failures += test_auto_reload_on_empty();
+    failures += test_reload_selected();
+    failures += test_reload_no_magazine();
+    failures += test_reload_full_ammo();
 
     fprintf(stdout, "============================\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",
