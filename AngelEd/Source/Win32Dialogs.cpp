@@ -1877,8 +1877,9 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             HWND hSY  = GetDlgItem(hwnd, ID_HM_SIZEY);
             HWND hSZ  = GetDlgItem(hwnd, ID_HM_SIZEZ);
             HWND hSC  = GetDlgItem(hwnd, ID_HM_SCALE);
-            if (hImg) GetWindowTextW(hImg, g_imgPath, 512);
-            if (hTex) GetWindowTextW(hTex, g_texPath, 512);
+            char imgPathA[512], texPathA[512];
+            if (hImg) { GetWindowTextW(hImg, g_imgPath, 512); WideCharToMultiByte(CP_UTF8, 0, g_imgPath, -1, imgPathA, 512, 0, 0); }
+            if (hTex) { GetWindowTextW(hTex, g_texPath, 512); WideCharToMultiByte(CP_UTF8, 0, g_texPath, -1, texPathA, 512, 0, 0); }
             double px=0,py=0,pz=0,sx=100,sy=50,sz=100,sc=1.0;
             if (hPX) { GetWindowTextW(hPX, buf, 256); px = wcstod(buf, nullptr); }
             if (hPY) { GetWindowTextW(hPY, buf, 256); py = wcstod(buf, nullptr); }
@@ -1887,13 +1888,17 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             if (hSY) { GetWindowTextW(hSY, buf, 256); sy = wcstod(buf, nullptr); }
             if (hSZ) { GetWindowTextW(hSZ, buf, 256); sz = wcstod(buf, nullptr); }
             if (hSC) { GetWindowTextW(hSC, buf, 256); sc = wcstod(buf, nullptr); }
-            // Store to a shared state that main loop can read
-            FILE* log = fopen("System/AngelEd.log", "a");
-            if (log) {
-                fprintf(log, "[HmEditor] img=%ls tex=%ls pos=(%.1f,%.1f,%.1f) size=(%.1f,%.1f,%.1f) scale=%.2f\n",
-                        g_imgPath, g_texPath, px, py, pz, sx, sy, sz, sc);
-                fclose(log);
-            }
+            // Store to state that main loop reads to call BuildHeightmap
+            g_editorPanels.actionHeightmapImage = imgPathA;
+            g_editorPanels.actionHeightmapTexture = texPathA;
+            g_editorPanels.actionHmPosX = (float)px;
+            g_editorPanels.actionHmPosY = (float)py;
+            g_editorPanels.actionHmPosZ = (float)pz;
+            g_editorPanels.actionHmSx = (float)sx;
+            g_editorPanels.actionHmSy = (float)sy;
+            g_editorPanels.actionHmSz = (float)sz;
+            g_editorPanels.actionHmScale = (float)sc;
+            g_editorPanels.actionGenerateHeightmap = true;
         }
         break;
     }

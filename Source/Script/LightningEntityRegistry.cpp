@@ -13,6 +13,7 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 void LightningEntityRegistry::Init() {
     m_defs.clear();
+    m_allDefs.clear();
     std::vector<std::string> contents;
     std::vector<std::string> paths;
 
@@ -54,6 +55,12 @@ void LightningEntityRegistry::Init() {
 
     // Parse all found .ozls files
     auto defs = LightningScriptParser::ParseAll(contents, paths);
+    // Keep every parsed def so world-local defs with colliding names
+    // (e.g. "zone_sky_0" in each world) stay resolvable by world dir.
+    // Copy into m_allDefs BEFORE moving into the map (moved-from defs are empty).
+    for (auto& def : defs) {
+        m_allDefs.push_back(def);
+    }
     for (auto& def : defs) {
         m_defs[def.name] = std::move(def);
     }
@@ -73,11 +80,11 @@ const EntityDef* LightningEntityRegistry::Find(const std::string& name) const {
 }
 
 // ---------------------------------------------------------------------------
-// FindByType — collect all defs of a given type
+// FindByType — collect all defs of a given type (includes every world's defs)
 // ---------------------------------------------------------------------------
 void LightningEntityRegistry::FindByType(EntityType type, std::vector<const EntityDef*>& out) const {
     out.clear();
-    for (auto& [name, def] : m_defs) {
+    for (auto& def : m_allDefs) {
         if (def.type == type) out.push_back(&def);
     }
 }
@@ -88,5 +95,9 @@ void LightningEntityRegistry::FindByType(EntityType type, std::vector<const Enti
 bool LightningEntityRegistry::Register(const EntityDef& def) {
     if (def.name.empty() || def.type == EntityType::UNKNOWN) return false;
     m_defs[def.name] = def;
+    for (auto& d : m_allDefs) {
+        if (d.name == def.name) { d = def; return true; }
+    }
+    m_allDefs.push_back(def);
     return true;
 }

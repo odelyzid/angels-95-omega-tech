@@ -31,7 +31,12 @@ public:
     // Register a single parsed definition (used by editor for live reload)
     bool Register(const EntityDef& def);
 
+    // All parsed definitions (keeps every def even when names collide across
+    // worlds — m_defs only retains the last-registered per name)
+    const std::vector<EntityDef>& GetAllDefs() const { return m_allDefs; }
+
 private:
     LightningEntityRegistry() = default;
     std::unordered_map<std::string, EntityDef> m_defs;
+    std::vector<EntityDef> m_allDefs;
 };

@@ -148,7 +148,7 @@ test_parser: tests/LightningScriptParser.test.cpp Source/Script/LightningScriptP
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
 test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+	$(SERVER_CXX) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@
 
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)

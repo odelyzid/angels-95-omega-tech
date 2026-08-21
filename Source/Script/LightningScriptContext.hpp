@@ -52,6 +52,14 @@ public:
     void RegisterJumpLabel(const std::string& label, int line);
     int  FindJumpLabel(const std::string& label) const;
 
+    // Next jump label at a line strictly greater than afterLine
+    int FindNextJumpLabel(int afterLine) const;
+
+    // Run an action block: reset, jump past its label, execute up to maxSteps
+    // instructions and stop at the next action label (action bodies are linear
+    // labels — without the stop, a run would fall through into the next action)
+    int RunAction(const std::string& actionName, int maxSteps);
+
     struct PawnSpawnRequest {
         std::string name;
         float x = 0, y = 0, z = 0;

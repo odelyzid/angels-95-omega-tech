@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 // Surface behavior flags for OZONE brush primitives
 #define SURF_FAKEBACKDROP (1 << 3)  // brush renders as sky backdrop
@@ -54,6 +55,7 @@ struct OzoneCollisionVolume {
     float texScaleV = 1.0f;  // texture tiling/repeat V
     float texOffsetU = 0.0f; // texture shift U
     float texOffsetV = 0.0f; // texture shift V
+    bool isHeightmap = false; // true = terrain volume (support via ground clamp, never an obstacle)
 };
 
 class OzoneLoader {
@@ -100,6 +102,16 @@ public:
     Vector3 GetHeightmapPosition() const { return m_hmPosition; }
     float GetHeightmapScale() const { return m_hmScale; }
 
+    // Heightmap grid access for terrain editing
+    int GetHeightmapGridW() const { return m_hmGridW; }
+    int GetHeightmapGridH() const { return m_hmGridH; }
+    float GetHeightmapCellSize() const {
+        return (m_hmGridW > 1) ? (m_hmSize.x / (float)(m_hmGridW - 1)) : 0.0f;
+    }
+    float GetHeightAtGrid(int col, int row) const;
+    void SetHeightAtGrid(int col, int row, float height, bool triggerRebuild = true);
+    void RebuildHeightmapMesh();
+
     // Draw only the renderables with SURF_FAKEBACKDROP flag set
     // (used for skybox rendering from SkyZone camera)
     void DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds);
@@ -143,8 +155,14 @@ private:
     Vector3 m_hmPosition{0,0,0};
     Vector3 m_hmSize{100,50,100};
     float m_hmScale = 1.0f;
+    int m_hmGridW = 0;           // grid columns (image width)
+    int m_hmGridH = 0;           // grid rows (image height)
+    std::vector<float> m_hmHeights; // CPU-side height values [row * w + col]
 
     std::vector<Texture2D> m_tilesetTex;
+
+    std::string m_worldDir;        // current world directory (for .ozls def matching)
+    std::unordered_map<std::string, int> m_zoneCounters; // per-load zone name counters
 
     void UnloadTextures();
     void UnloadHeightmap();
@@ -157,4 +175,7 @@ private:
     Model BuildSphere(float r, int segments);
     Model BuildPyramid(float w, float d, float h);
     Model BuildPlane(float nx, float ny, float nz, float dist);
+    Model BuildHeightmapMesh(const std::vector<float>& heights, int gw, int gh,
+                             float cellX, float cellZ, float heightScale,
+                             float uvTileSize = 8.0f);
 };

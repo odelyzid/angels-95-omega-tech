@@ -37,6 +37,7 @@ public:
 
     // --- Lifecycle ---
     int Spawn(const std::string& defName);
+    int Spawn(const EntityDef* def);
     void Despawn(int index);
     EntityInstance* Get(int index);
     int Count() const { return (int)m_instances.size(); }
@@ -76,6 +77,7 @@ public:
 
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
+    void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
 
     // --- Execute a named action label on an instance ---
     void RunAction(EntityInstance* inst, const std::string& actionName);

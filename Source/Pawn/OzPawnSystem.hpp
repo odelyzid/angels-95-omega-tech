@@ -215,6 +215,7 @@ struct SkyZoneNode {
     std::string skyboxPath;        // current skybox texture path
     Texture2D skyboxTex{0};        // loaded skybox texture (unloaded on clear)
     std::string name;              // matching .ozls entity name for script hookup
+    const struct EntityDef* def = nullptr; // resolved .ozls def (world-scoped)
     bool active = false;
     float intensity = 1.0f;
 };

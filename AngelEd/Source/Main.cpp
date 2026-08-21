@@ -495,7 +495,7 @@ static void EditorLog(const char* fmt, ...) {
     }
 }
 
-enum class PlaceMode { MODEL, PICKUP, NODE, ENV };
+enum class PlaceMode { MODEL, PICKUP, NODE, ENV, TERRAIN };
 static PlaceMode g_placeMode = PlaceMode::MODEL;
 
 // INI config
@@ -1199,6 +1199,66 @@ int main(int argc, char **argv){
                 EditorPickEntity();
         }
 
+        // TERRAIN brush: raise/lower heightmap cells (TERRAIN mode, left mouse)
+        if (g_placeMode == PlaceMode::TERRAIN && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+            auto& oz = OzoneLoader::Instance();
+            if (oz.HasHeightmap()) {
+                Vector2 mp = GetMousePosition();
+                if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
+                    Ray ray = GetMouseRay(mp, OTEditor.MainCamera);
+                    Vector3 hmPos = oz.GetHeightmapPosition();
+                    float scale = oz.GetHeightmapScale();
+                    float sx = oz.GetHeightmapCellSize() * (oz.GetHeightmapGridW() - 1) * scale;
+                    float sz = oz.GetHeightmapCellSize() * (oz.GetHeightmapGridH() - 1) * scale;
+                    float halfW = sx * 0.5f;
+                    float halfD = sz * 0.5f;
+
+                    // Intersect ray with the heightmap's base plane (Y = hmPos.y)
+                    float t = (hmPos.y - ray.position.y) / ray.direction.y;
+                    if (t > 0.0f) {
+                        float wx = ray.position.x + ray.direction.x * t;
+                        float wz = ray.position.z + ray.direction.z * t;
+                        float mx = (wx - hmPos.x) / scale;
+                        float mz = (wz - hmPos.z) / scale;
+                        int col = (int)((mx + halfW) / (sx / (float)(oz.GetHeightmapGridW() - 1)));
+                        int row = (int)((mz + halfD) / (sz / (float)(oz.GetHeightmapGridH() - 1)));
+
+                        // Throttle: skip if same cell as last frame
+                        static int lastCol = -1, lastRow = -1;
+                        if (col == lastCol && row == lastRow) {
+                            // Still allow painting if mouse button held (applied once on press)
+                        } else {
+                            lastCol = col; lastRow = row;
+                        }
+
+                        int gw = oz.GetHeightmapGridW();
+                        int gh = oz.GetHeightmapGridH();
+                        int radius = g_editorPanels.terrainBrushSize;
+                        float strength = g_editorPanels.terrainBrushStrength;
+                        bool raising = (g_editorPanels.terrainBrushMode == 0);
+
+                        // Batch all cell edits then rebuild once
+                        for (int rz = -radius; rz <= radius; rz++) {
+                            for (int rx = -radius; rx <= radius; rx++) {
+                                int c = col + rx;
+                                int r = row + rz;
+                                if (c < 0 || c >= gw || r < 0 || r >= gh)
+                                    continue;
+                                float dist = sqrtf((float)(rx*rx + rz*rz));
+                                if (dist > (float)radius) continue;
+                                float falloff = 1.0f - dist / (float)(radius + 1);
+                                float curH = oz.GetHeightAtGrid(c, r);
+                                float delta = strength * falloff;
+                                oz.SetHeightAtGrid(c, r,
+                                    raising ? curH + delta : curH - delta, false);
+                            }
+                        }
+                        oz.RebuildHeightmapMesh();
+                    }
+                }
+            }
+        }
+
         // Right-click: drag resizes placement ghost; click picks entity + native context menu
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             g_rbDown = true;
@@ -1870,6 +1930,51 @@ int main(int argc, char **argv){
             bx+=6;
             tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);
             tBtn("PolyTexInfo","Pickup",6);
+            bx += 6;
+            // Terrain editing buttons
+            bool terrainMode = (g_placeMode == PlaceMode::TERRAIN);
+            Color terrainColor = terrainMode ? (Color){90,70,50,255} : (Color){45,45,50,255};
+            int tbW = 52;
+            DrawRectangle(bx, 2, tbW, tbH-4, terrainColor);
+            DrawText("Raise", bx+4, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
+            if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)tbW, (float)tbH-4}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                g_placeMode = PlaceMode::TERRAIN;
+                g_editorPanels.terrainBrushMode = 0; // raise
+            }
+            bx += tbW + 2;
+            DrawRectangle(bx, 2, tbW, tbH-4, terrainColor);
+            DrawText("Lower", bx+4, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
+            if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)tbW, (float)tbH-4}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                g_placeMode = PlaceMode::TERRAIN;
+                g_editorPanels.terrainBrushMode = 1; // lower
+            }
+            bx += tbW + 2;
+            // Brush size adjustment buttons
+            char sizeTxt[32];
+            snprintf(sizeTxt, sizeof(sizeTxt), "Sz:%d", g_editorPanels.terrainBrushSize);
+            DrawText(sizeTxt, bx+4, 7, 12, LIGHTGRAY);
+            int szW = (int)strlen(sizeTxt) * 7 + 10;
+            Rectangle szR = {(float)bx, 2, (float)szW, (float)tbH-4};
+            if (CheckCollisionPointRec(GetMousePosition(), szR)) {
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                    g_editorPanels.terrainBrushSize = (g_editorPanels.terrainBrushSize % 10) + 1;
+            }
+            bx += szW + 2;
+            // Brush strength
+            char strTxt[32];
+            snprintf(strTxt, sizeof(strTxt), "Str:%.1f", g_editorPanels.terrainBrushStrength);
+            DrawText(strTxt, bx+4, 7, 12, LIGHTGRAY);
+            int stW = (int)strlen(strTxt) * 7 + 10;
+            Rectangle stR = {(float)bx, 2, (float)stW, (float)tbH-4};
+            if (CheckCollisionPointRec(GetMousePosition(), stR)) {
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    static float strengths[] = {0.01f, 0.03f, 0.05f, 0.1f, 0.2f};
+                    static int si = 2;
+                    si = (si + 1) % 5;
+                    g_editorPanels.terrainBrushStrength = strengths[si];
+                }
+            }
+            bx += stW + 2;
         }
 
         // Draw the 3D viewport render target (offset by native stats sidebar)
@@ -2308,6 +2413,8 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_TWO))   g_placeMode = PlaceMode::PICKUP;
         if (IsKeyPressed(KEY_THREE)) g_placeMode = PlaceMode::NODE;
         if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; ShowEnvPanel(!g_editorPanels.showEnvPanel); }
+        if (IsKeyPressed(KEY_FIVE) && g_placeMode != PlaceMode::MODEL)
+            g_placeMode = PlaceMode::TERRAIN;
 
         // Primitive type cycling (1-5 for box/cyl/sph/pyr/pln, only in MODEL mode)
         if (g_placeMode == PlaceMode::MODEL) {

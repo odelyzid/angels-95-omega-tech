@@ -29,7 +29,7 @@ static void EnsureLogFile() {
 
 void Log::write(LogLevel level, const char* file, int line, const char* fmt, ...) {
     char buf[LOG_WINDOW_MAX_LINE_LENGTH];
-    char prefix[32];
+    char prefix[160];
     const char* level_str;
     switch (level) {
         case LogLevel::TRACE: level_str = "TRACE"; break;

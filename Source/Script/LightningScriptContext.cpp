@@ -70,6 +70,40 @@ int LightningScriptContext::FindJumpLabel(const std::string& label) const {
 }
 
 // ---------------------------------------------------------------------------
+// FindNextJumpLabel — nearest action label strictly after a line index
+// ---------------------------------------------------------------------------
+int LightningScriptContext::FindNextJumpLabel(int afterLine) const {
+    int best = -1;
+    for (auto& [label, line] : m_jumpLabels) {
+        (void)label;
+        if (line > afterLine && (best < 0 || line < best)) best = line;
+    }
+    return best;
+}
+
+// ---------------------------------------------------------------------------
+// RunAction — execute one action block without overrunning into the next one
+// ---------------------------------------------------------------------------
+int LightningScriptContext::RunAction(const std::string& actionName, int maxSteps) {
+    int labelLine = FindJumpLabel(actionName);
+    if (labelLine < 0) return 0;
+    Reset();
+    // Jump directly past the action label — never execute other actions' bodies
+    m_pc = labelLine + 1;
+    int nextLabel = FindNextJumpLabel(labelLine);
+    int steps = 0;
+    while (steps < maxSteps && HasMore()) {
+        if (nextLabel >= 0 && m_pc >= nextLabel) break;
+        if (!ExecuteNext()) break;
+        steps++;
+    }
+    // Exhaust the script so the per-frame tick in LightningEntityManager::Update
+    // cannot keep executing the leftover bodies of other actions.
+    m_pc = (int)m_lines.size();
+    return steps;
+}
+
+// ---------------------------------------------------------------------------
 // ExecuteNext — run one instruction at m_pc, advance if not a jump
 // ---------------------------------------------------------------------------
 bool LightningScriptContext::ExecuteNext() {

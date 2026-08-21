@@ -443,6 +443,11 @@ auto LoadWorld()
             PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
         }
 
+        // Spawn at the world's playerstart unless resuming from a saved
+        // position ("Continue" from the title menu sets SetCameraFlag).
+        if (!SetCameraFlag)
+            PawnSystem::Instance().RespawnPlayerAtStart(OmegaTechData.MainCamera);
+
         SaveGame();
     }
 }
@@ -1599,27 +1604,15 @@ void DrawWorld()
     BeginMode3D(OmegaTechData.MainCamera);
 
     // -----------------------------------------------------------------------
-    // SKY PASS â€” render SURF_FAKEBACKDROP brushes from a virtual camera
-    // positioned at the active SkyZoneNode's origin, tracking player look dir.
+    // SKY PASS — render SURF_FAKEBACKDROP brushes from the main camera with
+    // depth disabled so the skybox shows through behind them. Uses the main
+    // camera so perimeter backdrop walls have correct perspective/parallax.
     // -----------------------------------------------------------------------
-    if (inSkyZone)
+if (inSkyZone)
     {
-        SkyZoneNode* skyZone = PawnSystem::Instance().GetActiveSkyZone();
-        if (skyZone)
-        {
-            // Build sky camera at SkyZoneNode position, following player rotation
-            Camera3D skyCam = OmegaTechData.MainCamera;
-            skyCam.position = skyZone->position;
-            // Keep the player's look direction for parallax
-            Vector3 dir = Vector3Subtract(OmegaTechData.MainCamera.target, OmegaTechData.MainCamera.position);
-            dir = Vector3Normalize(dir);
-            skyCam.target = Vector3Add(skyCam.position, dir);
-            skyCam.fovy = skyZone->fov;
-
-            rlDisableDepthMask();
-            OzoneLoader::Instance().DrawZoneGeometry(skyCam);
-            rlEnableDepthMask();
-        }
+        rlDisableDepthMask();
+        OzoneLoader::Instance().DrawZoneGeometry(OmegaTechData.MainCamera);
+        rlEnableDepthMask();
     }
 
     // GameplaySoundZone â€” trigger zone-specific music/sound profiles
@@ -1729,9 +1722,14 @@ void DrawWorld()
             if (idx >= 0 && idx < (int)vols.size() &&
                 CheckCollisionBoxes(g_playerMovement.PlayerBounds, vols[idx].aabb))
             {
-                // Skip volumes whose top is at or below the player's feet â€”
+                // Skip volumes whose top is at or below the player's feet —
                 // these are floors/surfaces the player stands on, not obstacles.
                 if (vols[idx].aabb.max.y <= playerFeet + 0.1f)
+                    continue;
+                // The heightmap is the ground: support comes from the ground
+                // clamp below. Its tall AABB would otherwise freeze the player
+                // mid-air above the terrain (restore cancels gravity).
+                if (vols[idx].isHeightmap)
                     continue;
                 ObjectCollision = true;
                 break;
@@ -1750,7 +1748,10 @@ void DrawWorld()
         float hmY = ozLoader.HasHeightmap()
                         ? ozLoader.SampleHeightmapY(cp.x, cp.z)
                         : -99999.0f;
-        if (hmY > -50000.0f)
+        // Only treat the heightmap as ground when its surface is at or below
+        // the player's feet — underground areas (tunnels) must fall through to
+        // brush-top support instead of being teleported to the surface.
+        if (hmY > -50000.0f && hmY <= cp.y + 0.1f)
         {
 
             if (cp.y <= hmY + PLAYER_EYE_HEIGHT + 0.1f)
@@ -2042,11 +2043,6 @@ void DrawWorld()
         OmegaTechData.LevelIndex = SetSceneId;
         LoadWorld();
         SetSceneFlag = false;
-
-        // Place player near the new world's collision surface
-        float sy = 8.0f;
-        OmegaTechData.MainCamera.position.y = sy;
-        OmegaTechData.MainCamera.target.y = sy;
     }
 
     if (SetCameraFlag)

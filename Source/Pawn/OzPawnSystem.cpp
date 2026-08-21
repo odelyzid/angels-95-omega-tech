@@ -235,9 +235,10 @@ PlayerStartNode* PawnSystem::GetFirstPlayerStart() {
 void PawnSystem::RespawnPlayerAtStart(Camera3D& camera) {
     PlayerStartNode* ps = GetFirstPlayerStart();
     if (ps) {
-        camera.position = ps->position;
-        camera.position.y += 2.0f;
-        camera.target = {ps->position.x, ps->position.y + 2.0f, ps->position.z - 5.0f};
+        camera.position = {ps->position.x, ps->position.y + 2.0f, ps->position.z};
+        float yawRad = ps->yaw * DEG2RAD;
+        camera.target = {camera.position.x + sinf(yawRad), camera.position.y,
+                         camera.position.z - cosf(yawRad)};
     } else {
         camera.position = {0.0f, 5.0f, 0.0f};
         camera.target = {0.0f, 5.0f, -5.0f};
@@ -536,12 +537,23 @@ void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
 
     if (inSky && !wasInSky) {
         auto& n = m_skyZones[m_activeSkyZoneIndex];
-        LightningEntityManager::Instance().TriggerZoneAction(
-            n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_enter");
+        OZ_INFO("SkyZone enter: name=%s def=%s pos=(%.1f,%.1f,%.1f)", n.name.c_str(),
+                n.def ? n.def->name.c_str() : "null",
+                playerPos.x, playerPos.y, playerPos.z);
+        if (n.def)
+            LightningEntityManager::Instance().TriggerZoneAction(n.def, "on_enter");
+        else
+            LightningEntityManager::Instance().TriggerZoneAction(
+                n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_enter");
     } else if (!inSky && wasInSky) {
         auto& n = m_skyZones[prevActive];
-        LightningEntityManager::Instance().TriggerZoneAction(
-            n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_exit");
+        OZ_INFO("SkyZone exit: name=%s pos=(%.1f,%.1f,%.1f)", n.name.c_str(),
+                playerPos.x, playerPos.y, playerPos.z);
+        if (n.def)
+            LightningEntityManager::Instance().TriggerZoneAction(n.def, "on_exit");
+        else
+            LightningEntityManager::Instance().TriggerZoneAction(
+                n.name.empty() ? "zone_sky_0" : n.name.c_str(), "on_exit");
     }
 }
 

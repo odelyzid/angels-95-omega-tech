@@ -37,14 +37,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         ent->cooldownRemaining = swingSpeed;
 
         // Run on_swing action
-        int swingLabel = ent->ctx.FindJumpLabel("on_swing");
-        if (swingLabel >= 0) {
-            ent->ctx.Reset();
-            while (ent->ctx.ProgramCounter() < swingLabel && ent->ctx.HasMore())
-                ent->ctx.ExecuteNext();
-            for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
-                ent->ctx.ExecuteNext();
-        }
+        ent->ctx.RunAction("on_swing", 30);
 
 #ifndef OMEGA_TEST_ENV
         // Forward range check against PawnSystem NPCs (single-player)
@@ -57,14 +50,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             Vector3 closest = Vector3Add(origin, Vector3Scale(direction, t));
             float d = Vector3Distance(closest, pawn.position);
             if (d < 2.0f) {
-                int hitLabel = ent->ctx.FindJumpLabel("on_hit");
-                if (hitLabel >= 0) {
-                    ent->ctx.Reset();
-                    while (ent->ctx.ProgramCounter() < hitLabel && ent->ctx.HasMore())
-                        ent->ctx.ExecuteNext();
-                    for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
-                        ent->ctx.ExecuteNext();
-                }
+                ent->ctx.RunAction("on_hit", 30);
                 break;
             }
         }
@@ -93,14 +79,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             float reloadTime = readStat("reload_time", 2.0f);
             ent->cooldownRemaining = reloadTime;
             ent->runtimeStats["ammo"] = magazine;
-            int reloadLabel = ent->ctx.FindJumpLabel("on_reload");
-            if (reloadLabel >= 0) {
-                ent->ctx.Reset();
-                while (ent->ctx.ProgramCounter() < reloadLabel && ent->ctx.HasMore())
-                    ent->ctx.ExecuteNext();
-                for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
-                    ent->ctx.ExecuteNext();
-            }
+            ent->ctx.RunAction("on_reload", 30);
             return -1;
         }
         ammoIt->second -= 1.0f;
@@ -109,14 +88,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     ent->cooldownRemaining = fireRate;
 
     // Trigger on_fire script action if defined
-    int labelLine = ent->ctx.FindJumpLabel("on_fire");
-    if (labelLine >= 0) {
-        ent->ctx.Reset();
-        while (ent->ctx.ProgramCounter() < labelLine && ent->ctx.HasMore())
-            ent->ctx.ExecuteNext();
-        for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
-            ent->ctx.ExecuteNext();
-    }
+    ent->ctx.RunAction("on_fire", 30);
 
 #ifndef OMEGA_TEST_ENV
     for (int i = 0; i < projectileCount; i++) {
@@ -182,14 +154,7 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     ent->cooldownRemaining = reloadTime;
     ent->runtimeStats["ammo"] = magazine;
 
-    int reloadLabel = ent->ctx.FindJumpLabel("on_reload");
-    if (reloadLabel >= 0) {
-        ent->ctx.Reset();
-        while (ent->ctx.ProgramCounter() < reloadLabel && ent->ctx.HasMore())
-            ent->ctx.ExecuteNext();
-        for (int step = 0; step < 30 && ent->ctx.HasMore(); step++)
-            ent->ctx.ExecuteNext();
-    }
+    ent->ctx.RunAction("on_reload", 30);
     return true;
 }
 
@@ -306,6 +271,13 @@ int LightningEntityManager::Spawn(const std::string& defName) {
         OZ_WARN("LightningEntityManager: unknown entity '%s'", defName.c_str());
         return -1;
     }
+    return Spawn(def);
+}
+
+// Spawn — def-based variant (used when the caller already resolved the def,
+// e.g. world-scoped zone defs that must not be re-looked-up by name)
+int LightningEntityManager::Spawn(const EntityDef* def) {
+    if (!def) return -1;
 
     if ((int)m_instances.size() >= MAX_ENTITIES) {
         OZ_WARN("LightningEntityManager: max entities (%d) reached", MAX_ENTITIES);
@@ -343,7 +315,7 @@ int LightningEntityManager::Spawn(const std::string& defName) {
     m_instances.push_back(std::move(inst));
 
     int idx = (int)m_instances.size() - 1;
-    OZ_INFO("LightningEntityManager: spawned '%s' at index %d", defName.c_str(), idx);
+    OZ_INFO("LightningEntityManager: spawned '%s' at index %d", def->name.c_str(), idx);
     return idx;
 }
 
@@ -393,13 +365,7 @@ EntityInstance* LightningEntityManager::Get(int index) {
 // ---------------------------------------------------------------------------
 void LightningEntityManager::RunAction(EntityInstance* inst, const std::string& actionName) {
     if (!inst || !inst->def) return;
-    int labelLine = inst->ctx.FindJumpLabel(actionName);
-    if (labelLine < 0) return;
-    inst->ctx.Reset();
-    while (inst->ctx.ProgramCounter() < labelLine && inst->ctx.HasMore())
-        inst->ctx.ExecuteNext();
-    for (int step = 0; step < 30 && inst->ctx.HasMore(); step++)
-        inst->ctx.ExecuteNext();
+    inst->ctx.RunAction(actionName, 30);
 }
 
 // ---------------------------------------------------------------------------
@@ -562,15 +528,7 @@ void LightningEntityManager::HandleInput() {
         EntityInstance* sel = SelectedEntity();
         if (sel && sel->def) {
             // Trigger on_use action
-            sel->ctx.Reset();
-            // Find and jump to on_use label
-            int labelLine = sel->ctx.FindJumpLabel("on_use");
-            if (labelLine >= 0) {
-                // Reset and run until on_use, then execute
-                sel->ctx.Reset();
-                while (sel->ctx.ProgramCounter() < labelLine && sel->ctx.HasMore())
-                    sel->ctx.ExecuteNext();
-            }
+            sel->ctx.RunAction("on_use", 30);
         }
     }
 }
@@ -626,6 +584,14 @@ void LightningEntityManager::TriggerZoneAction(const std::string& zoneName,
                                                 const std::string& actionName) {
     const EntityDef* def = LightningEntityRegistry::Instance().Find(zoneName);
     if (!def) return;
+    TriggerZoneAction(def, actionName);
+}
+
+// TriggerZoneAction — def-based variant (world-scoped defs resolved at zone
+// creation avoid the global registry's cross-world name collisions)
+void LightningEntityManager::TriggerZoneAction(const EntityDef* def,
+                                               const std::string& actionName) {
+    if (!def) return;
     // Only allow zone-type entities to trigger via TrigherZoneAction
     if (def->type != EntityType::SKYZONE) return;
 
@@ -636,23 +602,15 @@ void LightningEntityManager::TriggerZoneAction(const std::string& zoneName,
     }
     if (instIdx < 0) {
         // Spawn a temporary instance for zone execution
-        instIdx = Spawn(zoneName);
+        instIdx = Spawn(def);
     }
     if (instIdx < 0) return;
 
     EntityInstance* inst = Get(instIdx);
     if (!inst) return;
 
-    // Jump to the action label and execute
-    inst->ctx.Reset();
-    int labelLine = inst->ctx.FindJumpLabel(actionName);
-    if (labelLine >= 0) {
-        while (inst->ctx.ProgramCounter() < labelLine && inst->ctx.HasMore())
-            inst->ctx.ExecuteNext();
-        // Run up to 50 instructions for the action
-        for (int step = 0; step < 50 && inst->ctx.HasMore(); step++)
-            inst->ctx.ExecuteNext();
-    }
+    // Jump to the action label and execute (stops at the next action label)
+    inst->ctx.RunAction(actionName, 50);
 }
 
 // ---------------------------------------------------------------------------

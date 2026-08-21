@@ -14,6 +14,13 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
+// Strip surrounding quote characters (U+0022) from a string if present
+static std::string StripQuotes(std::string s) {
+    if (s.size() >= 2 && s.front() == '\"' && s.back() == '\"')
+        return s.substr(1, s.size() - 2);
+    return s;
+}
+
 static ZoneType ParseZoneType(std::string name) {
     std::transform(name.begin(), name.end(), name.begin(),
                    [](unsigned char c) { return (char)std::tolower(c); });
@@ -24,7 +31,9 @@ static ZoneType ParseZoneType(std::string name) {
     return ZoneType::ZONE_WATER;
 }
 
-static bool LoadOzoneEntity(const OzonePrimitive& prim) {
+static bool LoadOzoneEntity(const OzonePrimitive& prim,
+                            std::unordered_map<std::string, int>& zoneCounters,
+                            const std::string& worldDir) {
     auto& pawns = PawnSystem::Instance();
     switch (prim.type) {
         case OzonePrimitiveType::ENTITY_PLAYERSTART:
@@ -58,10 +67,8 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
                 node.zoneType = ParseZoneType(prim.entitySubType);
                 if (prim.args.size() >= 7) node.intensity = prim.args[6];
                 // Generate unique zone name for .ozls script hook matching
-                static std::unordered_map<std::string, int> zoneCounters;
-                std::string typeKey = prim.entitySubType;
-                auto& counter = zoneCounters[typeKey];
-                node.name = "zone_" + typeKey + "_" + std::to_string(counter++);
+                auto& counter = zoneCounters[prim.entitySubType];
+                node.name = "zone_" + prim.entitySubType + "_" + std::to_string(counter++);
                 // Extended env override args (optional, after intensity):
                 // fogR fogG fogB fogDensity fogStart fogEnd ambR ambG ambB ambIntensity reverbMix reverbDecay
                 if (prim.args.size() >= 16) {
@@ -95,10 +102,34 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim) {
                     };
                     skyNode.name = node.name;
                     skyNode.intensity = node.intensity;
-                    // Look up .ozls SKYZONE entity by name for initial config
+                    // Look up .ozls SKYZONE entity by name for initial config.
+                    // The global registry holds defs from ALL worlds, and zone
+                    // names are generated per world (e.g. "zone_sky_0") — so a
+                    // name hit may belong to another world. Disambiguate by
+                    // matching the def's skybox path against this world dir.
                     const EntityDef* edef = LightningEntityRegistry::Instance().Find(node.name);
                     if (edef && edef->type == EntityType::SKYZONE) {
+                        if (!worldDir.empty() && edef->skybox.find(worldDir) == std::string::npos)
+                            edef = nullptr; // name collided with another world's def
+                    } else {
+                        edef = nullptr;
+                    }
+                    if (!edef) {
+                        std::vector<const EntityDef*> skyDefs;
+                        LightningEntityRegistry::Instance().FindByType(EntityType::SKYZONE, skyDefs);
+                        for (auto* d : skyDefs) {
+                            if (!worldDir.empty() &&
+                                d->skybox.find(worldDir) != std::string::npos) {
+                                edef = d;
+                                break;
+                            }
+                        }
+                    }
+                    if (edef && edef->type == EntityType::SKYZONE) {
+                        skyNode.def = edef;
                         skyNode.skyboxPath = edef->skybox;
+                        OZ_INFO("OZONE sky zone '%s': resolved def '%s' skybox='%s'",
+                                node.name.c_str(), edef->name.c_str(), edef->skybox.c_str());
                         // Look up fov from stats if available
                         auto fit = edef->stats.floats.find("fov");
                         if (fit != edef->stats.floats.end())
@@ -278,10 +309,12 @@ Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
     // Walls (h >= 1.0) get 16x UV tiling so the 32x32 tileset texture
     // doesn't look stretched across large faces
-    if (h >= 1.0f && mesh.texcoords) {
+    // Floors (h < 1.0) get 8x tiling so ground tiles repeat sensibly
+    float tiling = (h >= 1.0f) ? 16.0f : 8.0f;
+    if (mesh.texcoords) {
         for (int i = 0; i < mesh.vertexCount; i++) {
-            mesh.texcoords[i*2 + 0] *= 16.0f;
-            mesh.texcoords[i*2 + 1] *= 16.0f;
+            mesh.texcoords[i*2 + 0] *= tiling;
+            mesh.texcoords[i*2 + 1] *= tiling;
         }
         UpdateMeshBuffer(mesh, 1, mesh.texcoords,
                          mesh.vertexCount * 2 * (int)sizeof(float), 0);
@@ -376,6 +409,144 @@ Model OzoneLoader::BuildPlane(float nx, float ny, float nz, float dist) {
 }
 
 // ---------------------------------------------------------------------------
+// BuildHeightmapMesh — build a tessellated grid mesh from a height array
+// Vertices are placed with cellX/cellZ spacing, height = h * heightScale.
+// Mesh is centered at origin. Normals computed from adjacent triangle faces.
+// ---------------------------------------------------------------------------
+Model OzoneLoader::BuildHeightmapMesh(const std::vector<float>& heights,
+                                      int gw, int gh,
+                                      float cellX, float cellZ,
+                                      float heightScale, float uvTileSize) {
+    if (gw < 2 || gh < 2 || heights.size() < (size_t)(gw * gh))
+        return Model{0};
+    if (uvTileSize <= 0.0f) uvTileSize = 8.0f;
+
+    int quadsW = gw - 1;
+    int quadsH = gh - 1;
+    int triCount = quadsW * quadsH * 2;
+    int vertCount = triCount * 3;
+
+    Mesh mesh = {0};
+    mesh.triangleCount = triCount;
+    mesh.vertexCount = vertCount;
+
+    mesh.vertices  = (float*)RL_MALLOC(vertCount * 3 * sizeof(float));
+    mesh.normals   = (float*)RL_MALLOC(vertCount * 3 * sizeof(float));
+    mesh.texcoords = (float*)RL_MALLOC(vertCount * 2 * sizeof(float));
+
+    float halfW = cellX * quadsW * 0.5f;
+    float halfD = cellZ * quadsH * 0.5f;
+
+    auto vertexPos = [&](int col, int row) -> Vector3 {
+        return {
+            col * cellX - halfW,
+            heights[row * gw + col] * heightScale,
+            row * cellZ - halfD
+        };
+    };
+
+    // Compute normal for a triangle given three vertices
+    auto triNormal = [](Vector3 a, Vector3 b, Vector3 c) -> Vector3 {
+        Vector3 ab = {b.x - a.x, b.y - a.y, b.z - a.z};
+        Vector3 ac = {c.x - a.x, c.y - a.y, c.z - a.z};
+        Vector3 n = Vector3CrossProduct(ab, ac);
+        return Vector3Normalize(n);
+    };
+
+    int vi = 0;
+    for (int iz = 0; iz < quadsH; iz++) {
+        for (int ix = 0; ix < quadsW; ix++) {
+            Vector3 v00 = vertexPos(ix,     iz);
+            Vector3 v10 = vertexPos(ix + 1, iz);
+            Vector3 v11 = vertexPos(ix + 1, iz + 1);
+            Vector3 v01 = vertexPos(ix,     iz + 1);
+
+            // Tri 1: v00, v11, v10 — CCW seen from above so the face
+            // normal points up (lit shader needs upward normals)
+            Vector3 n1 = triNormal(v00, v11, v10);
+            // Tri 2: v00, v01, v11
+            Vector3 n2 = triNormal(v00, v01, v11);
+
+            // World-space tiled UVs (uvTileSize world units per repeat)
+            float u0 = ((float) ix * cellX)      / uvTileSize;
+            float u1 = ((float)(ix + 1) * cellX) / uvTileSize;
+            float v0 = ((float) iz * cellZ)      / uvTileSize;
+            float v1 = ((float)(iz + 1) * cellZ) / uvTileSize;
+
+            // Triangle 1: v00, v11, v10
+            mesh.vertices[vi * 3 + 0] = v00.x;
+            mesh.vertices[vi * 3 + 1] = v00.y;
+            mesh.vertices[vi * 3 + 2] = v00.z;
+            mesh.normals[vi * 3 + 0] = n1.x;
+            mesh.normals[vi * 3 + 1] = n1.y;
+            mesh.normals[vi * 3 + 2] = n1.z;
+            mesh.texcoords[vi * 2 + 0] = u0;
+            mesh.texcoords[vi * 2 + 1] = v0;
+            vi++;
+
+            mesh.vertices[vi * 3 + 0] = v11.x;
+            mesh.vertices[vi * 3 + 1] = v11.y;
+            mesh.vertices[vi * 3 + 2] = v11.z;
+            mesh.normals[vi * 3 + 0] = n1.x;
+            mesh.normals[vi * 3 + 1] = n1.y;
+            mesh.normals[vi * 3 + 2] = n1.z;
+            mesh.texcoords[vi * 2 + 0] = u1;
+            mesh.texcoords[vi * 2 + 1] = v1;
+            vi++;
+
+            mesh.vertices[vi * 3 + 0] = v10.x;
+            mesh.vertices[vi * 3 + 1] = v10.y;
+            mesh.vertices[vi * 3 + 2] = v10.z;
+            mesh.normals[vi * 3 + 0] = n1.x;
+            mesh.normals[vi * 3 + 1] = n1.y;
+            mesh.normals[vi * 3 + 2] = n1.z;
+            mesh.texcoords[vi * 2 + 0] = u1;
+            mesh.texcoords[vi * 2 + 1] = v0;
+            vi++;
+
+            // Triangle 2: v00, v01, v11
+            mesh.vertices[vi * 3 + 0] = v00.x;
+            mesh.vertices[vi * 3 + 1] = v00.y;
+            mesh.vertices[vi * 3 + 2] = v00.z;
+            mesh.normals[vi * 3 + 0] = n2.x;
+            mesh.normals[vi * 3 + 1] = n2.y;
+            mesh.normals[vi * 3 + 2] = n2.z;
+            mesh.texcoords[vi * 2 + 0] = u0;
+            mesh.texcoords[vi * 2 + 1] = v0;
+            vi++;
+
+            mesh.vertices[vi * 3 + 0] = v01.x;
+            mesh.vertices[vi * 3 + 1] = v01.y;
+            mesh.vertices[vi * 3 + 2] = v01.z;
+            mesh.normals[vi * 3 + 0] = n2.x;
+            mesh.normals[vi * 3 + 1] = n2.y;
+            mesh.normals[vi * 3 + 2] = n2.z;
+            mesh.texcoords[vi * 2 + 0] = u0;
+            mesh.texcoords[vi * 2 + 1] = v1;
+            vi++;
+
+            mesh.vertices[vi * 3 + 0] = v11.x;
+            mesh.vertices[vi * 3 + 1] = v11.y;
+            mesh.vertices[vi * 3 + 2] = v11.z;
+            mesh.normals[vi * 3 + 0] = n2.x;
+            mesh.normals[vi * 3 + 1] = n2.y;
+            mesh.normals[vi * 3 + 2] = n2.z;
+            mesh.texcoords[vi * 2 + 0] = u1;
+            mesh.texcoords[vi * 2 + 1] = v1;
+            vi++;
+        }
+    }
+
+    // raylib 5.5's LoadModelFromMesh does NOT upload the mesh to the GPU
+    // (unlike GenMesh*/LoadOBJ) — upload explicitly or nothing will draw
+    UploadMesh(&mesh, false);
+    Model model = LoadModelFromMesh(mesh);
+    return model;
+}
+
+// ---------------------------------------------------------------------------
+// BuildHeightmap — load grayscale PNG, generate terrain mesh
+// ---------------------------------------------------------------------------
 // BuildHeightmap â€” load grayscale PNG, generate terrain mesh
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
@@ -384,13 +555,25 @@ Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
     // args: x y z scale sizeX sizeY sizeZ
     if (args.size() < 6) return Model{0};
 
-    // Load grayscale heightmap image
+// Load grayscale heightmap image
     m_hmImage = LoadImage(imagePath.c_str());
-    if (m_hmImage.data == 0) return Model{0};
+    if (m_hmImage.data == 0) {
+        OZ_WARN("OZONE heightmap: LoadImage failed for '%s'", imagePath.c_str());
+        return Model{0};
+    }
+    OZ_INFO("OZONE heightmap: image loaded %dx%d from '%s'", m_hmImage.width, m_hmImage.height, imagePath.c_str());
     ImageFormat(&m_hmImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
 
     // Load texture overlay
     m_hmTexture = LoadTexture(texPath.c_str());
+    if (!m_hmTexture.id) {
+        OZ_WARN("OZONE heightmap: texture load failed for '%s'", texPath.c_str());
+    } else {
+        // Tiled UVs need repeat wrapping; mipmaps + trilinear reduce shimmer
+        SetTextureWrap(m_hmTexture, TEXTURE_WRAP_REPEAT);
+        GenTextureMipmaps(&m_hmTexture);
+        SetTextureFilter(m_hmTexture, TEXTURE_FILTER_TRILINEAR);
+    }
 
     // Position (Z-up â†’ Y-up swap: args[1]=OZONE Y becomes raylib Z)
     m_hmPosition = {args[0], args[2], args[1]};
@@ -399,13 +582,28 @@ Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
                 (args.size() > 5) ? args[5] : 50.0f,
                 (args.size() > 6) ? args[6] : 100.0f};
 
-    Mesh mesh = GenMeshHeightmap(m_hmImage, m_hmSize);
-    Model model = LoadModelFromMesh(mesh);
+    // Read heights from grayscale image into m_hmHeights
+    m_hmGridW = m_hmImage.width;
+    m_hmGridH = m_hmImage.height;
+    uint8_t* pixels = (uint8_t*)m_hmImage.data;
+    m_hmHeights.resize(m_hmGridW * m_hmGridH);
+    for (int i = 0; i < m_hmGridW * m_hmGridH; i++)
+        m_hmHeights[i] = pixels[i] / 255.0f;
+
+    float cellX = (m_hmGridW > 1) ? (m_hmSize.x / (float)(m_hmGridW - 1)) : 0;
+    float cellZ = (m_hmGridH > 1) ? (m_hmSize.z / (float)(m_hmGridH - 1)) : 0;
+    Model model = BuildHeightmapMesh(m_hmHeights, m_hmGridW, m_hmGridH,
+                                     cellX, cellZ, m_hmSize.y);
     if (m_hmTexture.id)
         model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = m_hmTexture;
     model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
     if (GetLitFogShader().id > 0)
         model.materials[0].shader = GetLitFogShader();
+
+    // Keep the model for rendering (Draw/DrawWorldGeometry draw m_hmModel)
+    if (m_hmModel.meshCount > 0)
+        UnloadModel(m_hmModel);
+    m_hmModel = model;
 
     m_hmReady = (m_hmImage.data != 0);
     return model;
@@ -483,12 +681,15 @@ bool OzoneLoader::LoadFile(const char* path) {
             LoadWorldTextures(worldDir);
         }
     }
+    // Remember the world directory for .ozls def matching (GameData path when
+    // available so world-local skyzone defs win over same-named ones elsewhere)
+    m_worldDir = gameDataWorldDir.empty() ? worldDir : gameDataWorldDir;
 
     auto primitives = OzoneParser::parse_file(path);
     if (primitives.empty()) return false;
 
     for (auto& prim : primitives) {
-        if (LoadOzoneEntity(prim)) continue;
+        if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
 
         // Heightmap is handled specially — builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
@@ -497,8 +698,8 @@ bool OzoneLoader::LoadFile(const char* path) {
         r.position = {0,0,0};
         r.scale = 1.0f;
         // Resolve relative paths: prefer GameData/Worlds/<name>/, fall back to package directory
-        std::string imgPath = prim.entityType;
-        std::string texPath = prim.entitySubType;
+        std::string imgPath = StripQuotes(prim.entityType);
+        std::string texPath = StripQuotes(prim.entitySubType);
         if (!gameDataWorldDir.empty()) {
             imgPath = gameDataWorldDir + imgPath;
             if (!texPath.empty()) texPath = gameDataWorldDir + texPath;
@@ -535,6 +736,13 @@ bool OzoneLoader::LoadFile(const char* path) {
 
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
+    // Sync texScaleU/V with BuildBox's default tiling so that
+    // ApplyRenderableUV correctly undoes it before applying overrides
+    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 5) {
+        float h = prim.args[4];
+        r.texScaleU = (h >= 1.0f) ? 16.0f : 8.0f;
+        r.texScaleV = (h >= 1.0f) ? 16.0f : 8.0f;
+    }
     // Parse optional texSlot after rotation: box has 7+1=8 args, cyl has 8+1=9
     if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
         r.texSlot = (int)prim.args[7];
@@ -587,7 +795,7 @@ bool OzoneLoader::LoadString(const char* data) {
     if (primitives.empty()) return false;
 
     for (auto& prim : primitives) {
-        if (LoadOzoneEntity(prim)) continue;
+if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
 
         // Heightmap is handled specially
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
@@ -595,7 +803,8 @@ bool OzoneLoader::LoadString(const char* data) {
         r.typeId = (int)prim.type;
         r.position = {0,0,0};
         r.scale = 1.0f;
-        r.model = BuildHeightmap(prim.entityType, prim.entitySubType, prim.args);
+        r.model = BuildHeightmap(StripQuotes(prim.entityType),
+                                 StripQuotes(prim.entitySubType), prim.args);
         r.loaded = m_hmReady;
         r.csgOp = 0;
         m_renderables.push_back(r);
@@ -617,6 +826,12 @@ bool OzoneLoader::LoadString(const char* data) {
     r.scale = 1.0f;
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
+    // Sync texScaleU/V with BuildBox's default tiling
+    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 5) {
+        float h = prim.args[4];
+        r.texScaleU = (h >= 1.0f) ? 16.0f : 8.0f;
+        r.texScaleV = (h >= 1.0f) ? 16.0f : 8.0f;
+    }
     if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
         r.texSlot = (int)prim.args[7];
     else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 9)
@@ -741,9 +956,23 @@ void OzoneLoader::RebuildCollisionVolumes() {
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
-            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT)
             continue;
+
+        // Heightmap: emit an AABB covering the full terrain extent.
+        // Per-cell collision is handled by SampleHeightmapY ground clamp.
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
+            CsgBrush brush;
+            brush.minX = m_hmPosition.x - m_hmSize.x * m_hmScale * 0.5f;
+            brush.minY = m_hmPosition.y;
+            brush.minZ = m_hmPosition.z - m_hmSize.z * m_hmScale * 0.5f;
+            brush.maxX = m_hmPosition.x + m_hmSize.x * m_hmScale * 0.5f;
+            brush.maxY = m_hmPosition.y + m_hmSize.y * m_hmScale;
+            brush.maxZ = m_hmPosition.z + m_hmSize.z * m_hmScale * 0.5f;
+            brush.op   = CsgOp::SOLID;
+            csg.Apply(brush);
+            continue;
+        }
 
         BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
         CsgBrush brush;
@@ -773,6 +1002,18 @@ void OzoneLoader::RebuildCollisionVolumes() {
         cv.aabb.min = {v.minX, v.minY, v.minZ};
         cv.aabb.max = {v.maxX, v.maxY, v.maxZ};
         cv.typeId = 0;
+        if (m_hmReady) {
+            float hmMinX = m_hmPosition.x - m_hmSize.x * m_hmScale * 0.5f;
+            float hmMinZ = m_hmPosition.z - m_hmSize.z * m_hmScale * 0.5f;
+            float hmMaxX = m_hmPosition.x + m_hmSize.x * m_hmScale * 0.5f;
+            float hmMaxY = m_hmPosition.y + m_hmSize.y * m_hmScale;
+            float hmMaxZ = m_hmPosition.z + m_hmSize.z * m_hmScale * 0.5f;
+            const float eps = 0.01f;
+            if (fabsf(v.minX - hmMinX) < eps && fabsf(v.minY - m_hmPosition.y) < eps &&
+                fabsf(v.minZ - hmMinZ) < eps && fabsf(v.maxX - hmMaxX) < eps &&
+                fabsf(v.maxY - hmMaxY) < eps && fabsf(v.maxZ - hmMaxZ) < eps)
+                cv.isHeightmap = true;
+        }
         m_collisionVolumes.push_back(cv);
     }
 
@@ -822,6 +1063,17 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
         case 2: mdl = BuildSphere(size.x, 16); break;
         case 3: mdl = BuildPyramid(size.x, size.z, size.y); break;
         case 4: mdl = BuildPlane(0, 1, 0, 0); break;
+        case 5: {
+            // Flat platform heightmap (no file paths needed for editor preview)
+            int gw = 9, gh = 9;
+            std::vector<float> h(gw * gh, 0.5f);
+            float cx = size.x / (float)(gw - 1);
+            float cz = size.z / (float)(gh - 1);
+            mdl = BuildHeightmapMesh(h, gw, gh, cx, cz, size.y);
+            if (mdl.meshCount > 0)
+                ApplyTex(mdl, Texture2D{0}, DARKGRAY);
+            break;
+        }
         default: return -1;
     }
     if (mdl.meshes == nullptr) return -1;
@@ -1070,6 +1322,9 @@ void OzoneLoader::UnloadHeightmap() {
         m_hmImage = Image{0};
         m_hmTexture = Texture2D{0};
         m_hmModel = Model{0};
+        m_hmGridW = 0;
+        m_hmGridH = 0;
+        m_hmHeights.clear();
     }
 }
 
@@ -1112,15 +1367,88 @@ float OzoneLoader::SampleHeightmapY(float px, float pz) const {
 }
 
 // ---------------------------------------------------------------------------
+// RebuildHeightmapMesh — rebuild the GPU mesh from m_hmHeights without
+// re-reading the source image. Called after SetHeightAtGrid() modifies
+// individual cell heights. Preserves texture and shader.
+// ---------------------------------------------------------------------------
+void OzoneLoader::RebuildHeightmapMesh() {
+    if (!m_hmReady || m_hmHeights.empty()) return;
+
+    float cellX = (m_hmGridW > 1) ? (m_hmSize.x / (float)(m_hmGridW - 1)) : 0;
+    float cellZ = (m_hmGridH > 1) ? (m_hmSize.z / (float)(m_hmGridH - 1)) : 0;
+    Model newModel = BuildHeightmapMesh(m_hmHeights, m_hmGridW, m_hmGridH,
+                                        cellX, cellZ, m_hmSize.y);
+
+    // Save old texture and shader references
+    Texture2D oldTex = m_hmModel.meshCount > 0
+        ? m_hmModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture
+        : Texture2D{0};
+    Shader oldShader = m_hmModel.meshCount > 0
+        ? m_hmModel.materials[0].shader
+        : Shader{0};
+
+    // Replace the model
+    if (m_hmModel.meshCount > 0)
+        UnloadModel(m_hmModel);
+
+    m_hmModel = newModel;
+    if (oldTex.id || m_hmTexture.id) {
+        m_hmModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture =
+            oldTex.id ? oldTex : m_hmTexture;
+    }
+    m_hmModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    if (oldShader.id > 0)
+        m_hmModel.materials[0].shader = oldShader;
+    else if (GetLitFogShader().id > 0)
+        m_hmModel.materials[0].shader = GetLitFogShader();
+}
+
+// ---------------------------------------------------------------------------
+// GetHeightAtGrid — read height value at grid cell (col, row) in [0..1] range
+// ---------------------------------------------------------------------------
+float OzoneLoader::GetHeightAtGrid(int col, int row) const {
+    if (col < 0 || col >= m_hmGridW || row < 0 || row >= m_hmGridH)
+        return 0.0f;
+    return m_hmHeights[row * m_hmGridW + col];
+}
+
+// ---------------------------------------------------------------------------
+// SetHeightAtGrid — set height at grid cell, clamp to [0..1], update image
+// pixel, then rebuild the mesh
+// ---------------------------------------------------------------------------
+void OzoneLoader::SetHeightAtGrid(int col, int row, float height, bool triggerRebuild) {
+    if (!m_hmReady || col < 0 || col >= m_hmGridW || row < 0 || row >= m_hmGridH)
+        return;
+    if (height < 0.0f) height = 0.0f;
+    if (height > 1.0f) height = 1.0f;
+
+    int idx = row * m_hmGridW + col;
+    m_hmHeights[idx] = height;
+
+    // Keep the grayscale image in sync (for SampleHeightmapY bilinear reads)
+    if (m_hmImage.data) {
+        uint8_t* p = (uint8_t*)m_hmImage.data;
+        p[idx] = (uint8_t)(height * 255.0f);
+    }
+
+    if (triggerRebuild)
+        RebuildHeightmapMesh();
+}
+
+// ---------------------------------------------------------------------------
 // Unload
 // ---------------------------------------------------------------------------
 void OzoneLoader::Unload() {
     for (auto& r : m_renderables) {
         if (r.customTex.id > 0) UnloadTexture(r.customTex);
-        if (r.loaded) UnloadModel(r.model);
+        // Heightmap model is owned by m_hmModel (unloaded in UnloadHeightmap)
+        if (r.loaded && r.typeId != (int)OzonePrimitiveType::HEIGHTMAP)
+            UnloadModel(r.model);
     }
     m_renderables.clear();
     m_collisionVolumes.clear();
+    m_zoneCounters.clear();
+    m_worldDir.clear();
     UnloadHeightmap();
     UnloadTextures();
 }

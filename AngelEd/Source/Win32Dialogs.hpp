@@ -68,6 +68,11 @@ struct EditorPanelState {
     bool actionApplyLight = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
     int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
+
+    // Terrain editing
+    int terrainBrushMode = 0;       // 0=raise, 1=lower, 2=flatten
+    int terrainBrushSize = 4;       // radius in grid cells
+    float terrainBrushStrength = 0.05f; // height change per click [0..1]
     int actionCsgCommitNow = -1; // CSG operation to place immediately (-1 = inactive)
     int actionWorldGraphProperties = -1; // WorldGraph item index to open properties
     int actionWorldGraphDelete = -1; // WorldGraph entity index to delete
