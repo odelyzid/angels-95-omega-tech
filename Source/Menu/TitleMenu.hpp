@@ -268,6 +268,7 @@ private:
 
         m_hoveredItem = -1;
 
+        #ifdef _WIN32
         // Main window chrome buttons
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (CheckCollisionPointRec(mp, m_closeBtn)) { PostMessage(GetActiveWindow(), WM_CLOSE, 0, 0); return; }
@@ -285,6 +286,13 @@ private:
             }
             return;
         }
+#else
+        // No native window chrome outside Windows
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (CheckCollisionPointRec(mp, m_maxBtn)) { ToggleFullscreen(); return; }
+        }
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) { m_dragging = false; m_dragPane = false; }
+#endif
 
         // Pane dragging
         if (m_dragPane && m_dragPaneIdx >= 0 && m_dragPaneIdx < (int)m_panes.size()) {
