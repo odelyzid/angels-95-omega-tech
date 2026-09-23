@@ -93,7 +93,6 @@ jobs:
           install: >
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-make
-            mingw-w64-x86_64-raylib
             make
 
       - name: Check toolchain
@@ -101,7 +100,15 @@ jobs:
           uname -s
           g++ --version | head -1
           make --version | head -1
-          pkg-config --cflags --libs raylib 2>/dev/null || echo "pkg-config not used"
+
+      - name: Build raylib from source
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib
+          cd /tmp/raylib/src
+          make PLATFORM=PLATFORM_DESKTOP -j
+          mkdir -p /mingw64/include /mingw64/lib
+          cp raylib.h /mingw64/include/
+          cp libraylib.a /mingw64/lib/
 
       - name: Build server (AngelServ)
         run: make AngelServ SERVER_CXX=g++

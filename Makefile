@@ -24,6 +24,16 @@ else
   SERVER_LIBS := -lm -lws2_32
 endif
 
+# Windows resource files (icon embedding) only apply to Windows builds;
+# GNU windres is not guaranteed on Linux runners.
+ifneq ($(EXE),)
+RES_95  = $(BUILD_DIR)/Angels95.res
+RES_SRV = $(BUILD_DIR)/AngelServ.res
+else
+RES_95  =
+RES_SRV =
+endif
+
 CFLAGS := -O3 --std=c++20 $(PIC) $(RAYLIB_INC)
 COMP := g++
 SERVER_CXX := g++
@@ -118,21 +128,23 @@ $(BUILD_DIR)/LightningEntityManager.o: Source/Script/LightningEntityManager.cpp 
 	$(COMP) $(CFLAGS) -c Source/Script/LightningEntityManager.cpp -o $@
 
 # 6a. Compile Windows resource files
+ifneq ($(EXE),)
 $(BUILD_DIR)/Angels95.res: Source/Angels95.rc GameData/Global/Icon/angels95.ico | $(BUILD_DIR)
 	windres Source/Angels95.rc -O coff -o $@
 
 $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.ico | $(BUILD_DIR)
 	windres Source/AngelServ.rc -O coff -o $@
+endif
 
 # 6b. Build Game Binary
-OTENGINE: $(BUILD_DIR)/Angels95.res $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-AngelServ: $(BUILD_DIR)/AngelServ.res $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
+AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
 	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/AngelServ.res $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
