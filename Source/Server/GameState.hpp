@@ -38,6 +38,7 @@ struct ServerPlayer {
     int ammo = 0;                        // shared ammo pool (refilled by AMMO pickups)
     int world_index = 0;
     double last_seen;
+    bool has_position = false;           // first validated PLAYER_UPDATE received
 
     bool connected = false;
     int health_ticks = 0; // for regen

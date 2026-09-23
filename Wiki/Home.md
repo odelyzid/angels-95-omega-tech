@@ -16,3 +16,4 @@ Built on [raylib](https://www.raylib.com/) with PS1-inspired retro aesthetics an
 | [LightningScript](LightningScript) | Scripting language reference, opcodes, entity definitions |
 | [World Format (WDL)](World-Format-WDL) | WDL syntax, OZONE format, world directory layout |
 | [Building](Building) | Build instructions, prerequisites, test targets, CI |
+| [Engine Roadmap](Engine-Roadmap) | Gap analysis and prioritized roadmap by tier |

@@ -69,6 +69,82 @@ static void test_find_free_port() {
     else printf("FAIL: should return a non-zero port\n");
 }
 
+// S4 regression: the client must stay in the connecting state until the server
+// confirms auth (first non-challenge message), and a re-auth must be re-acked
+// without duplicating the player server-side.
+static int test_auth_deferred_confirm() {
+    test_count++;
+    printf("  TEST auth deferred confirm (S4)... ");
+
+    uint16_t port = net::find_free_port();
+    int join_count = 0, connect_count = 0;
+
+    net::NetworkServer server;
+    if (!server.init(port, 4)) { printf("FAIL: server.init\n"); return 1; }
+
+    net::ServerCallbacks scbs;
+    scbs.on_player_join = [&](net::NetworkPlayer& p) {
+        join_count++;
+        net::NetworkMessage ping;
+        ping.magic = net::MAGIC;
+        ping.type = static_cast<uint32_t>(net::MessageType::PING);
+        ping.size = 0;
+        ping.sequence = 0;
+        ping.timestamp = 0;
+        server.send_message(p, ping); // doubles as the auth confirm packet
+    };
+    scbs.on_player_leave = [](net::NetworkPlayer&) {};
+    scbs.on_message_received = [](const net::NetworkMessage&, const net::NetworkPlayer&) {};
+    server.set_callbacks(std::move(scbs));
+
+    if (!server.start()) { printf("FAIL: server.start\n"); return 1; }
+
+    net::NetworkClient client;
+    net::ClientCallbacks ccbs;
+    ccbs.on_connected = [&]() { connect_count++; };
+    ccbs.on_disconnected = [] {};
+    ccbs.on_message_received = [](const net::NetworkMessage&) {};
+    client.set_callbacks(std::move(ccbs));
+
+    if (!client.connect("127.0.0.1", port)) { printf("FAIL: client.connect\n"); return 1; }
+
+    // A client must NOT be connected merely because it sent CLIENT_AUTH.
+    if (client.is_connected()) {
+        printf("FAIL: connected before server confirm\n");
+        return 1;
+    }
+
+    // Pump both ends (non-blocking UDP on loopback converges fast).
+    for (int i = 0; i < 2000 && !client.is_connected(); ++i) {
+        server.update();
+        client.update();
+    }
+
+    if (!client.is_connected()) { printf("FAIL: never confirmed by server\n"); return 1; }
+    if (connect_count != 1) { printf("FAIL: on_connected fired %d times\n", connect_count); return 1; }
+    if (server.player_count() != 1) { printf("FAIL: server player_count=%u\n", server.player_count()); return 1; }
+
+    // Re-auth from a connected client: server must re-play the join payload
+    // for ack recovery without duplicating the player.
+    int joins_before = join_count;
+    net::NetworkMessage auth;
+    auth.magic = net::MAGIC;
+    auth.type = static_cast<uint32_t>(net::MessageType::CLIENT_AUTH);
+    auth.size = 0;
+    auth.sequence = 0;
+    auth.timestamp = 0;
+    if (!client.send_message(auth)) { printf("FAIL: send re-auth\n"); return 1; }
+    server.update();
+    if (join_count != joins_before + 1) { printf("FAIL: re-auth not re-acked\n"); return 1; }
+    if (server.player_count() != 1) { printf("FAIL: re-auth duplicated player\n"); return 1; }
+
+    client.disconnect();
+    server.stop();
+    pass_count++;
+    printf("PASS\n");
+    return 0;
+}
+
 int main() {
     printf("Network packet tests:\n");
     test_magic_constant();
@@ -79,6 +155,7 @@ int main() {
     test_is_valid_ip();
     test_is_valid_ip_invalid();
     test_find_free_port();
+    test_auth_deferred_confirm();
 
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <chrono>
+#include <algorithm>
 
 static double now_seconds() {
     using namespace std::chrono;
@@ -175,15 +176,24 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
 
     switch (type) {
         case net::MessageType::CHAT: {
+            if (msg.size == 0) break;
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
-            m_chat_msg = reinterpret_cast<const char*>(msg.payload);
+            // Bound the read to the declared size and clamp to the chat buffer;
+            // stop at the first NUL so an unterminated payload can't over-read.
+            const char* p = reinterpret_cast<const char*>(msg.payload);
+            size_t n = std::min<size_t>(msg.size, sizeof(net::ChatData) - 1);
+            size_t len = 0;
+            while (len < n && p[len] != '\0') ++len;
+            m_chat_msg.assign(p, len);
             if (m_on_chat_received) m_on_chat_received(m_chat_msg);
             break;
         }
         case net::MessageType::SCENE_UPDATE: {
+            if (msg.size == 0) break;
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
-            m_pending_scene.assign(reinterpret_cast<const char*>(msg.payload),
-                                    msg.size);
+            // msg.size is attacker-controlled; never read past the payload buf.
+            size_t n = std::min<size_t>(msg.size, net::MAX_MESSAGE_SIZE);
+            m_pending_scene.assign(reinterpret_cast<const char*>(msg.payload), n);
             if (m_on_scene_received) m_on_scene_received(m_pending_scene);
             break;
         }

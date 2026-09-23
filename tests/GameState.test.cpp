@@ -8,6 +8,7 @@
 
 #include "../Source/Server/GameState.hpp"
 #include <cstdio>
+#include <cstring>
 #include <cassert>
 
 static int tests_total = 0, tests_passed = 0;
@@ -213,6 +214,35 @@ static int test_ammo_pickup_no_xp_granted() {
     PASS(); return 0; END_TEST();
 }
 
+// --- Tier 0: trust / idempotency regressions ---
+
+static int test_add_player_idempotent() {
+    TEST("add_player is idempotent for the same id (no duplicate)");
+    GameState gs;
+    uint32_t a = gs.add_player(7, "First");
+    uint32_t b = gs.add_player(7, "Renamed");
+    CHECK_EQ(a, (uint32_t)7);
+    CHECK_EQ(b, (uint32_t)7);
+    CHECK_EQ(gs.player_count(), (int)1);
+    ServerPlayer* p = gs.get_player(7);
+    CHECK(p != nullptr);
+    CHECK_EQ(std::strcmp(p->name, "Renamed"), 0);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_player_position_flag() {
+    TEST("update_player_position flips has_position after first update");
+    GameState gs;
+    uint32_t id = gs.add_player(3, "Mover");
+    ServerPlayer* p = gs.get_player(id);
+    CHECK(p != nullptr);
+    CHECK_EQ(p->has_position, false);
+    gs.update_player_position(id, 1.0f, 2.0f, 3.0f, 0.5f, 0.25f);
+    CHECK(p->has_position);
+    CHECK_APROX(p->position.x, 1.0f, 0.0001f);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
@@ -228,6 +258,8 @@ int main() {
     failures += test_projectile_hits_other_player();
     failures += test_ammo_pickup_grants_ammo();
     failures += test_ammo_pickup_no_xp_granted();
+    failures += test_add_player_idempotent();
+    failures += test_player_position_flag();
 
     fprintf(stdout, "===============\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

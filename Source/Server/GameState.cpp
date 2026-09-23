@@ -248,6 +248,13 @@ uint32_t GameState::add_player(uint32_t id, const char* name)
         OZ_WARN("Cannot add player, server full");
         return 0;
     }
+    // Idempotent: re-join / re-auth for an already-connected id just refreshes
+    // the name instead of creating a duplicate.
+    if (ServerPlayer* existing = get_player(id)) {
+        strncpy(existing->name, name, sizeof(existing->name) - 1);
+        existing->name[sizeof(existing->name) - 1] = '\0';
+        return existing->id;
+    }
     ServerPlayer player;
     player.id = id;
     strncpy(player.name, name, sizeof(player.name) - 1);
@@ -304,6 +311,7 @@ void GameState::update_player_position(uint32_t id, float x, float y, float z,
     p->position = {x, y, z};
     p->yaw = yaw;
     p->pitch = pitch;
+    p->has_position = true;
     p->last_seen = time(nullptr);
 }
 

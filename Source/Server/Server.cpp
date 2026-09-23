@@ -762,18 +762,21 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
     g_game_server->send_message(const_cast<net::NetworkPlayer&>(player), msg);
 }
 
-static void on_player_join(net::NetworkPlayer& player) {
-    OZ_INFO("Player %s (id=%u) joined from %s:%u",
-            player.name, player.id, player.ip_address, player.port);
-    g_game_state.add_player(player.id, player.name);
-
+// World-list JSON for a joining player, clamped to the network payload size so
+// a long world list can never overflow the fixed-size message buffer.
+static void send_join_world_list(const net::NetworkPlayer& player) {
+    constexpr size_t kMaxPayload = net::MAX_MESSAGE_SIZE;
     std::string world_list = "{\"type\":\"world_list\",\"worlds\":[";
     for (size_t i = 0; i < g_world_list.size(); ++i) {
+        std::string entry = json_escape(g_world_list[i]);
+        if (world_list.size() + entry.size() + 2 > kMaxPayload) break; // room for ",]"
         if (i) world_list += ',';
-        world_list += json_escape(g_world_list[i]);
+        world_list += entry;
     }
     world_list += "]}";
-    auto msg = net::NetworkMessage{};
+    if (world_list.size() > kMaxPayload) world_list.resize(kMaxPayload);
+
+    net::NetworkMessage msg{};
     msg.magic = net::MAGIC;
     msg.type = static_cast<uint32_t>(net::MessageType::SCENE_UPDATE);
     msg.size = static_cast<uint32_t>(world_list.size());
@@ -781,6 +784,15 @@ static void on_player_join(net::NetworkPlayer& player) {
     msg.timestamp = static_cast<uint32_t>(time(nullptr));
     memcpy(msg.payload, world_list.data(), world_list.size());
     g_game_server->send_message(player, msg);
+}
+
+static void on_player_join(net::NetworkPlayer& player) {
+    OZ_INFO("Player %s (id=%u) joined from %s:%u",
+            player.name, player.id, player.ip_address, player.port);
+    // Idempotent: re-auth/re-ack may replay this for an existing player.
+    g_game_state.add_player(player.id, player.name);
+
+    send_join_world_list(player);
 
     // Sync active pickups (near-spawn first worlds)
     int synced = 0;
@@ -817,11 +829,36 @@ static void on_server_message(const net::NetworkMessage& msg,
             if (msg.size < sizeof(net::PlayerUpdateData)) return;
             net::PlayerUpdateData pud;
             memcpy(&pud, msg.payload, sizeof(pud));
+
+            // Reject malformed positions (NaN/Inf) outright.
+            if (!std::isfinite(pud.position.x) || !std::isfinite(pud.position.y) ||
+                !std::isfinite(pud.position.z) || !std::isfinite(pud.yaw) ||
+                !std::isfinite(pud.pitch)) {
+                OZ_WARN("PLAYER_UPDATE from %u: non-finite position dropped", sender.id);
+                break;
+            }
+
+            // Teleport clamp: sizeable per-update moves are dropped.
+            constexpr float kMaxMovePerUpdate = 25.0f;
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
+            if (sp && sp->has_position) {
+                float dx = pud.position.x - sp->position.x;
+                float dy = pud.position.y - sp->position.y;
+                float dz = pud.position.z - sp->position.z;
+                if (std::fabs(dx) > kMaxMovePerUpdate ||
+                    std::fabs(dy) > kMaxMovePerUpdate ||
+                    std::fabs(dz) > kMaxMovePerUpdate) {
+                    OZ_WARN("PLAYER_UPDATE from %u: teleport delta (%.1f,%.1f,%.1f) dropped",
+                            sender.id, dx, dy, dz);
+                    break;
+                }
+            }
             g_game_state.update_player_position(
                 sender.id, pud.position.x, pud.position.y, pud.position.z, pud.yaw, pud.pitch);
 
-            // Relay to all other players
+            // Relay to all other players (with server-authoritative health)
             pud.player_id = sender.id;
+            if (sp) pud.health = sp->health;
             net::NetworkMessage relay;
             relay.magic = net::MAGIC;
             relay.type = static_cast<uint32_t>(net::MessageType::PLAYER_UPDATE);
@@ -964,6 +1001,11 @@ static void on_server_message(const net::NetworkMessage& msg,
             if (msg.size < sizeof(net::WeaponAmmoData)) return;
             net::WeaponAmmoData wad;
             memcpy(&wad, msg.payload, sizeof(wad));
+            // Bounds-check client-reported ammo (anti-cheat basic clamp).
+            if (wad.ammo < 0) wad.ammo = 0;
+            else if (wad.ammo > 999) wad.ammo = 999;
+            if (wad.magazine < 0) wad.magazine = 0;
+            else if (wad.magazine > 999) wad.magazine = 999;
             wad.player_id = sender.id;
             ServerPlayer* sp = g_game_state.get_player(sender.id);
             if (sp && wad.slot >= 0 && wad.slot < 8) {
@@ -1033,8 +1075,27 @@ static void on_server_message(const net::NetworkMessage& msg,
             if (msg.size < sizeof(net::PlayerHurtData)) break;
             net::PlayerHurtData phd;
             memcpy(&phd, msg.payload, sizeof(phd));
+            // Only the affected client may report its own world-hazard damage.
+            if (phd.player_id != sender.id) {
+                OZ_WARN("PLAYER_HURT from %u targeting %u — dropped",
+                        sender.id, phd.player_id);
+                break;
+            }
+            if (phd.damage < 0 || phd.damage > 100 ||
+                !std::isfinite(phd.remaining_health) ||
+                phd.remaining_health < 0.0f) {
+                OZ_WARN("PLAYER_HURT from %u: out-of-range values dropped",
+                        sender.id);
+                break;
+            }
             ServerPlayer* victim = g_game_state.get_player(phd.player_id);
             if (victim) {
+                // Monotonic down: a client may never raise its own health.
+                if (phd.remaining_health > victim->health) {
+                    OZ_WARN("PLAYER_HURT from %u: health increase attempt dropped",
+                            sender.id);
+                    break;
+                }
                 victim->health = phd.remaining_health;
                 OZ_INFO("PLAYER_HURT: victim=%u damage=%d health=%.0f",
                         phd.player_id, phd.damage, phd.remaining_health);
@@ -1054,6 +1115,13 @@ static void on_server_message(const net::NetworkMessage& msg,
             if (msg.size < sizeof(net::PlayerKillData)) break;
             net::PlayerKillData pkd;
             memcpy(&pkd, msg.payload, sizeof(pkd));
+            // The server is authoritative over kills. A client may only
+            // report a self-inflicted kill.
+            if (pkd.killer_id != sender.id || pkd.victim_id != sender.id) {
+                OZ_WARN("PLAYER_KILL from %u claiming killer=%u victim=%u — dropped",
+                        sender.id, pkd.killer_id, pkd.victim_id);
+                break;
+            }
             OZ_INFO("PLAYER_KILL: killer=%u victim=%u", pkd.killer_id, pkd.victim_id);
             ServerPlayer* victim = g_game_state.get_player(pkd.victim_id);
             if (victim) {
@@ -1071,8 +1139,10 @@ static void on_server_message(const net::NetworkMessage& msg,
             break;
         }
         case net::MessageType::PICKUP_COLLECTED: {
-            // Already handled via PICKUP_COLLECT handler above — just relay
-            g_game_server->broadcast_message(msg);
+            // Server broadcasts its own PICKUP_COLLECTED on a successful
+            // PICKUP_COLLECT; never relay client-spoofed grants.
+            OZ_WARN("PICKUP_COLLECTED from player %u ignored (server-authoritative)",
+                    sender.id);
             break;
         }
         case net::MessageType::NPC_DAMAGE: {
@@ -1124,6 +1194,16 @@ static void on_server_message(const net::NetworkMessage& msg,
             relay.timestamp = static_cast<uint32_t>(time(nullptr));
             memcpy(relay.payload, &nsud, sizeof(nsud));
             g_game_server->broadcast_message(relay);
+            break;
+        }
+        case net::MessageType::COMMAND: {
+            OZ_WARN("COMMAND from player %u — admin commands not implemented (kick/ban in Tier 2)",
+                    sender.id);
+            break;
+        }
+        case net::MessageType::GAME_STATE: {
+            OZ_WARN("GAME_STATE from player %u ignored — server owns authoritative state",
+                    sender.id);
             break;
         }
         default:
@@ -1207,7 +1287,7 @@ int main(int argc, char** argv) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    OZ_INFO("AngelServ build 50 starting");
+    OZ_INFO("AngelServ build b56 starting");
     OZ_INFO("Game port: UDP %d",  game_port);
     OZ_INFO("HTTP port: %d",     http_port);
     printf("Data dir:  %s\n",     g_gamedata_dir.c_str());
@@ -1240,7 +1320,7 @@ int main(int argc, char** argv) {
 
     // LAN discovery
     net::NetworkDiscovery discovery;
-    discovery.init("Angels95", "0.2.0", static_cast<uint16_t>(game_port));
+    discovery.init("Angels95", "0.2.1", static_cast<uint16_t>(game_port));
     discovery.start();
 
     // Initialize game state with worlds

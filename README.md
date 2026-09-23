@@ -13,7 +13,7 @@ aesthetics, a custom **OZONE** world format (with legacy **WDL** support), a
 (`AngelEd`), and a dedicated standalone server (`AngelServ`) with no raylib
 dependency.
 
-Current release: **b55**.
+Current release: **b56**.
 
 ---
 
@@ -50,6 +50,7 @@ Current release: **b55**.
 | LightningScript scripting reference | [LightningScript](Wiki/LightningScript.md) |
 | WDL / OZONE world format | [World Format](Wiki/World-Format-WDL.md) |
 | Build instructions, prerequisites, CI | [Building](Wiki/Building.md) |
+| Gap analysis and priorities | [Engine Roadmap](Wiki/Engine-Roadmap.md) |
 
 ---
 
@@ -161,6 +162,19 @@ ozone_parser, network, game_state. Single suites: `make test_parser`, etc.
 ---
 
 ## Changelog
+
+### b56 — 2026-09-24
+- **Network security hardenings (Tier 0 of engine roadmap)** — world-list JSON
+  clamped to the UDP payload size (fixes remote overflow), bounded
+  `SCENE_UPDATE`/`CHAT` reads on the client, server-authoritative
+  `PLAYER_HURT`/`PLAYER_KILL`/pickup ownership, `WEAPON_AMMO` clamps, non-finite
+  + teleport position rejection with server-authoritative relayed health, and a
+  deferred auth handshake (retry/resend fix + idempotent player join). See
+  `Wiki/Engine-Roadmap.md` for the full gap analysis.
+- **Footwork hardening** — explicit `COMMAND`/`GAME_STATE` handling, per-update
+  teleport clamp, monotonic-down health.
+- Tests extended (`NetworkClient` loopback auth handshake, `GameState`
+  idempotent `add_player`): all 9 suites green.
 
 ### b55 — 2026-09-23
 - **LightningScript entity actions** — new opcode/actions for scripts:

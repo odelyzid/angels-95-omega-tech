@@ -352,8 +352,14 @@ void NetworkServer::update() {
                     break;
                 }
                 case MessageType::PLAYER_JOIN:
+                    // Already connected — ignore rebroadcasts.
+                    break;
                 case MessageType::CLIENT_AUTH:
-                    // Already handled above
+                    // Re-auth from a connected player: replay the join payload
+                    // so a client whose original ack was lost can finish its
+                    // handshake. on_player_join must be idempotent.
+                    if (m_callbacks.on_player_join)
+                        m_callbacks.on_player_join(*player);
                     break;
                 case MessageType::PLAYER_LEAVE:
                     printf("Player %s left\n", player->name);
@@ -527,20 +533,25 @@ void NetworkClient::update() {
                 disconnect();
                 return;
             }
-            // Retry: send JOIN again
             m_handshake_retries++;
             m_handshake_start = now;
-            NetworkMessage join;
-            join.magic = MAGIC;
-            join.type = static_cast<uint32_t>(MessageType::PLAYER_JOIN);
-            join.size = 0;
-            join.sequence = m_message_sequence++;
-            join.timestamp = static_cast<uint32_t>(now);
+            NetworkMessage retry;
+            retry.magic = MAGIC;
+            retry.sequence = m_message_sequence++;
+            retry.timestamp = static_cast<uint32_t>(now);
+            if (m_challenge_token != 0) {
+                // Already challenged: resend our auth token; the server re-acks.
+                retry.type = static_cast<uint32_t>(MessageType::CLIENT_AUTH);
+                retry.size = static_cast<uint32_t>(sizeof(m_challenge_token));
+                memcpy(retry.payload, &m_challenge_token, sizeof(m_challenge_token));
+            } else {
+                retry.type = static_cast<uint32_t>(MessageType::PLAYER_JOIN);
+                retry.size = 0;
+            }
             sendto(TO_SOCK(m_socket_fd),
-                   sock_sendto_buf(&join, sizeof(join)), 0,
+                   sock_sendto_buf(&retry, sizeof(retry)), 0,
                    (struct sockaddr*)&m_server_address, sizeof(m_server_address));
         }
-        // Still in handshake — receive only challenge messages
     }
 
     struct sockaddr_in addr;
@@ -569,7 +580,7 @@ void NetworkClient::update() {
             NetworkMessage auth;
             auth.magic = MAGIC;
             auth.type = static_cast<uint32_t>(MessageType::CLIENT_AUTH);
-            auth.size = sizeof(token);
+            auth.size = static_cast<uint32_t>(sizeof(token));
             auth.sequence = m_message_sequence++;
             auth.timestamp = static_cast<uint32_t>(now);
             memcpy(auth.payload, &token, sizeof(token));
@@ -577,11 +588,19 @@ void NetworkClient::update() {
                    sock_sendto_buf(&auth, sizeof(auth)), 0,
                    (struct sockaddr*)&m_server_address, sizeof(m_server_address));
 
+            // Stay in the connecting state: `m_connected` must only flip once
+            // the server confirms (first non-challenge message). If this AUTH
+            // is lost, the retry path below resends it and the server re-acks.
+            printf("Client: challenge accepted (token=%u), awaiting server confirm\n", token);
+            continue;
+        }
+
+        // First non-challenge message from the server confirms authentication.
+        if (m_connecting) {
             m_connected = true;
             m_connecting = false;
-            printf("Client: authenticated with server (token=%u)\n", token);
+            printf("Client: authenticated with server\n");
             if (m_callbacks.on_connected) m_callbacks.on_connected();
-            continue;
         }
 
         switch (rcvType) {
