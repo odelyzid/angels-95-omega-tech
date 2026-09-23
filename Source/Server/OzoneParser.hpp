@@ -21,6 +21,9 @@ enum class OzonePrimitiveType : uint8_t {
     ENTITY_ZONE,         // Zone volume
     ENTITY_NPC,          // NPC spawn node
     ENTITY_LIGHT,        // Light node (point/spot/directional)
+    ENTITY_PORTAL,       // Portal zone (level-to-level connection)
+    ENTITY_LEVELINFO,    // Level metadata (game rules, skybox)
+    ENTITY_PARTICLES,    // Ambient particle weather settings
     HEIGHTMAP,           // Terrain heightmap (grayscale image)
     UNKNOWN
 };
@@ -30,8 +33,10 @@ struct OzonePrimitive {
     std::vector<float> args;        // position, dimensions, etc.
     std::string entityType;         // for entity types: "Walker", "HealthVial", etc.
     std::string entitySubType;      // for zones: "Water", "Ladder", "Sky", "Reverb"
+    std::string name;               // optional explicit name (zone name= kwarg for script hooks)
     int csgOp = 0;                  // CSG operation: 0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC
     int surfaceFlags = 0;           // surface behavior flags (e.g. SURF_FAKEBACKDROP)
+    std::string texPath;            // custom diffuse texture path (texPath="..." attribute)
     float texScaleU = 1.0f;         // texture tiling U (applied to mesh UVs)
     float texScaleV = 1.0f;         // texture tiling V (applied to mesh UVs)
     float texOffsetU = 0.0f;        // texture shift U

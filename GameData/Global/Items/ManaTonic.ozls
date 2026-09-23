@@ -1,0 +1,15 @@
+entity "ManaTonic" : consumable {
+    icon = "GameData/Global/Items/ManaVial.png"
+    stats {
+        value = 25
+        respawn_time = 30.0
+        pickup_category = "consumable"
+    }
+    actions {
+        on_use {
+            playerstat mana += 25
+            msg "The tonic shimmers down your throat. +25 mana."
+            consume
+        }
+    }
+}

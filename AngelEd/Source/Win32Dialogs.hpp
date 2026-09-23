@@ -90,6 +90,17 @@ struct EditorPanelState {
     std::string actionSelectFromGraphName;
     float actionSelectFromGraphPos[3] = {0,0,0};
 
+    // LevelList / Campaign panel
+    bool showLevelList = false;
+    std::string actionLevelListOpen;        // world folder name to open
+    std::string actionLevelListLink;        // create portal in current world -> target world
+    std::string portalTargetWorld;          // default target for newly placed portals
+
+    // Portal editing actions (Portal tab in ZoneProperties)
+    int  actionApplyPortal = -1;            // portal index to apply panel fields onto
+    int  actionDeletePortal = -1;           // portal index to delete
+    int  actionSelectPortal = -1;           // portal index to select in viewport
+
     // Properties panel (context-sensitive)
     bool showPropsPanel = false;
     int propsTargetType = -1;       // SelType encoded
@@ -125,6 +136,7 @@ struct EditorPanelState {
     void* hWorldGraph = nullptr;
     void* hPropsPanel = nullptr;
     void* hStatsSidebar = nullptr;
+    void* hLevelList = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -144,6 +156,7 @@ struct EditorPanelState {
     WinPos lightPropsPos = {400, 100, 340, 480};
     WinPos worldGraphPos = {540, 100, 600, 400};
     WinPos propsPanelPos = {300, 150, 400, 500};
+    WinPos levelListPos = {200, 120, 560, 420};
 #endif
 };
 
@@ -186,6 +199,7 @@ struct ZoneProperties {
     float timeLimitMinutes = 10.0f;
     int scoreLimit = 50;
     bool friendlyFire = false;
+    bool applyGameType = false;
     // Particles
     ParticleType particleType = ParticleType::NONE;
     float particleDensity = 50.0f;
@@ -195,10 +209,52 @@ struct ZoneProperties {
     bool applyParticles = false;
     // Skybox
     std::string skyboxTexturePath;  // path to skybox texture, empty = world default
+    bool applySkybox = false;
+};
+
+// Level metadata — persisted via LevelInfo/Particles instructions in both formats
+struct LevelMetadata {
+    // GameType / rules
+    GameType gameType = GameType::SINGLEPLAYER;
+    int maxPlayers = 8;
+    float respawnTime = 5.0f;
+    bool timeLimitEnabled = false;
+    float timeLimitMinutes = 10.0f;
+    int scoreLimit = 50;
+    bool friendlyFire = false;
+    std::string skyboxTexturePath;
+    // Ambient particles
+    ParticleType particleType = ParticleType::NONE;
+    float particleDensity = 50.0f;
+    float particleSpeed = 1.0f;
+    int particleColorR = 200, particleColorG = 200, particleColorB = 200;
+    float particleWindX = 0.0f, particleWindZ = 0.0f;
 };
 
 ZoneProperties GetZoneProperties();
 void ClearZoneApplyFlags();
+LevelMetadata GetLevelMetadata();
+void SetLevelMetadata(const LevelMetadata& meta);   // also refreshes ZoneProperties UI values
+
+// --- Portal editing (Portal tab in ZoneProperties) ---
+struct PortalEditState {
+    int  selectedIndex = -1;        // PawnSystem portal index, -1 = none
+    char targetWorld[256] = {};     // destination level folder name
+    float spawnX = 0, spawnY = 20, spawnZ = 0;
+    bool bidirectional = true;
+};
+void RefreshPortalList();           // rebuild portal combo from PawnSystem
+int  GetPortalCount();
+const char* GetPortalTargetWorld(int index);
+void SetPortalSelection(int index); // push viewport selection into the panel
+
+// Edited portal field values (read by Main.cpp when applying)
+struct PortalEditValues {
+    std::string targetWorld;
+    float spawnX = 0, spawnY = 20, spawnZ = 0;
+    bool bidirectional = true;
+};
+PortalEditValues GetPortalEditValues();
 
 // --- Pawn management ---
 void PawnManagerAddPawn(const char* name, const char* meshPath);
@@ -232,6 +288,8 @@ void ShowHeightmapEditor(bool show);
 void ShowLightProps(bool show);
 void ShowWorldGraph(bool show);
 void ShowPropertiesPanel(bool show);
+void ShowLevelList(bool show);
+void RefreshLevelList();
 void RefreshWorldGraph();
 void UpdateModelPreview(void* hBmp, int w, int h);
 void ScanModelBrowserFiles();
@@ -262,6 +320,8 @@ inline void ShowHeightmapEditor(bool) {}
 inline void ShowLightProps(bool) {}
 inline void ShowWorldGraph(bool) {}
 inline void ShowPropertiesPanel(bool) {}
+inline void ShowLevelList(bool) {}
+inline void RefreshLevelList() {}
 inline void RefreshWorldGraph() {}
 inline void UpdateModelPreview(void*, int, int) {}
 inline void ScanModelBrowserFiles() {}
@@ -271,8 +331,15 @@ inline bool ChooseSaveWorldFile(std::string&) { return false; }
 inline void UpdateStatsSidebar(float, float, float, float, float, float, float, float, int, int, const char*, float, float, float) {}
 inline void LayoutStatsSidebar(int, int, int, int) {}
 inline int GetStatsSidebarWidth() { return 200; }
-inline EnvSettings GetEnvSettings() { return {}; }
-inline void ClearEnvApplyFlags() {}
+inline ZoneProperties GetZoneProperties() { return {}; }
+inline void ClearZoneApplyFlags() {}
+inline LevelMetadata GetLevelMetadata() { return {}; }
+inline void SetLevelMetadata(const LevelMetadata&) {}
+inline void RefreshPortalList() {}
+inline int GetPortalCount() { return 0; }
+inline const char* GetPortalTargetWorld(int) { return nullptr; }
+inline void SetPortalSelection(int) {}
+inline PortalEditValues GetPortalEditValues() { return {}; }
 inline void PawnManagerAddPawn(const char*, const char*) {}
 inline int GetPawnCount() { return 0; }
 inline const char* GetPawnName(int) { return nullptr; }

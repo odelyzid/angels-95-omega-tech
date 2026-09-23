@@ -74,6 +74,9 @@ const char* message_type_string(MessageType type) {
         case MessageType::PLAYER_ACTION:  return "PLAYER_ACTION";
         case MessageType::PICKUP_COLLECTED: return "PICKUP_COLLECTED";
         case MessageType::NPC_DAMAGE:       return "NPC_DAMAGE";
+        case MessageType::WEAPON_AMMO:      return "WEAPON_AMMO";
+        case MessageType::SERVER_CHALLENGE: return "SERVER_CHALLENGE";
+        case MessageType::CLIENT_AUTH:      return "CLIENT_AUTH";
         default: return "UNKNOWN";
     }
 }

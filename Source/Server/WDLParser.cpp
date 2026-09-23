@@ -50,6 +50,9 @@ WDLElementType WDLParser::classify(const std::string& token) {
     if (token == "Spawn") return WDLElementType::SPAWN;
     if (token == "Pickup") return WDLElementType::PICKUP;
     if (token == "ZoneInfo") return WDLElementType::ZONE_INFO;
+    if (token == "Portal") return WDLElementType::PORTAL;
+    if (token == "LevelInfo") return WDLElementType::LEVEL_INFO;
+    if (token == "Particles") return WDLElementType::PARTICLES;
     if (token == "Fog") return WDLElementType::FOG;
     if (token == "Ambient") return WDLElementType::AMBIENT_TYPE;
     if (token == "LightType") return WDLElementType::LIGHT_TYPE;
@@ -221,6 +224,59 @@ std::vector<WDLElement> WDLParser::parse_string(const std::string& content) {
                 }
                 break;
             }
+            case WDLElementType::PORTAL: {
+                // Portal:targetWorld:minX:minY:minZ:maxX:maxY:maxZ:[spawnX:spawnY:spawnZ:[bidir]]
+                if (i < fields.size()) {
+                    elem.entityType = fields[i];  // target world name (may be empty)
+                    i++;
+                }
+                for (int c = 0; c < 6 && i < fields.size(); c++, i++) {
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { elem.args.push_back(0.0f); }
+                }
+                // Optional spawn point + bidirectional flag appended to args
+                for (int c = 0; c < 4 && i < fields.size(); c++, i++) {
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { break; }
+                }
+                break;
+            }
+            case WDLElementType::LEVEL_INFO: {
+                // LevelInfo:gameType:maxPlayers:respawnTime:timeLimitEnabled:timeLimitMinutes:
+                //           scoreLimit:friendlyFire:skyboxPath:
+                for (int c = 0; c < 7 && i < fields.size(); c++, i++) {
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { elem.args.push_back(0.0f); }
+                }
+                if (i < fields.size()) {
+                    elem.entityType = fields[i];  // skybox path (may be empty)
+                    i++;
+                }
+                break;
+            }
+            case WDLElementType::PARTICLES: {
+                // Particles:type:density:speed:r:g:b:windX:windZ:
+                // type is numeric (0=none 1=snow 2=rain 3=void 4=psychic); names accepted for robustness
+                for (int c = 0; c < 8 && i < fields.size(); c++, i++) {
+                    if (c == 0) {
+                        const std::string& t = fields[i];
+                        int idx;
+                        if (t == "NONE" || t == "none") idx = 0;
+                        else if (t == "SNOW" || t == "snow") idx = 1;
+                        else if (t == "RAIN" || t == "rain") idx = 2;
+                        else if (t == "VOID" || t == "VOID_REALM" || t == "void") idx = 3;
+                        else if (t == "PSYCHIC" || t == "PSYCHIC_REALM" || t == "psychic") idx = 4;
+                        else {
+                            try { idx = std::stoi(t); } catch (...) { idx = 0; }
+                        }
+                        elem.args.push_back((float)idx);
+                        continue;
+                    }
+                    try { elem.args.push_back(std::stof(fields[i])); }
+                    catch (...) { elem.args.push_back(0.0f); }
+                }
+                break;
+            }
             case WDLElementType::FOG:
             case WDLElementType::AMBIENT_TYPE: {
                 for (int c = 0; c < 4 && i < fields.size(); c++, i++) {
@@ -275,6 +331,9 @@ const char* WDLParser::GetWDLTypeName(WDLElementType type) {
         case WDLElementType::LIGHT_TYPE: return "LightType";
         case WDLElementType::AMBIENT_TYPE: return "Ambient";
         case WDLElementType::ZONE_INFO: return "ZoneInfo";
+        case WDLElementType::PORTAL: return "Portal";
+        case WDLElementType::LEVEL_INFO: return "LevelInfo";
+        case WDLElementType::PARTICLES: return "Particles";
         case WDLElementType::ENTITY_WALKER: return "Walker";
         case WDLElementType::NOISE_EMITTER: return "NoiseEmitter";
         case WDLElementType::COL_FLAG: return "C";

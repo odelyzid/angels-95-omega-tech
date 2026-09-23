@@ -48,6 +48,7 @@ enum EditorMenuCmd {
     IDM_LIGHT_PROPS,
     IDM_HEIGHTMAP,
     IDM_WORLD_GRAPH,
+    IDM_LEVEL_LIST,
     IDM_FULLSCREEN,
     IDM_RESET_CAM,
     IDM_VIEW_TOP,
@@ -76,7 +77,7 @@ static CsgProcessor g_csgProc;
 // ---------------------------------------------------------------------------
 // Entity selection system (hover + click + right-click context menu)
 // ---------------------------------------------------------------------------
-enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN };
+enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN, PORTAL };
 struct EditorSelection {
     SelType type = SelType::NONE;
     int index = -1;
@@ -241,6 +242,24 @@ static RayCollision RaycastTestStarts(Ray ray, EditorSelection& out) {
     return best;
 }
 
+static RayCollision RaycastTestPortals(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& portals = PawnSystem::Instance().GetPortals();
+    for (size_t p = 0; p < portals.size(); p++) {
+        auto& portal = portals[p];
+        RayCollision hit = GetRayCollisionBox(ray, portal.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PORTAL, (int)p, portal.targetWorld, {
+                (portal.bounds.min.x + portal.bounds.max.x) * 0.5f,
+                (portal.bounds.min.y + portal.bounds.max.y) * 0.5f,
+                (portal.bounds.min.z + portal.bounds.max.z) * 0.5f
+            }};
+        }
+    }
+    return best;
+}
+
 static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
 #ifdef DEBUG_EDITOR_TRACE
@@ -277,6 +296,7 @@ static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     testWithSel(RaycastTestLights(ray, tmp), tmp);
     testWithSel(RaycastTestZones(ray, tmp), tmp, 1.2f);
     testWithSel(RaycastTestStarts(ray, tmp), tmp);
+    testWithSel(RaycastTestPortals(ray, tmp), tmp);
 
     out = bestSel;
     return best.hit;
@@ -305,6 +325,14 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
                 break;
             }
         }
+    } else if (sel.type == SelType::PORTAL) {
+        auto& portals = PawnSystem::Instance().GetPortals();
+        if (sel.index >= 0 && sel.index < (int)portals.size()) {
+            auto& p = portals[sel.index];
+            OmegaTechEditor.W = p.bounds.max.x - p.bounds.min.x;
+            OmegaTechEditor.H = p.bounds.max.y - p.bounds.min.y;
+            OmegaTechEditor.L = p.bounds.max.z - p.bounds.min.z;
+        }
     }
     EditorLog("Gizmo snapped to %s idx=%d", sel.name.c_str(), sel.index);
 }
@@ -332,6 +360,10 @@ static void EditorPickEntity() {
                   g_sel.name.c_str(), (int)g_sel.type, g_sel.index, (float)g_sel.pos.x, (float)g_sel.pos.y, (float)g_sel.pos.z);
         OmegaTechEditor.DrawModel = true;
         SnapGizmoToSelection(g_sel);
+        if (g_sel.type == SelType::PORTAL) {
+            SetPortalSelection(g_sel.index);
+            g_editorPanels.portalTargetWorld = g_sel.name;
+        }
     } else {
         OmegaTechEditor.DrawModel = false;
     }
@@ -369,6 +401,10 @@ static void DeleteSelectedEntity() {
         PawnSystem::Instance().RemoveZone(g_sel.index);
     } else if (g_sel.type == SelType::SPAWN) {
         PawnSystem::Instance().RemovePlayerStart(g_sel.index);
+    } else if (g_sel.type == SelType::PORTAL) {
+        PawnSystem::Instance().RemovePortal(g_sel.index);
+        RefreshPortalList();
+        RefreshLevelList();
     } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
         int mid = CachedModels[g_sel.index].ModelId;
         wstring line = L"Model" + to_wstring(mid) + L":" +
@@ -439,6 +475,15 @@ static void DuplicateSelectedEntity() {
                 PawnSystem::Instance().AddPlayerStart(clone);
                 break;
             }
+        }
+    } else if (g_sel.type == SelType::PORTAL) {
+        auto& portals = PawnSystem::Instance().GetPortals();
+        if (g_sel.index >= 0 && g_sel.index < (int)portals.size()) {
+            ZonePortal clone = portals[g_sel.index];
+            clone.bounds.min.x += offset.x; clone.bounds.min.z += offset.z;
+            clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
+            PawnSystem::Instance().AddPortal(clone);
+            RefreshLevelList();
         }
     } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
         int mid = CachedModels[g_sel.index].ModelId;
@@ -600,6 +645,7 @@ static void SyncWDLNodes() {
     pawns.ClearPlayerStarts();
     pawns.ClearPickups();
     pawns.ClearZones();
+    pawns.ClearPortals();
 
     std::string content(OTEditor.WorldData.begin(), OTEditor.WorldData.end());
     for (const auto& element : WDLParser::parse_string(content)) {
@@ -626,6 +672,38 @@ static void SyncWDLNodes() {
             node.zoneType = ParseWDLZoneType(element.zoneType);
             node.intensity = element.intensity;
             pawns.AddZone(node);
+        } else if (element.type == WDLElementType::PORTAL && element.args.size() >= 6) {
+            ZonePortal portal;
+            portal.bounds = {{element.args[0], element.args[1], element.args[2]},
+                             {element.args[3], element.args[4], element.args[5]}};
+            portal.targetWorld = element.entityType;
+            if (element.args.size() >= 9)
+                portal.targetSpawn = {element.args[6], element.args[7], element.args[8]};
+            if (element.args.size() >= 10)
+                portal.bidirectional = element.args[9] != 0.0f;
+            pawns.AddPortal(portal);
+        } else if (element.type == WDLElementType::LEVEL_INFO && element.args.size() >= 7) {
+            LevelMetadata meta = GetLevelMetadata();
+            meta.gameType = (GameType)(int)element.args[0];
+            meta.maxPlayers = (int)element.args[1];
+            meta.respawnTime = element.args[2];
+            meta.timeLimitEnabled = element.args[3] != 0.0f;
+            meta.timeLimitMinutes = element.args[4];
+            meta.scoreLimit = (int)element.args[5];
+            meta.friendlyFire = element.args[6] != 0.0f;
+            meta.skyboxTexturePath = element.entityType;
+            SetLevelMetadata(meta);
+        } else if (element.type == WDLElementType::PARTICLES && element.args.size() >= 8) {
+            LevelMetadata meta = GetLevelMetadata();
+            meta.particleType = (ParticleType)(int)element.args[0];
+            meta.particleDensity = element.args[1];
+            meta.particleSpeed = element.args[2];
+            meta.particleColorR = (int)element.args[3];
+            meta.particleColorG = (int)element.args[4];
+            meta.particleColorB = (int)element.args[5];
+            meta.particleWindX = element.args[6];
+            meta.particleWindZ = element.args[7];
+            SetLevelMetadata(meta);
         }
     }
 }
@@ -684,6 +762,16 @@ static bool LoadWorldDocument(const fs::path& path) {
     return true;
 }
 
+static const char* WDLZoneTypeName(ZoneType t) {
+    switch (t) {
+        case ZoneType::ZONE_LADDER: return "ladder";
+        case ZoneType::ZONE_SKY: return "sky";
+        case ZoneType::ZONE_REVERB: return "reverb";
+        case ZoneType::ZONE_GAMEPLAY_SOUND: return "sound";
+        default: return "water";
+    }
+}
+
 static void AppendOzoneEntities(std::wofstream& output) {
     auto& pawns = PawnSystem::Instance();
     for (const auto& start : pawns.GetPlayerStarts())
@@ -697,10 +785,35 @@ static void AppendOzoneEntities(std::wofstream& output) {
                << pawn.position.x << L":" << pawn.position.y << L":" << pawn.position.z << L":\n";
     }
     for (const auto& zone : pawns.GetZones())
-        output << L"ZoneInfo:" << (int)zone.zoneType << L":"
+        output << L"ZoneInfo:" << WDLZoneTypeName(zone.zoneType) << L":"
                << zone.bounds.min.x << L":" << zone.bounds.min.y << L":" << zone.bounds.min.z << L":"
                << zone.bounds.max.x << L":" << zone.bounds.max.y << L":" << zone.bounds.max.z << L":"
                << zone.intensity << L":\n";
+    for (const auto& portal : pawns.GetPortals())
+        output << L"Portal:" << std::wstring(portal.targetWorld.begin(), portal.targetWorld.end()) << L":"
+               << portal.bounds.min.x << L":" << portal.bounds.min.y << L":" << portal.bounds.min.z << L":"
+               << portal.bounds.max.x << L":" << portal.bounds.max.y << L":" << portal.bounds.max.z << L":"
+               << portal.targetSpawn.x << L":" << portal.targetSpawn.y << L":" << portal.targetSpawn.z << L":"
+               << (portal.bidirectional ? 1 : 0) << L":\n";
+
+    // Level metadata — only written when non-default to keep files clean
+    LevelMetadata meta = GetLevelMetadata();
+    bool metaNonDefault = meta.gameType != GameType::SINGLEPLAYER ||
+                          meta.maxPlayers != 8 || meta.respawnTime != 5.0f ||
+                          meta.timeLimitEnabled || meta.scoreLimit != 50 ||
+                          meta.friendlyFire || !meta.skyboxTexturePath.empty();
+    if (metaNonDefault) {
+        output << L"LevelInfo:" << (int)meta.gameType << L":" << meta.maxPlayers << L":"
+               << meta.respawnTime << L":" << (meta.timeLimitEnabled ? 1 : 0) << L":"
+               << meta.timeLimitMinutes << L":" << meta.scoreLimit << L":"
+               << (meta.friendlyFire ? 1 : 0) << L":"
+               << std::wstring(meta.skyboxTexturePath.begin(), meta.skyboxTexturePath.end()) << L":\n";
+    }
+    if (meta.particleType != ParticleType::NONE) {
+        output << L"Particles:" << (int)meta.particleType << L":" << meta.particleDensity << L":"
+               << meta.particleSpeed << L":" << meta.particleColorR << L":" << meta.particleColorG << L":"
+               << meta.particleColorB << L":" << meta.particleWindX << L":" << meta.particleWindZ << L":\n";
+    }
 }
 
 static void ExportToOzone(std::ostream& output) {
@@ -709,15 +822,16 @@ static void ExportToOzone(std::ostream& output) {
     output << "# Format: ozone v1.0\n\n";
 
     // Export collision volumes as box primitives
+    // (OZONE is Z-up: file y/z swapped vs engine coords)
     auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
     for (size_t i = 0; i < vols.size(); i++) {
         auto& v = vols[i];
         Vector3 center = {(v.aabb.min.x + v.aabb.max.x) * 0.5f,
-                          (v.aabb.min.y + v.aabb.max.y) * 0.5f,
-                          (v.aabb.min.z + v.aabb.max.z) * 0.5f};
+                          (v.aabb.min.z + v.aabb.max.z) * 0.5f,
+                          (v.aabb.min.y + v.aabb.max.y) * 0.5f};
         float w = v.aabb.max.x - v.aabb.min.x;
-        float h = v.aabb.max.y - v.aabb.min.y;
-        float d = v.aabb.max.z - v.aabb.min.z;
+        float h = v.aabb.max.z - v.aabb.min.z;
+        float d = v.aabb.max.y - v.aabb.min.y;
         if (w < 0.01f) w = 1.0f;
         if (h < 0.01f) h = 1.0f;
         if (d < 0.01f) d = 1.0f;
@@ -727,25 +841,34 @@ static void ExportToOzone(std::ostream& output) {
                << " " << w << " " << h << " " << d << " 0\n";
     }
 
-    // Heightmap
+    // Heightmap (position is Z-up in OZONE; size axes are used as-is)
     if (WDLModels.HeightMapReady) {
+        Vector3 hp = {WDLModels.HeightMapPosition.x,
+                      WDLModels.HeightMapPosition.z,
+                      WDLModels.HeightMapPosition.y};
         output << "heightmap Models/HeightMap.png Models/HeightMapTexture.png "
-               << WDLModels.HeightMapPosition.x << " " << WDLModels.HeightMapPosition.y << " " << WDLModels.HeightMapPosition.z
+               << hp.x << " " << hp.y << " " << hp.z
                << " " << WDLModels.HeightMapScale
                << " " << WDLModels.HeightMapSize.x << " " << WDLModels.HeightMapSize.y << " " << WDLModels.HeightMapSize.z << "\n";
     }
 
     output << "\n# Entities\n";
 
-    // Player starts
+    // OZONE files are Z-up ("x=east, y=north, z=up"); loaders convert to
+    // engine Y-up by swapping y/z. Swap here so round-trips are lossless.
     auto& pawns = PawnSystem::Instance();
+    auto zup = [](const Vector3& v) { return Vector3{v.x, v.z, v.y}; };
+
+    // Player starts
     for (auto& start : pawns.GetPlayerStarts()) {
-        output << "playerstart " << start.position.x << " " << start.position.y << " " << start.position.z << " " << start.yaw << "\n";
+        Vector3 p = zup(start.position);
+        output << "playerstart " << p.x << " " << p.y << " " << p.z << " " << start.yaw << "\n";
     }
 
     // Pickups
     for (auto& pickup : pawns.GetPickups()) {
-        output << "pickup " << pickup.typeName << " " << pickup.position.x << " " << pickup.position.y << " " << pickup.position.z;
+        Vector3 p = zup(pickup.position);
+        output << "pickup " << pickup.typeName << " " << p.x << " " << p.y << " " << p.z;
         if (pickup.respawnTime > 0.01f) output << " " << pickup.respawnTime;
         output << "\n";
     }
@@ -753,22 +876,31 @@ static void ExportToOzone(std::ostream& output) {
     // NPCs
     for (auto& pawn : pawns.GetPawns()) {
         if (!pawn.active || pawn.defName.empty()) continue;
-        output << "npc " << pawn.defName << " " << pawn.position.x << " " << pawn.position.y << " " << pawn.position.z << "\n";
+        Vector3 p = zup(pawn.position);
+        output << "npc " << pawn.defName << " " << p.x << " " << p.y << " " << p.z << "\n";
+    }
+
+    // Lights
+    for (auto& light : pawns.GetLights()) {
+        if (!light.active) continue;
+        Vector3 p = zup(light.position);
+        const char* type = (light.type == LitLightType::SPOT) ? "spot" :
+                           (light.type == LitLightType::DIRECTIONAL) ? "directional" : "point";
+        output << "light " << type << " " << p.x << " " << p.y << " " << p.z
+               << " " << light.color.r << " " << light.color.g << " " << light.color.b
+               << " " << light.intensity << " " << light.radius;
+        if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
+        output << "\n";
     }
 
     // Zone volumes
     for (auto& zone : pawns.GetZones()) {
-        const char* zt = "water";
-        switch (zone.zoneType) {
-            case ZoneType::ZONE_LADDER: zt = "ladder"; break;
-            case ZoneType::ZONE_SKY: zt = "sky"; break;
-            case ZoneType::ZONE_REVERB: zt = "reverb"; break;
-            case ZoneType::ZONE_GAMEPLAY_SOUND: zt = "sound"; break;
-            default: zt = "water"; break;
-        }
+        const char* zt = WDLZoneTypeName(zone.zoneType);
+        Vector3 mn = zup(zone.bounds.min);
+        Vector3 mx = zup(zone.bounds.max);
         output << "zone " << zt
-               << " " << zone.bounds.min.x << " " << zone.bounds.min.y << " " << zone.bounds.min.z
-               << " " << zone.bounds.max.x << " " << zone.bounds.max.y << " " << zone.bounds.max.z
+               << " " << std::min(mn.x, mx.x) << " " << std::min(mn.y, mx.y) << " " << std::min(mn.z, mx.z)
+               << " " << std::max(mn.x, mx.x) << " " << std::max(mn.y, mx.y) << " " << std::max(mn.z, mx.z)
                << " " << zone.intensity;
         // Export env overrides if any are set
         auto& eo = zone.envOverrides;
@@ -782,10 +914,43 @@ static void ExportToOzone(std::ostream& output) {
         output << "\n";
     }
 
+    // Portals (level connections)
+    for (auto& portal : pawns.GetPortals()) {
+        Vector3 mn = zup(portal.bounds.min);
+        Vector3 mx = zup(portal.bounds.max);
+        Vector3 sp = zup(portal.targetSpawn);
+        output << "portal " << portal.targetWorld
+               << " " << std::min(mn.x, mx.x) << " " << std::min(mn.y, mx.y) << " " << std::min(mn.z, mx.z)
+               << " " << std::max(mn.x, mx.x) << " " << std::max(mn.y, mx.y) << " " << std::max(mn.z, mx.z)
+               << " " << sp.x << " " << sp.y << " " << sp.z
+               << (portal.bidirectional ? " bidir" : "") << "\n";
+    }
+
     // Emitters
     for (auto& emitter : pawns.GetEmitters()) {
         const char* et = (emitter.type == EmitterType::SOUND) ? "sound" : "music";
-        output << "emitter " << et << " " << emitter.position.x << " " << emitter.position.y << " " << emitter.position.z << "\n";
+        Vector3 p = zup(emitter.position);
+        output << "emitter " << et << " " << p.x << " " << p.y << " " << p.z << "\n";
+    }
+
+    // Level metadata
+    {
+        LevelMetadata meta = GetLevelMetadata();
+        bool metaNonDefault = meta.gameType != GameType::SINGLEPLAYER ||
+                              meta.maxPlayers != 8 || meta.respawnTime != 5.0f ||
+                              meta.timeLimitEnabled || meta.scoreLimit != 50 ||
+                              meta.friendlyFire || !meta.skyboxTexturePath.empty();
+        if (metaNonDefault) {
+            output << "levelinfo " << (int)meta.gameType << " " << meta.maxPlayers << " "
+                   << meta.respawnTime << " " << (meta.timeLimitEnabled ? 1 : 0) << " "
+                   << meta.timeLimitMinutes << " " << meta.scoreLimit << " "
+                   << (meta.friendlyFire ? 1 : 0) << " " << meta.skyboxTexturePath << "\n";
+        }
+        if (meta.particleType != ParticleType::NONE) {
+            output << "particles " << (int)meta.particleType << " " << meta.particleDensity << " "
+                   << meta.particleSpeed << " " << meta.particleColorR << " " << meta.particleColorG << " "
+                   << meta.particleColorB << " " << meta.particleWindX << " " << meta.particleWindZ << "\n";
+        }
     }
 
     output << "\n# End of OZONE export\n";
@@ -859,6 +1024,11 @@ const char* WorldGraph_GetModelName(int index) {
 // Selection accessors for Win32 dialogs
 int Editor_GetSelectedType() { return (int)g_sel.type; }
 int Editor_GetSelectedIndex() { return g_sel.index; }
+std::string Editor_GetCurrentWorldName() {
+    if (g_documentPath.empty()) return "";
+    fs::path parent = g_documentPath.parent_path();
+    return parent.filename().string();
+}
 int Editor_GetCsgOperation() { return OmegaTechEditor.CSGOperation; }
 void Editor_SetCsgOperation(int op) { OmegaTechEditor.CSGOperation = op; }
 int Editor_GetPlaceMode() { return (int)g_placeMode; }
@@ -920,6 +1090,7 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_VIEW_LEFT:     { Vector3 c = OTEditor.MainCamera.target; SetViewPreset({c.x-80,c.y,c.z},c,{0,1,0}); } return 0;
             case IDM_VIEW_PERSPECTIVE: SetViewPerspective(); return 0;
             case IDM_WORLD_GRAPH:   ToggleWorldGraph(); return 0;
+            case IDM_LEVEL_LIST:    ShowLevelList(!g_editorPanels.showLevelList); RefreshLevelList(); return 0;
             case IDM_ABOUT:         MessageBoxA(NULL, "AngelEd v1.0\nOzWorld Editor\nBased on OmegaTech\nTribeWarez 2026", "About AngelEd", MB_OK | MB_ICONINFORMATION); return 0;
             // Context menu actions
             case IDM_PROPERTIES:    OpenPropertiesForSelection(); return 0;
@@ -968,6 +1139,7 @@ static void CreateEditorMenuBar() {
     AppendMenuA(hView, MF_STRING, IDM_HEIGHTMAP, "&Heightmap Editor\tH");
     AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
     AppendMenuA(hView, MF_STRING, IDM_WORLD_GRAPH, "&World Graph Explorer");
+    AppendMenuA(hView, MF_STRING, IDM_LEVEL_LIST, "Level &List / Campaign");
     AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hView, "&View");
 
     HMENU hCam = CreatePopupMenu();
@@ -1396,6 +1568,36 @@ int main(int argc, char **argv){
                     SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
                 }
             }
+            // GameType / skybox / particles -> level metadata (persisted on save)
+            if (zp.applyGameType || zp.applySkybox || zp.applyParticles) {
+                LevelMetadata meta = GetLevelMetadata();
+                if (zp.applyGameType) {
+                    meta.gameType = zp.gameType;
+                    meta.maxPlayers = zp.maxPlayers;
+                    meta.respawnTime = zp.respawnTime;
+                    meta.timeLimitEnabled = zp.timeLimitEnabled;
+                    meta.timeLimitMinutes = zp.timeLimitMinutes;
+                    meta.scoreLimit = zp.scoreLimit;
+                    meta.friendlyFire = zp.friendlyFire;
+                    EditorLog("Level GameType applied: mode=%d maxPlayers=%d", (int)meta.gameType, meta.maxPlayers);
+                }
+                if (zp.applySkybox) {
+                    meta.skyboxTexturePath = zp.skyboxTexturePath;
+                    EditorLog("Level skybox applied: %s", meta.skyboxTexturePath.c_str());
+                }
+                if (zp.applyParticles) {
+                    meta.particleType = zp.particleType;
+                    meta.particleDensity = zp.particleDensity;
+                    meta.particleSpeed = zp.particleSpeed;
+                    meta.particleColorR = zp.particleColorR;
+                    meta.particleColorG = zp.particleColorG;
+                    meta.particleColorB = zp.particleColorB;
+                    meta.particleWindX = zp.particleWindX;
+                    meta.particleWindZ = zp.particleWindZ;
+                    EditorLog("Level particles applied: type=%d density=%.0f", (int)meta.particleType, meta.particleDensity);
+                }
+                SetLevelMetadata(meta);
+            }
             ClearZoneApplyFlags();
         }
 
@@ -1544,12 +1746,30 @@ int main(int argc, char **argv){
             } else if (g_placeMode == PlaceMode::NODE) {
                 Color c = BLUE;
                 switch (OmegaTechEditor.ActiveNodeType) {
-                    case EditorNodeType::SPAWN: c = BLUE;    break;
-                    case EditorNodeType::NPC:   c = MAGENTA; break;
-                    case EditorNodeType::LIGHT: c = YELLOW;  break;
+                    case EditorNodeType::SPAWN:  c = BLUE;    break;
+                    case EditorNodeType::NPC:    c = MAGENTA; break;
+                    case EditorNodeType::LIGHT:  c = YELLOW;  break;
+                    case EditorNodeType::ZONE:   c = SKYBLUE; break;
+                    case EditorNodeType::PORTAL: c = PURPLE;  break;
                 }
-                DrawCube({px, py, pz}, 0.5f, 0.2f, 0.5f, c);
-                DrawCubeWires({px, py, pz}, 0.5f, 0.2f, 0.5f, (Color){c.r,c.g,c.b,80});
+                if (OmegaTechEditor.ActiveNodeType == EditorNodeType::PORTAL) {
+                    // Portal preview: full volume wireframe + swirl marker
+                    float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
+                    float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
+                    float hd = fmaxf(OmegaTechEditor.L, 1) * 0.5f;
+                    DrawCubeWires({px, py, pz}, hw * 2, hh * 2, hd * 2, c);
+                    DrawCube({px, py, pz}, hw * 2, hh * 2, hd * 2, (Color){c.r,c.g,c.b,40});
+                    DrawSphere({px, py + hh, pz}, 0.3f, c);
+                } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::ZONE) {
+                    float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
+                    float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
+                    float hd = fmaxf(OmegaTechEditor.L, 1) * 0.5f;
+                    DrawCubeWires({px, py, pz}, hw * 2, hh * 2, hd * 2, c);
+                    DrawCube({px, py, pz}, hw * 2, hh * 2, hd * 2, (Color){c.r,c.g,c.b,30});
+                } else {
+                    DrawCube({px, py, pz}, 0.5f, 0.2f, 0.5f, c);
+                    DrawCubeWires({px, py, pz}, 0.5f, 0.2f, 0.5f, (Color){c.r,c.g,c.b,80});
+                }
             }
 
             // Axis gizmo
@@ -1631,6 +1851,17 @@ int main(int argc, char **argv){
                     for (auto& s : starts) {
                         if ((int)s.id == idx) { s.position = newPos; break; }
                     }
+                } else if (g_sel.type == SelType::PORTAL) {
+                    auto& portals = PawnSystem::Instance().GetPortals();
+                    if (idx >= 0 && idx < (int)portals.size()) {
+                        auto& p = portals[idx];
+                        Vector3 center = {(p.bounds.min.x + p.bounds.max.x) * 0.5f,
+                                          (p.bounds.min.y + p.bounds.max.y) * 0.5f,
+                                          (p.bounds.min.z + p.bounds.max.z) * 0.5f};
+                        Vector3 delta = {newPos.x - center.x, newPos.y - center.y, newPos.z - center.z};
+                        p.bounds.min.x += delta.x; p.bounds.min.y += delta.y; p.bounds.min.z += delta.z;
+                        p.bounds.max.x += delta.x; p.bounds.max.y += delta.y; p.bounds.max.z += delta.z;
+                    }
                 }
                 // Update selection stored position
                 g_sel.pos = newPos;
@@ -1673,17 +1904,57 @@ int main(int argc, char **argv){
                         to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
                         to_wstring(OmegaTechEditor.R) + L":";
                 } else if (g_placeMode == PlaceMode::NODE) {
-                    wstring nodePrefix;
-                    switch (OmegaTechEditor.ActiveNodeType) {
-                        case EditorNodeType::SPAWN: nodePrefix = L"Spawn:";   break;
-                        case EditorNodeType::NPC:   nodePrefix = L"NPC:";     break;
-                        case EditorNodeType::LIGHT: nodePrefix = L"Light:";   break;
-                        case EditorNodeType::ZONE: nodePrefix = L"ZoneInfo:";   break;
+                    // Unified WDL node formats:
+                    //   ZoneInfo:type:minX:minY:minZ:maxX:maxY:maxZ:intensity:
+                    //   Portal:targetWorld:minX:minY:minZ:maxX:maxY:maxZ:spawnX:spawnY:spawnZ:bidir:
+                    if (OmegaTechEditor.ActiveNodeType == EditorNodeType::ZONE) {
+                        float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
+                        float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
+                        float hd = fmaxf(OmegaTechEditor.L, 1) * 0.5f;
+                        float minX = OmegaTechEditor.X - hw, maxX = OmegaTechEditor.X + hw;
+                        float minY = OmegaTechEditor.Y - hh, maxY = OmegaTechEditor.Y + hh;
+                        float minZ = OmegaTechEditor.Z - hd, maxZ = OmegaTechEditor.Z + hd;
+                        WDLCommand += L"ZoneInfo:water:" +
+                            to_wstring(minX) + L":" + to_wstring(minY) + L":" + to_wstring(minZ) + L":" +
+                            to_wstring(maxX) + L":" + to_wstring(maxY) + L":" + to_wstring(maxZ) + L":1:";
+                        ZoneVolumeNode node;
+                        node.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
+                        node.zoneType = ZoneType::ZONE_WATER;
+                        node.intensity = 1.0f;
+                        PawnSystem::Instance().AddZone(node);
+                    } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::PORTAL) {
+                        float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
+                        float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
+                        float hd = fmaxf(OmegaTechEditor.L, 1) * 0.5f;
+                        float minX = OmegaTechEditor.X - hw, maxX = OmegaTechEditor.X + hw;
+                        float minY = OmegaTechEditor.Y - hh, maxY = OmegaTechEditor.Y + hh;
+                        float minZ = OmegaTechEditor.Z - hd, maxZ = OmegaTechEditor.Z + hd;
+                        std::string target(g_editorPanels.portalTargetWorld);
+                        if (target.empty()) target = "EngineTest";
+                        wstring wTarget(target.begin(), target.end());
+                        WDLCommand += L"Portal:" + wTarget + L":" +
+                            to_wstring(minX) + L":" + to_wstring(minY) + L":" + to_wstring(minZ) + L":" +
+                            to_wstring(maxX) + L":" + to_wstring(maxY) + L":" + to_wstring(maxZ) + L":0:20:0:1:";
+                        ZonePortal portal;
+                        portal.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
+                        portal.targetWorld = target;
+                        portal.targetSpawn = {0, 20, 0};
+                        portal.bidirectional = true;
+                        PawnSystem::Instance().AddPortal(portal);
+                        RefreshLevelList();
+                    } else {
+                        wstring nodePrefix;
+                        switch (OmegaTechEditor.ActiveNodeType) {
+                            case EditorNodeType::SPAWN: nodePrefix = L"Spawn:";   break;
+                            case EditorNodeType::NPC:   nodePrefix = L"NPC:";     break;
+                            case EditorNodeType::LIGHT: nodePrefix = L"Light:";   break;
+                            default: nodePrefix = L"Spawn:"; break;
+                        }
+                        // Node format: type:subtype:x:y:z:0:0:
+                        WDLCommand += nodePrefix + to_wstring((int)OmegaTechEditor.ActiveNodeType) + L":" +
+                            to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
+                            to_wstring(OmegaTechEditor.Z) + L":0:0:";
                     }
-                    // Node format: type:subtype:x:y:z:0:0:
-                    WDLCommand += nodePrefix + to_wstring((int)OmegaTechEditor.ActiveNodeType) + L":" +
-                        to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                        to_wstring(OmegaTechEditor.Z) + L":0:0:";
                 }
 
                 {
@@ -1785,6 +2056,10 @@ int main(int argc, char **argv){
                         return {{s.position.x-0.6f,s.position.y-0.5f,s.position.z-0.6f},
                                 {s.position.x+0.6f,s.position.y+1.2f,s.position.z+0.6f}};
                 }
+            } else if (sel.type == SelType::PORTAL) {
+                auto& portals = PawnSystem::Instance().GetPortals();
+                if (sel.index >= 0 && sel.index < (int)portals.size())
+                    return portals[sel.index].bounds;
             } else if (sel.type == SelType::MODEL && sel.index >= 0 && sel.index < CachedModelCounter) {
                 int mid = CachedModels[sel.index].ModelId;
                 LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
@@ -2120,6 +2395,16 @@ int main(int argc, char **argv){
                         break;
                     }
                 }
+            } else if (tgtType == SelType::PORTAL) {
+                auto& portals = PawnSystem::Instance().GetPortals();
+                if (tgtIdx >= 0 && tgtIdx < (int)portals.size()) {
+                    auto& p = portals[tgtIdx];
+                    float szx = g_editorPanels.propSizeX;
+                    float szy = g_editorPanels.propSizeY;
+                    float szz = g_editorPanels.propSizeZ;
+                    p.bounds.min = {px - szx*0.5f, py - szy*0.5f, pz - szz*0.5f};
+                    p.bounds.max = {px + szx*0.5f, py + szy*0.5f, pz + szz*0.5f};
+                }
             }
             EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), tgtIdx);
             g_editorPanels.actionApplyProperties = false;
@@ -2406,6 +2691,89 @@ int main(int argc, char **argv){
             Vector3 pos = OTEditor.MainCamera.position;
             PawnSystem::Instance().Spawn(pos, g_editorPanels.actionSpawnPawn.c_str());
             g_editorPanels.actionSpawnPawn.clear();
+        }
+
+        // Portal editing actions (Portal tab in Zone Properties)
+        if (g_editorPanels.actionApplyPortal >= 0) {
+            int idx = g_editorPanels.actionApplyPortal;
+            auto& portals = PawnSystem::Instance().GetPortals();
+            if (idx >= 0 && idx < (int)portals.size()) {
+                PortalEditValues pe = GetPortalEditValues();
+                ZonePortal& p = portals[idx];
+                p.targetWorld = pe.targetWorld;
+                p.targetSpawn = {pe.spawnX, pe.spawnY, pe.spawnZ};
+                p.bidirectional = pe.bidirectional;
+                g_sel.name = pe.targetWorld;
+                EditorLog("Portal %d updated (target=%s spawn=%.1f,%.1f,%.1f bidir=%d)",
+                          idx, pe.targetWorld.c_str(), pe.spawnX, pe.spawnY, pe.spawnZ,
+                          pe.bidirectional ? 1 : 0);
+                RefreshLevelList();
+            }
+            g_editorPanels.actionApplyPortal = -1;
+        }
+        if (g_editorPanels.actionDeletePortal >= 0) {
+            int idx = g_editorPanels.actionDeletePortal;
+            PawnSystem::Instance().RemovePortal(idx);
+            EditorLog("Portal %d deleted", idx);
+            RefreshPortalList();
+            RefreshLevelList();
+            g_editorPanels.actionDeletePortal = -1;
+        }
+        if (g_editorPanels.actionSelectPortal >= 0) {
+            int idx = g_editorPanels.actionSelectPortal;
+            auto& portals = PawnSystem::Instance().GetPortals();
+            if (idx >= 0 && idx < (int)portals.size()) {
+                auto& p = portals[idx];
+                g_sel = { SelType::PORTAL, idx, p.targetWorld, {
+                    (p.bounds.min.x + p.bounds.max.x) * 0.5f,
+                    (p.bounds.min.y + p.bounds.max.y) * 0.5f,
+                    (p.bounds.min.z + p.bounds.max.z) * 0.5f }};
+                SnapGizmoToSelection(g_sel);
+                OmegaTechEditor.DrawModel = true;
+            }
+            g_editorPanels.actionSelectPortal = -1;
+        }
+
+        // LevelList / Campaign actions
+        if (!g_editorPanels.actionLevelListOpen.empty()) {
+            std::string worldName = g_editorPanels.actionLevelListOpen;
+            g_editorPanels.actionLevelListOpen.clear();
+            fs::path wdl = fs::path("GameData/Worlds") / worldName / "World.wdl";
+            fs::path ozone = fs::path("GameData/Worlds") / worldName / "World.ozone";
+            if (!fs::exists(wdl)) wdl = fs::path("../GameData/Worlds") / worldName / "World.wdl";
+            if (!fs::exists(ozone)) ozone = fs::path("../GameData/Worlds") / worldName / "World.ozone";
+            fs::path target = fs::exists(wdl) ? wdl : ozone;
+            if (fs::exists(target)) {
+                g_pendingOpenPath = target;
+                EditorLog("LevelList: opening world '%s'", worldName.c_str());
+            } else {
+                EditorLog("LevelList: world '%s' not found", worldName.c_str());
+            }
+        }
+        if (!g_editorPanels.actionLevelListLink.empty()) {
+            std::string target = g_editorPanels.actionLevelListLink;
+            g_editorPanels.actionLevelListLink.clear();
+            // Create a portal in front of the camera linking to the target world
+            Vector3 pos = OTEditor.MainCamera.target;
+            ZonePortal portal;
+            portal.bounds = {{pos.x - 2, pos.y - 2, pos.z - 2},
+                             {pos.x + 2, pos.y + 2, pos.z + 2}};
+            portal.targetWorld = target;
+            portal.targetSpawn = {0, 20, 0};
+            portal.bidirectional = true;
+            PawnSystem::Instance().AddPortal(portal);
+            // Persist into WDL text immediately so Save picks it up
+            std::wstring cmd = L"Portal:" + std::wstring(target.begin(), target.end()) +
+                L":" + to_wstring(portal.bounds.min.x) + L":" + to_wstring(portal.bounds.min.y) + L":" +
+                to_wstring(portal.bounds.min.z) + L":" + to_wstring(portal.bounds.max.x) + L":" +
+                to_wstring(portal.bounds.max.y) + L":" + to_wstring(portal.bounds.max.z) +
+                L":0:20:0:1:";
+            OTEditor.WorldData += cmd;
+            CacheWDL();
+            g_editorPanels.portalTargetWorld = target;
+            RefreshPortalList();
+            RefreshLevelList();
+            EditorLog("Created portal link to '%s' at camera target", target.c_str());
         }
 
         // Mode switching

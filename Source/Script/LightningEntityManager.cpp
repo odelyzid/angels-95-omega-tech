@@ -39,6 +39,10 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         // Run on_swing action
         ent->ctx.RunAction("on_swing", 30);
 
+        // Honor script-set cooldown override (set_cooldown N)
+        float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+        if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
+
 #ifndef OMEGA_TEST_ENV
         // Forward range check against PawnSystem NPCs (single-player)
         const auto& pawns = PawnSystem::Instance().GetPawns();
@@ -80,6 +84,8 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             ent->cooldownRemaining = reloadTime;
             ent->runtimeStats["ammo"] = magazine;
             ent->ctx.RunAction("on_reload", 30);
+            float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+            if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
             return -1;
         }
         ammoIt->second -= 1.0f;
@@ -89,6 +95,10 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
 
     // Trigger on_fire script action if defined
     ent->ctx.RunAction("on_fire", 30);
+
+    // Honor script-set cooldown override (set_cooldown N)
+    float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+    if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
 
 #ifndef OMEGA_TEST_ENV
     for (int i = 0; i < projectileCount; i++) {
@@ -155,6 +165,8 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     ent->runtimeStats["ammo"] = magazine;
 
     ent->ctx.RunAction("on_reload", 30);
+    float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+    if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
     return true;
 }
 
@@ -179,6 +191,8 @@ void LightningEntityManager::Init() {
     m_pendingFog = false;
     m_pendingSkybox.clear();
     m_pendingAmbient = false;
+    m_pendingMessage.clear();
+    m_playerHurt = false;
 
     // Auto-spawn player entity
     int playerIdx = Spawn("Player");
@@ -197,6 +211,11 @@ void LightningEntityManager::Init() {
             p->runtimeStats["xp"] = (float)p->def->defaultXP;
             p->runtimeStats["xp_to_next"] = (float)p->def->defaultXPToNext;
         }
+        // Bind stat resolver so scripts can read $health/$mana/etc.
+        auto& playerCtx = m_instances[m_playerEntityIndex].ctx;
+        playerCtx.SetStatResolver([this](const std::string& name) -> float {
+            return ResolveScriptStat(name);
+        });
         OZ_INFO("LightningEntityManager: player entity spawned at idx %d", playerIdx);
     } else {
         OZ_WARN("LightningEntityManager: could not spawn player entity");
@@ -213,53 +232,91 @@ void LightningEntityManager::Update(float dt) {
     for (auto& inst : m_instances) {
         if (inst.def == nullptr) continue;
         if (inst.cooldownRemaining > 0) inst.cooldownRemaining -= dt;
+
+        // Per-frame on_tick hook (only for defs that define it)
+        if (inst.ctx.FindJumpLabel("on_tick") >= 0) {
+            inst.ctx.RunAction("on_tick", 30);
+            ApplyEntityScriptEffects(inst);
+        }
+
         // Tick instance script context for active behaviors
         if (inst.ctx.HasMore()) {
             // Run up to 10 instructions per frame to avoid stalls
             for (int step = 0; step < 10 && inst.ctx.HasMore(); step++)
                 inst.ctx.ExecuteNext();
 
-            // Check for pending side-effects after each tick batch
-            std::string sound = inst.ctx.PopPendingSound();
-            if (!sound.empty()) {
-                if (CacheSound(sound) >= 0) {
-                    auto it = m_soundCache.find(sound);
-                    if (it != m_soundCache.end() && it->second.sound.frameCount > 0)
-                        PlaySound(it->second.sound);
-                }
-            }
-
-            float fr=0, fg=0, fb=0, fd=0;
-            if (inst.ctx.PopPendingFog(fr, fg, fb, fd)) {
-                m_pendingFog = true;
-                m_fogR = fr; m_fogG = fg; m_fogB = fb; m_fogDensity = fd;
-            }
-
-            std::string sky = inst.ctx.PopPendingSkybox();
-            if (!sky.empty()) {
-                m_pendingSkybox = sky;
-            }
-
-            float ar=0, ag=0, ab=0;
-            if (inst.ctx.PopPendingAmbient(ar, ag, ab)) {
-                m_pendingAmbient = true;
-                m_ambientR = ar; m_ambientG = ag; m_ambientB = ab;
-            }
-
-            // Process pending pawn spawn from spawn_pawn opcode
-#ifndef OMEGA_TEST_ENV
-            auto pawnReq = inst.ctx.PopPendingPawnSpawn();
-            if (pawnReq.valid && !pawnReq.name.empty()) {
-                PawnSystem::Instance().Spawn(
-                    {pawnReq.x, pawnReq.y, pawnReq.z},
-                    pawnReq.name.c_str());
-            }
-#endif
+            ApplyEntityScriptEffects(inst);
         }
     }
 
     // Clean up finished one-shot sounds
     PruneSoundCache();
+}
+
+// ---------------------------------------------------------------------------
+// ApplyEntityScriptEffects — drain one instance's queued side-effects into the
+// host-facing pending state (sound/fog/skybox/ambient/msg/stat ops/pickup spawn)
+// ---------------------------------------------------------------------------
+void LightningEntityManager::ApplyEntityScriptEffects(EntityInstance& inst) {
+    if (!inst.def) return;
+
+    std::string sound = inst.ctx.PopPendingSound();
+    if (!sound.empty()) {
+        if (CacheSound(sound) >= 0) {
+            auto it = m_soundCache.find(sound);
+            if (it != m_soundCache.end() && it->second.sound.frameCount > 0)
+                PlaySound(it->second.sound);
+        }
+    }
+
+    float fr=0, fg=0, fb=0, fd=0;
+    if (inst.ctx.PopPendingFog(fr, fg, fb, fd)) {
+        m_pendingFog = true;
+        m_fogR = fr; m_fogG = fg; m_fogB = fb; m_fogDensity = fd;
+    }
+
+    std::string sky = inst.ctx.PopPendingSkybox();
+    if (!sky.empty()) {
+        m_pendingSkybox = sky;
+    }
+
+    float ar=0, ag=0, ab=0;
+    if (inst.ctx.PopPendingAmbient(ar, ag, ab)) {
+        m_pendingAmbient = true;
+        m_ambientR = ar; m_ambientG = ag; m_ambientB = ab;
+    }
+
+    // HUD message (msg opcode)
+    std::string msg = inst.ctx.PopPendingMessage();
+    if (!msg.empty()) m_pendingMessage = msg;
+
+    // Deferred player stat writes (heal/damage/playerstat opcodes)
+    auto statOps = inst.ctx.PopPlayerStatOps();
+    if (!statOps.empty()) ApplyPlayerStatOps(statOps);
+
+    // Scripted damage flash
+    if (inst.ctx.PopPendingHurt()) m_playerHurt = true;
+
+#ifndef OMEGA_TEST_ENV
+    // Process pending pawn spawn from spawn_pawn opcode
+    auto pawnReq = inst.ctx.PopPendingPawnSpawn();
+    if (pawnReq.valid && !pawnReq.name.empty()) {
+        PawnSystem::Instance().Spawn(
+            {pawnReq.x, pawnReq.y, pawnReq.z},
+            pawnReq.name.c_str());
+    }
+
+    // Process pending pickup spawn from spawn_pickup opcode
+    auto pickupReq = inst.ctx.PopPendingPickupSpawn();
+    if (pickupReq.valid && !pickupReq.name.empty()) {
+        PickupNode pn;
+        pn.position = {pickupReq.x, pickupReq.y, pickupReq.z};
+        pn.typeName = pickupReq.name;
+        pn.respawnTime = pickupReq.respawnTime;
+        pn.active = true;
+        PawnSystem::Instance().AddPickup(pn);
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +352,14 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
     // Initialize runtime stats from def
     for (auto& [k, v] : def->stats.floats)
         inst.runtimeStats[k] = v;
+
+    // Initialize ammo for weapons
+    if (def->type == EntityType::WEAPON) {
+        auto magIt = def->stats.floats.find("magazine");
+        if (magIt != def->stats.floats.end()) {
+            inst.runtimeStats["ammo"] = magIt->second;
+        }
+    }
 
     // Load instance script from action blocks
     // We build a script that can be triggered by action name
@@ -529,6 +594,18 @@ void LightningEntityManager::HandleInput() {
         if (sel && sel->def) {
             // Trigger on_use action
             sel->ctx.RunAction("on_use", 30);
+
+            // Apply side-effects immediately so consumables feel instant
+            ApplyEntityScriptEffects(*sel);
+
+            // 'consume' removes the item from the hotbar after use
+            if (sel->ctx.ConsumeRequested()) {
+                sel->ctx.ClearConsume();
+                int idx = m_hotbar[m_selectedSlot];
+                RunAction(sel, "on_unequip");
+                m_hotbar[m_selectedSlot] = -1;
+                Despawn(idx);
+            }
         }
     }
 }
@@ -592,8 +669,25 @@ void LightningEntityManager::TriggerZoneAction(const std::string& zoneName,
 void LightningEntityManager::TriggerZoneAction(const EntityDef* def,
                                                const std::string& actionName) {
     if (!def) return;
-    // Only allow zone-type entities to trigger via TrigherZoneAction
+    // Only allow zone-type entities to trigger via TriggerZoneAction
     if (def->type != EntityType::SKYZONE) return;
+    TriggerEntityAction(def, actionName);
+}
+
+// ---------------------------------------------------------------------------
+// TriggerEntityAction — run a named action on an instance of the given def
+// (creates a persistent instance on first use, like zone scripts)
+// ---------------------------------------------------------------------------
+void LightningEntityManager::TriggerEntityAction(const EntityDef* def,
+                                                 const std::string& actionName) {
+    if (!def) return;
+
+    // Skip if the def doesn't define this action (no instance needed)
+    bool hasAction = false;
+    for (const auto& a : def->actions) {
+        if (a.name == actionName) { hasAction = true; break; }
+    }
+    if (!hasAction) return;
 
     // Find existing instance or create one
     int instIdx = -1;
@@ -601,7 +695,6 @@ void LightningEntityManager::TriggerZoneAction(const EntityDef* def,
         if (m_instances[i].def == def) { instIdx = i; break; }
     }
     if (instIdx < 0) {
-        // Spawn a temporary instance for zone execution
         instIdx = Spawn(def);
     }
     if (instIdx < 0) return;
@@ -611,6 +704,17 @@ void LightningEntityManager::TriggerZoneAction(const EntityDef* def,
 
     // Jump to the action label and execute (stops at the next action label)
     inst->ctx.RunAction(actionName, 50);
+    ApplyEntityScriptEffects(*inst);
+}
+
+// ---------------------------------------------------------------------------
+// TriggerCollectAction — fire a pickup's on_collect script when collected
+// ---------------------------------------------------------------------------
+void LightningEntityManager::TriggerCollectAction(const std::string& defName) {
+    const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
+    if (!def) return;
+    if (def->type == EntityType::SKYZONE) return;
+    TriggerEntityAction(def, "on_collect");
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +798,58 @@ void LightningEntityManager::SetPlayerXP(int v) { SetPlayerStat("xp", (float)v);
 
 int LightningEntityManager::GetPlayerXPToNext() const { return (int)GetPlayerStat("xp_to_next", 100.0f); }
 void LightningEntityManager::SetPlayerXPToNext(int v) { SetPlayerStat("xp_to_next", (float)v); }
+
+// ---------------------------------------------------------------------------
+// ResolveScriptStat — external stat provider for script $name tokens.
+// Reads the player entity's runtimeStats first, then falls back to the
+// selected weapon/entity instance's runtimeStats (ammo etc.).
+// ---------------------------------------------------------------------------
+float LightningEntityManager::ResolveScriptStat(const std::string& name) const {
+    if (m_playerEntityIndex >= 0 && m_playerEntityIndex < (int)m_instances.size()) {
+        auto& rs = m_instances[m_playerEntityIndex].runtimeStats;
+        auto it = rs.find(name);
+        if (it != rs.end()) return it->second;
+    }
+    EntityInstance* sel = SelectedEntity();
+    if (sel && sel->def) {
+        auto it = sel->runtimeStats.find(name);
+        if (it != sel->runtimeStats.end()) return it->second;
+        auto dit = sel->def->stats.floats.find(name);
+        if (dit != sel->def->stats.floats.end()) return dit->second;
+    }
+    return 0.0f;
+}
+
+// ---------------------------------------------------------------------------
+// ApplyPlayerStatOps — apply deferred script stat writes to the player entity
+// ---------------------------------------------------------------------------
+void LightningEntityManager::ApplyPlayerStatOps(
+    const std::vector<LightningScriptContext::PlayerStatOp>& ops) {
+    for (const auto& op : ops) {
+        float cur = GetPlayerStat(op.name, 0.0f);
+        float nv = cur;
+        switch (op.op) {
+            case 0: nv = op.value; break;
+            case 1: nv = cur + op.value; break;
+            case 2: nv = cur - op.value; break;
+            case 3: nv = cur * op.value; break;
+            case 4: if (op.value != 0.0f) nv = cur / op.value; break;
+            default: break;
+        }
+        // Clamp the resource pools to sane ranges
+        if (op.name == "health") {
+            float maxh = GetPlayerStat("max_health", 100.0f);
+            nv = std::max(0.0f, std::min(nv, maxh));
+        } else if (op.name == "mana") {
+            float maxm = GetPlayerStat("max_mana", 100.0f);
+            nv = std::max(0.0f, std::min(nv, maxm));
+        } else if (op.name == "psychic_energy") {
+            float maxp = GetPlayerStat("max_psychic_energy", 100.0f);
+            nv = std::max(0.0f, std::min(nv, maxp));
+        }
+        SetPlayerStat(op.name, nv);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Serialization — compact hotbar + equipment state for TF.sav

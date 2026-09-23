@@ -79,6 +79,12 @@ public:
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
     void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
 
+    // --- Generic entity action (not SKYZONE-restricted; used for on_collect) ---
+    void TriggerEntityAction(const EntityDef* def, const std::string& actionName);
+
+    // --- Pickup collect hook (called by PawnSystem::UpdatePickups) ---
+    void TriggerCollectAction(const std::string& defName);
+
     // --- Execute a named action label on an instance ---
     void RunAction(EntityInstance* inst, const std::string& actionName);
 
@@ -104,6 +110,16 @@ public:
     void  SetPlayerXP(int v);
     int   GetPlayerXPToNext() const;
     void  SetPlayerXPToNext(int v);
+
+    // --- Script result routing (read by host after Update) ---
+    const std::string& PendingMessage() const { return m_pendingMessage; }
+    void ClearPendingMessage() { m_pendingMessage.clear(); }
+    bool PlayerHurt() const { return m_playerHurt; }
+    void ClearPlayerHurt() { m_playerHurt = false; }
+
+    // External stat provider for script $name tokens (player + selected weapon stats)
+    float ResolveScriptStat(const std::string& name) const;
+    void ApplyPlayerStatOps(const std::vector<LightningScriptContext::PlayerStatOp>& ops);
 
     // --- Serialization (for save/load) ---
     std::string SerializeState() const;  // compact string of hotbar + equipment state
@@ -153,6 +169,8 @@ private:
     std::string m_pendingSkybox;
     bool m_pendingAmbient = false;
     float m_ambientR = 0.0f, m_ambientG = 0.0f, m_ambientB = 0.0f;
+    std::string m_pendingMessage;
+    bool m_playerHurt = false;
 
     // Simple one-shot sound cache: path -> loaded Sound
     struct CachedSound { Sound sound; float timer = 0.0f; };
@@ -164,4 +182,7 @@ private:
     void UncacheResource(int idx);
     void UnloadAllResources();
     void PruneSoundCache();
+
+    // Drain an instance's pending script side-effects (sound/msg/stats/pickup spawn)
+    void ApplyEntityScriptEffects(EntityInstance& inst);
 };

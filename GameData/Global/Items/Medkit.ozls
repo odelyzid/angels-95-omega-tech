@@ -1,0 +1,16 @@
+entity "Medkit" : consumable {
+    icon = "GameData/Global/Items/HealthVial.png"
+    stats {
+        value = 50
+        respawn_time = 30.0
+        pickup_category = "consumable"
+    }
+    actions {
+        on_use {
+            playerstat health += 50
+            msg "You kneel and bind your wounds. +50 health."
+            play_sound "GameData/Global/Sounds/TalkingNoise.mp3"
+            consume
+        }
+    }
+}

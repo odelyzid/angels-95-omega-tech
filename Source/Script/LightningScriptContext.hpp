@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
+#include <functional>
 
 // LightningScriptContext — per-instance script execution engine
 // Refactored from Source/Parasite/ParasiteScript.hpp
@@ -22,6 +23,12 @@ public:
     // Set a debug tag (typically "entityName:instanceIdx" or "zone:name")
     void SetDebugTag(const std::string& tag) { m_debugTag = tag; }
     const std::string& GetDebugTag() const { return m_debugTag; }
+
+    // Optional external stat provider (host binds player runtimeStats here).
+    // Used to resolve $name tokens that aren't local variables.
+    void SetStatResolver(const std::function<float(const std::string&)>& resolver) {
+        m_statResolver = resolver;
+    }
 
     // Load script lines from a text buffer
     bool Load(const std::string& scriptText);
@@ -66,12 +73,36 @@ public:
         bool valid = false;
     };
 
+    // A deferred write to a host-owned stat (e.g. player runtimeStats).
+    // op: 0='=', 1='+=', 2='-=', 3='*=', 4='/='
+    struct PlayerStatOp {
+        std::string name;
+        int op = 1;
+        float value = 0.0f;
+    };
+
+    // Pending pickup spawn (spawn_pickup opcode).
+    struct PickupSpawnRequest {
+        std::string name;
+        float x = 0, y = 0, z = 0;
+        float respawnTime = 30.0f;
+        bool valid = false;
+    };
+
     // Pop pending side-effects (called by host after script execution)
     std::string PopPendingSound();              // returns __last_sound and clears it
     bool PopPendingFog(float& r, float& g, float& b, float& density);
     std::string PopPendingSkybox();             // returns __skybox name or empty
     bool PopPendingAmbient(float& r, float& g, float& b);
     PawnSpawnRequest PopPendingPawnSpawn();     // returns __pawn_name and position
+
+    // New side-effects (msg / player stats / consume / pickup spawn)
+    std::string PopPendingMessage();            // returns __last_msg and clears it
+    bool ConsumeRequested() const;              // true until ClearConsume()
+    void ClearConsume();
+    std::vector<PlayerStatOp> PopPlayerStatOps();  // drains queued stat writes
+    PickupSpawnRequest PopPendingPickupSpawn();    // returns __pickup_* data
+    bool PopPendingHurt();                         // returns true if a scripted damage flash was requested
 
 private:
     std::vector<std::string> m_lines;
@@ -82,6 +113,12 @@ private:
     std::unordered_map<std::string, float> m_floatVars;
     std::unordered_map<std::string, std::string> m_strVars;
     int m_flags[MAX_FLAGS] = {0};
+
+    // External stat provider (player runtimeStats), set by LEM
+    std::function<float(const std::string&)> m_statResolver;
+
+    // Deferred side-effect queues
+    std::vector<PlayerStatOp> m_pendingStatOps;
 
     // Jump labels: label_name → line_index
     std::unordered_map<std::string, int> m_jumpLabels;

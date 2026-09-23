@@ -27,6 +27,12 @@ char g_world_to_load[256] = "EngineTest";
 char g_world_dir_override[256] = "";
 bool g_skipMenu = false;
 
+// Portal transitions (campaign system) — set by the portal trigger in
+// UpdateEntities, consumed right after LoadWorld() repositions the player.
+bool g_portalTransitionPending = false;
+Vector3 g_portalSpawnPos = {0, 20, 0};
+float g_portalCooldown = 0.0f;
+
 int ScriptTimer = 0;
 
 // Cross-world state that must be reset on each LoadWorld()
@@ -37,6 +43,7 @@ Sound g_ambienceHandle = {0};
 std::string g_ambienceZoneName;
 bool g_wasInReverb = false;
 std::string g_activeEnvZone;
+Texture2D g_skySideTex = {0};   // optional horizon/side skybox variant
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -47,8 +54,10 @@ void SaveGame();
 void UpdateCustom();
 void CacheWDL();
 float SampleHeightmapGroundY(float px, float pz);
+void DrawRemotePlayers3D();
 
 #include "ParticleDemon/ParticleDemon.hpp"
+#include "Renderer/CombatFX.hpp"
 
 class EngineData
 {
@@ -72,6 +81,7 @@ public:
     Texture BtnClicked;
     ray_video_t HomeScreenVideo;
     Music HomeScreenMusic;
+    Model SkyboxFace[6];   // 0=top, 1=bottom, 2=+X, 3=-X, 4=+Z, 5=-Z
 
     bool FirstLoad = true;
 
@@ -218,32 +228,142 @@ void LoadEntitiesFromWDL()
             i += 5;
             continue;
         }
-        // ZoneInfo: "ZoneInfo:X:Y:Z:S:Rotation:W:H:L:TypeName"
+        // ZoneInfo — unified: "ZoneInfo:type:minX:minY:minZ:maxX:maxY:maxZ:intensity:"
+        // legacy fallback: "ZoneInfo:X:Y:Z:S:Rotation:W:H:L:TypeName"
         else if (Instruction.substr(0, 8) == L"ZoneInfo")
         {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            float w = ToFloat(WSplitValue(WData, i + 6));
-            float h = ToFloat(WSplitValue(WData, i + 7));
-            float l = ToFloat(WSplitValue(WData, i + 8));
-            string zoneTypeName;
-            if (Instruction.size() > 8)
-                zoneTypeName = string(Instruction.begin() + 8, Instruction.end());
-            else
-                zoneTypeName = string(WSplitValue(WData, i + 9).begin(), WSplitValue(WData, i + 9).end());
-            ZoneType zt = ZoneType::ZONE_WATER;
-            if (zoneTypeName == "Ladder")
-                zt = ZoneType::ZONE_LADDER;
-            else if (zoneTypeName == "Sky")
-                zt = ZoneType::ZONE_SKY;
-            else if (zoneTypeName == "Reverb")
-                zt = ZoneType::ZONE_REVERB;
             ZoneVolumeNode node;
-            node.bounds = {{x, y, z}, {w, h, l}};
-            node.zoneType = zt;
-            PawnSystem::Instance().AddZone(node);
-            i += 9;
+            wstring firstField = WSplitValue(WData, i + 1);
+            // Type embedded in the instruction token ("ZoneInfoLadder:...") = legacy format
+            bool legacy = Instruction.size() > 8;
+            if (!legacy)
+            {
+                try
+                {
+                    size_t parsed = 0;
+                    std::stof(firstField, &parsed);
+                    legacy = parsed == firstField.size(); // fully numeric -> legacy client format
+                }
+                catch (...) { legacy = false; }
+            }
+
+            if (!legacy)
+            {
+                // Unified parser format
+                string zoneTypeName(firstField.begin(), firstField.end());
+                float minX = ToFloat(WSplitValue(WData, i + 2));
+                float minY = ToFloat(WSplitValue(WData, i + 3));
+                float minZ = ToFloat(WSplitValue(WData, i + 4));
+                float maxX = ToFloat(WSplitValue(WData, i + 5));
+                float maxY = ToFloat(WSplitValue(WData, i + 6));
+                float maxZ = ToFloat(WSplitValue(WData, i + 7));
+                float intensity = ToFloat(WSplitValue(WData, i + 8));
+                if (intensity <= 0.0f) intensity = 1.0f;
+                ZoneType zt = ZoneType::ZONE_WATER;
+                if (zoneTypeName == "ladder" || zoneTypeName == "Ladder" || zoneTypeName == "1")
+                    zt = ZoneType::ZONE_LADDER;
+                else if (zoneTypeName == "sky" || zoneTypeName == "Sky" || zoneTypeName == "2")
+                    zt = ZoneType::ZONE_SKY;
+                else if (zoneTypeName == "reverb" || zoneTypeName == "Reverb" || zoneTypeName == "3")
+                    zt = ZoneType::ZONE_REVERB;
+                else if (zoneTypeName == "sound" || zoneTypeName == "Sound" || zoneTypeName == "4")
+                    zt = ZoneType::ZONE_GAMEPLAY_SOUND;
+                node.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
+                node.zoneType = zt;
+                node.intensity = intensity;
+                PawnSystem::Instance().AddZone(node);
+                i += 8;
+            }
+            else
+            {
+                // Legacy client format
+                float x = ToFloat(WSplitValue(WData, i + 1));
+                float y = ToFloat(WSplitValue(WData, i + 2));
+                float z = ToFloat(WSplitValue(WData, i + 3));
+                float w = ToFloat(WSplitValue(WData, i + 6));
+                float h = ToFloat(WSplitValue(WData, i + 7));
+                float l = ToFloat(WSplitValue(WData, i + 8));
+                string zoneTypeName;
+                if (Instruction.size() > 8)
+                    zoneTypeName = string(Instruction.begin() + 8, Instruction.end());
+                else
+                    zoneTypeName = string(WSplitValue(WData, i + 9).begin(), WSplitValue(WData, i + 9).end());
+                ZoneType zt = ZoneType::ZONE_WATER;
+                if (zoneTypeName == "Ladder")
+                    zt = ZoneType::ZONE_LADDER;
+                else if (zoneTypeName == "Sky")
+                    zt = ZoneType::ZONE_SKY;
+                else if (zoneTypeName == "Reverb")
+                    zt = ZoneType::ZONE_REVERB;
+                node.bounds = {{x, y, z}, {w, h, l}};
+                node.zoneType = zt;
+                PawnSystem::Instance().AddZone(node);
+                i += 9;
+            }
+            continue;
+        }
+        // Portal: "Portal:targetWorld:minX:minY:minZ:maxX:maxY:maxZ:[spawnX:spawnY:spawnZ:[bidir]]"
+        else if (Instruction.substr(0, 6) == L"Portal")
+        {
+            wstring wtgt = WSplitValue(WData, i + 1);
+            string targetWorld(wtgt.begin(), wtgt.end());
+            float minX = ToFloat(WSplitValue(WData, i + 2));
+            float minY = ToFloat(WSplitValue(WData, i + 3));
+            float minZ = ToFloat(WSplitValue(WData, i + 4));
+            float maxX = ToFloat(WSplitValue(WData, i + 5));
+            float maxY = ToFloat(WSplitValue(WData, i + 6));
+            float maxZ = ToFloat(WSplitValue(WData, i + 7));
+            ZonePortal portal;
+            portal.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
+            portal.targetWorld = targetWorld;
+            // Optional spawn point (defaults to volume center floor)
+            wstring sx = WSplitValue(WData, i + 8);
+            if (!sx.empty())
+            {
+                portal.targetSpawn = {ToFloat(sx),
+                                      ToFloat(WSplitValue(WData, i + 9)),
+                                      ToFloat(WSplitValue(WData, i + 10))};
+                wstring bidir = WSplitValue(WData, i + 11);
+                if (!bidir.empty())
+                    portal.bidirectional = ToFloat(bidir) != 0.0f;
+            }
+            else
+            {
+                portal.targetSpawn = {minX + (maxX - minX) * 0.5f, minY, minZ + (maxZ - minZ) * 0.5f};
+            }
+            PawnSystem::Instance().AddPortal(portal);
+            i += 11;
+            continue;
+        }
+        // LevelInfo: "LevelInfo:gameType:maxPlayers:respawnTime:timeLimitEnabled:timeLimitMinutes:scoreLimit:friendlyFire:skyboxPath:"
+        else if (Instruction.substr(0, 9) == L"LevelInfo")
+        {
+            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
+            s.gameType = (int)ToFloat(WSplitValue(WData, i + 1));
+            s.maxPlayers = (int)ToFloat(WSplitValue(WData, i + 2));
+            s.respawnTime = ToFloat(WSplitValue(WData, i + 3));
+            s.timeLimitEnabled = ToFloat(WSplitValue(WData, i + 4)) != 0.0f;
+            s.timeLimitMinutes = ToFloat(WSplitValue(WData, i + 5));
+            s.scoreLimit = (int)ToFloat(WSplitValue(WData, i + 6));
+            s.friendlyFire = ToFloat(WSplitValue(WData, i + 7)) != 0.0f;
+            wstring wsky = WSplitValue(WData, i + 8);
+            s.skyboxPath = string(wsky.begin(), wsky.end());
+            i += 8;
+            continue;
+        }
+        // Particles: "Particles:type:density:speed:r:g:b:windX:windZ:"
+        else if (Instruction.substr(0, 9) == L"Particles")
+        {
+            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
+            s.particleType = (int)ToFloat(WSplitValue(WData, i + 1));
+            s.particleDensity = ToFloat(WSplitValue(WData, i + 2));
+            s.particleSpeed = ToFloat(WSplitValue(WData, i + 3));
+            s.particleR = (int)ToFloat(WSplitValue(WData, i + 4));
+            s.particleG = (int)ToFloat(WSplitValue(WData, i + 5));
+            s.particleB = (int)ToFloat(WSplitValue(WData, i + 6));
+            s.particleWindX = ToFloat(WSplitValue(WData, i + 7));
+            s.particleWindZ = ToFloat(WSplitValue(WData, i + 8));
+            i += 8;
             continue;
         }
     }
@@ -405,8 +525,14 @@ auto LoadWorld()
         PawnSystem::Instance().ClearPlayerStarts();
         PawnSystem::Instance().ClearPickups();
         PawnSystem::Instance().ClearZones();
+        PawnSystem::Instance().ClearPortals();
         PawnSystem::Instance().ClearEmitters();
         PawnSystem::Instance().DespawnAll();
+        // Reset level metadata so stale settings never leak across worlds
+        PawnSystem::Instance().GetWorldInfo() = WorldInfo{};
+        ParticlesEnabled = false;
+        CombatFX::Instance().ClearAll();
+        if (g_skySideTex.id > 0) { UnloadTexture(g_skySideTex); g_skySideTex = {0}; }
 
         if (!isDirectWdl)
         {
@@ -420,6 +546,43 @@ auto LoadWorld()
         else
         {
             LoadEntitiesFromWDL();
+        }
+
+        // Apply level metadata (LevelInfo/Particles) after entities are loaded
+        {
+            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
+            if (!s.skyboxPath.empty())
+            {
+                Texture2D newSky = LoadTextureWithFallback(s.skyboxPath.c_str());
+                if (newSky.id > 0)
+                {
+                    if (WDLModels.Skybox.id > 0) UnloadTexture(WDLModels.Skybox);
+                    WDLModels.Skybox = newSky;
+                    OmegaTechData.SkyboxEnabled = true;
+                    OZ_INFO("LevelInfo: skybox '%s'", s.skyboxPath.c_str());
+                }
+                else
+                {
+                    OZ_WARN("LevelInfo: skybox '%s' not found", s.skyboxPath.c_str());
+                }
+            }
+            ParticlesEnabled = (s.particleType != 0);
+            if (ParticlesEnabled)
+                OZ_INFO("LevelInfo: particles type=%d density=%.0f", s.particleType, s.particleDensity);
+            if (!s.skyboxSidePath.empty())
+            {
+                Texture2D sideSky = LoadTextureWithFallback(s.skyboxSidePath.c_str());
+                if (sideSky.id > 0)
+                {
+                    if (g_skySideTex.id > 0) UnloadTexture(g_skySideTex);
+                    g_skySideTex = sideSky;
+                    OZ_INFO("LevelInfo: skybox sides '%s'", s.skyboxSidePath.c_str());
+                }
+                else
+                {
+                    OZ_WARN("LevelInfo: skybox sides '%s' not found", s.skyboxSidePath.c_str());
+                }
+            }
         }
 
         if (OmegaTechSoundData.MusicFound)
@@ -543,6 +706,25 @@ void OmegaTechInit()
 
     // Initialize engine billboard system
     EngineBillboard::Init();
+
+    // Initialize combat FX (procedural decal/particle textures)
+    CombatFX::Instance().Init();
+
+    // Initialize 3D skybox cube faces (6 planes with correct UV orientation per face)
+    const float skySize = 2000.0f;
+    for (int i = 0; i < 6; i++) {
+        Mesh plane = GenMeshPlane(skySize, skySize, 1, 1);
+        float* tc = (float*)plane.texcoords;
+        int vcount = plane.vertexCount;
+        if (tc) {
+            switch (i) {
+                case 0: for (int v = 0; v < vcount; v++) tc[v*2+1] = 1.0f - tc[v*2+1]; break;
+                case 2: for (int v = 0; v < vcount; v++) tc[v*2] = 1.0f - tc[v*2]; break;
+                case 5: for (int v = 0; v < vcount; v++) tc[v*2] = 1.0f - tc[v*2]; break;
+            }
+        }
+        OmegaTechData.SkyboxFace[i] = LoadModelFromMesh(plane);
+    }
 
     // Register pawn definitions from .cfg files (data-driven)
     {
@@ -1328,6 +1510,24 @@ void UpdateEntities()
     // Single-pass zone scan for player â€” replaces 4 separate CheckZoneCollision calls
     PawnSystem::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
 
+    // Portal trigger — level-to-level transitions (campaign system)
+    if (g_portalCooldown > 0.0f)
+        g_portalCooldown -= dt;
+    else
+    {
+        ZonePortal* portal = PawnSystem::Instance().CheckPortalCollision(playerPos, g_playerMovement.PlayerBounds);
+        if (portal && !SetSceneFlag)
+        {
+            OZ_INFO("Portal: entering level '%s'", portal->targetWorld.c_str());
+            strncpy(g_world_to_load, portal->targetWorld.c_str(), sizeof(g_world_to_load) - 1);
+            g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
+            g_portalSpawnPos = portal->targetSpawn;
+            g_portalTransitionPending = true;
+            SetSceneFlag = true;      // LoadWorld runs at end of frame
+            g_portalCooldown = 3.0f;  // latch so the trigger can't re-fire mid-transition
+        }
+    }
+
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
     PawnSystem::Instance().Update(playerPos, dt);
 
@@ -1357,7 +1557,6 @@ void UpdateEntities()
         {
             LightningEntityManager::Instance().SetPlayerHealth(std::max(0.0f, LightningEntityManager::Instance().GetPlayerHealth() - damage));
             g_damageCooldown = 1.0f;
-            OmegaTechTextSystem.Write(TextFormat("Took %.0f damage from enemy!", damage));
             if (OmegaTechData.PanicCounter != 240)
                 OmegaTechData.PanicCounter += 2;
             if (OmegaTechData.Ticker % 2 == 0)
@@ -1565,48 +1764,189 @@ void LoadSave()
     ExtraWDLInstructions = LoadFile("GameData/Saves/Script.sav");
 }
 
+// Sweep every active projectile one frame-step ahead and test against OZONE
+// brush collision volumes + heightmap terrain. On a hit the projectile is
+// deactivated and an impact burst + decal are spawned at the contact point.
+// Position integration itself stays in PawnSystem::UpdateProjectiles.
+static void SweepProjectilesVsWorld(float dt)
+{
+    auto& loader = OzoneLoader::Instance();
+    const auto& volumes = loader.GetCollisionVolumes();
+    bool hasTerrain = loader.HasHeightmap();
+    auto& projectiles = PawnSystem::Instance().GetProjectiles();
+
+    for (auto& p : projectiles) {
+        if (!p.active) continue;
+
+        Vector3 next = {p.position.x + p.velocity.x * dt,
+                        p.position.y + p.velocity.y * dt,
+                        p.position.z + p.velocity.z * dt};
+
+        float bestT = 1.0f;
+        Vector3 bestNormal = {0, 1, 0};
+        Vector3 hitPos = {0, 0, 0};
+        bool hit = false;
+        bool terrainHit = false;
+
+        for (const auto& cv : volumes) {
+            if (cv.isHeightmap) continue;
+            float t;
+            Vector3 n;
+            if (SegmentVsAABB(p.position, next, cv.aabb, t, n) && t < bestT) {
+                bestT = t;
+                bestNormal = n;
+                hit = true;
+            }
+        }
+
+        if (!hit && hasTerrain) {
+            float groundY = loader.SampleHeightmapY(next.x, next.z);
+            if (next.y <= groundY) {
+                hit = true;
+                terrainHit = true;
+                bestT = 1.0f;
+                bestNormal = {0, 1, 0};
+                hitPos = {next.x, groundY, next.z};
+            }
+        }
+
+        if (hit) {
+            if (!terrainHit)
+                hitPos = Vector3Lerp(p.position, next, bestT);
+            p.active = false;
+            CombatFX::Instance().SpawnImpact(hitPos, bestNormal,
+                                             Color{255, 180, 60, 255}, 12, 6.0f);
+            CombatFX::Instance().AddDecal(hitPos, bestNormal, 0.35f);
+        }
+    }
+}
+
 void DrawWorld()
 {
     BeginTextureMode(Target);
     ClearBackground(BLACK);
 
-    // Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
+// Detect sky zone BEFORE 3D mode begins (needed for sky camera setup)
     PawnSystem::Instance().UpdateSkyZone(
         OmegaTechData.MainCamera.position,
         g_playerMovement.PlayerBounds);
     bool inSkyZone = PawnSystem::Instance().IsInSkyZone();
 
-    // 2D skybox background â€” render the active zone's skybox texture or fallback
-    {
-        Texture2D skyTex = {0};
-        if (inSkyZone) {
-            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
-            if (sky && sky->skyboxTex.id > 0)
-                skyTex = sky->skyboxTex;
-            else if (WDLModels.Skybox.id > 0)
-                skyTex = WDLModels.Skybox;
-        } else if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
-            skyTex = WDLModels.Skybox;
-        }
-        if (skyTex.id > 0) {
-            float sw = (float)Target.texture.width;
-            float sh = (float)Target.texture.height;
-            float tx = (float)skyTex.width;
-            float ty = (float)skyTex.height;
-            float scale = (tx > 0 && ty > 0) ? fmaxf(sw / tx, sh / ty) : 1.0f;
-            DrawTexturePro(skyTex,
-                           (Rectangle){0, 0, tx, ty},
-                           (Rectangle){sw * 0.5f, sh * 0.5f, tx * scale, ty * scale},
-                           (Vector2){tx * scale * 0.5f, ty * scale * 0.5f}, 0, WHITE);
-        }
-    }
-
     BeginMode3D(OmegaTechData.MainCamera);
 
     // -----------------------------------------------------------------------
+    // 3D Skybox Cube — drawn first with depth-write disabled so it sits
+    // behind all world geometry. Top/bottom use the active skybox (cap),
+    // 4 sides use the side texture from LevelInfo (g_skySideTex).
+    // -----------------------------------------------------------------------
+    {
+        Texture2D capTex = {0};
+        if (inSkyZone) {
+            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
+            if (sky && sky->skyboxTex.id > 0)
+                capTex = sky->skyboxTex;
+            else if (WDLModels.Skybox.id > 0)
+                capTex = WDLModels.Skybox;
+        } else if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
+            capTex = WDLModels.Skybox;
+        }
+        Texture2D sideTex = g_skySideTex;
+
+        if (capTex.id > 0 || sideTex.id > 0) {
+            Vector3 camPos = OmegaTechData.MainCamera.position;
+            rlDisableDepthMask();
+            rlDisableBackfaceCulling();
+
+            // Top face (index 0) — at y=+1000, normal -Y (faces down)
+            {
+                Color fallback = {80, 120, 200, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x, camPos.y + 1000.0f, camPos.z);
+                rlRotatef(180.0f, 1.0f, 0.0f, 0.0f);
+                if (capTex.id > 0) {
+                    OmegaTechData.SkyboxFace[0].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
+                    DrawModel(OmegaTechData.SkyboxFace[0], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[0], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            // Bottom face (index 1) — at y=-1000, normal +Y (faces up)
+            {
+                Color fallback = {80, 120, 200, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x, camPos.y - 1000.0f, camPos.z);
+                if (capTex.id > 0) {
+                    OmegaTechData.SkyboxFace[1].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
+                    DrawModel(OmegaTechData.SkyboxFace[1], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[1], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            // +X face (index 2) — at x=+1000, normal -X (faces west)
+            {
+                Color fallback = {120, 180, 240, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x + 1000.0f, camPos.y, camPos.z);
+                rlRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+                if (sideTex.id > 0) {
+                    OmegaTechData.SkyboxFace[2].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
+                    DrawModel(OmegaTechData.SkyboxFace[2], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[2], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            // -X face (index 3) — at x=-1000, normal +X (faces east)
+            {
+                Color fallback = {120, 180, 240, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x - 1000.0f, camPos.y, camPos.z);
+                rlRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+                if (sideTex.id > 0) {
+                    OmegaTechData.SkyboxFace[3].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
+                    DrawModel(OmegaTechData.SkyboxFace[3], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[3], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            // +Z face (index 4) — at z=+1000, normal -Z (faces south)
+            {
+                Color fallback = {120, 180, 240, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x, camPos.y, camPos.z + 1000.0f);
+                rlRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+                if (sideTex.id > 0) {
+                    OmegaTechData.SkyboxFace[4].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
+                    DrawModel(OmegaTechData.SkyboxFace[4], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[4], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            // -Z face (index 5) — at z=-1000, normal +Z (faces north)
+            {
+                Color fallback = {120, 180, 240, 255};
+                rlPushMatrix();
+                rlTranslatef(camPos.x, camPos.y, camPos.z - 1000.0f);
+                if (sideTex.id > 0) {
+                    OmegaTechData.SkyboxFace[5].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
+                    DrawModel(OmegaTechData.SkyboxFace[5], {0,0,0}, 1.0f, WHITE);
+                } else {
+                    DrawModel(OmegaTechData.SkyboxFace[5], {0,0,0}, 1.0f, fallback);
+                }
+                rlPopMatrix();
+            }
+            rlEnableBackfaceCulling();
+            rlEnableDepthMask();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // SKY PASS — render SURF_FAKEBACKDROP brushes from the main camera with
-    // depth disabled so the skybox shows through behind them. Uses the main
-    // camera so perimeter backdrop walls have correct perspective/parallax.
+    // depth disabled so the skybox shows through behind them.
     // -----------------------------------------------------------------------
 if (inSkyZone)
     {
@@ -1840,9 +2180,15 @@ if (inSkyZone)
         // Player start markers
         for (auto &ps : PawnSystem::Instance().GetPlayerStarts())
             DrawCubeWires(ps.position, 0.5f, 1.0f, 0.5f, GREEN);
+    }
 
-        // Projectiles
+    // Combat FX — projectile rendering, impacts, decals, muzzle flash and
+    // remote players all live here so they render inside the 3D camera pass.
+    {
+        CombatFX::Instance().Update(GetFrameTime());
         PawnSystem::Instance().DrawProjectiles(OmegaTechData.MainCamera);
+        CombatFX::Instance().Draw3D(OmegaTechData.MainCamera);
+        DrawRemotePlayers3D();
     }
 
     if (Debug)
@@ -1852,8 +2198,9 @@ if (inSkyZone)
     else
     {
         UpdateEntities();
-        // Update projectiles (age, movement, gravity)
+        // Wall/terrain impact sweep, then update projectiles (age, movement, gravity)
         float dt = GetFrameTime();
+        SweepProjectilesVsWorld(dt);
         PawnSystem::Instance().UpdateProjectiles(dt);
     }
     if (ObjectCollision)
@@ -2031,6 +2378,20 @@ if (inSkyZone)
                 g_activeEnvZone.clear();
             }
         }
+    // Route script HUD messages (msg opcode) to the on-screen text system
+        if (!lem.PendingMessage().empty())
+        {
+            OmegaTechTextSystem.Write(lem.PendingMessage());
+            lem.ClearPendingMessage();
+        }
+
+        // Scripted damage flash (damage opcode)
+        if (lem.PlayerHurt())
+        {
+            lem.ClearPlayerHurt();
+            if (OmegaTechData.PanicCounter != 240)
+                OmegaTechData.PanicCounter += 2;
+        }
     }
 
     UpdateCustom();
@@ -2042,6 +2403,35 @@ if (inSkyZone)
     {
         OmegaTechData.LevelIndex = SetSceneId;
         LoadWorld();
+        if (g_portalTransitionPending)
+        {
+            // Arriving via portal: place player at the portal's target spawn,
+            // preserving view direction.
+            Vector3 oldPos = OmegaTechData.MainCamera.position;
+            OmegaTechData.MainCamera.position = g_portalSpawnPos;
+            // Never arrive under the terrain: lift the camera to the highest
+            // ground surface (WDL or OZONE heightmap) at this XZ when the raw
+            // spawn sits below grade.
+            float groundY = fmaxf(SampleHeightmapGroundY(g_portalSpawnPos.x, g_portalSpawnPos.z),
+                                  OzoneLoader::Instance().HasHeightmap()
+                                      ? OzoneLoader::Instance().SampleHeightmapY(g_portalSpawnPos.x, g_portalSpawnPos.z)
+                                      : -99999.0f);
+            if (groundY > -50000.0f &&
+                OmegaTechData.MainCamera.position.y < groundY + PLAYER_EYE_HEIGHT)
+                OmegaTechData.MainCamera.position.y = groundY + PLAYER_EYE_HEIGHT;
+            OmegaTechData.MainCamera.target.x += OmegaTechData.MainCamera.position.x - oldPos.x;
+            OmegaTechData.MainCamera.target.y += OmegaTechData.MainCamera.position.y - oldPos.y;
+            OmegaTechData.MainCamera.target.z += OmegaTechData.MainCamera.position.z - oldPos.z;
+            // Reset movement state to the arrival point so the collision
+            // "restore" path can't yank the player back to a stale position
+            // from the previous world.
+            g_playerMovement.OldX = OmegaTechData.MainCamera.position.x;
+            g_playerMovement.OldY = OmegaTechData.MainCamera.position.y;
+            g_playerMovement.OldZ = OmegaTechData.MainCamera.position.z;
+            g_playerMovement.velocityY = 0.0f;
+            g_playerMovement.onGround = true;
+            g_portalTransitionPending = false;
+        }
         SetSceneFlag = false;
     }
 

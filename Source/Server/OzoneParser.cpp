@@ -1,6 +1,16 @@
 #include "OzoneParser.hpp"
 #include <cstdio>
 
+// Particle type names -> numeric index (0=none 1=snow 2=rain 3=void 4=psychic)
+static int ParticleTypeNameToIndex(const std::string& s) {
+    if (s == "NONE" || s == "none") return 0;
+    if (s == "SNOW" || s == "snow") return 1;
+    if (s == "RAIN" || s == "rain") return 2;
+    if (s == "VOID" || s == "VOID_REALM" || s == "void") return 3;
+    if (s == "PSYCHIC" || s == "PSYCHIC_REALM" || s == "psychic") return 4;
+    try { return std::stoi(s); } catch (...) { return 0; }
+}
+
 std::vector<OzonePrimitive> OzoneParser::parse_file(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -57,6 +67,10 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                         prim.texOffsetU = std::stof(s.substr(11));
                     else if (s.rfind("texOffsetV=", 0) == 0)
                         prim.texOffsetV = std::stof(s.substr(11));
+                    else if (s.rfind("texPath=", 0) == 0)
+                        prim.texPath = s.substr(8);
+                    else if (s.rfind("texPath=\"", 0) == 0)
+                        prim.texPath = s.substr(9, s.size() - 10);
                 }
             }
         };
@@ -101,10 +115,14 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             }
         } else if (type_name == "zone") {
             prim.type = OzonePrimitiveType::ENTITY_ZONE;
-            // zone zonetype minX minY minZ maxX maxY maxZ [intensity]
+            // zone zonetype minX minY minZ maxX maxY maxZ [intensity] [fog...] [name=label]
             if (ls >> prim.entitySubType) {
                 std::string s;
                 while (ls >> s) {
+                    if (s.rfind("name=", 0) == 0) {
+                        prim.name = s.substr(5);
+                        continue;
+                    }
                     try { prim.args.push_back(std::stof(s)); }
                     catch (...) { break; }
                 }
@@ -130,6 +148,48 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                     try { prim.args.push_back(std::stof(s)); }
                     catch (...) { break; }
                 }
+            }
+        } else if (type_name == "portal") {
+            prim.type = OzonePrimitiveType::ENTITY_PORTAL;
+            // portal targetWorld minX minY minZ maxX maxY maxZ [spawnX spawnY spawnZ] [bidir]
+            // Coordinates are OZONE Z-up; loaders convert to engine Y-up.
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    if (s == "bidir" || s == "1") { prim.args.push_back(1.0f); continue; }
+                    if (s == "0") { prim.args.push_back(0.0f); continue; }
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
+        } else if (type_name == "levelinfo") {
+            prim.type = OzonePrimitiveType::ENTITY_LEVELINFO;
+            // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes
+            //           scoreLimit friendlyFire skyboxPath
+            for (int c = 0; c < 7; c++) {
+                std::string s;
+                if (!(ls >> s)) break;
+                try { prim.args.push_back(std::stof(s)); }
+                catch (...) { prim.args.push_back(0.0f); }
+            }
+            std::string skybox;
+            if (ls >> skybox) prim.entityType = skybox;
+            std::string sideSkybox;
+            if (ls >> sideSkybox) prim.entitySubType = sideSkybox;
+        } else if (type_name == "particles") {
+            prim.type = OzonePrimitiveType::ENTITY_PARTICLES;
+            // particles type density speed r g b windX windZ
+            // type is numeric (0=none 1=snow 2=rain 3=void 4=psychic); names accepted for robustness
+            std::string s;
+            bool first = true;
+            while (ls >> s) {
+                if (first) {
+                    first = false;
+                    prim.args.push_back((float)ParticleTypeNameToIndex(s));
+                    continue;
+                }
+                try { prim.args.push_back(std::stof(s)); }
+                catch (...) { break; }
             }
         } else if (type_name == "heightmap") {
             prim.type = OzonePrimitiveType::HEIGHTMAP;

@@ -172,6 +172,7 @@ inline Texture2D LoadTextureWithFallback(const char* path) {
         else if (ext == ".bmp") fmt = "bmp";
         else if (ext == ".tga") fmt = "tga";
         else if (ext == ".gif") fmt = "gif";
+        else if (ext == ".dds") fmt = "dds";
         if (fmt) {
             Image img = LoadImageFromMemory(fmt, data, (int)sz);
             Texture2D tex = LoadTextureFromImage(img);

@@ -159,13 +159,16 @@ test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Sourc
 test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
+test_ozone_parser: tests/OzoneParser.test.cpp Source/Server/OzoneParser.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
 test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_network test_game_state
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_network test_game_state
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -184,6 +187,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== WDLParser Tests ==="
 	-./test_wdl_parser
 	@echo ""
+	@echo "=== OzoneParser Tests ==="
+	-./test_ozone_parser
+	@echo ""
 	@echo "=== Network Packet Tests ==="
 	-./test_network
 	@echo ""
@@ -191,4 +197,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_game_state
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_network test_game_state
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_network test_game_state

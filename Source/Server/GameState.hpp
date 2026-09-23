@@ -45,6 +45,11 @@ struct ServerPlayer {
     int penergy_ticks = 0;
     int exploration_tick = 0; // for exploration XP
     uint32_t last_damage_tick = 0; // throttle NPC_DAMAGE
+
+    // Weapon registry: per hotbar slot (8), store weapon def name
+    char weapon_def[8][64] = {{0}};
+    int weapon_ammo[8] = {0};
+    int weapon_magazine[8] = {0};
 };
 
 // ---------------------------------------------------------------------------
@@ -152,7 +157,7 @@ constexpr float pickup_default_respawn(PickupType t) {
         case PickupType::MANA:     return 30.0f;
         case PickupType::PSYCHIC:  return 25.0f;
         case PickupType::ARMOR:    return 45.0f;
-        case PickupType::WEAPON:   return 0.0f; // never respawn
+        case PickupType::WEAPON:   return 30.0f; // respawn after 30s
         case PickupType::AMMO:     return 20.0f;
         case PickupType::KEY:      return 0.0f; // never respawn
         case PickupType::COIN:     return 0.0f; // never respawn
@@ -175,6 +180,7 @@ struct ServerPickup {
     float respawn_timer = 0.0f;  // counts up when inactive; respawns when >= respawn_time
     bool active = true;          // visible and collectable
     bool respawnable = true;
+    char weapon_def_name[64] = {0}; // for WEAPON pickups
 };
 
 // ---------------------------------------------------------------------------
@@ -269,7 +275,8 @@ public:
 
     // Collect a pickup
     bool collect_pickup(uint32_t player_id, int pickup_id, int world_index,
-                        PickupType* out_type = nullptr, int* out_value = nullptr);
+                        PickupType* out_type = nullptr, int* out_value = nullptr,
+                        char* out_weapon_def_name = nullptr, size_t weapon_def_name_len = 0);
     void respawn_pickup(WorldState& ws, ServerPickup& pickup);
 
     // Enumerate active pickups (for join sync)

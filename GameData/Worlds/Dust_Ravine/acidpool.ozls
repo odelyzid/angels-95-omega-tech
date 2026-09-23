@@ -1,0 +1,24 @@
+entity "acidpool" : skyzone {
+    actions {
+        on_enter {
+            wtflag 0 1
+            var timer = 60
+            play_sound "GameData/Global/Sounds/Hurt.mp3"
+            msg "Acid! The pooled run-off burns your boots!"
+        }
+        on_tick {
+            if ($flag0 >= 1) {
+                $timer = $timer - 1
+                if ($timer <= 0) {
+                    playerstat health -= 5
+                    var timer = 60
+                }
+            }
+        }
+        on_exit {
+            wtflag 0 0
+            var timer = -1
+            msg "You scramble clear of the acid."
+        }
+    }
+}

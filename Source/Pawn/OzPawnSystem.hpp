@@ -53,7 +53,27 @@ enum class ZoneType : uint8_t {
     ZONE_LADDER = 1,
     ZONE_SKY = 2,
     ZONE_REVERB = 3,
-    ZONE_GAMEPLAY_SOUND = 4
+    ZONE_GAMEPLAY_SOUND = 4,
+    ZONE_PORTAL = 5
+};
+
+// Level metadata — per-world game rules + environment defaults (LevelInfo/Particles)
+struct LevelSettings {
+    int gameType = 0;              // matches editor GameType enum order
+    int maxPlayers = 8;
+    float respawnTime = 5.0f;
+    bool timeLimitEnabled = false;
+    float timeLimitMinutes = 10.0f;
+    int scoreLimit = 50;
+    bool friendlyFire = false;
+    std::string skyboxPath;        // empty = world default (Models/Skybox.png)
+    std::string skyboxSidePath;    // optional horizon/side sky texture (cap = skyboxPath)
+    // Ambient particle weather
+    int particleType = 0;          // 0=none, 1=snow, 2=rain, 3=void, 4=psychic
+    float particleDensity = 50.0f;
+    float particleSpeed = 1.0f;
+    int particleR = 200, particleG = 200, particleB = 200;
+    float particleWindX = 0.0f, particleWindZ = 0.0f;
 };
 
 // Sound profile - maps game types to music/sound actions
@@ -165,13 +185,16 @@ struct ZoneVolumeNode {
     ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
 };
 
-// ZonePortal — connects two zones (enable zone transitions / zone graph)
+// ZonePortal — connects two zones / two LEVELS (enable zone transitions + campaigns)
 struct ZonePortal {
-    BoundingBox portalBounds;     // trigger volume
+    BoundingBox bounds;           // trigger volume
     std::string fromZoneName;     // source zone name (or "" for any)
     std::string toZoneName;       // target zone name (or "" for world default)
-    Vector3 teleportOffset;       // position delta on transition
+    std::string targetWorld;      // destination level folder name in GameData/Worlds/ ("" = unassigned)
+    Vector3 targetSpawn{0, 20, 0}; // player position on arrival in targetWorld
+    Vector3 teleportOffset;       // legacy: position delta on same-level transition
     bool bidirectional = true;
+    bool enabled = true;
 };
 
 // WorldInfo — global world metadata + default environment fallback
@@ -179,10 +202,11 @@ struct WorldInfo {
     ZoneEnvOverrides defaultEnv;  // defaults: fog, ambient, reverb
     std::string defaultSkybox;
     std::string defaultMusic;
-    std::vector<ZonePortal> portals;
+    std::vector<ZonePortal> portals;  // legacy same-level portals (level links live in m_portals)
     BoundingBox worldBounds;
     std::string name;
     std::string author;
+    LevelSettings settings;       // game rules + weather metadata (LevelInfo/Particles)
 };
 
 // PointRegion — per-entity zone tracking with stacking support
@@ -294,6 +318,16 @@ public:
     ZoneVolumeNode* GetZone(int id);
     ZoneVolumeNode* CheckZoneCollision(Vector3 pos, BoundingBox bounds);
 
+    // Portal nodes — level-to-level connections (campaign system)
+    int AddPortal(const ZonePortal& node);
+    void RemovePortal(int id);
+    void ClearPortals();
+    std::vector<ZonePortal>& GetPortals() { return m_portals; }
+    const std::vector<ZonePortal>& GetPortals() const { return m_portals; }
+    ZonePortal* GetPortal(int id);
+    // Returns the first enabled portal whose volume contains pos/bounds, nullptr if none
+    ZonePortal* CheckPortalCollision(Vector3 pos, BoundingBox bounds);
+
     // Consolidated multi-zone query — returns all overlapping zones sorted by priority
     std::vector<ZoneVolumeNode*> GetActiveZones(Vector3 pos, BoundingBox bounds);
 
@@ -367,6 +401,7 @@ private:
     std::vector<ProjectileNode> m_projectiles;
     std::vector<PickupNode> m_pickups;
     std::vector<ZoneVolumeNode> m_zones;
+    std::vector<ZonePortal> m_portals;
     std::vector<EmitterNode> m_emitters;
     uint32_t m_nextEntityId = 1;
     uint32_t m_nextLightId = 1;
@@ -381,6 +416,13 @@ private:
         Texture2D texture{0};
     };
     std::unordered_map<std::string, WeaponPickupCache> m_weaponPickupCache;
+
+    // Portal visual: shared double-sided quad + EFX shimmer texture (lazy loaded)
+    Model m_portalQuadModel{0};
+    Texture2D m_portalTexture{0};
+    bool m_portalVisualReady = false;
+    void EnsurePortalVisual();
+    void UnloadPortalVisual();
 
     // World metadata + zone portal system
     WorldInfo m_worldInfo;

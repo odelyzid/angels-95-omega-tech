@@ -98,6 +98,7 @@ void AssetMapper::RegisterEngineTextures() {
         {"Music"},
         {"PawnNode"},
         {"PlayerStart"},
+        {"Portal"},
         {"Sound"},
         {"ZoneInfo"},
         {"ZoneWater"},

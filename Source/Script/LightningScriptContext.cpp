@@ -14,6 +14,7 @@ bool LightningScriptContext::Load(const std::string& scriptText) {
     m_floatVars.clear();
     m_strVars.clear();
     m_jumpLabels.clear();
+    m_pendingStatOps.clear();
     std::memset(m_flags, 0, sizeof(m_flags));
     m_pc = 0;
 
@@ -161,10 +162,12 @@ bool LightningScriptContext::ExecuteNext() {
 
         auto getVal = [&](const std::string& s) -> float {
             if (s.rfind("$", 0) == 0) {
-                auto it = m_floatVars.find(s.substr(1));
+                std::string vn = s.substr(1);
+                auto it = m_floatVars.find(vn);
                 if (it != m_floatVars.end()) return it->second;
-                auto it2 = m_intVars.find(s.substr(1));
+                auto it2 = m_intVars.find(vn);
                 if (it2 != m_intVars.end()) return (float)it2->second;
+                if (m_statResolver) return m_statResolver(vn);
                 return 0;
             }
             try { return std::stof(s); } catch (...) { return 0; }
@@ -177,10 +180,21 @@ bool LightningScriptContext::ExecuteNext() {
                 m_floatVars[name] = val;
             else
                 m_intVars[name] = (int)val;
-        } else if (op == "+=") { m_intVars[name] = m_intVars[name] + (int)val; }
-        else if (op == "-=") { m_intVars[name] = m_intVars[name] - (int)val; }
-        else if (op == "*=") { m_intVars[name] = m_intVars[name] * (int)val; }
-        else if (op == "/=") { if (val != 0) m_intVars[name] = m_intVars[name] / (int)val; }
+        } else if (op == "+=") {
+            if (m_floatVars.count(name)) m_floatVars[name] += val;
+            else m_intVars[name] = m_intVars[name] + (int)val;
+        } else if (op == "-=") {
+            if (m_floatVars.count(name)) m_floatVars[name] -= val;
+            else m_intVars[name] = m_intVars[name] - (int)val;
+        } else if (op == "*=") {
+            if (m_floatVars.count(name)) m_floatVars[name] *= val;
+            else m_intVars[name] = m_intVars[name] * (int)val;
+        } else if (op == "/=") {
+            if (val != 0.0f) {
+                if (m_floatVars.count(name)) m_floatVars[name] /= val;
+                else m_intVars[name] = m_intVars[name] / (int)val;
+            }
+        }
         m_pc++;
 
     } else if (opcode == "if") {
@@ -354,6 +368,81 @@ bool LightningScriptContext::ExecuteNext() {
         SetFloat("__pawn_z", z);
         m_pc++;
 
+    } else if (opcode == "msg") {
+        std::string msg;
+        std::getline(ls, msg);
+        size_t qs = msg.find_first_not_of(" \t\"");
+        size_t qe = msg.find_last_not_of(" \t\"\r\n");
+        if (qs != std::string::npos && qe != std::string::npos)
+            msg = msg.substr(qs, qe - qs + 1);
+        SetStr("__last_msg", msg);
+        m_pc++;
+
+    } else if (opcode == "heal" || opcode == "damage") {
+        float amt;
+        ls >> amt;
+        m_pendingStatOps.push_back({"health", (opcode == "heal") ? 1 : 2, amt});
+        if (opcode == "damage") SetFloat("__last_hurt", 1.0f);
+        m_pc++;
+
+    } else if (opcode == "playerstat") {
+        // playerstat <name> <op> <value>   (op: =, +=, -=, *=, /=)
+        std::string name, op2;
+        std::string valueStr;
+        ls >> name >> op2;
+        std::getline(ls, valueStr);
+        {
+            size_t vs = valueStr.find_first_not_of(" \t");
+            if (vs != std::string::npos) valueStr = valueStr.substr(vs);
+            size_t ve = valueStr.find_last_not_of(" \t\r\n");
+            if (ve != std::string::npos) valueStr = valueStr.substr(0, ve + 1);
+        }
+        if (!name.empty() && name[0] == '$') name.erase(0, 1);
+        float value = 0.0f;
+        if (valueStr.rfind("$", 0) == 0) {
+            std::string vn = valueStr.substr(1);
+            auto it = m_floatVars.find(vn);
+            if (it != m_floatVars.end()) value = it->second;
+            else {
+                auto it2 = m_intVars.find(vn);
+                if (it2 != m_intVars.end()) value = (float)it2->second;
+                else if (m_statResolver) value = m_statResolver(vn);
+            }
+        } else {
+            try { value = std::stof(valueStr); } catch (...) { value = 0.0f; }
+        }
+        int stOp = 0;
+        if (op2 == "=") stOp = 0;
+        else if (op2 == "+=") stOp = 1;
+        else if (op2 == "-=") stOp = 2;
+        else if (op2 == "*=") stOp = 3;
+        else if (op2 == "/=") stOp = 4;
+        m_pendingStatOps.push_back({name, stOp, value});
+        m_pc++;
+
+    } else if (opcode == "consume") {
+        SetFloat("__consume", 1.0f);
+        m_pc++;
+
+    } else if (opcode == "spawn_pickup") {
+        // spawn_pickup "name" x y z [respawnTime]
+        std::string name;
+        ls >> name;
+        {
+            size_t a = name.find_first_not_of(" \t\"");
+            size_t b = name.find_last_not_of(" \t\"\r\n");
+            if (a != std::string::npos && b != std::string::npos) name = name.substr(a, b - a + 1);
+        }
+        float x, y, z, respawn = 30.0f;
+        ls >> x >> y >> z;
+        ls >> respawn;
+        SetStr("__pickup_name", name);
+        SetFloat("__pickup_x", x);
+        SetFloat("__pickup_y", y);
+        SetFloat("__pickup_z", z);
+        SetFloat("__pickup_respawn", respawn);
+        m_pc++;
+
     } else {
         OZ_WARN("LightningScript: unknown opcode '%s' at line %d", opcode.c_str(), m_pc);
         m_pc++;
@@ -435,6 +524,7 @@ bool LightningScriptContext::EvalCondition(const std::string& cond) {
             if (it != m_floatVars.end()) return it->second;
             auto it2 = m_intVars.find(vn);
             if (it2 != m_intVars.end()) return (float)it2->second;
+            if (m_statResolver) return m_statResolver(vn);
             return 0;
         }
         try { return std::stof(s); } catch (...) { return 0; }
@@ -516,4 +606,60 @@ LightningScriptContext::PawnSpawnRequest LightningScriptContext::PopPendingPawnS
     if (it_z != m_floatVars.end()) { req.z = it_z->second; m_floatVars.erase(it_z); }
     req.valid = true;
     return req;
+}
+
+// ---------------------------------------------------------------------------
+// PopPendingMessage — return and clear __last_msg
+// ---------------------------------------------------------------------------
+std::string LightningScriptContext::PopPendingMessage() {
+    auto it = m_strVars.find("__last_msg");
+    if (it == m_strVars.end() || it->second.empty()) return {};
+    std::string name = it->second;
+    m_strVars.erase(it);
+    return name;
+}
+
+// ---------------------------------------------------------------------------
+// Consume / player stat ops / pickup spawn side-effects
+// ---------------------------------------------------------------------------
+bool LightningScriptContext::ConsumeRequested() const {
+    return GetFloat("__consume", 0.0f) > 0.0f;
+}
+
+void LightningScriptContext::ClearConsume() {
+    SetFloat("__consume", 0.0f);
+}
+
+std::vector<LightningScriptContext::PlayerStatOp> LightningScriptContext::PopPlayerStatOps() {
+    std::vector<PlayerStatOp> out;
+    out.swap(m_pendingStatOps);
+    return out;
+}
+
+LightningScriptContext::PickupSpawnRequest LightningScriptContext::PopPendingPickupSpawn() {
+    PickupSpawnRequest req;
+    auto it = m_strVars.find("__pickup_name");
+    if (it == m_strVars.end() || it->second.empty()) return req;
+    req.name = it->second;
+    m_strVars.erase(it);
+    auto it_x = m_floatVars.find("__pickup_x");
+    auto it_y = m_floatVars.find("__pickup_y");
+    auto it_z = m_floatVars.find("__pickup_z");
+    auto it_r = m_floatVars.find("__pickup_respawn");
+    if (it_x != m_floatVars.end()) { req.x = it_x->second; m_floatVars.erase(it_x); }
+    if (it_y != m_floatVars.end()) { req.y = it_y->second; m_floatVars.erase(it_y); }
+    if (it_z != m_floatVars.end()) { req.z = it_z->second; m_floatVars.erase(it_z); }
+    if (it_r != m_floatVars.end()) { req.respawnTime = it_r->second; m_floatVars.erase(it_r); }
+    req.valid = true;
+    return req;
+}
+
+// ---------------------------------------------------------------------------
+// PopPendingHurt — return/clear one scripted damage flash request
+// ---------------------------------------------------------------------------
+bool LightningScriptContext::PopPendingHurt() {
+    auto it = m_floatVars.find("__last_hurt");
+    if (it == m_floatVars.end()) return false;
+    m_floatVars.erase(it);
+    return true;
 }

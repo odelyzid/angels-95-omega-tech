@@ -1,164 +1,107 @@
 # AGENTS.md - Angels95 / OmegaTech Engine
 
+PS1-styled multiplayer game on raylib 5.5 with a custom WDL/OZONE world format and dedicated server. C++20, single `g++` link per target via plain Makefiles, no cmake. Full docs live in `Wiki/` (Engine-Overview, Building, Editor-Usage, LightningScript, World-Format-WDL).
+
 ## Build
 
 ### Linux / macOS
 ```bash
-make OTENGINE          # game client -> Angels95
-make AngelServ         # dedicated server (no raylib dep)
-make ozpack            # asset packer tool
-make -j$(nproc)        # all targets
+make OTENGINE          # client -> Angels95
+make AngelServ         # server, no raylib dep
+make ozpack            # asset packer
+make -j$(nproc)        # all three
 ```
-- `build.sh` handles raylib 5.5 install + make on Linux.
-- raylib must be installed system-wide (`/usr/local/lib/libraylib.a`). Not vendored.
+- raylib 5.5 must be installed system-wide (`/usr/local/lib/libraylib.a`), not vendored. `build.sh` installs it from source.
 
 ### Windows
-- **w64devkit:** `.\build-native-win.ps1` (requires `C:\raylib\w64devkit` GCC 15.2.0). Do NOT use WinGet GCC 16.1.0.
-- **MSYS2/MINGW64:** `.\build.ps1` (uses `mingw-w64-x86_64-raylib`).
-- Flags: `-SkipData` skips asset packaging, `-SkipClean` skips `make clean`.
-- Both assemble `System/` with all EXEs, INIs, run scripts, and packaged assets.
-- `build-data.ps1` uses `OzPack.exe` to create `.oz*` packages from `GameData/`.
+- **w64devkit:** `.\build-native-win.ps1` (requires `C:\raylib\w64devkit`, GCC 15.2.0). Do NOT use WinGet GCC 16.1.0 - broken POSIX/UCRT headers.
+- **MSYS2/MINGW64:** `.\build.ps1` (uses `mingw-w64-x86_64-raylib`; auto-builds raylib 5.5 to `~/raylib-5.5` if missing).
+- Both build all 4 targets and assemble `System/`. Flags: `-SkipData` (skip asset packaging), `-SkipClean`.
+- `build-data.ps1` drives `OzPack.exe` to create `.oz*` packages from `GameData/` subdirectories.
 
 ### Targets
 | Target | Build cmd | Dependencies |
 |---|---|---|
 | `Angels95` (client) | `make OTENGINE` | raylib 5.5 |
 | `AngelServ` (server) | `make AngelServ` | None (standalone, raw sockets) |
-| `AngelEd` (editor) | `make -C AngelEd` | raylib 5.5 + Win32 |
-| `OzPack` | `make ozpack` | None (standalone) |
+| `AngelEd` (editor) | `make -C AngelEd` | raylib 5.5 + Win32 (Makefile errors out on Linux) |
+| `OzPack` | `make ozpack` | None |
 
-## Makefile structure (root)
-- **Game objects:** raygui.o, OTCustom.o, Encoder.o, Main.o, Network.o, Log.o, Client.o, OzAssetMapper.o, OzSoundLoader.o, OzPawnSystem.o, OzOzoneLoader.o, OzoneParser.o, OzBsp.o, WorldChunk.o, LightningScriptContext.o, LightningScriptParser.o, LightningEntityRegistry.o, LightningEntityManager.o, LitLightning.o, rlights.o
-- **AngelServ objects:** Network.o, GameState.o, Log.o, OzBsp.o, WorldChunk.o (+ Server.cpp, WDLParser.cpp, OzoneParser.cpp)
-- Flags: `-O3 --std=c++20`, single g++ invocation per target, no cmake.
-
-## AngelEd Makefile (`AngelEd/Makefile`)
-- Separate Makefile with its own `AngelEd.o`, `Win32Dialogs.o`, `EditorIcons.o`, `PPGIO.o` objects.
-- Links raylib, links against Angels95 build objects for shared modules.
-- Win32-only (native panels + raylib viewport).
+## Makefile notes (root)
+- Flags: `-O3 --std=c++20`, one g++ invocation per target. Objects go to `build/`.
+- `Source/raygui/raygui.c` needs `-fpermissive -DRAYGUI_IMPLEMENTATION` (not plain C++).
+- `windres` embeds `.rc` icons; server/client Windows builds need it on PATH.
+- `clean` also removes the test executables sitting in the repo root.
 
 ## Tests
 ```bash
-make test              # runs test_parser + test_entity_manager
-make test_parser       # LightningScriptParser tests
-make test_context      # LightningScriptContext tests
-make test_registry     # LightningEntityRegistry tests
-make test_entity_manager # LightningEntityManager tests
+make test   # builds + runs ALL suites (continues past failures)
 ```
-- No test framework - standalone `.test.cpp` files in `tests/` compiled directly, run as executables.
-- No raylib dependency (use `SERVER_CXX` compiler, `-DOMEGA_TEST_ENV` flag).
+Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_wdl_parser`, `test_ozone_parser`, `test_network`, `test_game_state`.
+
+- No test framework - standalone `tests/*.test.cpp` compiled directly. **Test executables land in repo root** (`./test_parser`, not `./tests/`).
+- Most suites use `SERVER_CXX` + `-DOMEGA_TEST_ENV` (no raylib). **Exceptions:** `test_entity_manager` and `test_pawn_system` link raylib (Vector3/BoundingBox types).
+- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_network` / `make test_game_state` etc.
+
+## Runtime config quirk (verified)
+- `System/Angels95.ini` and `System/OzServer.ini` are **templates written by build scripts - never read at runtime**. The client and server accept no INI config. Server behavior is controlled entirely by CLI flags (`--port`, `--http-port`, `--dir`). Only `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`). To change defaults, edit the code, not the INI.
 
 ## Entrypoints
-- **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop.
-- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080), `--dir` (GameData).
+- **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`.
+- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData). LAN discovery UDP 27100.
 - **Editor:** `AngelEd/Source/Main.cpp` - `main(argc, argv)`. Win32 panels + raylib viewport.
-- **Core engine:** `Source/Core.hpp` (~1200 lines, single header) - init, menu, world loading, render loop, shaders.
+- **Core engine:** `Source/Core.hpp` (~2400 lines, single header) - init, splash, menu, world loading, render loop, shaders.
 
-## Source tree (Source/)
-- `Source/Main.cpp` - client entrypoint, game loop, rendering
-- `Source/Core.hpp` - engine init, splash, menu, world loading
-- `Source/Server/Server.cpp` - dedicated server, HTTP API on :8080
-- `Source/Server/WDLParser.cpp`/`.hpp` - WDL world format parser (standalone, no raylib)
-- `Source/Server/OzoneParser.cpp`/`.hpp` - OZONE world format parser
-- `Source/Server/GameState.cpp`/`.hpp` - server game state management
-- `Source/Network/Network.cpp`/`.hpp` - custom UDP protocol, packed structs. LAN discovery on UDP 27100, game port 27015
-- `Source/Package/PackageAssetLoader.hpp` - runtime asset loading from `.oz*` packages
-- `Source/Package/OzPackage.hpp` - OzPackage format reader/writer
-- `Source/Package/OzAssetMapper.cpp`/`.hpp` - engine/item texture mapper
-- `Source/Pawn/OzPawnSystem.cpp`/`.hpp` - dynamic NPC system (FSM: IDLE -> PATROL -> CHASE -> RETURN -> DEAD)
-- `Source/Pawn/Items.hpp` - item definitions (20 backpack + 8 equipment + 5 weapon slots)
-- `Source/Pawn/Entities.hpp` - entity definitions
-- `Source/Pawn/Objects.hpp` - world object definitions
-- `Source/Pawn/Player.hpp` - player state/capabilities
-- `Source/Script/LightningScriptParser.cpp`/`.hpp` - LightningScript parser
-- `Source/Script/LightningScriptContext.cpp`/`.hpp` - script execution context
-- `Source/Script/LightningEntityRegistry.cpp`/`.hpp` - entity type registry (pickup defs from .ozls)
-- `Source/Script/LightningEntityManager.cpp`/`.hpp` - runtime entity management
-- `Source/Script/LightningEntityDef.hpp` - entity definition structs
-- `Source/Renderer/LitLightning.cpp`/`.hpp` - lighting renderer
-- `Source/Renderer/EngineBillboard.hpp` - billboard sprite rendering (pickups, icons)
-- `Source/Renderer/TextSystem.hpp` - text rendering system
-- `Source/Renderer/Video.hpp` - video playback support
-- `Source/Physics/OzBsp.cpp`/`.hpp` - CSG/BSP collision processor
-- `Source/Physics/WorldChunk.cpp`/`.hpp` - spatial partition (chunk-based world)
-- `Source/Audio/OzSoundLoader.cpp`/`.hpp` - sound loading with fallback
-- `Source/Audio/DspReverb.hpp` - audio reverb DSP
-- `Source/Client/Client.cpp`/`.hpp` - client networking layer
-- `Source/Custom/OTCustom.cpp`/`.hpp` - custom engine code (statically linked)
-- `Source/Encoder/Encoder.cpp`/`.hpp` - asset encoder
-- `Source/Menu/TitleMenu.hpp` - title/home screen menu
-- `Source/Parasite/ParasiteScript.hpp` - Parasite script definitions
-- `Source/Parasite/ParasiteScriptData.hpp` - Parasite script data
-- `Source/ParticleDemon/ParticleDemon.hpp` - 50-particle array system (explosion/trail/rain)
-- `Source/plmpeg/pl_mpeg.h` - MPEG1 video decoder
-- `Source/rlights/rlights.cpp`/`.h` - raylib lights helper
-- `Source/raygui/` - raygui UI library (raygui.c/.h, dark.h theme)
-- `Source/OzOzoneLoader.cpp`/`.hpp` - OZONE world format loader
-- `Source/OzPack.cpp` - standalone packer/unpacker CLI tool
-- `Source/Data.hpp` - game data structures
-- `Source/Settings.hpp` - settings management
-- `Source/IniConfig.hpp` - INI config file reader
-- `Source/Log.cpp`/`.hpp` - logging system
-- `Source/Editor.hpp` - editor integration header (used by AngelEd)
-- `Source/PPGIO.hpp` - WDL format I/O helpers (uses `using namespace std`)
-- `Source/WindowsCompat.hpp` - must be included early in files touching both raylib and winsock2. Defines `CloseWindow`/`ShowCursor`/`Rectangle`/`DrawText` -> `__WIN32_*`/`GDI_*` before `#include <windows.h>`, then `#undef`s them.
-
-## AngleEd/Source (Editor)
-- `AngelEd/Source/Editor.hpp` - main editor state (Camera, ViewMode, Fog, WorldData, cached models)
-- `AngelEd/Source/Main.cpp` - full editor loop: raycast selection, gizmo, entity actions, menu bar
-- `AngelEd/Source/Win32Dialogs.cpp`/`.hpp` - native Win32 panel windows (SoundMgr, TextureMgr, PawnMgr, ScriptMgr, ModelBrowser, EnvPanel, PickupPanel, NodePanel, HeightmapEditor, LightProps, WorldGraph, PropertiesPanel)
-- `AngelEd/Source/EditorIcons.cpp`/`.hpp` - toolbar icon loader (AngelEd/UI/*.bmp)
-- `AngelEd/Source/PPGIO.hpp` - WDL I/O (shared with Source/)
-- `AngelEd/Source/raygui/` - bundled raygui (dark.h, raygui.c/.h)
-- `AngelEd/UI/` - 45 toolbar icon .bmp files
-- Entity selection: raycast hit-testing for brushes, models, NPCs, pickups, lights, zones, spawns
-- Supports WDL (.wdl) and OZONE (.ozone) world formats
-- Model preview render-to-texture for browser dialogs
-- CSG processor (`CsgProcessor g_csgProc`) exists but backend never called
-- INI config at `System/AngelEd.ini`
+## Source layout (condensed)
+Full tree: `Wiki/Engine-Overview.md`. Key modules:
+- Rendering/loop: `Source/Main.cpp`, `Source/Core.hpp`, `Source/Renderer/` (LitLightning, EngineBillboard, TextSystem), `Source/raygui/`, `Source/rlights/`, `System/Shaders/`.
+- Networking: `Source/Network/Network.cpp/.hpp` (UDP, `#pragma pack(push,1)`), `Source/Client/Client.cpp`.
+- Server: `Source/Server/` (Server.cpp, GameState, WDLParser, OzoneParser).
+- Script/entities: `Source/Script/` (LightningScript parser/context; EntityRegistry scans `*.ozls` in GameData + packages; EntityManager).
+- Pawn/world: `Source/Pawn/` (OzPawnSystem, Items/Entities/Objects/Player), `Source/Physics/` (OzBsp, WorldChunk), `Source/OzOzoneLoader.*`.
+- Packaging: `Source/Package/` (OzPackage, PackageAssetLoader, OzAssetMapper), `Source/OzPack.cpp`.
+- Audio: `Source/Audio/`; video: `Source/plmpeg/`; particles: `Source/ParticleDemon/`.
 
 ## Package system (OzPackage)
-- Extensions: `.ozpak` (generic), `.oztex` (textures), `.ozsnd` (sounds), `.ozmux` (music), `.ozone` (worlds)
-- Runtime: `PackageAssetLoader::Instance().Init()` scans `System/Data/*.oz*`. Use `*WithFallback` wrappers (filesystem -> package).
+- Extensions + magic: `.ozpak`/OZPK (generic: models/scripts/shaders), `.oztex`/OZTX (textures), `.ozsnd`/OZSD (sounds), `.ozmux`/OZMX (music), `.ozone`/OZWN (worlds).
+- Runtime: `PackageAssetLoader::Instance().Init()` scans `System/Data/*.oz*`. Read assets via `*WithFallback` wrappers (filesystem first, then packages).
 - Models use temp-file cache in `System/Cache/` (raylib has no `LoadModelFromMemory`).
-- Packaging: `.\build-data.ps1` uses `OzPack.exe` to create packages from `GameData/` subdirectories.
+- Packaging: `OzPack pack <magic|auto> <dir> <out>`; also `unpack`, `list`, `dir`. `build-data.ps1` drives it per GameData subdirectory.
 
-## World format (WDL)
-- Colon-delimited plain text. Instructions: `HeightMap`, `Model1`-`Model20`, `Object1`-`Object5`, `Walker` (NPC spawn), `Light`, `ClipBox`, `Collision`, `Script`, `NE1`-`NE3` (noise emitters).
-- Worlds live in `GameData/Worlds/<WorldName>/World.wdl` alongside optional subdirectories: `Models/`, `Scripts/`, `Music/`, `NoiseEmitter/`.
-- Server scans `GameData/Worlds/` for subdirectories containing `World.wdl` at startup.
-- WDL helpers in `Source/PPGIO.hpp`: `LoadFile()`, `GetWDLSize()`, `WSplitValue()`, `WReadValue()`, `ToFloat()`, etc.
+## World format (WDL) - legacy
+- Colon-delimited text in `GameData/Worlds/<Name>/World.wdl` (all bundled worlds now use `.ozone` instead).
+- Tokens recognized by `WDLParser::classify()`: `HeightMap`, `Collision`, `AdvCollision`, `ClipBox`, `Light`, `C`, `Spawn`, `Pickup`, `ZoneInfo`, `Portal`, `LevelInfo`, `Particles`, `Fog`, `Ambient`, `LightType`, `NPC`/`Walker`/`Skaarj`/`Brute`/`Floater`, and suffix-counted `Script*`, `Object*`, `Model<digits>`, `NE*` (noise emitters -> mp3s in `NoiseEmitter/`).
+- I/O helpers: `Source/PPGIO.hpp` (`LoadFile`, `GetWDLSize`, `WSplitValue`, `WReadValue`, `ToFloat`).
+- World subdirs: `Models/`, `Scripts/`, `Music/`, `NoiseEmitter/`.
 
-## World format (OZONE)
-- Newer format supported by OzoneParser/OzoneLoader.
-- Primitive-based: box, cylinder, sphere, pyramid, plane with CSG ops (add/sub/intersect).
-- Entities: playerstart, pickup, npc, zone, emitter.
-- Export from AngelEd: `ExportToOzone()` in `AngelEd/Source/Main.cpp`.
-
-## System/ release layout
-- `System/` contains Angels95.exe, AngelServ.exe, AngelEd.exe, OzPack.exe, INIs, run scripts, `Data/*.oz*`, `Cache/`.
-- Game requires `GameData/` as a sibling directory for worlds, saves, and loose assets.
-- Run scripts (`run.bat`, `run.ps1`) set cwd to repo root then launch the client.
-- Server config: `OzServer.ini` (Port, HttpPort, MaxPlayers, WorldDir, ServerName).
-- Editor config: `AngelEd.ini`
+## World format (OZONE) - current
+- Primitive ops: `add`/`sub`/`intersect` + primitives `box cyl sph pyr pln`. Per-brush kwargs: `flags=N`, `texScaleU/V`, `texOffsetU/V`, `texPath=`.
+- Entities: `playerstart`, `pickup`, `zone` (zones are scripted by sibling `<name>.ozls` skyzone files), `npc`, `light` (point/spot/directional). Z-up axis.
+- Export from AngelEd: `ExportToOzone()` in `AngelEd/Source/Main.cpp`. Reference: `GameData/Worlds/*/World.ozone`.
 
 ## Conventions & quirks
 - **`#pragma pack(push,1)`** for all network packet structs.
-- **Asset paths:** `*WithFallback` wrappers check filesystem first, then packages. Server `--dir` flag overrides world directory.
-- **Save files (binary, do not commit):** `GameData/Saves/TF.sav` (flags), `POS.sav` (position), `Script.sav` (WDL scripts). All `.sav` files are gitignored.
-- **`using namespace std;`** used in `PPGIO.hpp`, `Data.hpp`, `Encoder.hpp`, `TextSystem.hpp`, `ParasiteScriptData.hpp`.
-- **Editor:** Win32 native panels + raylib viewport. Dynamic file scanning of `GameData/` + packages. `Win32Dialogs.cpp` defines `UNICODE`/`_UNICODE` for wide-string Win32 API.
-- **Known editor gaps:** Lighting toggle (Lit/Unlit) does not actually unset shader from model materials. No right-click context menu or entity properties. CSG Add/Subtract UI is wired but backend `CsgProcessor` never called. Texture browser grid is implemented (thumbnails in custom control). No test-play functionality.
-- **Particle system:** `Core.hpp` includes `ParticleDemon.hpp` - actual 50-particle array implementation with explosion/trail/rain effects. `RainParticles` instance in `EngineData`.
-- **Editor panels:** Sound Manager (category tabs: SFX/Music/Ambience, volume slider, loop), Texture Manager (grid browser with thumbnails, package loading, apply to model), Pawn Manager (tree hierarchy, data-driven from config/registry), Script Manager, Model Browser, Zone Properties, Pickup Panel, Node Panel, Heightmap Editor, Light Properties, World Graph Explorer, Properties Panel.
+- **`Source/WindowsCompat.hpp`** must be included early in files touching both raylib and winsock2; it remaps `CloseWindow`/`ShowCursor`/`Rectangle`/`DrawText` to `__WIN32_*`/`GDI_*` before `#include <windows.h>`, then `#undef`s them.
+- **`using namespace std;`** in `PPGIO.hpp`, `Data.hpp`, `Encoder.hpp`, `TextSystem.hpp`, `ParasiteScriptData.hpp`.
+- **Save files (binary, do not commit):** `GameData/Saves/TF.sav`, `POS.sav`, `Script.sav`. All `*.sav` gitignored.
+- gitignored: `System/`, `build/`, `build-ed/`, `.docs/`, `*.exe`, `*.o`.
+- Run scripts (`System/run.bat`, `run.ps1`) set cwd to repo root before launching - the game expects repo-relative paths.
 
 ## Pawn system
-- Data-driven NPC definitions from `GameData/Global/PawnDefs/*.cfg` (name, speed, aggroRange, attackRange, damage, maxHealth, sprite_path, scream_path).
-- Fallback hardcoded defs: Walker, Skaarj, Brute, Floater.
-- FSM states: IDLE, PATROL, CHASE, ATTACK, RETURN, DEAD.
-- Pickup types from LightningScript entity registry (`.ozls` definitions).
+- Data-driven NPC defs from `GameData/Global/PawnDefs/*.cfg` (name, speed, aggroRange, attackRange, damage, maxHealth, sprite_path, scream_path). Fallback hardcoded defs: Walker, Skaarj, Brute, Floater.
+- **FSM is `PawnState`: IDLE, PATROL, CHASE, RETURN, DEAD** (no ATTACK state - check `Source/Pawn/OzPawnSystem.hpp:25`). State transitions fire `.ozls` script actions `on_patrol`/`on_chase`/`on_return`/`on_death`.
+- NPCs attack only via melee range check (+ projectiles) - no ranged NPC fire.
 
-## CI
-- **Linux:** Build raylib from source (cached) -> `make AngelServ` -> `make OTENGINE` -> `make ozpack` -> smoke test server with `timeout 3`.
-- **Windows (MSYS2):** `pacman -S mingw-w64-x86_64-{gcc,make,raylib}` -> build all 4 targets -> assemble System/ -> run `build-data.ps1` -> upload artifact.
-- Tags matching `b*` trigger GitHub Release with zipped System/.
+## Weapons (b54+)
+- Data-driven `.ozls` entities of type `weapon`: ranged (ProjectileNode; speed/spread/damage/lifetime; `magazine`/`reload_time` stats) or melee (`reach` stat, `on_swing`/`on_hit` actions).
+- Key code: `Source/Script/LightningEntityManager.cpp` `FireSelectedWeapon()` (ammo/reload/cooldown dispatch); projectile sim in `Source/Pawn/OzPawnSystem.cpp` `SpawnProjectile`/`UpdateProjectiles` (client radius 1.5) and `Source/Server/GameState.cpp` `spawn_projectile`/`tick_projectiles` (server radius 2.0 - radii intentionally differ).
+
+## Editor state (verified as of b54)
+- Win32 native panels + raylib viewport. Dynamic file scanning of `GameData/` + packages. Reads `System/AngelEd.ini`.
+- Lit/Unlit/Wire toggle now swaps material shaders; right-click context menu exists; CSG `Apply`/`MergePass` is called for OZONE primitives (EMID >= 200).
+- Still missing: undo/redo, test-play mode. Docs: `Wiki/Editor-Usage.md`.
+
+## CI (.github/workflows/ci.yml)
+- Runs on every push/PR; tags matching `b*` also create a GitHub Release with zipped `System/`.
+- **Linux:** build raylib from source (cached) -> `make AngelServ` -> `make OTENGINE` -> `make ozpack` -> smoke test with `timeout 3 ./AngelServ`.
+- **Windows (MSYS2):** `pacman -S mingw-w64-x86_64-{gcc,make,raylib}` -> build all 4 targets -> assemble System/ -> run `build-data.ps1` -> upload artifact. Note: CI compiles AngelEd with inline raw `g++` commands, NOT the `AngelEd/Makefile` - the two can drift.

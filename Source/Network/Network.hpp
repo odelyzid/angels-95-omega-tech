@@ -69,8 +69,9 @@ enum class MessageType : uint32_t {
     PLAYER_ACTION = 17,
     PICKUP_COLLECTED = 18,
     NPC_DAMAGE = 19,
-    SERVER_CHALLENGE = 20,
-    CLIENT_AUTH = 21
+    WEAPON_AMMO = 20,
+    SERVER_CHALLENGE = 21,
+    CLIENT_AUTH = 22
 };
 
 struct NetworkPlayer {
@@ -111,6 +112,7 @@ struct PickupCollectData {
     uint32_t player_id;
     int pickup_id;
     int world_index;
+    char weapon_def_name[64]; // for weapon pickups
 };
 
 struct PickupRespawnData {
@@ -119,6 +121,7 @@ struct PickupRespawnData {
     NetVec3 position;
     int type;       // PickupType as int
     int value;
+    char weapon_def_name[64]; // for weapon pickups
 };
 
 struct NpcStateUpdateData {
@@ -155,6 +158,15 @@ struct PickupCollectedData {
     int pickup_id;
     int item_id;
     int quantity;
+    char weapon_def_name[64]; // for weapon pickups
+};
+
+struct WeaponAmmoData {
+    uint32_t player_id;
+    int slot;           // hotbar slot 0-7
+    int ammo;           // current ammo count
+    int magazine;       // max ammo
+    int action;         // 0=fire, 1=reload, 2=sync
 };
 
 struct WeaponFireData {

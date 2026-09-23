@@ -147,6 +147,17 @@ add box 26 -49.75 5 2 10 0.5 0           # right arch pillar
 playerstart 0 8 0 0
 
 # ==============================================================================
+# Portal to Dust_Ravine (level-to-level connection test)
+# OZONE Z-up: bounds min/max in Z-up coords, then spawn point IN TARGET WORLD
+# (Dust_Ravine coords: open sand east of its west-approach rocks, eye height 2)
+# ==============================================================================
+portal Dust_Ravine -3 14 0 3 20 8 -66 8 2 bidir
+
+# Level metadata + ambient particles (test)
+levelinfo SINGLEPLAYER 8 5 0 0 50 0
+particles RAIN 100 18 0.4 0.5 0.85 -2 1
+
+# ==============================================================================
 # NPC spawns
 # ==============================================================================
 npc Walker 10 10 0

@@ -27,6 +27,7 @@ struct ClientPickup {
     int type = 0;
     int value = 0;
     bool active = true;
+    char weapon_def_name[64] = {0};
 };
 
 // Remote player representation (other players connected)
@@ -74,7 +75,7 @@ public:
     void send_chat(const char* text);
 
     // Send pickup collect request
-    void send_pickup_collect(int pickup_id, int world_index);
+    void send_pickup_collect(int pickup_id, int world_index, const char* weapon_def_name = nullptr);
 
     // Send NPC damage
     void send_npc_damage(int world_index, int npc_index, int partition_index, int damage);
@@ -83,6 +84,9 @@ public:
     void send_weapon_fire(float ox, float oy, float oz,
                           float dx, float dy, float dz,
                           int weapon_type, int power = 10);
+
+    // Send weapon ammo update (fire/reload/sync)
+    void send_weapon_ammo(int slot, int ammo, int magazine, int action);
 
     // Status
     bool is_connected() const { return m_client.is_connected(); }
@@ -114,6 +118,9 @@ public:
     void set_on_item_collected(std::function<void(int item_id, int quantity)> cb) {
         m_on_item_collected = std::move(cb);
     }
+    void set_on_weapon_collected(std::function<void(const char* weapon_def_name)> cb) {
+        m_on_weapon_collected = std::move(cb);
+    }
     void set_on_player_hurt(std::function<void(int damage, float remaining_health)> cb) {
         m_on_player_hurt = std::move(cb);
     }
@@ -135,6 +142,7 @@ private:
     std::function<void(const std::string&)> m_on_scene_received;
     std::function<void(const std::string&)> m_on_chat_received;
     std::function<void(int item_id, int quantity)> m_on_item_collected;
+    std::function<void(const char* weapon_def_name)> m_on_weapon_collected;
     std::function<void(int damage, float remaining_health)> m_on_player_hurt;
     int m_pending_collect_id = -1;
 

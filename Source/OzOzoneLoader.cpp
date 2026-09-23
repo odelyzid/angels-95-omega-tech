@@ -66,12 +66,16 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 };
                 node.zoneType = ParseZoneType(prim.entitySubType);
                 if (prim.args.size() >= 7) node.intensity = prim.args[6];
-                // Generate unique zone name for .ozls script hook matching
+                // Generate unique zone name for .ozls script hook matching.
+                // An explicit name= kwarg overrides the auto-generated one so
+                // scripted zones survive zone reordering in the editor.
                 auto& counter = zoneCounters[prim.entitySubType];
-                node.name = "zone_" + prim.entitySubType + "_" + std::to_string(counter++);
+                node.name = prim.name.empty()
+                    ? ("zone_" + prim.entitySubType + "_" + std::to_string(counter++))
+                    : prim.name;
                 // Extended env override args (optional, after intensity):
                 // fogR fogG fogB fogDensity fogStart fogEnd ambR ambG ambB ambIntensity reverbMix reverbDecay
-                if (prim.args.size() >= 16) {
+                if (prim.args.size() >= 17) {
                     node.envOverrides.applyFog = true;
                     node.envOverrides.fogR = (int)prim.args[7];
                     node.envOverrides.fogG = (int)prim.args[8];
@@ -184,6 +188,70 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 return true;
             }
             pawns.AddLight(node);
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_PORTAL: {
+            // portal targetWorld minX minY minZ maxX maxY maxZ [spawnX spawnY spawnZ] [bidir]
+            // Coordinates are OZONE Z-up — convert to engine Y-up.
+            if (prim.args.size() >= 6) {
+                ZonePortal portal;
+                portal.targetWorld = prim.entityType;
+                portal.bounds.min = {
+                    std::min(prim.args[0], prim.args[3]),
+                    std::min(prim.args[2], prim.args[5]),
+                    std::min(prim.args[1], prim.args[4])
+                };
+                portal.bounds.max = {
+                    std::max(prim.args[0], prim.args[3]),
+                    std::max(prim.args[2], prim.args[5]),
+                    std::max(prim.args[1], prim.args[4])
+                };
+                if (prim.args.size() >= 9) {
+                    portal.targetSpawn = {prim.args[6], prim.args[8], prim.args[7]}; // Z-up conversion
+                } else {
+                    portal.targetSpawn = {
+                        (portal.bounds.min.x + portal.bounds.max.x) * 0.5f,
+                        portal.bounds.min.y,
+                        (portal.bounds.min.z + portal.bounds.max.z) * 0.5f
+                    };
+                }
+                if (prim.args.size() >= 10) portal.bidirectional = prim.args[9] != 0.0f;
+                pawns.AddPortal(portal);
+            }
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_LEVELINFO: {
+            // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes
+            //           scoreLimit friendlyFire skyboxPath
+            auto arg = [&](int i) -> float {
+                return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
+            };
+            LevelSettings& s = pawns.GetWorldInfo().settings;
+            s.gameType = (int)arg(0);
+            s.maxPlayers = (int)arg(1);
+            s.respawnTime = arg(2);
+            s.timeLimitEnabled = arg(3) != 0.0f;
+            s.timeLimitMinutes = arg(4);
+            s.scoreLimit = (int)arg(5);
+            s.friendlyFire = arg(6) != 0.0f;
+            s.skyboxPath = prim.entityType;
+            s.skyboxSidePath = prim.entitySubType;
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_PARTICLES: {
+            // particles type density speed r g b windX windZ
+            auto arg = [&](int i) -> float {
+                return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
+            };
+            LevelSettings& s = pawns.GetWorldInfo().settings;
+            s.particleType = (int)arg(0);
+            s.particleDensity = arg(1);
+            s.particleSpeed = arg(2);
+            s.particleR = (int)arg(3);
+            s.particleG = (int)arg(4);
+            s.particleB = (int)arg(5);
+            s.particleWindX = arg(6);
+            s.particleWindZ = arg(7);
             return true;
         }
         default:
@@ -760,6 +828,16 @@ bool OzoneLoader::LoadFile(const char* path) {
                           prim.texScaleU, prim.texScaleV,
                           prim.texOffsetU, prim.texOffsetV);
     }
+    // Custom per-brush diffuse texture (texPath= attribute), resolved against
+    // the world directory unless already rooted at GameData/
+    if (!prim.texPath.empty()) {
+        std::string tp = StripQuotes(prim.texPath);
+        if (!tp.empty() && tp.rfind("GameData/", 0) != 0) {
+            if (!gameDataWorldDir.empty()) tp = gameDataWorldDir + tp;
+            else if (!worldDir.empty()) tp = worldDir + tp;
+        }
+        ApplyRenderableTexture((int)m_renderables.size() - 1, tp.c_str());
+    }
     }
 
     // Post-process: assign zoneId to lights based on containing zone
@@ -845,6 +923,12 @@ if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
         ApplyRenderableUV((int)m_renderables.size() - 1,
                           prim.texScaleU, prim.texScaleV,
                           prim.texOffsetU, prim.texOffsetV);
+    }
+    if (!prim.texPath.empty()) {
+        std::string tp = StripQuotes(prim.texPath);
+        if (!tp.empty() && tp.rfind("GameData/", 0) != 0 && !m_worldDir.empty())
+            tp = m_worldDir + tp;
+        ApplyRenderableTexture((int)m_renderables.size() - 1, tp.c_str());
     }
     }
     // Post-process: assign zoneId to lights based on containing zone

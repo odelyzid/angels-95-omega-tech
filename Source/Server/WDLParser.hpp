@@ -27,6 +27,9 @@ enum class WDLElementType : uint8_t {
     ENTITY_WALKER,          // 16 = Walker optimization node (legacy)
     NOISE_EMITTER,          // 17 = Legacy noise emitter
     COL_FLAG,               // 18 = Collision flag data
+    PORTAL,                 // 19 = Portal entity (level-to-level connection)
+    LEVEL_INFO,             // 20 = Level metadata (game rules, skybox)
+    PARTICLES,              // 21 = Ambient particle weather settings
     UNKNOWN = 255           // Unrecognized type
 };
 
@@ -36,7 +39,7 @@ struct WDLElement {
     std::vector<float> args;  // 2-6 float values for coordinates/scale/rotation
 
     // Entity-specific fields
-    std::string entityType = "";    // e.g., "Walker", "HealthVial", "PlayerStart"
+    std::string entityType = "";    // e.g., "Walker", "HealthVial", "PlayerStart", portal target world
     std::string zoneType = "";      // e.g., "Water", "Ladder", "Sky"
     std::string pickupType = "";    // e.g., "HealthVial", "Coin"
     float scale = 1.0f;

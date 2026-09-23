@@ -183,13 +183,14 @@ float SampleHeightmapGroundY(float px, float pz) {
 }
 
 // --- Pawn node types ---
-enum class EditorNodeType { SPAWN, NPC, LIGHT, ZONE };
+enum class EditorNodeType { SPAWN, NPC, LIGHT, ZONE, PORTAL };
 static const char* NodeTypeLabel(EditorNodeType t) {
     switch (t) {
         case EditorNodeType::SPAWN: return "Player Spawn";
         case EditorNodeType::NPC:   return "NPC Spawn";
         case EditorNodeType::LIGHT: return "Point Light";
         case EditorNodeType::ZONE:  return "Zone Volume";
+        case EditorNodeType::PORTAL: return "Level Portal";
         default: return "?";
     }
 }

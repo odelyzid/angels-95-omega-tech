@@ -208,6 +208,10 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
         pickup.respawnable = pickup_can_respawn(pickup.type);
         pickup.active = true;
         pickup.respawn_timer = 0.0f;
+        // Set default weapon def name for weapon pickups
+        if (pickup.type == PickupType::WEAPON) {
+            strcpy(pickup.weapon_def_name, "automag");
+        }
 
         float x, z, y;
         if (i < 12) {
@@ -555,7 +559,8 @@ void GameState::tick_pickups(WorldState& ws, float dt) {
 }
 
 bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_index,
-                               PickupType* out_type, int* out_value) {
+                               PickupType* out_type, int* out_value,
+                               char* out_weapon_def_name, size_t weapon_def_name_len) {
     ServerPlayer* player = get_player(player_id);
     if (!player) return false;
 
@@ -593,6 +598,10 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
     // Write out-params before marking inactive
     if (out_type)  *out_type  = pickup->type;
     if (out_value) *out_value = pickup->value;
+    if (out_weapon_def_name && weapon_def_name_len > 0 && pickup->type == PickupType::WEAPON) {
+        strncpy(out_weapon_def_name, pickup->weapon_def_name, weapon_def_name_len - 1);
+        out_weapon_def_name[weapon_def_name_len - 1] = '\0';
+    }
 
     // Apply pickup effect
     switch (pickup->type) {

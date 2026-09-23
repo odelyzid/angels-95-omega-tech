@@ -2,11 +2,13 @@
 #include "../Package/OzAssetMapper.hpp"
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Renderer/EngineBillboard.hpp"
+#include "../Renderer/CombatFX.hpp"
 #include "../Script/LightningEntityManager.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
 #include "PlayerMovement.hpp"
 #include "Items.hpp"
 #include "../Log.hpp"
+#include <rlgl.h>
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -278,6 +280,10 @@ void PawnSystem::UpdateProjectiles(float dt) {
             if (dist < 1.5f) {
                 pawn.health -= (int)p.damage;
                 p.active = false;
+                Vector3 hitNormal = Vector3Normalize(Vector3Scale(p.velocity, -1.0f));
+                CombatFX::Instance().SpawnImpact(
+                    {pawn.position.x, pawn.position.y + 0.5f, pawn.position.z},
+                    hitNormal, Color{200, 30, 30, 255}, 10, 4.0f);
                 if (pawn.health <= 0) {
                     pawn.active = false;
                     pawn.state = PawnState::DEAD;
@@ -300,6 +306,10 @@ void PawnSystem::DrawProjectiles(Camera3D& camera) {
         Color c = {255, 200, 50, 255};
         float radius = 0.3f;
         DrawSphere(p.position, radius, c);
+        // Tracer streak along the travel direction
+        Vector3 tail = Vector3Scale(p.velocity, -0.03f);
+        DrawLine3D(p.position, Vector3Add(p.position, tail),
+                   Color{255, 220, 120, 200});
         // Optional glow sprite
         if (p.sprite && p.sprite->id > 0) {
             DrawBillboard(camera, *p.sprite, p.position, 0.5f, WHITE);
@@ -400,7 +410,9 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                         gInventory.AddToBackpack(itemId, 1);
                         break;
                 }
-            } else if (edef && edef->type == EntityType::WEAPON) {
+            } else if (edef && (edef->type == EntityType::WEAPON ||
+                                edef->type == EntityType::CONSUMABLE ||
+                                edef->type == EntityType::UPGRADE)) {
                 int instIdx = LightningEntityManager::Instance().Spawn(edef->name);
                 if (instIdx >= 0) {
                     for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
@@ -411,6 +423,10 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                     }
                 }
             }
+
+            // Fire the pickup's on_collect script hook (quest pickups, rewards)
+            LightningEntityManager::Instance().TriggerCollectAction(n.typeName);
+
             OZ_INFO("Pickup collected: %s (itemId=%d)", n.typeName.c_str(), itemId);
             m_pickupFeedback.collected = true;
             m_pickupFeedback.typeName = n.typeName;
@@ -460,6 +476,99 @@ ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) 
     for (auto& n : m_zones) {
         if (CheckCollisionBoxes(bounds, n.bounds)) {
             return &n;
+        }
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Portal Nodes — level-to-level connections (campaign system)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddPortal(const ZonePortal& node) {
+    ZonePortal n = node;
+    m_portals.push_back(n);
+    return (int)m_portals.size() - 1;
+}
+
+void PawnSystem::RemovePortal(int id) {
+    if (id < 0 || id >= (int)m_portals.size()) return;
+    m_portals.erase(m_portals.begin() + id);
+}
+
+void PawnSystem::EnsurePortalVisual() {
+    if (m_portalVisualReady) return;
+    m_portalVisualReady = true;
+
+    // Double-sided unit quad in the XY plane (faces +/-Z)
+    Mesh mesh = {0};
+    mesh.vertexCount = 8;
+    mesh.triangleCount = 4;
+    mesh.vertices  = (float*)RL_MALLOC(8 * 3 * sizeof(float));
+    mesh.normals   = (float*)RL_MALLOC(8 * 3 * sizeof(float));
+    mesh.texcoords = (float*)RL_MALLOC(8 * 2 * sizeof(float));
+    mesh.indices   = (unsigned short*)RL_MALLOC(12 * sizeof(unsigned short));
+
+    static const float px[8]  = {-0.5f,  0.5f, 0.5f, -0.5f, -0.5f,  0.5f, 0.5f, -0.5f};
+    static const float py[8]  = {-0.5f, -0.5f, 0.5f,  0.5f, -0.5f, -0.5f, 0.5f,  0.5f};
+    static const float pz[8]  = {1,1,1,1, -1,-1,-1,-1};
+    static const float uvs[16] = {0,1, 1,1, 1,0, 0,0,  0,1, 1,1, 1,0, 0,0};
+    static const unsigned short idx[12] = {0,1,2, 0,2,3, 4,6,5, 4,7,6};
+
+    for (int i = 0; i < 8; i++) {
+        mesh.vertices[i*3+0] = px[i];
+        mesh.vertices[i*3+1] = py[i];
+        mesh.vertices[i*3+2] = 0.0f;
+        mesh.normals[i*3+0] = 0.0f;
+        mesh.normals[i*3+1] = 0.0f;
+        mesh.normals[i*3+2] = pz[i];
+        mesh.texcoords[i*2+0] = uvs[i*2];
+        mesh.texcoords[i*2+1] = uvs[i*2+1];
+    }
+    for (int i = 0; i < 12; i++) mesh.indices[i] = idx[i];
+
+    UploadMesh(&mesh, false);
+    m_portalQuadModel = LoadModelFromMesh(mesh);
+    m_portalTexture = LoadTextureWithFallback("GameData/Global/EFX/cas_win_black#.dds");
+    if (m_portalTexture.id == 0)
+        OZ_WARN("Portal shimmer texture not found: GameData/Global/EFX/cas_win_black#.dds");
+}
+
+void PawnSystem::UnloadPortalVisual() {
+    if (!m_portalVisualReady) return;
+    m_portalVisualReady = false;
+    if (m_portalTexture.id > 0) {
+        UnloadTexture(m_portalTexture);
+        m_portalTexture.id = 0;
+    }
+    if (m_portalQuadModel.meshes != nullptr || m_portalQuadModel.materials != nullptr) {
+        // Detach texture first so UnloadModel's material cleanup doesn't free it twice
+        if (m_portalQuadModel.materials != nullptr)
+            m_portalQuadModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture.id = 0;
+        UnloadModel(m_portalQuadModel);
+    }
+    m_portalQuadModel = Model{0};
+}
+
+void PawnSystem::ClearPortals() {
+    UnloadPortalVisual();
+    m_portals.clear();
+}
+
+ZonePortal* PawnSystem::GetPortal(int id) {
+    if (id < 0 || id >= (int)m_portals.size()) return nullptr;
+    return &m_portals[id];
+}
+
+ZonePortal* PawnSystem::CheckPortalCollision(Vector3 pos, BoundingBox bounds) {
+    for (auto& p : m_portals) {
+        if (!p.enabled || p.targetWorld.empty()) continue;
+        if (pos.x >= p.bounds.min.x && pos.x <= p.bounds.max.x &&
+            pos.y >= p.bounds.min.y && pos.y <= p.bounds.max.y &&
+            pos.z >= p.bounds.min.z && pos.z <= p.bounds.max.z) {
+            return &p;
+        }
+        if (CheckCollisionBoxes(bounds, p.bounds)) {
+            return &p;
         }
     }
     return nullptr;
@@ -720,6 +829,48 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
     for (auto& n : m_emitters) {
         const char* icon = (n.type == EmitterType::SOUND) ? "Sound" : "Music";
         EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f, litShader);
+    }
+
+    // Portal visuals: shimmer plane on the thinnest face of the trigger volume
+    for (auto& p : m_portals) {
+        if (!p.enabled) continue;
+        EnsurePortalVisual();
+        Vector3 center = {
+            (p.bounds.min.x + p.bounds.max.x) * 0.5f,
+            (p.bounds.min.y + p.bounds.max.y) * 0.5f,
+            (p.bounds.min.z + p.bounds.max.z) * 0.5f
+        };
+        Vector3 size = {
+            p.bounds.max.x - p.bounds.min.x,
+            p.bounds.max.y - p.bounds.min.y,
+            p.bounds.max.z - p.bounds.min.z
+        };
+        Vector3 rotAxis = {0, 1, 0};
+        float rotAngle = 0.0f;
+        Vector3 scale = {size.x, size.y, 1.0f};
+        if (size.z <= size.x && size.z <= size.y) {
+            // Door in XY plane, faces +/-Z: no rotation
+        } else if (size.x <= size.y) {
+            // Door in ZY plane, faces +/-X: yaw the quad 90 degrees
+            rotAngle = 90.0f;
+            scale = {size.z, size.y, 1.0f};
+        } else {
+            // Horizontal hatch, faces +/-Y: pitch the quad 90 degrees
+            rotAxis = {1, 0, 0};
+            rotAngle = 90.0f;
+            scale = {size.x, size.z, 1.0f};
+        }
+        if (m_portalQuadModel.meshes != nullptr && m_portalQuadModel.materials != nullptr) {
+            if (litShader.id > 0)
+                m_portalQuadModel.materials[0].shader = litShader;
+            m_portalQuadModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = m_portalTexture;
+            BeginBlendMode(BLEND_ALPHA);
+            rlDisableDepthMask();
+            DrawModelEx(m_portalQuadModel, center, rotAxis, rotAngle, scale, WHITE);
+            rlEnableDepthMask();
+            EndBlendMode();
+        }
+        EngineBillboard::Draw(camera, "Portal", center, 1.2f, litShader);
     }
 }
 

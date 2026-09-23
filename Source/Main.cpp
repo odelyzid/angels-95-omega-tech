@@ -5,6 +5,7 @@
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityDef.hpp"
 #include "Pawn/OzPawnSystem.hpp"
+#include "Renderer/CombatFX.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -87,7 +88,6 @@ static bool ShowInventory = false;
 static float g_recoilPitch = 0.0f;
 static float g_recoilYaw = 0.0f;
 static float g_crosshairBloom = 0.0f;
-static struct { Vector3 position; float timer; } g_muzzleFlash = {{0,0,0}, 0.0f};
 static bool g_adsActive = false;
 
 
@@ -211,10 +211,10 @@ static Color unpack_color(uint32_t packed) {
 }
 
 // ---------------------------------------------------------------------------
-// Remote player rendering 
-// TODO: Move into Render/
+// Remote player rendering — drawn inside DrawWorld()'s BeginMode3D pass
+// (called from Core.hpp). TODO: Move into Render/
 // ---------------------------------------------------------------------------
-static void DrawRemotePlayers() {
+void DrawRemotePlayers3D() {
     if (!g_network_enabled || !g_client.is_connected()) return;
     const auto& players = g_client.remote_players();
     for (const auto& rp : players) {
@@ -263,8 +263,7 @@ static void FireWeapon() {
     if (result < 0) return; // didn't fire
 
     // Muzzle flash
-    g_muzzleFlash.position = origin;
-    g_muzzleFlash.timer = 0.12f;
+    CombatFX::Instance().ArmMuzzleFlash(origin, 0.12f);
 
     // Apply recoil
     float recoilKick = SelectedWeaponStat("recoil", result > 0 ? 2.0f : 1.0f);
@@ -1215,7 +1214,7 @@ int main(int argc, char** argv){
                             }
                         }
                         if (nearest_pickup >= 0) {
-                            g_client.send_pickup_collect(nearest_pickup, nearest_world);
+                            g_client.send_pickup_collect(nearest_pickup, nearest_world, nullptr);
                             last_collect_try = t;
                         }
                     }
@@ -1251,16 +1250,6 @@ int main(int argc, char** argv){
         if (g_network_enabled && g_client.is_connected()) {
             DrawText(TextFormat("Ping: %dms", g_client.get_ping_ms()),
                      10, GetScreenHeight() - 20, 12, GREEN);
-        }
-
-        // Remote player models
-        DrawRemotePlayers();
-
-        // Muzzle flash
-        if (g_muzzleFlash.timer > 0.0f) {
-            float t = g_muzzleFlash.timer / 0.12f;
-            DrawSphere(g_muzzleFlash.position, 0.5f * t, (Color){255, (unsigned char)(200 * t), 50, 255});
-            g_muzzleFlash.timer -= GetFrameTime();
         }
 
         // Inventory overlay
@@ -1302,5 +1291,11 @@ int main(int argc, char** argv){
     
     UnloadRenderTexture(Target);
     EngineBillboard::Shutdown();
+    for (int i = 0; i < 6; i++) {
+        if (OmegaTechData.SkyboxFace[i].meshCount > 0) {
+            UnloadModel(OmegaTechData.SkyboxFace[i]);
+            OmegaTechData.SkyboxFace[i] = Model{0};
+        }
+    }
     CloseWindow();
 }

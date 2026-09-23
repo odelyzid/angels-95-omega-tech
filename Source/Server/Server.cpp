@@ -252,6 +252,56 @@ static void append_elem_json(std::string& out, const WDLElement& e, bool first) 
         case WDLElementType::COL_FLAG:
             add_field("type", json_escape("col_flag"));
             break;
+        case WDLElementType::PORTAL:
+            add_field("type", json_escape("portal")); out += ',';
+            add_field("targetWorld", json_escape(e.entityType)); out += ',';
+            if (e.args.size() >= 6) {
+                add_num("minX", e.args[0]); out += ',';
+                add_num("minY", e.args[1]); out += ',';
+                add_num("minZ", e.args[2]); out += ',';
+                add_num("maxX", e.args[3]); out += ',';
+                add_num("maxY", e.args[4]); out += ',';
+                add_num("maxZ", e.args[5]);
+            }
+            if (e.args.size() >= 9) {
+                out += ','; add_num("spawnX", e.args[6]); out += ',';
+                add_num("spawnY", e.args[7]); out += ',';
+                add_num("spawnZ", e.args[8]);
+            }
+            if (e.args.size() >= 10) {
+                out += ',';
+                add_field("bidirectional", json_escape(e.args[9] != 0.0f ? "true" : "false"));
+            }
+            break;
+        case WDLElementType::LEVEL_INFO:
+            add_field("type", json_escape("level_info")); out += ',';
+            if (e.args.size() >= 7) {
+                add_num("gameType", e.args[0]); out += ',';
+                add_num("maxPlayers", e.args[1]); out += ',';
+                add_num("respawnTime", e.args[2]); out += ',';
+                add_num("timeLimitEnabled", e.args[3]); out += ',';
+                add_num("timeLimitMinutes", e.args[4]); out += ',';
+                add_num("scoreLimit", e.args[5]); out += ',';
+                add_num("friendlyFire", e.args[6]);
+            }
+            if (!e.entityType.empty()) {
+                out += ',';
+                add_field("skybox", json_escape(e.entityType));
+            }
+            break;
+        case WDLElementType::PARTICLES:
+            add_field("type", json_escape("particles")); out += ',';
+            if (e.args.size() >= 8) {
+                add_num("particleType", e.args[0]); out += ',';
+                add_num("density", e.args[1]); out += ',';
+                add_num("speed", e.args[2]); out += ',';
+                add_num("r", e.args[3]); out += ',';
+                add_num("g", e.args[4]); out += ',';
+                add_num("b", e.args[5]); out += ',';
+                add_num("windX", e.args[6]); out += ',';
+                add_num("windZ", e.args[7]);
+            }
+            break;
         default:
             add_field("type", json_escape("unknown"));
             break;
@@ -377,6 +427,56 @@ static void append_ozone_json(std::string& out, const OzonePrimitive& p, bool fi
             }
             break;
         }
+        case OzonePrimitiveType::ENTITY_PORTAL: {
+            out += esc("portal");
+            out += R"(,"targetWorld":)" + esc(p.entityType);
+            if (p.args.size() >= 6) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         R"(,"min":[%.3f,%.3f,%.3f],"max":[%.3f,%.3f,%.3f])",
+                         p.args[0], p.args[1], p.args[2], p.args[3], p.args[4], p.args[5]);
+                out += buf;
+            }
+            if (p.args.size() >= 9) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), R"(,"spawn":[%.3f,%.3f,%.3f])",
+                         p.args[6], p.args[7], p.args[8]);
+                out += buf;
+            }
+            if (p.args.size() >= 10)
+                out += p.args[9] != 0.0f ? R"(,"bidirectional":true)" : R"(,"bidirectional":false)";
+            break;
+        }
+        case OzonePrimitiveType::ENTITY_LEVELINFO: {
+            out += esc("level_info");
+            if (p.args.size() >= 7) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         R"(,"gameType":%d,"maxPlayers":%d,"respawnTime":%.3f)"
+                         R"(,"timeLimitEnabled":%d,"timeLimitMinutes":%.3f,"scoreLimit":%d,"friendlyFire":%d)",
+                         (int)p.args[0], (int)p.args[1], p.args[2],
+                         p.args[3] != 0.0f ? 1 : 0, p.args[4], (int)p.args[5],
+                         p.args[6] != 0.0f ? 1 : 0);
+                out += buf;
+            }
+            if (!p.entityType.empty())
+                out += R"(,"skybox":)" + esc(p.entityType);
+            break;
+        }
+        case OzonePrimitiveType::ENTITY_PARTICLES: {
+            out += esc("particles");
+            if (p.args.size() >= 8) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         R"(,"particleType":%d,"density":%.3f,"speed":%.3f)"
+                         R"(,"r":%d,"g":%d,"b":%d,"windX":%.3f,"windZ":%.3f)",
+                         (int)p.args[0], p.args[1], p.args[2],
+                         (int)p.args[3], (int)p.args[4], (int)p.args[5],
+                         p.args[6], p.args[7]);
+                out += buf;
+            }
+            break;
+        }
         default:
             out += esc("unknown");
             break;
@@ -389,23 +489,23 @@ static void append_ozone_json(std::string& out, const OzonePrimitive& p, bool fi
 // ---------------------------------------------------------------------------
 static int http_listen(int port) {
     int fd = (int)socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
+    if (!sock_fd_good(fd)) return -1;
     int yes = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, sock_set_opt(&yes, sizeof(yes)));
+    setsockopt(TO_SOCK(fd), SOL_SOCKET, SO_REUSEADDR, sock_set_opt(&yes, sizeof(yes)));
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY; // 0.0.0.0 — all interfaces
     addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { close(fd); return -1; }
-    if (listen(fd, 8) < 0) { close(fd); return -1; }
+    if (bind(TO_SOCK(fd), (struct sockaddr*)&addr, sizeof(addr)) < 0) { close_sock(fd); return -1; }
+    if (listen(TO_SOCK(fd), 8) < 0) { close_sock(fd); return -1; }
     return fd;
 }
 
 static void http_write_all(int fd, const char* data, size_t len) {
     size_t off = 0;
     while (off < len) {
-        ssize_t w = write(fd, data + off, len - off);
+        ssize_t w = send(TO_SOCK(fd), sock_sendto_buf(data + off, len - off), 0);
         if (w <= 0) break;
         off += (size_t)w;
     }
@@ -456,8 +556,8 @@ static const char* get_query_param(const char* path, const char* key,
 
 static void handle_http_client(int cfd) {
     char req[8192];
-    ssize_t n = read(cfd, req, sizeof(req) - 1);
-    if (n <= 0) { close(cfd); return; }
+    ssize_t n = recv(TO_SOCK(cfd), sock_recvfrom_buf(req, sizeof(req) - 1), 0);
+    if (n <= 0) { close_sock(cfd); return; }
     req[n] = '\0';
 
     char method[16] = {0}, path[1024] = {0};
@@ -475,7 +575,7 @@ static void handle_http_client(int cfd) {
                 }
                 json += "]}";
                 http_respond_json(cfd, json.c_str());
-                close(cfd);
+                close_sock(cfd);
                 return;
             }
             // Try WDL
@@ -492,7 +592,7 @@ static void handle_http_client(int cfd) {
                 }
                 json += "]}";
                 http_respond_json(cfd, json.c_str());
-                close(cfd);
+                close_sock(cfd);
                 return;
             }
 
@@ -510,12 +610,12 @@ static void handle_http_client(int cfd) {
                 }
                 json += "]}";
                 http_respond_json(cfd, json.c_str());
-                close(cfd);
+                close_sock(cfd);
                 return;
             }
 
             http_respond_404(cfd);
-            close(cfd);
+            close_sock(cfd);
             return;
         }
 
@@ -534,7 +634,7 @@ static void handle_http_client(int cfd) {
             json += std::to_string(g_game_state.world_count());
             json += "}";
             http_respond_json(cfd, json.c_str());
-            close(cfd);
+            close_sock(cfd);
             return;
         }
 
@@ -546,7 +646,7 @@ static void handle_http_client(int cfd) {
             }
             json += "]}";
             http_respond_json(cfd, json.c_str());
-            close(cfd);
+            close_sock(cfd);
             return;
         }
 
@@ -567,7 +667,7 @@ static void handle_http_client(int cfd) {
             }
             json += "]}";
             http_respond_json(cfd, json.c_str());
-            close(cfd);
+            close_sock(cfd);
             return;
         }
     }
@@ -591,17 +691,17 @@ static void handle_http_client(int cfd) {
             }
             if (!valid) {
                 http_respond_json(cfd, "{\"ok\":false,\"error\":\"invalid_token\"}");
-                close(cfd);
+                close_sock(cfd);
                 return;
             }
         }
         http_respond_json(cfd, "{\"ok\":true,\"token\":\"dev\"}");
-        close(cfd);
+        close_sock(cfd);
         return;
     }
 
     http_respond_404(cfd);
-    close(cfd);
+    close_sock(cfd);
 }
 
 static void http_server_thread(int port) {
@@ -638,7 +738,7 @@ static void http_server_thread(int port) {
         }
     }
 
-    close(lfd);
+    close_sock(lfd);
 }
 
 // ---------------------------------------------------------------------------
@@ -742,7 +842,8 @@ static void on_server_message(const net::NetworkMessage& msg,
             memcpy(&pcd, msg.payload, sizeof(pcd));
             PickupType ptype;
             int pvalue;
-            if (g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index, &ptype, &pvalue)) {
+            char weapon_def_name[64] = {0};
+            if (g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index, &ptype, &pvalue, weapon_def_name, sizeof(weapon_def_name))) {
                 ServerPlayer* pl = g_game_state.get_player(sender.id);
                 if (pl) {
                     net::XpUpdateData xud;
@@ -763,6 +864,7 @@ static void on_server_message(const net::NetworkMessage& msg,
                 // Map pickup type/value to inventory item_id
                 int item_id = -1;
                 int quantity = 1;
+                char weapon_def_out[64] = {0};
                 switch (ptype) {
                     case PickupType::HEALTH:   item_id = 1; break;
                     case PickupType::MANA:     item_id = 2; break;
@@ -774,6 +876,33 @@ static void on_server_message(const net::NetworkMessage& msg,
                     case PickupType::KEY:      item_id = 12; break;
                     case PickupType::COIN:     item_id = 13; quantity = pvalue > 0 ? pvalue : 1; break;
                     case PickupType::POWERUP:  item_id = 14; break;
+                    case PickupType::WEAPON: {
+                        item_id = 15; // weapon item_id
+                        // Use weapon def name from server pickup, or default
+                        if (weapon_def_name[0] != '\0') {
+                            strncpy(weapon_def_out, weapon_def_name, sizeof(weapon_def_out) - 1);
+                        } else {
+                            strcpy(weapon_def_out, "automag"); // default
+                        }
+                        // Store weapon in player's weapon registry (first free slot 0-7)
+                        ServerPlayer* pl2 = g_game_state.get_player(sender.id);
+                        if (pl2) {
+                            for (int i = 0; i < 8; i++) {
+                                if (pl2->weapon_def[i][0] == '\0') {
+                                    strncpy(pl2->weapon_def[i], weapon_def_out, 63);
+                                    pl2->weapon_def[i][63] = '\0';
+                                    // Get magazine size from weapon def (default 12 for automag)
+                                    int mag = 12;
+                                    if (strcmp(weapon_def_out, "automag") == 0) mag = 12;
+                                    else if (strcmp(weapon_def_out, "selenite_blade") == 0) mag = 0;
+                                    pl2->weapon_magazine[i] = mag;
+                                    pl2->weapon_ammo[i] = mag;
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
                     default: break;
                 }
                 net::PickupCollectedData pcd_out;
@@ -781,6 +910,7 @@ static void on_server_message(const net::NetworkMessage& msg,
                 pcd_out.pickup_id = pcd.pickup_id;
                 pcd_out.item_id = item_id;
                 pcd_out.quantity = quantity;
+                strncpy(pcd_out.weapon_def_name, weapon_def_out, sizeof(pcd_out.weapon_def_name) - 1);
                 net::NetworkMessage imsg;
                 imsg.magic = net::MAGIC;
                 imsg.type = static_cast<uint32_t>(net::MessageType::PICKUP_COLLECTED);
@@ -826,6 +956,39 @@ static void on_server_message(const net::NetworkMessage& msg,
             for (const auto& p : g_game_server->players()) {
                 if (p.id != sender.id && p.connected) {
                     g_game_server->send_message(p, relay);
+                }
+            }
+            break;
+        }
+        case net::MessageType::WEAPON_AMMO: {
+            if (msg.size < sizeof(net::WeaponAmmoData)) return;
+            net::WeaponAmmoData wad;
+            memcpy(&wad, msg.payload, sizeof(wad));
+            wad.player_id = sender.id;
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
+            if (sp && wad.slot >= 0 && wad.slot < 8) {
+                if (wad.action == 0) { // fire
+                    sp->weapon_ammo[wad.slot] = wad.ammo;
+                } else if (wad.action == 1) { // reload
+                    sp->weapon_ammo[wad.slot] = wad.ammo;
+                } else if (wad.action == 2) { // full sync
+                    if (wad.slot < 8) {
+                        sp->weapon_ammo[wad.slot] = wad.ammo;
+                        sp->weapon_magazine[wad.slot] = wad.magazine;
+                    }
+                }
+                // Relay ammo update to other players
+                net::NetworkMessage relay;
+                relay.magic = net::MAGIC;
+                relay.type = static_cast<uint32_t>(net::MessageType::WEAPON_AMMO);
+                relay.size = sizeof(wad);
+                relay.sequence = 0;
+                relay.timestamp = static_cast<uint32_t>(time(nullptr));
+                memcpy(relay.payload, &wad, sizeof(wad));
+                for (const auto& p : g_game_server->players()) {
+                    if (p.id != sender.id && p.connected) {
+                        g_game_server->send_message(p, relay);
+                    }
                 }
             }
             break;
@@ -1115,6 +1278,7 @@ int main(int argc, char** argv) {
                 prd.position = {pickup->position.x, pickup->position.y, pickup->position.z};
                 prd.type = static_cast<int>(pickup->type);
                 prd.value = pickup->value;
+                strncpy(prd.weapon_def_name, pickup->weapon_def_name, sizeof(prd.weapon_def_name) - 1);
                 net::NetworkMessage msg{};
                 msg.magic = net::MAGIC;
                 msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);

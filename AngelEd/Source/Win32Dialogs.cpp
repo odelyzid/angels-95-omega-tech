@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -58,6 +59,7 @@ static const wchar_t* CLASS_LIGHTPROPS = L"OzLightProps";
 static const wchar_t* CLASS_WORLDGRAPH = L"OzWorldGraph";
 static const wchar_t* CLASS_PROPSPANEL = L"OzPropsPanel";
 static const wchar_t* CLASS_STATSSIDEBAR = L"OzStatsSidebar";
+static const wchar_t* CLASS_LEVELLIST = L"OzLevelList";
 static const int STATS_SIDEBAR_W = 200;
 
 // Zone properties (read by editor rendering loop)
@@ -151,6 +153,7 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
+static LRESULT CALLBACK LevelListProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
@@ -1364,6 +1367,59 @@ void ClearZoneApplyFlags() {
     g_zoneProps.applyFog = false;
     g_zoneProps.applyAmbient = false;
     g_zoneProps.applyParticles = false;
+    g_zoneProps.applyGameType = false;
+    g_zoneProps.applySkybox = false;
+}
+
+// --- Level metadata (persisted via LevelInfo/Particles instructions) ---
+static LevelMetadata g_levelMeta;
+
+LevelMetadata GetLevelMetadata() { return g_levelMeta; }
+
+void SetLevelMetadata(const LevelMetadata& meta) {
+    g_levelMeta = meta;
+    // Mirror into ZoneProperties so the dialog shows current values
+    g_zoneProps.gameType = meta.gameType;
+    g_zoneProps.maxPlayers = meta.maxPlayers;
+    g_zoneProps.respawnTime = meta.respawnTime;
+    g_zoneProps.timeLimitEnabled = meta.timeLimitEnabled;
+    g_zoneProps.timeLimitMinutes = meta.timeLimitMinutes;
+    g_zoneProps.scoreLimit = meta.scoreLimit;
+    g_zoneProps.friendlyFire = meta.friendlyFire;
+    g_zoneProps.skyboxTexturePath = meta.skyboxTexturePath;
+    g_zoneProps.particleType = meta.particleType;
+    g_zoneProps.particleDensity = meta.particleDensity;
+    g_zoneProps.particleSpeed = meta.particleSpeed;
+    g_zoneProps.particleColorR = meta.particleColorR;
+    g_zoneProps.particleColorG = meta.particleColorG;
+    g_zoneProps.particleColorB = meta.particleColorB;
+    g_zoneProps.particleWindX = meta.particleWindX;
+    g_zoneProps.particleWindZ = meta.particleWindZ;
+}
+
+// --- Available worlds scan (for portal targets + LevelList) ---
+static std::vector<std::string> g_availableWorlds;
+
+static void ScanAvailableWorlds() {
+    g_availableWorlds.clear();
+    const char* roots[] = {"GameData/Worlds", "../GameData/Worlds"};
+    for (const char* root : roots) {
+        fs::path base(root);
+        if (!fs::exists(base)) continue;
+        for (auto& entry : fs::directory_iterator(base)) {
+            if (!entry.is_directory()) continue;
+            std::string name = entry.path().filename().string();
+            if (name == "Legacy") continue; // nested legacy world dump
+            if (fs::exists(entry.path() / "World.wdl") ||
+                fs::exists(entry.path() / "World.ozone")) {
+                // avoid duplicates when both roots resolve to the same tree
+                bool dup = false;
+                for (const auto& w : g_availableWorlds) if (w == name) { dup = true; break; }
+                if (!dup) g_availableWorlds.push_back(name);
+            }
+        }
+    }
+    std::sort(g_availableWorlds.begin(), g_availableWorlds.end());
 }
 
 // Tab IDs
@@ -1371,6 +1427,7 @@ static const int ID_ZONE_TAB_FOG = 190;
 static const int ID_ZONE_TAB_AMB = 191;
 static const int ID_ZONE_TAB_GT  = 192;
 static const int ID_ZONE_TAB_PAR = 193;
+static const int ID_ZONE_TAB_POR = 194;
 static const int ID_ZONE_CLOSE   = 199;
 
 // Fog controls
@@ -1393,6 +1450,7 @@ static const int ID_CHK_TIMELIMIT  = 153;
 static const int ID_SF_TIMELIMIT   = 154;
 static const int ID_SF_SCORELIMIT  = 155;
 static const int ID_CHK_FRIENDLY   = 156;
+static const int ID_ZONE_APPLY_GT  = 157;
 
 // Particle controls
 static const int ID_CMB_PARTICLETYPE = 160;
@@ -1405,8 +1463,22 @@ static const int ID_SF_PAR_WINDX     = 166;
 static const int ID_SF_PAR_WINDZ     = 167;
 static const int ID_ZONE_APPLY_PAR   = 168;
 
-// Tab control groups: 0=Fog, 1=Ambient, 2=GameType, 3=Particles
-static std::vector<HWND> g_zoneControlGroups[4];
+// Portal tab controls
+static const int ID_CMB_PORTAL_LIST   = 170;
+static const int ID_CMB_PORTAL_WORLD  = 171;
+static const int ID_SF_PORTAL_SX      = 172;
+static const int ID_SF_PORTAL_SY      = 173;
+static const int ID_SF_PORTAL_SZ      = 174;
+static const int ID_CHK_PORTAL_BIDIR  = 175;
+static const int ID_ZONE_APPLY_PORTAL = 176;
+static const int ID_ZONE_DEL_PORTAL   = 177;
+static const int ID_BTN_PORTAL_REFRESH= 178;
+
+// Tab control groups: 0=Fog, 1=Ambient, 2=GameType, 3=Particles, 4=Portal
+static std::vector<HWND> g_zoneControlGroups[5];
+
+// Portal editing state (shared with Main.cpp via accessors)
+static PortalEditState g_portalEdit;
 
 static void SyncScrollPos(HWND hwnd, int id, int value) {
     HWND hSB = GetDlgItem(hwnd, id);
@@ -1414,9 +1486,9 @@ static void SyncScrollPos(HWND hwnd, int id, int value) {
 }
 
 static void ShowZoneTab(HWND hwnd, int tab) {
-    if (tab < 0 || tab > 3) return;
+    if (tab < 0 || tab > 4) return;
     g_zoneTab = tab;
-    for (int t = 0; t < 4; t++) {
+    for (int t = 0; t < 5; t++) {
         for (auto& h : g_zoneControlGroups[t]) {
             ShowWindow(h, (t == tab) ? SW_SHOW : SW_HIDE);
         }
@@ -1438,7 +1510,115 @@ static void ShowZoneTab(HWND hwnd, int tab) {
         SyncScrollPos(hwnd, ID_SB_PAR_R, g_zoneProps.particleColorR);
         SyncScrollPos(hwnd, ID_SB_PAR_G, g_zoneProps.particleColorG);
         SyncScrollPos(hwnd, ID_SB_PAR_B, g_zoneProps.particleColorB);
+    } else if (tab == 4) {
+        RefreshPortalList();
     }
+}
+
+// --- Portal tab data plumbing ---
+int GetPortalCount() {
+    return (int)PawnSystem::Instance().GetPortals().size();
+}
+
+const char* GetPortalTargetWorld(int index) {
+    auto& portals = PawnSystem::Instance().GetPortals();
+    if (index < 0 || index >= (int)portals.size()) return nullptr;
+    return portals[index].targetWorld.c_str();
+}
+
+void RefreshPortalList() {
+    // Called on portal tab open and after world changes; rebuilds combo contents
+    // (deferred until controls exist — guarded by panel handle)
+    if (!g_editorPanels.hEnvPanel) return;
+    HWND hList = GetDlgItem((HWND)g_editorPanels.hEnvPanel, ID_CMB_PORTAL_LIST);
+    if (!hList) return;
+    SendMessage(hList, CB_RESETCONTENT, 0, 0);
+    auto& portals = PawnSystem::Instance().GetPortals();
+    for (size_t p = 0; p < portals.size(); p++) {
+        wchar_t label[300];
+        std::wstring tgt(portals[p].targetWorld.begin(), portals[p].targetWorld.end());
+        if (tgt.empty()) tgt = L"<unassigned>";
+        _snwprintf(label, 299, L"Portal %zu -> %s", p, tgt.c_str());
+        label[299] = 0;
+        SendMessage(hList, CB_ADDSTRING, 0, (LPARAM)label);
+    }
+    if (g_portalEdit.selectedIndex >= 0 &&
+        g_portalEdit.selectedIndex < (int)portals.size())
+        SendMessage(hList, CB_SETCURSEL, g_portalEdit.selectedIndex, 0);
+}
+
+static void LoadPortalIntoEditor(int index) {
+    auto& portals = PawnSystem::Instance().GetPortals();
+    g_portalEdit.selectedIndex = index;
+    if (index < 0 || index >= (int)portals.size()) {
+        g_portalEdit.targetWorld[0] = 0;
+        g_portalEdit.spawnX = g_portalEdit.spawnY = g_portalEdit.spawnZ = 0;
+        g_portalEdit.bidirectional = true;
+        return;
+    }
+    const ZonePortal& p = portals[index];
+    size_t n = p.targetWorld.copy(g_portalEdit.targetWorld, 255);
+    g_portalEdit.targetWorld[n] = 0;
+    g_portalEdit.spawnX = p.targetSpawn.x;
+    g_portalEdit.spawnY = p.targetSpawn.y;
+    g_portalEdit.spawnZ = p.targetSpawn.z;
+    g_portalEdit.bidirectional = p.bidirectional;
+}
+
+void SetPortalSelection(int index) {
+    LoadPortalIntoEditor(index);
+    // Push values into controls if the panel exists
+    if (!g_editorPanels.hEnvPanel) return;
+    HWND hwnd = (HWND)g_editorPanels.hEnvPanel;
+    ShowZoneTab(hwnd, 4);
+    RefreshPortalList();
+    ScanAvailableWorlds();
+    HWND hWorld = GetDlgItem(hwnd, ID_CMB_PORTAL_WORLD);
+    if (hWorld) {
+        std::wstring cur(g_portalEdit.targetWorld,
+                         g_portalEdit.targetWorld + strlen(g_portalEdit.targetWorld));
+        int sel = (int)SendMessage(hWorld, CB_FINDSTRINGEXACT, -1, (LPARAM)cur.c_str());
+        SendMessage(hWorld, CB_SETCURSEL, sel, 0);
+    }
+    auto setFloat = [&](int id, float v) {
+        wchar_t buf[32];
+        _snwprintf(buf, 31, L"%.2f", v); buf[31] = 0;
+        SetWindowTextW(GetDlgItem(hwnd, id), buf);
+    };
+    setFloat(ID_SF_PORTAL_SX, g_portalEdit.spawnX);
+    setFloat(ID_SF_PORTAL_SY, g_portalEdit.spawnY);
+    setFloat(ID_SF_PORTAL_SZ, g_portalEdit.spawnZ);
+    SendMessage(GetDlgItem(hwnd, ID_CHK_PORTAL_BIDIR), BM_SETCHECK,
+                g_portalEdit.bidirectional ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+PortalEditValues GetPortalEditValues() {
+    PortalEditValues out;
+    out.targetWorld = g_portalEdit.targetWorld;
+    out.spawnX = g_portalEdit.spawnX;
+    out.spawnY = g_portalEdit.spawnY;
+    out.spawnZ = g_portalEdit.spawnZ;
+    out.bidirectional = g_portalEdit.bidirectional;
+    // Live-read controls if the panel exists (captures unsaved edits)
+    if (g_editorPanels.hEnvPanel) {
+        HWND hwnd = (HWND)g_editorPanels.hEnvPanel;
+        int wsel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_PORTAL_WORLD), CB_GETCURSEL, 0, 0);
+        if (wsel >= 0 && wsel < (int)g_availableWorlds.size())
+            out.targetWorld = g_availableWorlds[wsel];
+        auto readF = [hwnd](int fid, float def) -> float {
+            wchar_t b[64] = {0};
+            HWND h = GetDlgItem(hwnd, fid);
+            if (!h) return def;
+            GetWindowTextW(h, b, 64);
+            return (float)wcstod(b, nullptr);
+        };
+        out.spawnX = readF(ID_SF_PORTAL_SX, out.spawnX);
+        out.spawnY = readF(ID_SF_PORTAL_SY, out.spawnY);
+        out.spawnZ = readF(ID_SF_PORTAL_SZ, out.spawnZ);
+        out.bidirectional =
+            (int)SendMessage(GetDlgItem(hwnd, ID_CHK_PORTAL_BIDIR), BM_GETCHECK, 0, 0) != 0;
+    }
+    return out;
 }
 
 static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -1447,13 +1627,14 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         int x = 8, y = 8, gap = 26;
 
         // Clear previous control groups
-        for (int t = 0; t < 4; t++) g_zoneControlGroups[t].clear();
+        for (int t = 0; t < 5; t++) g_zoneControlGroups[t].clear();
 
         // Tab buttons
         CreateButton(hwnd, L"Fog",       x, y, 70, 24, ID_ZONE_TAB_FOG);
         CreateButton(hwnd, L"Ambient",   x + 74, y, 70, 24, ID_ZONE_TAB_AMB);
         CreateButton(hwnd, L"GameType",  x + 148, y, 80, 24, ID_ZONE_TAB_GT);
         CreateButton(hwnd, L"Particles", x + 232, y, 80, 24, ID_ZONE_TAB_PAR);
+        CreateButton(hwnd, L"Portals",   x + 316, y, 80, 24, ID_ZONE_TAB_POR);
         y += 30;
 
         auto addSliderToGroup = [&](int tabIdx, int id, const wchar_t* label, int minv, int maxv, int def) {
@@ -1543,6 +1724,9 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         HWND hFriendly = CreateCtrl(hwnd, L"BUTTON", L"Friendly Fire", x, y, 120, 22, ID_CHK_FRIENDLY, BS_AUTOCHECKBOX);
         g_zoneControlGroups[2].push_back(hFriendly);
         y += 30;
+        HWND hGTApply = CreateButton(hwnd, L"Apply GameType", x, y, 140, 26, ID_ZONE_APPLY_GT);
+        g_zoneControlGroups[2].push_back(hGTApply);
+        y += 32;
 
         // --- Particles tab (3) ---
         CreateLabel(hwnd, L"Particle Type:", x, y, 85, 22, 40);
@@ -1564,6 +1748,72 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         HWND hParApply = CreateButton(hwnd, L"Apply Particles", x, y, 140, 26, ID_ZONE_APPLY_PAR);
         g_zoneControlGroups[3].push_back(hParApply);
         y += 32;
+
+        // --- Portal tab (4) ---
+        {
+            // Portal selector (existing portals in this world)
+            CreateLabel(hwnd, L"Portal:", x, y, 55, 20, 50);
+            g_zoneControlGroups[4].push_back(GetDlgItem(hwnd, 50));
+            HWND hList = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | CBS_DROPDOWNLIST,
+                                        x + 60, y, 220, 200, hwnd, (HMENU)(INT_PTR)ID_CMB_PORTAL_LIST, g_hInst, nullptr);
+            g_zoneControlGroups[4].push_back(hList);
+            y += 28;
+
+            // Target world dropdown
+            CreateLabel(hwnd, L"To World:", x, y, 70, 20, 51);
+            g_zoneControlGroups[4].push_back(GetDlgItem(hwnd, 51));
+            HWND hWorld = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | CBS_DROPDOWNLIST,
+                                         x + 75, y, 205, 300, hwnd, (HMENU)(INT_PTR)ID_CMB_PORTAL_WORLD, g_hInst, nullptr);
+            ScanAvailableWorlds();
+            for (const auto& wname : g_availableWorlds) {
+                std::wstring w(wname.begin(), wname.end());
+                SendMessage(hWorld, CB_ADDSTRING, 0, (LPARAM)w.c_str());
+            }
+            if (!g_portalEdit.targetWorld[0] && !g_availableWorlds.empty()) {
+                strncpy(g_portalEdit.targetWorld, g_availableWorlds[0].c_str(), 255);
+                g_portalEdit.targetWorld[255] = 0;
+                SendMessage(hWorld, CB_SETCURSEL, 0, 0);
+            } else {
+                std::wstring cur(g_portalEdit.targetWorld,
+                                 g_portalEdit.targetWorld + strlen(g_portalEdit.targetWorld));
+                int sel = (int)SendMessage(hWorld, CB_FINDSTRINGEXACT, -1, (LPARAM)cur.c_str());
+                SendMessage(hWorld, CB_SETCURSEL, sel >= 0 ? sel : 0, 0);
+            }
+            g_zoneControlGroups[4].push_back(hWorld);
+            y += 28;
+
+            // Spawn point at destination
+            auto addFloatInput = [&](int id, const wchar_t* label, float def, int lx, int ix) {
+                CreateLabel(hwnd, label, x + lx, y, 20, 20, id + 3000);
+                wchar_t buf[32];
+                _snwprintf(buf, 31, L"%.2f", def); buf[31] = 0;
+                HWND hEdit = CreateCtrl(hwnd, L"EDIT", buf, x + ix, y, 55, 20, id, WS_BORDER);
+                g_zoneControlGroups[4].push_back(GetDlgItem(hwnd, id + 3000));
+                g_zoneControlGroups[4].push_back(hEdit);
+            };
+            CreateLabel(hwnd, L"Spawn At:", x, y, 65, 20, 52);
+            g_zoneControlGroups[4].push_back(GetDlgItem(hwnd, 52));
+            addFloatInput(ID_SF_PORTAL_SX, L"X", g_portalEdit.spawnX, 68, 90);
+            addFloatInput(ID_SF_PORTAL_SY, L"Y", g_portalEdit.spawnY, 152, 174);
+            addFloatInput(ID_SF_PORTAL_SZ, L"Z", g_portalEdit.spawnZ, 236, 258);
+            y += 26;
+
+            // Bidirectional checkbox
+            HWND hBidir = CreateCtrl(hwnd, L"BUTTON", L"Bidirectional", x, y, 120, 22,
+                                     ID_CHK_PORTAL_BIDIR, BS_AUTOCHECKBOX);
+            SendMessage(hBidir, BM_SETCHECK, g_portalEdit.bidirectional ? BST_CHECKED : BST_UNCHECKED, 0);
+            g_zoneControlGroups[4].push_back(hBidir);
+            y += 30;
+
+            // Apply / Delete / Refresh row
+            HWND hPorApply = CreateButton(hwnd, L"Apply Portal", x, y, 110, 26, ID_ZONE_APPLY_PORTAL);
+            HWND hPorDel   = CreateButton(hwnd, L"Delete", x + 116, y, 70, 26, ID_ZONE_DEL_PORTAL);
+            HWND hPorRef   = CreateButton(hwnd, L"Refresh", x + 192, y, 80, 26, ID_BTN_PORTAL_REFRESH);
+            g_zoneControlGroups[4].push_back(hPorApply);
+            g_zoneControlGroups[4].push_back(hPorDel);
+            g_zoneControlGroups[4].push_back(hPorRef);
+            y += 32;
+        }
 
         // Close button (bottom of panel)
         CreateButton(hwnd, L"Close", 300, y, 90, 26, ID_ZONE_CLOSE);
@@ -1603,6 +1853,7 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         if (id == ID_ZONE_TAB_AMB) { ShowZoneTab(hwnd, 1); break; }
         if (id == ID_ZONE_TAB_GT)  { ShowZoneTab(hwnd, 2); break; }
         if (id == ID_ZONE_TAB_PAR) { ShowZoneTab(hwnd, 3); break; }
+        if (id == ID_ZONE_TAB_POR) { ShowZoneTab(hwnd, 4); break; }
 
         if (id == ID_ZONE_APPLY_FOG) {
             // Read fog start/end from edit fields
@@ -1624,6 +1875,77 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         }
         if (id == ID_ZONE_APPLY_PAR) {
             g_zoneProps.applyParticles = true;
+            break;
+        }
+        if (id == ID_ZONE_APPLY_GT) {
+            g_zoneProps.applyGameType = true;
+            break;
+        }
+        if (id == ID_CMB_PORTAL_LIST && HIWORD(w) == CBN_SELCHANGE) {
+            int sel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_PORTAL_LIST), CB_GETCURSEL, 0, 0);
+            if (sel >= 0) {
+                LoadPortalIntoEditor(sel);
+                // Refresh field values
+                ScanAvailableWorlds();
+                HWND hWorld = GetDlgItem(hwnd, ID_CMB_PORTAL_WORLD);
+                std::wstring cur(g_portalEdit.targetWorld,
+                                 g_portalEdit.targetWorld + strlen(g_portalEdit.targetWorld));
+                int wsel = (int)SendMessage(hWorld, CB_FINDSTRINGEXACT, -1, (LPARAM)cur.c_str());
+                SendMessage(hWorld, CB_SETCURSEL, wsel >= 0 ? wsel : 0, 0);
+                auto setFloat = [&](int fid, float v) {
+                    wchar_t b[32];
+                    _snwprintf(b, 31, L"%.2f", v); b[31] = 0;
+                    SetWindowTextW(GetDlgItem(hwnd, fid), b);
+                };
+                setFloat(ID_SF_PORTAL_SX, g_portalEdit.spawnX);
+                setFloat(ID_SF_PORTAL_SY, g_portalEdit.spawnY);
+                setFloat(ID_SF_PORTAL_SZ, g_portalEdit.spawnZ);
+                SendMessage(GetDlgItem(hwnd, ID_CHK_PORTAL_BIDIR), BM_SETCHECK,
+                            g_portalEdit.bidirectional ? BST_CHECKED : BST_UNCHECKED, 0);
+                g_editorPanels.actionSelectPortal = sel; // Main.cpp syncs viewport selection
+            }
+            break;
+        }
+        if (id == ID_CMB_PORTAL_WORLD && HIWORD(w) == CBN_SELCHANGE) {
+            int sel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_PORTAL_WORLD), CB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_availableWorlds.size()) {
+                strncpy(g_portalEdit.targetWorld, g_availableWorlds[sel].c_str(), 255);
+                g_portalEdit.targetWorld[255] = 0;
+            }
+            break;
+        }
+        if (id == ID_CHK_PORTAL_BIDIR) {
+            g_portalEdit.bidirectional =
+                (int)SendMessage(GetDlgItem(hwnd, ID_CHK_PORTAL_BIDIR), BM_GETCHECK, 0, 0) != 0;
+            break;
+        }
+        if (id == ID_BTN_PORTAL_REFRESH) {
+            RefreshPortalList();
+            break;
+        }
+        if (id == ID_ZONE_APPLY_PORTAL) {
+            // Read spawn fields + world selection into edit state, flag apply
+            auto readF = [hwnd](int fid, float def) -> float {
+                wchar_t b[64] = {0};
+                HWND h = GetDlgItem(hwnd, fid);
+                if (!h) return def;
+                GetWindowTextW(h, b, 64);
+                return (float)wcstod(b, nullptr);
+            };
+            g_portalEdit.spawnX = readF(ID_SF_PORTAL_SX, 0);
+            g_portalEdit.spawnY = readF(ID_SF_PORTAL_SY, 20);
+            g_portalEdit.spawnZ = readF(ID_SF_PORTAL_SZ, 0);
+            int wsel = (int)SendMessage(GetDlgItem(hwnd, ID_CMB_PORTAL_WORLD), CB_GETCURSEL, 0, 0);
+            if (wsel >= 0 && wsel < (int)g_availableWorlds.size()) {
+                strncpy(g_portalEdit.targetWorld, g_availableWorlds[wsel].c_str(), 255);
+                g_portalEdit.targetWorld[255] = 0;
+            }
+            g_editorPanels.actionApplyPortal = g_portalEdit.selectedIndex;
+            break;
+        }
+        if (id == ID_ZONE_DEL_PORTAL) {
+            if (g_portalEdit.selectedIndex >= 0)
+                g_editorPanels.actionDeletePortal = g_portalEdit.selectedIndex;
             break;
         }
         if (id == ID_CMB_GAMETYPE) {
@@ -1743,6 +2065,7 @@ static const int ID_NODE_SPAWN = 101;
 static const int ID_NODE_NPC   = 102;
 static const int ID_NODE_LIGHT = 103;
 static const int ID_NODE_ZONE  = 104;
+static const int ID_NODE_PORTAL= 105;
 
 void ShowNodePanel(bool show) {
     g_editorPanels.showNodePanel = show;
@@ -1758,7 +2081,8 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         CreateButton(hwnd, L"NPC Spawn", 10, 63, 160, 24, ID_NODE_NPC);
         CreateButton(hwnd, L"Point Light", 10, 91, 160, 24, ID_NODE_LIGHT);
         CreateButton(hwnd, L"Zone Volume", 10, 119, 160, 24, ID_NODE_ZONE);
-        CreateButton(hwnd, L"Close", 50, 151, 100, 28, ID_NODE_CLOSE);
+        CreateButton(hwnd, L"Level Portal", 10, 147, 160, 24, ID_NODE_PORTAL);
+        CreateButton(hwnd, L"Close", 50, 179, 100, 28, ID_NODE_CLOSE);
         break;
     }
     case WM_COMMAND: {
@@ -1770,6 +2094,7 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             else if (id == ID_NODE_NPC) type = 1;
             else if (id == ID_NODE_LIGHT) type = 2;
             else if (id == ID_NODE_ZONE) type = 3;
+            else if (id == ID_NODE_PORTAL) type = 4;
             if (type >= 0) g_editorPanels.actionNodeType = type;
         }
         break;
@@ -2188,8 +2513,26 @@ static void BuildWorldGraphEntries() {
             e.posY = (z.bounds.min.y + z.bounds.max.y) * 0.5f;
             e.posZ = (z.bounds.min.z + z.bounds.max.z) * 0.5f;
             e.rotation = 0;
-            e.selType = 7; // SelType::ZONE
+            e.selType = 6; // SelType::ZONE
             e.selIndex = (int)z.id;
+            g_worldGraphEntries.push_back(e);
+        }
+    }
+
+    // Portals (level connections)
+    {
+        auto& portals = PawnSystem::Instance().GetPortals();
+        for (size_t p = 0; p < portals.size(); p++) {
+            auto& portal = portals[p];
+            WorldGraphEntry e;
+            e.typeLabel = "Portal";
+            e.name = portal.targetWorld.empty() ? "<unassigned>" : portal.targetWorld;
+            e.posX = (portal.bounds.min.x + portal.bounds.max.x) * 0.5f;
+            e.posY = (portal.bounds.min.y + portal.bounds.max.y) * 0.5f;
+            e.posZ = (portal.bounds.min.z + portal.bounds.max.z) * 0.5f;
+            e.rotation = 0;
+            e.selType = 8; // SelType::PORTAL
+            e.selIndex = (int)p;
             g_worldGraphEntries.push_back(e);
         }
     }
@@ -2203,7 +2546,7 @@ static void BuildWorldGraphEntries() {
             e.name = "PlayerStart";
             e.posX = s.position.x; e.posY = s.position.y; e.posZ = s.position.z;
             e.rotation = s.yaw;
-            e.selType = 8; // SelType::SPAWN
+            e.selType = 7; // SelType::SPAWN
             e.selIndex = (int)s.id;
             g_worldGraphEntries.push_back(e);
         }
@@ -2367,6 +2710,191 @@ void RefreshWorldGraph() {
 }
 
 // =====================================================================
+// LevelList / Campaign panel — worlds + portal connections
+// =====================================================================
+static const int ID_LL_LIST   = 500;
+static const int ID_LL_OPEN   = 501;
+static const int ID_LL_LINK   = 502;
+static const int ID_LL_REFRESH= 503;
+static const int ID_LL_CLOSE  = 504;
+
+struct LevelListEntry {
+    std::string world;
+    std::string format;      // "WDL" or "OZONE"
+    int portalsOut = 0;
+    int portalsIn = 0;
+    bool isCurrent = false;
+};
+
+static std::vector<LevelListEntry> g_levelList;
+
+// Extract portal target-world names from a world file (light text scan)
+static void ScanPortalTargets(const fs::path& worldFile, std::vector<std::string>& out) {
+    out.clear();
+    std::ifstream f(worldFile);
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        // trim leading whitespace
+        size_t s = line.find_first_not_of(" \t\r\n");
+        if (s == std::string::npos) continue;
+        line = line.substr(s);
+        if (line.rfind("Portal:", 0) == 0) {                    // WDL
+            size_t c1 = line.find(':', 7);
+            size_t c2 = (c1 != std::string::npos) ? line.find(':', c1 + 1) : std::string::npos;
+            if (c1 != std::string::npos && c2 != std::string::npos)
+                out.push_back(line.substr(c1 + 1, c2 - c1 - 1));
+        } else if (line.rfind("portal ", 0) == 0) {             // OZONE
+            size_t sp = line.find(' ', 7);
+            if (sp != std::string::npos)
+                out.push_back(line.substr(7, sp - 7));
+        }
+    }
+}
+
+static void BuildLevelList() {
+    g_levelList.clear();
+    ScanAvailableWorlds();
+    extern std::string Editor_GetCurrentWorldName();
+    std::string current = Editor_GetCurrentWorldName();
+
+    // First pass: outgoing portal counts
+    std::vector<std::vector<std::string>> targets(g_availableWorlds.size());
+    for (size_t i = 0; i < g_availableWorlds.size(); i++) {
+        LevelListEntry e;
+        e.world = g_availableWorlds[i];
+        e.isCurrent = (e.world == current);
+        fs::path wdl = fs::path("GameData/Worlds") / e.world / "World.wdl";
+        fs::path ozone = fs::path("GameData/Worlds") / e.world / "World.ozone";
+        if (!fs::exists(wdl)) wdl = fs::path("../GameData/Worlds") / e.world / "World.wdl";
+        if (!fs::exists(ozone)) ozone = fs::path("../GameData/Worlds") / e.world / "World.ozone";
+        if (fs::exists(wdl)) { e.format = "WDL"; ScanPortalTargets(wdl, targets[i]); }
+        else if (fs::exists(ozone)) { e.format = "OZONE"; ScanPortalTargets(ozone, targets[i]); }
+        e.portalsOut = (int)targets[i].size();
+        g_levelList.push_back(e);
+    }
+    // Second pass: incoming counts
+    for (auto& e : g_levelList) {
+        e.portalsIn = 0;
+        for (size_t i = 0; i < g_levelList.size(); i++) {
+            if (&g_levelList[i] == &e) continue;
+            for (const auto& t : targets[i])
+                if (t == e.world) { e.portalsIn++; break; }
+        }
+    }
+}
+
+static void PopulateLevelList(HWND hList) {
+    ListView_DeleteAllItems(hList);
+    for (size_t i = 0; i < g_levelList.size(); i++) {
+        auto& e = g_levelList[i];
+        wchar_t buf[64];
+        auto setItem = [&](int col, const wchar_t* txt) {
+            LVITEMW lvi = {};
+            lvi.mask = LVIF_TEXT;
+            lvi.iItem = (int)i;
+            lvi.iSubItem = col;
+            lvi.pszText = const_cast<wchar_t*>(txt);
+            if (col == 0) ListView_InsertItem(hList, &lvi);
+            else ListView_SetItem(hList, &lvi);
+        };
+        std::wstring wname(e.world.begin(), e.world.end());
+        std::wstring wfmt(e.format.begin(), e.format.end());
+        _snwprintf(buf, 63, L"%d", e.portalsOut); buf[63] = 0;
+        std::wstring wout(buf);
+        _snwprintf(buf, 63, L"%d", e.portalsIn); buf[63] = 0;
+        std::wstring win(buf);
+        setItem(0, wname.c_str());
+        setItem(1, wfmt.c_str());
+        setItem(2, wout.c_str());
+        setItem(3, win.c_str());
+        setItem(4, e.isCurrent ? L"< current >" : L"");
+    }
+}
+
+static LRESULT CALLBACK LevelListProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    static HWND hList;
+    switch (msg) {
+    case WM_CREATE: {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int bw = 110, margin = 6;
+        int listH = rc.bottom - bw - margin * 3;
+
+        hList = CreateWindowEx(0, WC_LISTVIEW, L"",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL,
+            margin, margin, rc.right - margin * 2, listH,
+            hwnd, (HMENU)ID_LL_LIST, g_hInst, nullptr);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+        LVCOLUMNW lvc = {};
+        lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+        lvc.fmt = LVCFMT_LEFT;
+        const wchar_t* headers[] = {L"World", L"Format", L"Links Out", L"Links In", L""};
+        int widths[] = {160, 70, 80, 80, 90};
+        for (int i = 0; i < 5; i++) {
+            lvc.cx = widths[i];
+            lvc.pszText = const_cast<wchar_t*>(headers[i]);
+            ListView_InsertColumn(hList, i, &lvc);
+        }
+
+        CreateButton(hwnd, L"Open World",   margin, listH + margin * 2, bw, 26, ID_LL_OPEN);
+        CreateButton(hwnd, L"Add Link ->",  margin + bw + 6, listH + margin * 2, bw, 26, ID_LL_LINK);
+        CreateButton(hwnd, L"Refresh",      margin + (bw + 6) * 2, listH + margin * 2, bw, 26, ID_LL_REFRESH);
+        CreateButton(hwnd, L"Close",        rc.right - bw - margin, listH + margin * 2, bw, 26, ID_LL_CLOSE);
+
+        BuildLevelList();
+        PopulateLevelList(hList);
+        break;
+    }
+    case WM_USER + 51:
+        BuildLevelList();
+        PopulateLevelList(hList);
+        break;
+    case WM_NOTIFY: {
+        NMHDR* nm = (NMHDR*)l;
+        if (nm->idFrom == ID_LL_LIST && nm->code == NM_DBLCLK) {
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel >= 0 && sel < (int)g_levelList.size())
+                g_editorPanels.actionLevelListOpen = g_levelList[sel].world;
+        }
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+        if (id == ID_LL_CLOSE) { ShowLevelList(false); break; }
+        if (id == ID_LL_REFRESH) {
+            BuildLevelList();
+            PopulateLevelList(hList);
+            break;
+        }
+        if (sel < 0 || sel >= (int)g_levelList.size()) break;
+        if (id == ID_LL_OPEN)
+            g_editorPanels.actionLevelListOpen = g_levelList[sel].world;
+        if (id == ID_LL_LINK && !g_levelList[sel].isCurrent)
+            g_editorPanels.actionLevelListLink = g_levelList[sel].world;
+        break;
+    }
+    case WM_CLOSE: ShowLevelList(false); break;
+    case WM_DESTROY: g_editorPanels.hLevelList = nullptr; break;
+    default: return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+void ShowLevelList(bool show) {
+    g_editorPanels.showLevelList = show;
+    if (g_editorPanels.hLevelList)
+        ShowWindow((HWND)g_editorPanels.hLevelList, show ? SW_SHOW : SW_HIDE);
+}
+
+void RefreshLevelList() {
+    if (g_editorPanels.hLevelList)
+        SendMessage((HWND)g_editorPanels.hLevelList, WM_USER + 51, 0, 0);
+}
+
+// =====================================================================
 // Properties Panel - context-sensitive, dynamic controls
 // =====================================================================
 static const int ID_PP_POSX  = 401;
@@ -2425,7 +2953,7 @@ static void PopulatePropertiesPanel(HWND hwnd) {
     addField(L"Pos Z:", ID_PP_POSZ, g_editorPanels.propPosZ);
 
     // Type-specific fields
-    if (selType == 1 || selType == 7) { // Brush or Zone — add size fields
+    if (selType == 1 || selType == 6 || selType == 8) { // Brush, Zone, or Portal — add size fields
         addField(L"Size X:", ID_PP_SX, g_editorPanels.propSizeX);
         addField(L"Size Y:", ID_PP_SY, g_editorPanels.propSizeY);
         addField(L"Size Z:", ID_PP_SZ, g_editorPanels.propSizeZ);
@@ -2528,7 +3056,7 @@ void ShowPropertiesPanel(bool show) {
                     g_editorPanels.propTexOffsetV = vols[idx].texOffsetV;
                 }
             }
-        } else if (g_editorPanels.propsTargetType == 7) { // ZONE
+        } else if (g_editorPanels.propsTargetType == 6) { // ZONE
             auto& zones = PawnSystem::Instance().GetZones();
             for (auto& z : zones) {
                 if ((int)z.id == g_editorPanels.propsTargetIndex) {
@@ -2537,6 +3065,15 @@ void ShowPropertiesPanel(bool show) {
                     g_editorPanels.propSizeZ = z.bounds.max.z - z.bounds.min.z;
                     break;
                 }
+            }
+        } else if (g_editorPanels.propsTargetType == 8) { // PORTAL
+            auto& portals = PawnSystem::Instance().GetPortals();
+            if (g_editorPanels.propsTargetIndex >= 0 &&
+                g_editorPanels.propsTargetIndex < (int)portals.size()) {
+                auto& p = portals[g_editorPanels.propsTargetIndex];
+                g_editorPanels.propSizeX = p.bounds.max.x - p.bounds.min.x;
+                g_editorPanels.propSizeY = p.bounds.max.y - p.bounds.min.y;
+                g_editorPanels.propSizeZ = p.bounds.max.z - p.bounds.min.z;
             }
         }
 
@@ -2781,6 +3318,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_LIGHTPROPS, LightPropsProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_WORLDGRAPH, WorldGraphProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_PROPSPANEL, PropsPanelProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_LEVELLIST, LevelListProc, (HINSTANCE)hInst);
 
     // Stats sidebar uses dark background (override default COLOR_BTNFACE)
     {
@@ -2818,6 +3356,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_LIGHTPROPS,  L"Light Properties",     g_editorPanels.lightPropsPos,       g_editorPanels.hLightProps);
     create(CLASS_WORLDGRAPH,  L"World Graph Explorer", g_editorPanels.worldGraphPos,       g_editorPanels.hWorldGraph);
     create(CLASS_PROPSPANEL,  L"Entity Properties",    g_editorPanels.propsPanelPos,        g_editorPanels.hPropsPanel);
+    create(CLASS_LEVELLIST,   L"Level List / Campaign",g_editorPanels.levelListPos,         g_editorPanels.hLevelList);
 
     // Docked native stats sidebar (child of raylib window)
     {
@@ -2864,6 +3403,7 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hLightProps);
     destroy(g_editorPanels.hWorldGraph);
     destroy(g_editorPanels.hPropsPanel);
+    destroy(g_editorPanels.hLevelList);
     destroy(g_editorPanels.hStatsSidebar);
     if (g_sbBgBrush) { DeleteObject(g_sbBgBrush); g_sbBgBrush = nullptr; }
     if (g_editorPanels.hPreviewBitmap) {

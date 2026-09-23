@@ -339,6 +339,121 @@ static int test_unknown_opcode_warns() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_msg_opcode() {
+    TEST("msg stores pending message for host");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_msg");
+    CHECK(ctx.Load("msg \"Welcome to Dust Ravine\""));
+    ctx.ExecuteNext();
+    std::string m = ctx.PopPendingMessage();
+    CHECK(m == "Welcome to Dust Ravine");
+    CHECK(ctx.PopPendingMessage() == ""); // cleared
+    PASS(); return 0; END_TEST();
+}
+
+static int test_heal_damage_opcode() {
+    TEST("heal/damage queue playerstat ops on health");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_heal");
+    CHECK(ctx.Load("heal 50\ndamage 20"));
+    ctx.ExecuteNext(); // heal 50
+    ctx.ExecuteNext(); // damage 20
+    auto ops = ctx.PopPlayerStatOps();
+    CHECK_EQ((int)ops.size(), 2);
+    CHECK(ops[0].name == "health");
+    CHECK_EQ(ops[0].op, 1); // +=
+    CHECK_APROX(ops[0].value, 50.0f, 0.001f);
+    CHECK(ops[1].name == "health");
+    CHECK_EQ(ops[1].op, 2); // -=
+    CHECK_APROX(ops[1].value, 20.0f, 0.001f);
+    CHECK(ctx.PopPendingHurt()); // damage sets __last_hurt
+    CHECK(ctx.PopPlayerStatOps().empty()); // drained
+    PASS(); return 0; END_TEST();
+}
+
+static int test_playerstat_opcode() {
+    TEST("playerstat name op value");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_ps");
+    CHECK(ctx.Load("playerstat mana += 25\nplayerstat psychic_energy = 50\n$amt = 5\nplayerstat health += $amt"));
+    ctx.ExecuteNext(); // mana += 25
+    ctx.ExecuteNext(); // psychic_energy = 50
+    ctx.ExecuteNext(); // $amt = 5
+    ctx.ExecuteNext(); // health += $amt → var reference
+    auto ops = ctx.PopPlayerStatOps();
+    CHECK_EQ((int)ops.size(), 3);
+    CHECK(ops[0].name == "mana");
+    CHECK_EQ(ops[0].op, 1);
+    CHECK_APROX(ops[0].value, 25.0f, 0.001f);
+    CHECK(ops[1].name == "psychic_energy");
+    CHECK_EQ(ops[1].op, 0); // '='
+    CHECK_APROX(ops[1].value, 50.0f, 0.001f);
+    CHECK(ops[2].name == "health");
+    CHECK_EQ(ops[2].op, 1);
+    CHECK_APROX(ops[2].value, 5.0f, 0.001f); // resolved via $amt
+    PASS(); return 0; END_TEST();
+}
+
+static int test_consume_opcode() {
+    TEST("consume requests item removal until ClearConsume");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_consume");
+    CHECK(ctx.Load("consume"));
+    ctx.ExecuteNext();
+    CHECK(ctx.ConsumeRequested());
+    ctx.ClearConsume();
+    CHECK(!ctx.ConsumeRequested());
+    PASS(); return 0; END_TEST();
+}
+
+static int test_spawn_pickup_opcode() {
+    TEST("spawn_pickup stores name/pos/respawn for host");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_spawn_pickup");
+    CHECK(ctx.Load("spawn_pickup \"Medkit\" 4.0 2.0 8.0 45.0"));
+    ctx.ExecuteNext();
+    auto req = ctx.PopPendingPickupSpawn();
+    CHECK(req.valid);
+    CHECK(req.name == "Medkit");
+    CHECK_APROX(req.x, 4.0f, 0.001f);
+    CHECK_APROX(req.y, 2.0f, 0.001f);
+    CHECK_APROX(req.z, 8.0f, 0.001f);
+    CHECK_APROX(req.respawnTime, 45.0f, 0.001f);
+    auto req2 = ctx.PopPendingPickupSpawn();
+    CHECK(!req2.valid);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_float_compound() {
+    TEST("compound ops keep float precision on float vars");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_fcomp");
+    CHECK(ctx.Load("$x = 0.5\n$x += 0.25\n$x *= 2"));
+    ctx.ExecuteNext(); // $x = 0.5 (float)
+    ctx.ExecuteNext(); // $x += 0.25 → 0.75 (not int coercion)
+    ctx.ExecuteNext(); // $x *= 2 → 1.5
+    CHECK_APROX(ctx.GetFloat("x"), 1.5f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_stat_resolver() {
+    TEST("stat resolver backs $var reads in assignments & conditions");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_resolver");
+    ctx.SetStatResolver([](const std::string& name) -> float {
+        if (name == "health") return 55.0f;
+        return 0.0f;
+    });
+    CHECK(ctx.Load("$copy = $health\nif ($health > 40)\n$r = 1\nendif"));
+    ctx.ExecuteNext(); // $copy = $health → 55 via resolver
+    ctx.ExecuteNext(); // if (55 > 40) true
+    ctx.ExecuteNext(); // $r = 1
+    ctx.ExecuteNext(); // endif
+    CHECK_EQ(ctx.GetInt("copy"), 55);
+    CHECK_EQ(ctx.GetInt("r"), 1);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptContext Tests:\n");
     int failures = 0;
@@ -369,6 +484,13 @@ int main() {
     failures += test_pc_values();
     failures += test_find_unknown_label();
     failures += test_spawn_pawn_opcode();
+    failures += test_msg_opcode();
+    failures += test_heal_damage_opcode();
+    failures += test_playerstat_opcode();
+    failures += test_consume_opcode();
+    failures += test_spawn_pickup_opcode();
+    failures += test_float_compound();
+    failures += test_stat_resolver();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

@@ -85,13 +85,16 @@ void OmegaClient::send_chat(const char* text) {
     m_client.send_message(msg);
 }
 
-void OmegaClient::send_pickup_collect(int pickup_id, int world_index) {
+void OmegaClient::send_pickup_collect(int pickup_id, int world_index, const char* weapon_def_name) {
     if (!m_client.is_connected()) return;
 
     net::PickupCollectData pcd;
     pcd.player_id = 0; // server knows player id
     pcd.pickup_id = pickup_id;
     pcd.world_index = world_index;
+    if (weapon_def_name) {
+        strncpy(pcd.weapon_def_name, weapon_def_name, sizeof(pcd.weapon_def_name) - 1);
+    }
     m_pending_collect_id = pickup_id;
 
     net::NetworkMessage msg;
@@ -143,6 +146,27 @@ void OmegaClient::send_npc_damage(int world_index, int npc_index, int partition_
     msg.sequence = 0;
     msg.timestamp = static_cast<uint32_t>(time(nullptr));
     std::memcpy(msg.payload, &ndd, sizeof(ndd));
+    m_client.send_message(msg);
+}
+
+void OmegaClient::send_weapon_ammo(int slot, int ammo, int magazine, int action) {
+    if (!m_client.is_connected()) return;
+
+    net::WeaponAmmoData wad;
+    wad.player_id = 0;
+    wad.slot = slot;
+    wad.ammo = ammo;
+    wad.magazine = magazine;
+    wad.action = action; // 0=fire, 1=reload, 2=sync
+
+    net::NetworkMessage msg;
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::WEAPON_AMMO);
+    msg.size = sizeof(wad);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    std::memcpy(msg.payload, &wad, sizeof(wad));
+
     m_client.send_message(msg);
 }
 
@@ -237,7 +261,12 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             }
             // Grant item only if we requested this collect
             if (pcd.item_id > 0 && m_pending_collect_id == pcd.pickup_id) {
-                if (m_on_item_collected) m_on_item_collected(pcd.item_id, pcd.quantity);
+                if (pcd.item_id == 15 && pcd.weapon_def_name[0] != '\0') {
+                    // Weapon pickup - notify with weapon def name
+                    if (m_on_weapon_collected) m_on_weapon_collected(pcd.weapon_def_name);
+                } else if (m_on_item_collected) {
+                    m_on_item_collected(pcd.item_id, pcd.quantity);
+                }
                 m_pending_collect_id = -1;
             }
             break;
@@ -324,6 +353,20 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             // Keep last 64 projectiles
             while (m_projectiles.size() > 64) {
                 m_projectiles.erase(m_projectiles.begin());
+            }
+            break;
+        }
+        case net::MessageType::WEAPON_AMMO: {
+            if (msg.size < sizeof(net::WeaponAmmoData)) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::WeaponAmmoData wad;
+            memcpy(&wad, msg.payload, sizeof(wad));
+            // Update remote player ammo if needed
+            for (auto& rp : m_remote_players) {
+                if (rp.player_id == wad.player_id) {
+                    // Store ammo info in a future remote player extension
+                    break;
+                }
             }
             break;
         }
