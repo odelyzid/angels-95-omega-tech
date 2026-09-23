@@ -103,8 +103,8 @@ jobs:
 
       - name: Build raylib from source
         run: |
-          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git /tmp/raylib
-          cd /tmp/raylib/src
+          curl -sL https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz | tar -xz -C /tmp
+          cd /tmp/raylib-5.5/src
           make PLATFORM=PLATFORM_DESKTOP -j
           mkdir -p /mingw64/include /mingw64/lib
           cp raylib.h /mingw64/include/
