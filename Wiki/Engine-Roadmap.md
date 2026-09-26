@@ -51,7 +51,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 | **[1]** Collision is AABB-only | CSG brushes as AABBs; `MAX_SPLITS=64` | `Source/Physics/OzBsp.hpp:6-33` |
 | **[1]** No collision APIs | No raycast, sphere/capsule cast, or query — gameplay can't reuse the BSP | `Source/Physics/` |
 | **[1]** Position restore | Player slide solved by restoring pre-frame snapshot; no swept/continuous collision | `Source/Core.hpp:966-968` |
-| **[0/1]** Parallel collision paths | WDL re-parsed every frame on the client; OZONE pre-baked — two CSG paths never unified | `Source/Core.hpp:1175-1503` |
+| **[0/1]** Parallel collision paths | WDL token-baked once; two CSG paths (CachedModels render vs OZONE bake) still not fully unified | `Source/Core.hpp:1183-1270` |
 | **[3]** Rigid bodies | No physics engine at all (no joints, no ragdolls) | — |
 | **[3]** Navmesh/AI perception | NPCs use distance checks only; no pathfinding | `Source/Server/GameState.cpp:433-503` |
 | **[3]** Input | No rebinding, no gamepad tuning, no mouse-look sensitivity setting | `Source/Input*` (none) |
@@ -142,14 +142,23 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 ### Tier 1 — engine fundamentals
 
-- [ ] Real RTT ping (PING/PONG timestamp round-trip instead of time-since-connect)
-- [ ] Enforced 10 Hz server tick + client fixed-timestep (accumulator)
-- [ ] NPC interpolation on the client (smooth 2.5 Hz broadcasts)
-- [ ] Position/state validation moved into `GameState` (single choke point)
-- [ ] Client settings persistence (read a real config file; move VSync/MSAA to
-  window-creation time)
-- [ ] Frustum culling for renderables
-- [ ] Unify WDL client parse-on-load vs OZONE bake; stop per-frame WDL reparsing
+- [x] Real RTT ping (PING/PONG sequence-paired round-trip; client heartbeat at
+  `Network.cpp`, HUD already renders `get_ping_ms`)
+- [x] Enforced 10 Hz server tick (fixed-timestep accumulator, catch-up capped) +
+  client fixed-timestep (60 Hz accumulator for movement physics/pawns/projectiles)
+- [x] NPC interpolation on the client (smooth 2.5 Hz broadcasts via
+  `prev`/`target` lerp + shortest-arc yaw)
+- [x] Position/state validation moved into `GameState::update_player_position`
+  (single choke point, finite + teleport clamp)
+- [x] Client settings persistence (`LoadClientSettings` reads
+  `System/Angels95.ini` before `InitWindow`; VSync/MSAA/window-size applied at
+  window creation; saved on exit)
+- [x] Frustum culling for renderables (camera-geometry planes + AABB test in
+  `OzoneLoader::Draw`/`DrawWorldGeometry`)
+- [x] WDL token bake — `WDLProcess` walks a pre-split colon-delimited token
+  cache instead of re-tokenizing the whole world text with `WSplitValue` every
+  frame (`BakeWDLTokens`/`EnsureWDLTokensBaked` in `Source/Core.hpp`; rebuilt
+  lazily when `WorldData`/`OtherWDLData`/`ExtraWDLInstructions` change)
 
 ### Tier 2 — multiplayer completeness
 
@@ -189,9 +198,10 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 - "Dedicated server standalone works": it does for world/NPC simulation, but
   player damage is client-authoritative for world hazards (`PLAYER_HURT`) — now
   closed by Tier 0 ownership checks.
-- "INI config is supported": `System/Angels95.ini` and `System/OzServer.ini`
-  are build-time templates, **never read at runtime**. Client/server accept CLI
-  flags only (`--world`, `--world-dir`, `--port`, `--http-port`, `--dir`).
+- "INI config is supported": the **client** now reads/writes
+  `System/Angels95.ini` (window/VSync/MSAA/gfx/audio), but the **server** still
+  accepts CLI flags only (`--port`, `--http-port`, `--dir`); `System/OzServer.ini`
+  remains a build-time template.
 
 ---
 

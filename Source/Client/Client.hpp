@@ -7,13 +7,21 @@
 #include <functional>
 #include <mutex>
 
-// Client-side NPC representation for rendering
+// Client-side NPC representation for rendering. `position`/`yaw` hold the
+// interpolated render values; `*_target`/`*_prev` plus `snapshot_time` drive
+// the lerp between the last two server snapshots (NPC updates ~2.5 Hz).
 struct ClientNPC {
     int world_index;
     int npc_index;
     int partition_index;
     net::NetVec3 position{0,0,0};
+    net::NetVec3 target{0,0,0};
+    net::NetVec3 prev{0,0,0};
     float yaw = 0;
+    float yaw_target = 0;
+    float yaw_prev = 0;
+    double snapshot_time = 0;
+    bool has_snapshot = false;
     int state = 0;     // NpcState as int
     int health = 100;
     bool active = true;

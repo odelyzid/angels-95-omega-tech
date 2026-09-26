@@ -1,7 +1,6 @@
 ﻿#include "Data.hpp"
 #include "Log.hpp"
 #include "Package/OzAssetMapper.hpp"
-#include "Audio/OzSoundLoader.hpp"
 #include "Audio/DspReverb.hpp"
 #include "OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
@@ -27,6 +26,14 @@ char g_world_to_load[256] = "EngineTest";
 char g_world_dir_override[256] = "";
 bool g_skipMenu = false;
 
+// WDL token bake state (see BakeWDLTokens/EnsureWDLTokensBaked below) — the
+// colon-delimited world text is split into tokens once and cached so the
+// per-frame WDLProcess walk avoids re-tokenizing with WSplitValue each time.
+static std::vector<wstring> g_wdlTokens;
+static size_t g_wdlBakedWorldLen = (size_t)-1;
+static size_t g_wdlBakedOtherLen = (size_t)-1;
+static size_t g_wdlBakedExtraLen = (size_t)-1;
+
 // Portal transitions (campaign system) — set by the portal trigger in
 // UpdateEntities, consumed right after LoadWorld() repositions the player.
 bool g_portalTransitionPending = false;
@@ -48,6 +55,7 @@ Texture2D g_skySideTex = {0};   // optional horizon/side skybox variant
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
 const char *SetServerJoinIP = nullptr;
+int SetServerJoinPort = 27015;
 
 void LoadSave();
 void SaveGame();
@@ -520,6 +528,11 @@ auto LoadWorld()
             CacheWDL();
         }
 
+        // Force the WDL token bake to refresh for the new world text
+        g_wdlBakedWorldLen = (size_t)-1;
+        g_wdlBakedOtherLen = (size_t)-1;
+        g_wdlBakedExtraLen = (size_t)-1;
+
         // Clear all existing entities before loading new world
         PawnSystem::Instance().ClearLights();
         PawnSystem::Instance().ClearPlayerStarts();
@@ -864,9 +877,6 @@ void OmegaTechInit()
 
     Target = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    // Initialize sound system
-    SoundLoader::Instance().RegisterDefaults();
-
     // Pre-cache weapon object models from entity definitions (Object1-5)
     {
         static const char* objNames[] = {"Object1", "Object2", "Object3", "Object4", "Object5"};
@@ -910,6 +920,10 @@ void PlaySplashScreen()
 
 void PlayHomeScreen()
 {
+    // Re-open the title video if a previous menu visit released it.
+    if (!OmegaTechData.HomeScreenVideo.ok && IsPathFile("GameData/Global/Title/Title.mpg"))
+        OmegaTechData.HomeScreenVideo = ray_video_open("GameData/Global/Title/Title.mpg");
+
     if (g_skipMenu)
     {
         g_skipMenu = false;
@@ -927,6 +941,13 @@ void PlayHomeScreen()
 
     StopMusicStream(OmegaTechData.HomeScreenMusic);
 
+    // Release the title video (it will be re-opened on the next menu visit).
+    if (OmegaTechData.HomeScreenVideo.ok)
+    {
+        ray_video_destroy(&OmegaTechData.HomeScreenVideo);
+        OmegaTechData.HomeScreenVideo = ray_video_t{};
+    }
+
     if (menu.ShouldLoadGame() || menu.GetSelectedWorld())
     {
         UnloadRenderTexture(Target);
@@ -943,15 +964,20 @@ void PlayHomeScreen()
     if (menu.ShouldJoinServer())
     {
         SetServerJoinIP = menu.GetJoinIP();
+        int port = menu.GetJoinPort();
+        if (port > 0 && port <= 65535) SetServerJoinPort = port;
         SetServerJoinFlag = true;
     }
 
     if (menu.ShouldStartServer())
     {
+        int port = menu.GetJoinPort();
+        if (port <= 0 || port > 65535) port = 27015;
         SetServerJoinIP = "127.0.0.1";
+        SetServerJoinPort = port;
         SetServerJoinFlag = true;
         // Launch dedicated server as a subprocess
-        int serverPort = 27015;
+        int serverPort = port;
         std::string cmd = "start /B \"\" System\\AngelServ.exe --port " +
                           std::to_string(serverPort) + " --dir GameData";
         int result = std::system(cmd.c_str());
@@ -1172,21 +1198,63 @@ float SampleHeightmapGroundY(float px, float pz)
     return o.y + ht * WDLModels.HeightMapSize.y * scale;
 }
 
+// ---- WDL token bake ----
+// The colon-delimited world text (WorldData/OtherWDLData + dynamic
+// ExtraWDLInstructions) is split into tokens ONCE and cached, so WDLProcess
+// walks a token vector instead of calling WSplitValue (O(n) per call) over
+// the whole string every frame. Rebuilt lazily when a source string changes.
+void BakeWDLTokens()
+{
+    const wstring base = OmegaTechData.UseCachedRenderer ? OtherWDLData : WorldData;
+    const size_t extraLen = ExtraWDLInstructions.size();
+    wstring combined;
+    combined.reserve(base.size() + extraLen);
+    combined += base;
+    combined += ExtraWDLInstructions;
+
+    g_wdlTokens.clear();
+    g_wdlTokens.reserve(combined.size() / 2 + 1);
+    wstring cur;
+    for (size_t i = 0; i < combined.size(); i++)
+    {
+        if (combined[i] == L':')
+        {
+            g_wdlTokens.push_back(cur);
+            cur.clear();
+        }
+        else
+        {
+            cur += combined[i];
+        }
+    }
+    g_wdlTokens.push_back(cur);
+
+    g_wdlBakedWorldLen = WorldData.size();
+    g_wdlBakedOtherLen = OtherWDLData.size();
+    g_wdlBakedExtraLen = extraLen;
+}
+
+void EnsureWDLTokensBaked()
+{
+    if (g_wdlBakedWorldLen == WorldData.size() &&
+        g_wdlBakedOtherLen == OtherWDLData.size() &&
+        g_wdlBakedExtraLen == ExtraWDLInstructions.size())
+        return;
+    BakeWDLTokens();
+}
+
+const wstring& WdlToken(int index)
+{
+    static const wstring emptyToken;
+    if (index < 0 || index >= (int)g_wdlTokens.size())
+        return emptyToken;
+    return g_wdlTokens[index];
+}
+
 void WDLProcess()
 {
-
-    wstring WData = L"";
-    int Size = 0;
-    if (OmegaTechData.UseCachedRenderer)
-    {
-        WData = OtherWDLData + ExtraWDLInstructions;
-        Size = GetWDLSize(OtherWDLData, ExtraWDLInstructions);
-    }
-    else
-    {
-        WData = WorldData + ExtraWDLInstructions;
-        Size = GetWDLSize(WorldData, ExtraWDLInstructions);
-    }
+    EnsureWDLTokensBaked();
+    int Size = (int)g_wdlTokens.size() - 1;
 
     bool Render = false;
     bool FoundPlatform = false;
@@ -1194,7 +1262,7 @@ void WDLProcess()
 
     for (int i = 0; i <= Size; i++)
     {
-        wstring Instruction = WSplitValue(WData, i);
+        wstring Instruction = WdlToken(i);
 
         if (Instruction == L"C")
         {
@@ -1208,12 +1276,12 @@ void WDLProcess()
             WReadValue(Instruction, 0, 8) == L"ZoneInfo")
         {
 
-            X = ToFloat(WSplitValue(WData, i + 1));
-            Y = ToFloat(WSplitValue(WData, i + 2));
-            Z = ToFloat(WSplitValue(WData, i + 3));
-            S = ToFloat(WSplitValue(WData, i + 4));
+            X = ToFloat(WdlToken(i + 1));
+            Y = ToFloat(WdlToken(i + 2));
+            Z = ToFloat(WdlToken(i + 3));
+            S = ToFloat(WdlToken(i + 4));
 
-            Rotation = ToFloat(WSplitValue(WData, i + 5));
+            Rotation = ToFloat(WdlToken(i + 5));
 
             if (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z)
             {
@@ -1381,9 +1449,9 @@ void WDLProcess()
         if (Instruction == L"ClipBox")
         {
 
-            W = ToFloat(WSplitValue(WData, i + 6));
-            H = ToFloat(WSplitValue(WData, i + 7));
-            L = ToFloat(WSplitValue(WData, i + 8));
+            W = ToFloat(WdlToken(i + 6));
+            H = ToFloat(WdlToken(i + 7));
+            L = ToFloat(WdlToken(i + 8));
 
             if (CheckCollisionBoxSphere(
                     (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
@@ -1406,9 +1474,9 @@ void WDLProcess()
 
             if (Render)
             {
-                W = ToFloat(WSplitValue(WData, i + 6));
-                H = ToFloat(WSplitValue(WData, i + 7));
-                L = ToFloat(WSplitValue(WData, i + 8));
+                W = ToFloat(WdlToken(i + 6));
+                H = ToFloat(WdlToken(i + 7));
+                L = ToFloat(WdlToken(i + 8));
 
                 if (CheckCollisionBoxSphere(
                         (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
@@ -1502,10 +1570,9 @@ void WDLProcess()
     }
 }
 
-void UpdateEntities()
+void UpdateEntitiesSim(float dt)
 {
     Vector3 playerPos = OmegaTechData.MainCamera.position;
-    float dt = GetFrameTime();
 
     // Single-pass zone scan for player â€” replaces 4 separate CheckZoneCollision calls
     PawnSystem::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
@@ -1543,11 +1610,8 @@ void UpdateEntities()
         }
     }
 
-    // Draw all pawns (with lit shader for fog/lighting)
-    PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
-
-    // Draw entity billboards (player starts, pickups, zones) with lit shader
-    PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights);
+    // NOTE: pawn/entity drawing moved out to DrawWorld (once per frame after
+    // the fixed-step accumulator) so sim steps never double-draw.
 
     // Check if any pawn is attacking the player (contact damage)
     {
@@ -2197,11 +2261,29 @@ if (inSkyZone)
     }
     else
     {
-        UpdateEntities();
-        // Wall/terrain impact sweep, then update projectiles (age, movement, gravity)
-        float dt = GetFrameTime();
-        SweepProjectilesVsWorld(dt);
-        PawnSystem::Instance().UpdateProjectiles(dt);
+        // Fixed 60 Hz timestep for the client simulation. Physics, pawn FSM,
+        // projectiles and portal scans advance in discrete 1/60s steps (up to 4
+        // per render frame to avoid an unbounded catch-up spiral) so gameplay
+        // is frame-rate independent. Rendering happens once per frame below.
+        static double s_sim_accumulator = 0.0;
+        static constexpr double kSimTick = 1.0 / 60.0;
+        s_sim_accumulator += GetFrameTime();
+        int steps = 0;
+        while (s_sim_accumulator >= kSimTick && steps < 4) {
+            s_sim_accumulator -= kSimTick;
+            UpdateEntitiesSim(static_cast<float>(kSimTick));
+            // Wall/terrain impact sweep, then update projectiles (age, movement, gravity)
+            SweepProjectilesVsWorld(static_cast<float>(kSimTick));
+            PawnSystem::Instance().UpdateProjectiles(static_cast<float>(kSimTick));
+            ++steps;
+        }
+        if (steps >= 4 && s_sim_accumulator >= kSimTick)
+            s_sim_accumulator = 0.0; // drift guard: discard excess catch-up
+
+        // Draw pawns / entity billboards exactly once per frame (kept out of
+        // the sim steps so a catch-up frame doesn't re-draw the scene).
+        PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
+        PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights);
     }
     if (ObjectCollision)
     {

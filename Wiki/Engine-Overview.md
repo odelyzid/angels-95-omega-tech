@@ -56,8 +56,7 @@ Angels95/
       Video.hpp              # Video playback support
 
     Audio/
-      OzSoundLoader.cpp/.hpp # Sound loading with fallback
-      DspReverb.hpp          # Audio reverb DSP
+      DspReverb.hpp          # Audio reverb DSP (attached to the master mix)
 
     Client/
       Client.cpp/.hpp        # Client networking layer

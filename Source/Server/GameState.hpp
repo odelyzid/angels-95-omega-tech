@@ -258,7 +258,10 @@ public:
     uint32_t add_player(uint32_t id, const char* name); // returns player id
     void remove_player(uint32_t id);
     ServerPlayer* get_player(uint32_t id);
-    void update_player_position(uint32_t id, float x, float y, float z, float yaw, float pitch);
+    // Validated position update (choke point). Returns false if the player is
+    // unknown, inputs are non-finite, or the per-update move exceeds the
+    // teleport clamp; the position is only applied on success.
+    bool update_player_position(uint32_t id, float x, float y, float z, float yaw, float pitch);
     int player_count() const { return m_player_count; }
     const std::vector<ServerPlayer>& players() const { return m_players; }
 

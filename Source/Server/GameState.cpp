@@ -304,15 +304,41 @@ ServerPlayer* GameState::get_player(uint32_t id) {
     return nullptr;
 }
 
-void GameState::update_player_position(uint32_t id, float x, float y, float z,
-                                        float yaw, float pitch) {
+// Choke point for ALL position updates (network handler, bots, cheats).
+// Returns false and does not apply the update if the player is unknown,
+// the inputs are malformed (NaN/Inf), or the move exceeds the per-update
+// teleport limit. First update from a player always establishes a baseline.
+bool GameState::update_player_position(uint32_t id, float x, float y, float z,
+                                       float yaw, float pitch) {
     ServerPlayer* p = get_player(id);
-    if (!p) return;
+    if (!p) return false;
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+        !std::isfinite(yaw) || !std::isfinite(pitch)) {
+        OZ_WARN("update_player_position(id=%u): non-finite position dropped", id);
+        return false;
+    }
+
+    // Teleport clamp: sizeable per-update moves are rejected.
+    constexpr float kMaxMovePerUpdate = 25.0f;
+    if (p->has_position) {
+        float dx = fabsf(x - p->position.x);
+        float dy = fabsf(y - p->position.y);
+        float dz = fabsf(z - p->position.z);
+        if (dx > kMaxMovePerUpdate || dy > kMaxMovePerUpdate ||
+            dz > kMaxMovePerUpdate) {
+            OZ_WARN("update_player_position(id=%u): teleport delta (%.1f,%.1f,%.1f) dropped",
+                    id, dx, dy, dz);
+            return false;
+        }
+    }
+
     p->position = {x, y, z};
     p->yaw = yaw;
     p->pitch = pitch;
     p->has_position = true;
     p->last_seen = time(nullptr);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

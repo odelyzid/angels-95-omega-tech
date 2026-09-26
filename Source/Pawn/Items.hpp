@@ -81,29 +81,12 @@ inline const ItemDBEntry* GetItemDef(int id) {
     return nullptr;
 }
 
-// Equipment slot label names
-inline const char* EquipSlotLabel(EquipSlotType s) {
-    switch (s) {
-        case EquipSlotType::ARMOR:      return "Armor";
-        case EquipSlotType::JEWELRY1:   return "Jewelry 1";
-        case EquipSlotType::JEWELRY2:   return "Jewelry 2";
-        case EquipSlotType::HELMET:     return "Helmet";
-        case EquipSlotType::BOOTS:      return "Boots";
-        case EquipSlotType::LEGS:       return "Legs";
-        case EquipSlotType::ACCESSORY1: return "Accessory 1";
-        case EquipSlotType::ACCESSORY2: return "Accessory 2";
-        default: return "";
-    }
-}
-
 struct InventorySystem {
     BackpackSlot backpack[BACKPACK_SLOTS];
-    int equipment[EQUIP_SLOT_COUNT];
     int coins;
 
     InventorySystem() {
         for (auto& s : backpack)  { s.itemId = -1; s.quantity = 0; }
-        for (auto& e : equipment) e = -1;
         coins = 0;
     }
 
@@ -145,63 +128,8 @@ struct InventorySystem {
         return true;
     }
 
-    // Equip item from backpack slot to equipment
-    bool EquipFromBackpack(int bpSlot) {
-        if (bpSlot < 0 || bpSlot >= BACKPACK_SLOTS) return false;
-        int itemId = backpack[bpSlot].itemId;
-        if (itemId == -1) return false;
-        const ItemDBEntry* def = GetItemDef(itemId);
-        if (!def || def->equipSlot == EquipSlotType::NONE) return false;
-        int es = (int)def->equipSlot;
-        // If something already in slot, swap back
-        if (equipment[es] != -1) {
-            int oldItem = equipment[es];
-            equipment[es] = -1;
-            AddToBackpack(oldItem, 1);
-        }
-        equipment[es] = itemId;
-        RemoveFromBackpack(bpSlot);
-        return true;
-    }
-
-    // Unequip item to backpack
-    bool UnequipToBackpack(int equipSlot) {
-        if (equipSlot < 0 || equipSlot >= EQUIP_SLOT_COUNT) return false;
-        int itemId = equipment[equipSlot];
-        if (itemId == -1) return false;
-        if (AddToBackpack(itemId, 1)) {
-            equipment[equipSlot] = -1;
-            return true;
-        }
-        return false;
-    }
-
-    // Use a consumable item from backpack
-    bool UseItem(int bpSlot) {
-        if (bpSlot < 0 || bpSlot >= BACKPACK_SLOTS) return false;
-        int itemId = backpack[bpSlot].itemId;
-        if (itemId == -1) return false;
-        const ItemDBEntry* def = GetItemDef(itemId);
-        if (!def) return false;
-
-        auto& lem = LightningEntityManager::Instance();
-        switch (def->category) {
-            case ItemCategory::HEALTH_VIAL:
-                lem.SetPlayerHealth(std::min(lem.GetPlayerHealth() + (float)def->value, lem.GetPlayerMaxHealth()));
-                RemoveFromBackpack(bpSlot);
-                return true;
-            case ItemCategory::MANA_VIAL:
-                lem.SetPlayerMana(std::min(lem.GetPlayerMana() + (float)def->value, lem.GetPlayerMaxMana()));
-                RemoveFromBackpack(bpSlot);
-                return true;
-            case ItemCategory::ENERGY_CRYSTAL:
-                lem.SetPlayerPsychicEnergy(std::min(lem.GetPlayerPsychicEnergy() + (float)def->value, lem.GetPlayerMaxPsychicEnergy()));
-                RemoveFromBackpack(bpSlot);
-                return true;
-            default:
-                return false;
-        }
-    }
+    // NOTE: equipment (armor/upgrade) is handled by the .ozls-driven
+    // LightningEntityManager equipment slots (EquipmentAssign etc.), not here.
 
     // Summon a pickup item by name (for /summon command)
     int SummonItem(const char* name) {
@@ -220,19 +148,6 @@ struct InventorySystem {
             if (match && *a == *b) return ItemDB[i].id;
         }
         return -1;
-    }
-
-    bool HasItem(int itemId) const {
-        for (const auto& s : backpack)
-            if (s.itemId == itemId && s.quantity > 0) return true;
-        return false;
-    }
-
-    int ItemCount(int itemId) const {
-        int count = 0;
-        for (const auto& s : backpack)
-            if (s.itemId == itemId) count += s.quantity;
-        return count;
     }
 };
 

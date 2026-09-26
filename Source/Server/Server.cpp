@@ -38,6 +38,7 @@ static std::string g_server_name = "Angels95 Server";
 static std::chrono::steady_clock::time_point g_server_start_time;
 
 static GameState g_game_state;
+static net::NetworkDiscovery* g_discovery = nullptr; // set in main(); keeps LAN announce counts current
 
 static void signal_handler(int) { g_running = false; }
 
@@ -791,6 +792,8 @@ static void on_player_join(net::NetworkPlayer& player) {
             player.name, player.id, player.ip_address, player.port);
     // Idempotent: re-auth/re-ack may replay this for an existing player.
     g_game_state.add_player(player.id, player.name);
+    if (g_discovery)
+        g_discovery->set_player_count((uint32_t)g_game_state.player_count(), net::MAX_PLAYERS);
 
     send_join_world_list(player);
 
@@ -809,6 +812,8 @@ static void on_player_join(net::NetworkPlayer& player) {
 static void on_player_leave(net::NetworkPlayer& player) {
     printf("Player %s left\n", player.name);
     g_game_state.remove_player(player.id);
+    if (g_discovery)
+        g_discovery->set_player_count((uint32_t)g_game_state.player_count(), net::MAX_PLAYERS);
 
     // Broadcast departure to remaining clients
     net::NetworkMessage leave;
@@ -830,33 +835,17 @@ static void on_server_message(const net::NetworkMessage& msg,
             net::PlayerUpdateData pud;
             memcpy(&pud, msg.payload, sizeof(pud));
 
-            // Reject malformed positions (NaN/Inf) outright.
-            if (!std::isfinite(pud.position.x) || !std::isfinite(pud.position.y) ||
-                !std::isfinite(pud.position.z) || !std::isfinite(pud.yaw) ||
-                !std::isfinite(pud.pitch)) {
-                OZ_WARN("PLAYER_UPDATE from %u: non-finite position dropped", sender.id);
+            // All validation (finite, teleport clamp) lives in GameState so
+            // every position source shares the same choke point.
+            if (!g_game_state.update_player_position(
+                    sender.id, pud.position.x, pud.position.y, pud.position.z,
+                    pud.yaw, pud.pitch)) {
+                OZ_WARN("PLAYER_UPDATE from %u rejected", sender.id);
                 break;
             }
 
-            // Teleport clamp: sizeable per-update moves are dropped.
-            constexpr float kMaxMovePerUpdate = 25.0f;
-            ServerPlayer* sp = g_game_state.get_player(sender.id);
-            if (sp && sp->has_position) {
-                float dx = pud.position.x - sp->position.x;
-                float dy = pud.position.y - sp->position.y;
-                float dz = pud.position.z - sp->position.z;
-                if (std::fabs(dx) > kMaxMovePerUpdate ||
-                    std::fabs(dy) > kMaxMovePerUpdate ||
-                    std::fabs(dz) > kMaxMovePerUpdate) {
-                    OZ_WARN("PLAYER_UPDATE from %u: teleport delta (%.1f,%.1f,%.1f) dropped",
-                            sender.id, dx, dy, dz);
-                    break;
-                }
-            }
-            g_game_state.update_player_position(
-                sender.id, pud.position.x, pud.position.y, pud.position.z, pud.yaw, pud.pitch);
-
             // Relay to all other players (with server-authoritative health)
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
             pud.player_id = sender.id;
             if (sp) pud.health = sp->health;
             net::NetworkMessage relay;
@@ -1322,6 +1311,7 @@ int main(int argc, char** argv) {
     net::NetworkDiscovery discovery;
     discovery.init("Angels95", "0.2.1", static_cast<uint16_t>(game_port));
     discovery.start();
+    g_discovery = &discovery;
 
     // Initialize game state with worlds
     g_game_state.init_worlds(g_gamedata_dir, g_world_list);
@@ -1330,80 +1320,67 @@ int main(int argc, char** argv) {
         printf("AngelServ ready\n");
     }
 
-    // Main loop
+    // Main loop — fixed-timestep game tick (10 Hz), network drained each pass.
     int tick = 0;
+    constexpr double kTickInterval = 0.1; // 10 Hz
+    constexpr double kMaxCatchUp = 0.5;   // drop excess catch-up ticks under load
+    double acc = 0.0;
+    auto last_frame = std::chrono::steady_clock::now();
     while (g_running) {
         game_server.update();
         discovery.update();
 
-        g_game_state.tick(0.1f);
+        auto now = std::chrono::steady_clock::now();
+        acc += std::chrono::duration<double>(now - last_frame).count();
+        last_frame = now;
 
-        // Broadcast pickups that just respawned to all clients
-        {
-            auto respawned = g_game_state.consume_respawned_pickups();
-            for (auto& rp : respawned) {
-                WorldState* ws = g_game_state.get_world(rp.world_index);
-                if (!ws) continue;
-                ServerPickup* pickup = nullptr;
-                for (auto& part : ws->partitions)
-                    for (auto& p : part.pickups)
-                        if (p.id == rp.pickup_id) { pickup = &p; break; }
-                if (!pickup)
-                    for (auto& p : ws->global_pickups)
-                        if (p.id == rp.pickup_id) { pickup = &p; break; }
-                if (!pickup || !pickup->active) continue;
-                net::PickupRespawnData prd;
-                prd.pickup_id = pickup->id;
-                prd.world_index = rp.world_index;
-                prd.position = {pickup->position.x, pickup->position.y, pickup->position.z};
-                prd.type = static_cast<int>(pickup->type);
-                prd.value = pickup->value;
-                strncpy(prd.weapon_def_name, pickup->weapon_def_name, sizeof(prd.weapon_def_name) - 1);
-                net::NetworkMessage msg{};
-                msg.magic = net::MAGIC;
-                msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
-                msg.size = sizeof(prd);
-                msg.sequence = 0;
-                msg.timestamp = static_cast<uint32_t>(time(nullptr));
-                memcpy(msg.payload, &prd, sizeof(prd));
-                g_game_server->broadcast_message(msg);
-            }
-        }
+        while (acc >= kTickInterval) {
+            acc -= kTickInterval;
+            g_game_state.tick(static_cast<float>(kTickInterval));
 
-        // Broadcast NPC state to all players every 4 ticks (2.5/sec)
-        if (tick % 4 == 0) {
-            for (const auto& world : g_game_state.worlds()) {
-                // Global NPCs
-                for (size_t i = 0; i < world.global_npcs.size(); i++) {
-                    const auto& n = world.global_npcs[i];
-                    if (!n.active) continue;
-                    net::NpcStateUpdateData nsud;
-                    nsud.world_index = world.world_index;
-                    nsud.npc_index = static_cast<int>(i);
-                    nsud.partition_index = -1;
-                    nsud.position = n.position;
-                    nsud.yaw = n.yaw;
-                    nsud.state = static_cast<int>(n.state);
-                    nsud.health = n.health;
-                    nsud.active = n.active;
-                    net::NetworkMessage bmsg;
-                    bmsg.magic = net::MAGIC;
-                    bmsg.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
-                    bmsg.size = sizeof(nsud);
-                    bmsg.sequence = 0;
-                    bmsg.timestamp = static_cast<uint32_t>(time(nullptr));
-                    memcpy(bmsg.payload, &nsud, sizeof(nsud));
-                    g_game_server->broadcast_message(bmsg);
+            // Broadcast pickups that just respawned to all clients
+            {
+                auto respawned = g_game_state.consume_respawned_pickups();
+                for (auto& rp : respawned) {
+                    WorldState* ws = g_game_state.get_world(rp.world_index);
+                    if (!ws) continue;
+                    ServerPickup* pickup = nullptr;
+                    for (auto& part : ws->partitions)
+                        for (auto& p : part.pickups)
+                            if (p.id == rp.pickup_id) { pickup = &p; break; }
+                    if (!pickup)
+                        for (auto& p : ws->global_pickups)
+                            if (p.id == rp.pickup_id) { pickup = &p; break; }
+                    if (!pickup || !pickup->active) continue;
+                    net::PickupRespawnData prd;
+                    prd.pickup_id = pickup->id;
+                    prd.world_index = rp.world_index;
+                    prd.position = {pickup->position.x, pickup->position.y, pickup->position.z};
+                    prd.type = static_cast<int>(pickup->type);
+                    prd.value = pickup->value;
+                    strncpy(prd.weapon_def_name, pickup->weapon_def_name, sizeof(prd.weapon_def_name) - 1);
+                    net::NetworkMessage msg{};
+                    msg.magic = net::MAGIC;
+                    msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
+                    msg.size = sizeof(prd);
+                    msg.sequence = 0;
+                    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+                    memcpy(msg.payload, &prd, sizeof(prd));
+                    g_game_server->broadcast_message(msg);
                 }
-                // Partition NPCs
-                for (const auto& part : world.partitions) {
-                    for (size_t i = 0; i < part.npcs.size(); i++) {
-                        const auto& n = part.npcs[i];
+            }
+
+            // Broadcast NPC state to all players every 4 ticks (2.5/sec)
+            if (tick % 4 == 0) {
+                for (const auto& world : g_game_state.worlds()) {
+                    // Global NPCs
+                    for (size_t i = 0; i < world.global_npcs.size(); i++) {
+                        const auto& n = world.global_npcs[i];
                         if (!n.active) continue;
                         net::NpcStateUpdateData nsud;
                         nsud.world_index = world.world_index;
                         nsud.npc_index = static_cast<int>(i);
-                        nsud.partition_index = part.id;
+                        nsud.partition_index = -1;
                         nsud.position = n.position;
                         nsud.yaw = n.yaw;
                         nsud.state = static_cast<int>(n.state);
@@ -1418,23 +1395,51 @@ int main(int argc, char** argv) {
                         memcpy(bmsg.payload, &nsud, sizeof(nsud));
                         g_game_server->broadcast_message(bmsg);
                     }
+                    // Partition NPCs
+                    for (const auto& part : world.partitions) {
+                        for (size_t i = 0; i < part.npcs.size(); i++) {
+                            const auto& n = part.npcs[i];
+                            if (!n.active) continue;
+                            net::NpcStateUpdateData nsud;
+                            nsud.world_index = world.world_index;
+                            nsud.npc_index = static_cast<int>(i);
+                            nsud.partition_index = part.id;
+                            nsud.position = n.position;
+                            nsud.yaw = n.yaw;
+                            nsud.state = static_cast<int>(n.state);
+                            nsud.health = n.health;
+                            nsud.active = n.active;
+                            net::NetworkMessage bmsg;
+                            bmsg.magic = net::MAGIC;
+                            bmsg.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
+                            bmsg.size = sizeof(nsud);
+                            bmsg.sequence = 0;
+                            bmsg.timestamp = static_cast<uint32_t>(time(nullptr));
+                            memcpy(bmsg.payload, &nsud, sizeof(nsud));
+                            g_game_server->broadcast_message(bmsg);
+                        }
+                    }
+                }
+            }
+
+            if (++tick % 30 == 0 && g_game_server->player_count() > 0) {
+                auto& players = g_game_server->players();
+                printf("Players online: %u\n", g_game_server->player_count());
+                for (const auto& p : players) {
+                    if (p.connected)
+                        printf("  %s [%s:%d]\n", p.name, p.ip_address, p.port);
                 }
             }
         }
+        if (acc > kMaxCatchUp) acc = kMaxCatchUp; // spiral-of-death guard
 
-        if (++tick % 30 == 0 && g_game_server->player_count() > 0) {
-            auto& players = g_game_server->players();
-            printf("Players online: %u\n", g_game_server->player_count());
-            for (const auto& p : players) {
-                if (p.connected)
-                    printf("  %s [%s:%d]\n", p.name, p.ip_address, p.port);
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Nap to avoid busy-spinning; sub-tick latency is preserved since the
+        // receive loop (game_server.update) still drains every iteration.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     printf("Shutting down...\n");
+    g_discovery = nullptr;
     discovery.stop();
     g_game_server->stop();
     http_thread.join();

@@ -102,8 +102,13 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
         if (!def->scream_path.empty())
             p.scream = LoadSoundWithFallback(def->scream_path.c_str());
         if (p.scream.frameCount == 0) {
+            // Convention fallback: GameData/Global/Pawn/<name>.wav then .mp3
             std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
             p.scream = LoadSoundWithFallback(fallbackScream.c_str());
+            if (p.scream.frameCount == 0) {
+                fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".mp3";
+                p.scream = LoadSoundWithFallback(fallbackScream.c_str());
+            }
         }
     }
 
@@ -926,6 +931,18 @@ void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
     p.prevState = p.state;
     p.state = newState;
     p.stateTimer = 0.0f;
+
+    // Aggro scream: play when the pawn spots the player (with per-pawn cooldown
+    // so wolf-pack encounters don't machine-gun the same sample).
+#ifndef OMEGA_TEST_ENV
+    if (newState == PawnState::CHASE && p.scream.frameCount > 0) {
+        float now = (float)GetTime();
+        if (now - p.lastScreamTime > 4.0f) {
+            p.lastScreamTime = now;
+            PlaySound(p.scream);
+        }
+    }
+#endif
 
     // Fire LightningScript hook on state change if entity instance exists
 #ifndef OMEGA_TEST_ENV

@@ -40,6 +40,12 @@ static double now_seconds() {
     return (double)time(nullptr);
 }
 
+// Monotonic high-resolution clock for RTT (now_seconds() has 1s granularity).
+static double now_monotonic_s() {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
 static void fd_set_nonblocking(int fd) {
 #ifdef _WIN32
     u_long mode = 1;
@@ -273,7 +279,7 @@ void NetworkServer::update() {
                 challenge.timestamp = static_cast<uint32_t>(now_seconds());
                 memcpy(challenge.payload, &pending->challenge_token, sizeof(pending->challenge_token));
 
-                struct sockaddr_in addr;
+    struct sockaddr_in addr;
                 memset(&addr, 0, sizeof(addr));
                 addr.sin_family = AF_INET;
                 addr.sin_port = htons(client_port);
@@ -468,6 +474,10 @@ bool NetworkClient::connect(const char* server_ip, uint16_t port) {
     m_handshake_start = now_seconds();
     m_last_ping_time = now_seconds();
     m_last_pong_time = now_seconds();
+    m_last_ping_sent = now_monotonic_s();
+    m_rtt = 0;
+    m_ping_sent_at = 0;
+    m_pending_ping_seq = 0xFFFFFFFF;
 
     // Send initial hello
     NetworkMessage join;
@@ -554,6 +564,22 @@ void NetworkClient::update() {
         }
     }
 
+    // Heartbeat ping: measure real RTT. The server echoes our sequence on
+    // PONG, pairing this outgoing ping with its response. Uses the monotonic
+    // clock so sub-second round-trips resolve cleanly.
+    if (m_connected && now_monotonic_s() - m_last_ping_sent > m_ping_interval) {
+        m_last_ping_sent = now_monotonic_s();
+        m_ping_sent_at = m_last_ping_sent;
+        m_pending_ping_seq = m_message_sequence++;
+        NetworkMessage ping;
+        ping.magic = MAGIC;
+        ping.type = static_cast<uint32_t>(MessageType::PING);
+        ping.size = 0;
+        ping.sequence = m_pending_ping_seq;
+        ping.timestamp = static_cast<uint32_t>(now * 1000.0);
+        send_message(ping);
+    }
+
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
     NetworkMessage msg;
@@ -606,6 +632,12 @@ void NetworkClient::update() {
         switch (rcvType) {
             case MessageType::PONG:
                 m_last_pong_time = now;
+                // Pair with the most recent client-sent PING via sequence.
+                if (m_pending_ping_seq != 0xFFFFFFFF && msg.sequence == m_pending_ping_seq) {
+                    double rtt = now_monotonic_s() - m_ping_sent_at;
+                    m_pending_ping_seq = 0xFFFFFFFF;
+                    if (rtt >= 0 && rtt < 10.0) m_rtt = rtt;
+                }
                 break;
             case MessageType::PING: {
                 NetworkMessage pong;
@@ -639,15 +671,6 @@ bool NetworkClient::send_message(const NetworkMessage& msg) {
     return bytes == static_cast<ssize_t>(sizeof(msg));
 }
 
-double NetworkClient::get_rtt_s() const {
-    double diff = m_last_pong_time - m_last_ping_time;
-    return diff < 0 ? 0 : diff;
-}
-
-int NetworkClient::get_ping_ms() const {
-    return static_cast<int>(std::round(get_rtt_s() * 1000.0));
-}
-
 // ---------------------------------------------------------------------------
 // NetworkDiscovery
 // ---------------------------------------------------------------------------
@@ -666,7 +689,6 @@ bool NetworkDiscovery::init(const char* game_name, const char* game_version,
 
 bool NetworkDiscovery::start() {
     if (m_running) return true;
-    if (m_game_port == 0) return false;
 
     m_socket_fd = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_fd_bad(m_socket_fd)) {
@@ -686,7 +708,9 @@ bool NetworkDiscovery::start() {
     memset(&bind_addr, 0, sizeof(bind_addr));
     bind_addr.sin_family = AF_INET;
     bind_addr.sin_addr.s_addr = INADDR_ANY;
-    bind_addr.sin_port = htons(DISCOVERY_PORT);
+    // Server mode owns DISCOVERY_PORT; client mode binds an ephemeral port so
+    // unicast replies never contend with a server socket on the same host.
+    bind_addr.sin_port = htons(m_game_port != 0 ? DISCOVERY_PORT : 0);
     bind(TO_SOCK(m_socket_fd), (struct sockaddr*)&bind_addr, sizeof(bind_addr));
 
     memset(&m_broadcast_address, 0, sizeof(m_broadcast_address));
@@ -722,47 +746,12 @@ bool NetworkDiscovery::send_request() {
     return sent == static_cast<ssize_t>(strlen(magic));
 }
 
-void NetworkDiscovery::update() {
-    if (!m_running && sock_fd_bad(m_socket_fd)) return;
-
-    if (!m_running) {
-        start();
-        if (!m_running) return;
-    }
-
-    struct sockaddr_in sender;
-    socklen_t sender_len = sizeof(sender);
-    char buf[256];
-
-    ssize_t received;
-    while ((received = recvfrom(TO_SOCK(m_socket_fd),
-                                sock_recvfrom_buf(buf, sizeof(buf)-1),
-                                0,
-                                (struct sockaddr*)&sender, &sender_len)) > 0) {
-        buf[received] = '\0';
-    }
-
-    static double last_announce = 0;
-    double now = now_seconds();
-    if (now - last_announce > 3.0) {
-        char announce[128];
-        int len = snprintf(announce, sizeof(announce),
-                           "OZDISCOVER:%s:%s:%u",
-                           m_game_name.c_str(), m_game_version.c_str(),
-                           m_game_port);
-        sendto(TO_SOCK(m_socket_fd),
-               sock_sendto_buf(announce, (size_t)len), 0,
-               (struct sockaddr*)&m_broadcast_address,
-               sizeof(m_broadcast_address));
-        last_announce = now;
-    }
-}
-
 bool NetworkDiscovery::parse_response(const char* response,
                                       std::string& out_name,
                                       std::string& out_version,
                                       uint32_t& out_cur_players,
-                                      uint32_t* out_max_players) {
+                                      uint32_t* out_max_players,
+                                      uint16_t* out_port) {
     if (!response) return false;
 
     const char* prefix = "OZRESPONSE";
@@ -784,7 +773,7 @@ bool NetworkDiscovery::parse_response(const char* response,
     if (!end) return false;
     std::string sport(p, end - p);
     uint16_t port = static_cast<uint16_t>(std::stoul(sport));
-    (void)port;
+    if (out_port) *out_port = port;
     p = end + 1;
 
     uint32_t cur = 0, max = 0;
@@ -793,6 +782,117 @@ bool NetworkDiscovery::parse_response(const char* response,
     if (out_max_players) *out_max_players = max;
 
     return true;
+}
+
+void NetworkDiscovery::handle_datagram(char* buf, size_t len, uint32_t sender_addr, uint16_t sender_port) {
+    buf[len] = '\0';
+
+    if (std::strncmp(buf, "OZDISCOVER", 10) == 0) {
+        // Server mode: answer probes (and other servers' announces) with our details,
+        // sent back to the probe's source port.
+        if (m_game_port == 0) return;
+        char reply[192];
+        int rlen = snprintf(reply, sizeof(reply),
+                            "OZRESPONSE:%s:%s:%u:%u/%u",
+                            m_game_name.c_str(), m_game_version.c_str(),
+                            (unsigned)m_game_port,
+                            m_current_players, m_max_players);
+        if (rlen > 0) {
+            struct sockaddr_in to;
+            memset(&to, 0, sizeof(to));
+            to.sin_family = AF_INET;
+            to.sin_addr.s_addr = sender_addr;
+            to.sin_port = sender_port != 0 ? sender_port : htons(DISCOVERY_PORT);
+            sendto(TO_SOCK(m_socket_fd), sock_sendto_buf(reply, (size_t)rlen), 0,
+                   (struct sockaddr*)&to, sizeof(to));
+        }
+        return;
+    }
+
+    if (std::strncmp(buf, "OZRESPONSE", 10) == 0) {
+        // Client mode: record the responder.
+        DiscoveredServer entry;
+        uint32_t cur = 0, max = 0;
+        uint16_t port = 0;
+        if (parse_response(buf, entry.name, entry.version, cur, &max, &port)) {
+            entry.cur_players = cur;
+            entry.max_players = max;
+            entry.port = port;
+            char ipstr[64];
+            struct sockaddr_in tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.sin_family = AF_INET;
+            tmp.sin_addr.s_addr = sender_addr;
+            inet_ntop(AF_INET, &tmp.sin_addr, ipstr, sizeof(ipstr));
+            entry.ip = ipstr;
+            entry.last_seen = now_seconds();
+
+            for (auto& d : m_discovered) {
+                if (d.ip == entry.ip && d.port == entry.port) {
+                    d.last_seen = entry.last_seen;
+                    d.name = entry.name;
+                    d.version = entry.version;
+                    d.cur_players = entry.cur_players;
+                    d.max_players = entry.max_players;
+                    return;
+                }
+            }
+            m_discovered.push_back(std::move(entry));
+        }
+    }
+}
+
+void NetworkDiscovery::poll_discovered(std::vector<DiscoveredServer>& out) {
+    out.clear();
+    double now = now_seconds();
+    for (auto it = m_discovered.begin(); it != m_discovered.end();) {
+        if (now - it->last_seen > 9.0)
+            it = m_discovered.erase(it);
+        else
+            ++it;
+    }
+    out = m_discovered;
+}
+
+void NetworkDiscovery::update() {
+    if (!m_running && sock_fd_bad(m_socket_fd)) return;
+
+    if (!m_running) {
+        start();
+        if (!m_running) return;
+    }
+
+    struct sockaddr_in sender;
+    socklen_t sender_len = sizeof(sender);
+    char buf[256];
+
+    ssize_t received;
+    while ((received = recvfrom(TO_SOCK(m_socket_fd),
+                                sock_recvfrom_buf(buf, sizeof(buf)-1),
+                                0,
+                                (struct sockaddr*)&sender, &sender_len)) > 0) {
+        if (received < 1 || (size_t)received >= sizeof(buf)) continue;
+        handle_datagram(buf, (size_t)received, sender.sin_addr.s_addr, sender.sin_port);
+    }
+
+    // Server mode only: periodic announce (also acts as a probe for peers).
+    if (m_game_port == 0) return;
+
+    static double last_announce = 0;
+    double now = now_seconds();
+    if (now - last_announce > 3.0) {
+        char announce[160];
+        int len = snprintf(announce, sizeof(announce),
+                           "OZDISCOVER:%s:%s:%u:%u/%u",
+                           m_game_name.c_str(), m_game_version.c_str(),
+                            (unsigned)m_game_port,
+                           m_current_players, m_max_players);
+        sendto(TO_SOCK(m_socket_fd),
+               sock_sendto_buf(announce, (size_t)len), 0,
+               (struct sockaddr*)&m_broadcast_address,
+               sizeof(m_broadcast_address));
+        last_announce = now;
+    }
 }
 
 } // namespace net

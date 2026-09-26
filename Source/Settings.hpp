@@ -1,3 +1,4 @@
+#pragma once
 #include "raygui/raygui.h"
 #include  "raygui/dark.h"
 #include "Log.hpp"
@@ -11,6 +12,10 @@ static bool ParticlesEnabled = true;
 static bool FPSEnabled = false;
 static bool ShowLogWindow = false;
 static float ResolutionScale = 1.0f;
+
+// Persisted window size (loaded before InitWindow from System/Angels95.ini).
+static int ConfigWindowWidth = 1280;
+static int ConfigWindowHeight = 720;
 
 // --- New graphics settings ---
 static int   TextureFilterMode = 1;      // 0=Point, 1=Bilinear, 2=Trilinear, 3=Aniso4x, 4=Aniso8x, 5=Aniso16x
@@ -143,11 +148,11 @@ void UpdateSettings(){
         GuiGroupBox((Rectangle){ x, y, 320, 50 }, "Window Size");
         y += 18;
         int bw = 55, bgap = 5;
-        if (GuiButton((Rectangle){ x + 5, y, bw, 24 }, "480p")) SetWindowSize(640, 480);
-        if (GuiButton((Rectangle){ x + 10 + bw, y, bw, 24 }, "720p")) SetWindowSize(1280, 720);
-        if (GuiButton((Rectangle){ x + 15 + bw*2, y, bw, 24 }, "1080p")) SetWindowSize(1980, 1080);
-        if (GuiButton((Rectangle){ x + 20 + bw*3, y, bw, 24 }, "1440p")) SetWindowSize(2560, 1440);
-        if (GuiButton((Rectangle){ x + 25 + bw*4, y, bw, 24 }, "4k")) SetWindowSize(3840, 2160);
+        if (GuiButton((Rectangle){ x + 5, y, bw, 24 }, "480p")){ ConfigWindowWidth = 640;  ConfigWindowHeight = 480;  SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
+        if (GuiButton((Rectangle){ x + 10 + bw, y, bw, 24 }, "720p")){ ConfigWindowWidth = 1280; ConfigWindowHeight = 720; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
+        if (GuiButton((Rectangle){ x + 15 + bw*2, y, bw, 24 }, "1080p")){ ConfigWindowWidth = 1920; ConfigWindowHeight = 1080; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
+        if (GuiButton((Rectangle){ x + 20 + bw*3, y, bw, 24 }, "1440p")){ ConfigWindowWidth = 2560; ConfigWindowHeight = 1440; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
+        if (GuiButton((Rectangle){ x + 25 + bw*4, y, bw, 24 }, "4k")){ ConfigWindowWidth = 3840; ConfigWindowHeight = 2160; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
     }
 }
 

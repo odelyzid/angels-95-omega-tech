@@ -1,6 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "../raygui/raygui.h"
+#include "../Network/Network.hpp"
 #include <string>
 #include <vector>
 #include <cstring>
@@ -159,6 +160,12 @@ public:
 
         UpdateMusicStream(OmegaTechData.HomeScreenMusic);
 
+        // LAN browser: pump while the Multiplayer pane is open; stop otherwise.
+        bool multiOpen = false;
+        for (auto& p : m_panes) if (p.type == PANE_MULTIPLAYER) { multiOpen = true; break; }
+        if (multiOpen) LanUpdate();
+        else if (m_lanScanning) LanStop();
+
         m_sw = GetScreenWidth();
         m_sh = GetScreenHeight();
         Vector2 mp = GetMousePosition();
@@ -200,6 +207,7 @@ public:
     bool ShouldStartServer() const { return m_startServer; }
     const char* GetSelectedWorld() const { return m_selectedWorld.c_str(); }
     const char* GetJoinIP() const { return m_joinIP; }
+    int GetJoinPort() const { return std::atoi(m_hostPortBuffer); }
 
 private:
     int m_sw = 1280, m_sh = 720;
@@ -227,6 +235,41 @@ private:
     char m_hostPortBuffer[16] = "27015";
     std::string m_selectedServerWorld;
     int m_multiplayerSubPage = 0; // 0=Join, 1=Host
+
+    // LAN server browser (Join tab)
+    net::NetworkDiscovery m_lanDiscovery;
+    bool m_lanScanning = false;
+    double m_lastLanProbe = 0.0;
+    std::vector<net::DiscoveredServer> m_lanServers;
+    int m_lanHover = -1;
+
+    void LanStartScan() {
+        if (!m_lanDiscovery.is_running()) {
+            m_lanDiscovery.init("Angels95", "0.2.1", 0); // 0 = client mode (probe only)
+            m_lanDiscovery.start();
+        }
+        m_lanDiscovery.send_request();
+        m_lastLanProbe = GetTime();
+        m_lanScanning = true;
+    }
+
+    void LanStop() {
+        if (m_lanDiscovery.is_running()) m_lanDiscovery.stop();
+        m_lanScanning = false;
+        m_lanServers.clear();
+    }
+
+    void LanUpdate() {
+        if (!m_lanScanning) return;
+        m_lanDiscovery.update();
+        double now = GetTime();
+        if (now - m_lastLanProbe > 1.5) {
+            m_lanDiscovery.send_request();
+            m_lastLanProbe = now;
+        }
+        m_lanDiscovery.poll_discovered(m_lanServers);
+        if (m_lanHover >= (int)m_lanServers.size()) m_lanHover = -1;
+    }
 
     Rectangle m_minBtn, m_maxBtn, m_closeBtn;
     bool m_dragging = false;
@@ -589,6 +632,24 @@ private:
 
     void DrawBackground() {
         auto& tex = GetMenuTex();
+        // Animated title background (MPEG1) — fall back to static Title.png.
+        ray_video_t& vid = OmegaTechData.HomeScreenVideo;
+        if (vid.ok && vid.texture.id != 0) {
+            ray_video_update(&vid, GetFrameTime());
+            if (vid.texture.id != 0) {
+                // Cover-fit the video to the screen, preserving aspect.
+                float vw = (float)vid.texture.width, vh = (float)vid.texture.height;
+                float scale = std::max(m_sw / vw, m_sh / vh);
+                float dw = vw * scale, dh = vh * scale;
+                DrawTexturePro(vid.texture,
+                    {0, 0, vw, vh},
+                    {(m_sw - dw) * 0.5f, (m_sh - dh) * 0.5f, dw, dh},
+                    {0, 0}, 0.f, WHITE);
+                return;
+            }
+        }
+        if (vid.ok)
+            ray_video_update(&vid, GetFrameTime()); // keep decoding until first frame
         if (tex.titleBg.id)
             for (int x = 0; x < m_sw; x += tex.titleBg.width)
                 for (int y = 0; y < m_sh; y += tex.titleBg.height)
@@ -895,8 +956,57 @@ private:
                 m_exit = true;
             }
             y += 30;
-            DrawText("Enter the server IP address and port,", (int)(sx + 8), y, 11, (Color){140,160,180,200}); y += 14;
-            DrawText("then click Connect to join.", (int)(sx + 8), y, 11, (Color){140,160,180,200});
+            if (GuiButton({sx + 8, (float)y, 140, 24}, "Scan LAN")) {
+                PlaySound(OmegaTechSoundData.UIClick);
+                LanStartScan();
+            }
+            y += 30;
+
+            // LAN server list
+            {
+                int listH = (int)(sub.y + sub.height - y - 8);
+                if (listH > 40) {
+                    const char* label = m_lanScanning
+                        ? TextFormat("Servers on LAN (%d):", (int)m_lanServers.size())
+                        : "Servers on LAN:";
+                    DrawText(label, (int)(sx + 8), y, 12, LIGHTGRAY);
+                    y += 18;
+                    Rectangle listRect = {sx + 4, (float)y, sub.width - 8, (float)(sub.y + sub.height - y - 4)};
+                    DrawRectangleRec(listRect, (Color){0, 0, 0, 120});
+                    m_lanHover = -1;
+                    float ry = listRect.y + 2;
+                    const float rowH = 20.0f;
+                    for (int i = 0; i < (int)m_lanServers.size(); i++) {
+                        if (ry + rowH > listRect.y + listRect.height) break;
+                        const auto& s = m_lanServers[i];
+                        Rectangle row = {listRect.x + 2, ry, listRect.width - 4, rowH};
+                        bool hov = CheckCollisionPointRec(GetMousePosition(), row);
+                        if (hov) m_lanHover = i;
+                        if (hov) DrawRectangleRec(row, (Color){60, 110, 180, 90});
+                        char rowText[160];
+                        snprintf(rowText, sizeof(rowText), "%s  %s:%u  (%u/%u)",
+                                 s.name.c_str(), s.ip.c_str(), (unsigned)s.port,
+                                 s.cur_players, s.max_players);
+                        DrawText(rowText, (int)(row.x + 4), (int)(ry + 4), 11,
+                                 hov ? WHITE : (Color){170, 190, 210, 230});
+                        if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                            PlaySound(OmegaTechSoundData.UIClick);
+                            snprintf(m_joinIPBuffer, sizeof(m_joinIPBuffer), "%s", s.ip.c_str());
+                            snprintf(m_hostPortBuffer, sizeof(m_hostPortBuffer), "%u", (unsigned)s.port);
+                        }
+                        ry += rowH;
+                    }
+                    if (m_lanServers.empty()) {
+                        DrawText(m_lanScanning ? "scanning..." : "no servers found",
+                                 (int)(listRect.x + 6), (int)(listRect.y + 6), 11,
+                                 (Color){110, 130, 150, 200});
+                    }
+                    y = listRect.y + listRect.height;
+                }
+            }
+
+            DrawText("Click a discovered server to fill IP and port,", (int)(sx + 8), (int)(sub.y + sub.height - 30), 11, (Color){140,160,180,200});
+            DrawText("then click Connect to join.", (int)(sx + 8), (int)(sub.y + sub.height - 16), 11, (Color){140,160,180,200});
         } else {
             DrawText("Host a Game Server", (int)(sx + 8), y, 14, WHITE); y += 24;
             DrawText("World:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);

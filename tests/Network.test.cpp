@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <thread>
+#include <chrono>
 
 int test_count = 0, pass_count = 0;
 
@@ -145,6 +147,65 @@ static int test_auth_deferred_confirm() {
     return 0;
 }
 
+// RTT: the client periodically sends PING (fast interval here) and pairs the
+// server-echoed PONG by sequence to derive a real round-trip time.
+static int test_client_ping_rtt() {
+    test_count++;
+    printf("  TEST client ping RTT... ");
+
+    uint16_t port = net::find_free_port();
+    net::NetworkServer server;
+    if (!server.init(port, 4)) { printf("FAIL: server.init\n"); return 1; }
+
+    net::ServerCallbacks scbs;
+    scbs.on_player_join = [&](net::NetworkPlayer& p) {
+        net::NetworkMessage ping;
+        ping.magic = net::MAGIC;
+        ping.type = static_cast<uint32_t>(net::MessageType::PING);
+        ping.size = 0;
+        ping.sequence = 0;
+        ping.timestamp = 0;
+        server.send_message(p, ping); // auth confirm packet
+    };
+    scbs.on_player_leave = [](net::NetworkPlayer&) {};
+    scbs.on_message_received = [](const net::NetworkMessage&, const net::NetworkPlayer&) {};
+    server.set_callbacks(std::move(scbs));
+    if (!server.start()) { printf("FAIL: server.start\n"); return 1; }
+
+    net::NetworkClient client;
+    net::ClientCallbacks ccbs;
+    ccbs.on_connected = [] {};
+    ccbs.on_disconnected = [] {};
+    ccbs.on_message_received = [](const net::NetworkMessage&) {};
+    client.set_callbacks(std::move(ccbs));
+    if (!client.connect("127.0.0.1", port)) { printf("FAIL: client.connect\n"); return 1; }
+
+    // Pump until the handshake completes.
+    for (int i = 0; i < 20000 && !client.is_connected(); ++i) {
+        server.update();
+        client.update();
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    if (!client.is_connected()) { printf("FAIL: handshake never completed\n"); return 1; }
+
+    // Fast ping cadence so wall-clock elapses within the loop budget.
+    client.set_ping_interval(0.01);
+    int iters = 0;
+    for (; iters < 20000 && client.get_ping_ms() <= 0; ++iters) {
+        server.update();
+        client.update();
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    if (client.get_ping_ms() <= 0) { printf("FAIL: no RTT measured\n"); return 1; }
+    if (client.get_ping_ms() >= 1000) { printf("FAIL: implausible RTT %dms\n", client.get_ping_ms()); return 1; }
+
+    client.disconnect();
+    server.stop();
+    pass_count++;
+    printf("PASS (%dms after ~%.2fs)\n", client.get_ping_ms(), iters * 0.0002);
+    return 0;
+}
+
 int main() {
     printf("Network packet tests:\n");
     test_magic_constant();
@@ -156,6 +217,7 @@ int main() {
     test_is_valid_ip_invalid();
     test_find_free_port();
     test_auth_deferred_confirm();
+    test_client_ping_rtt();
 
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;

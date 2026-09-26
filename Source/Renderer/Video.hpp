@@ -218,8 +218,13 @@ static int ray_video_thread_worker(void * user) {
   int video_state;
   plm_frame_t * frame = plm_decode_video(ctx->plm);
 
+  if(!frame && plm_get_loop(ctx->plm)) {
+    // Decoder hit the end and rewound; retry once so the wrap frame
+    // doesn't latch DONE and kill playback.
+    frame = plm_decode_video(ctx->plm);
+  }
+
   if(!frame) {
-    //TODO: configure video to automatically replay in a loop.
     video_state = RAY_VIDEO_STATE_DONE;
   }
   else {
@@ -284,6 +289,7 @@ ray_video_t ray_video_create_by_file_handle(FILE * file) {
     if(!plm) return video;
 
     plm_set_audio_enabled(plm, 0);
+    plm_set_loop(plm, 1); // loop forever; DONE state never latches
     video.mipmaps = 1; //Does video even need mipmaps? UpdateTexture ignores the mipmaps anyway.
     video.width  = plm_get_width(plm);
     video.height = plm_get_height(plm);

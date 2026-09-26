@@ -71,9 +71,6 @@ static void EditorLog(const char* fmt, ...);
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
 
-// CSG processor — accumulates brush operations for collision geometry
-static CsgProcessor g_csgProc;
-
 // ---------------------------------------------------------------------------
 // Entity selection system (hover + click + right-click context menu)
 // ---------------------------------------------------------------------------
@@ -1965,7 +1962,9 @@ int main(int argc, char **argv){
                 OTEditor.WorldData += WDLCommand;
                 OmegaTechEditor.DrawModel = false;
 
-                // CSG: push brush through processor for OZONE primitives (EMID >= 200)
+                // CSG: register brush renderable for OZONE primitives (EMID >= 200).
+                // Collision comes from OzoneLoader::RebuildCollisionVolumes(), which
+                // runs its own CsgProcessor over every renderable's stored csgOp.
                 if (EMID >= 200 && g_placeMode == PlaceMode::MODEL) {
                     // X, Y, Z is the center position from the gizmo
                     float hw = OmegaTechEditor.W * 0.5f;
@@ -1979,8 +1978,6 @@ int main(int argc, char **argv){
                     brush.maxX = OmegaTechEditor.X + hw;
                     brush.maxY = OmegaTechEditor.Y + hh;
                     brush.maxZ = OmegaTechEditor.Z + hd;
-                    g_csgProc.Apply(brush);
-                    int merges = g_csgProc.MergePass();
                     // Add brush renderable first so it's in m_renderables for rebuild
                     int primType = EMID - 200;
                     Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
@@ -2608,7 +2605,8 @@ int main(int argc, char **argv){
                     OmegaTechEditor.H = 4.0f;
                     OmegaTechEditor.L = 4.0f;
                 }
-                // Same CSG placement logic as ENTER key
+                // Same CSG placement logic as ENTER key (collision rebuilt via
+                // OzoneLoader::RebuildCollisionVolumes after AddBrushRenderable)
                 float hw = OmegaTechEditor.W * 0.5f;
                 float hh = OmegaTechEditor.H * 0.5f;
                 float hd = OmegaTechEditor.L * 0.5f;
@@ -2620,8 +2618,6 @@ int main(int argc, char **argv){
                 brush.maxX = OmegaTechEditor.X + hw;
                 brush.maxY = OmegaTechEditor.Y + hh;
                 brush.maxZ = OmegaTechEditor.Z + hd;
-                g_csgProc.Apply(brush);
-                g_csgProc.MergePass();
                 int primType = EMID - 200;
                 Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
                 Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};

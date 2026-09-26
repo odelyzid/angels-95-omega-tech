@@ -1,5 +1,6 @@
 #include "Core.hpp"
 #include "Log.hpp"
+#include "ClientSettings.hpp"
 #include "Client/Client.hpp"
 #include "Script/LightningEntityManager.hpp"
 #include "Script/LightningEntityRegistry.hpp"
@@ -13,6 +14,13 @@
 #include <vector>
 #include <filesystem>
 namespace fs = std::filesystem;
+
+// Persist settings to System/Angels95.ini on every exit path (destructor runs
+// at process teardown, after raylib has closed — stdio/stdlib only, so it is
+// safe to run outside the window lifetime).
+static struct ClientSettingsOnExit {
+    ~ClientSettingsOnExit() { SaveClientSettings(); }
+} g_saveClientSettings;
 
 #ifdef _WIN32
 // ---------------------------------------------------------------------------
@@ -735,17 +743,26 @@ int main(int argc, char** argv){
         }
     }
 
-    SetConfigFlags(FLAG_VSYNC_HINT);
+    // Load persisted user settings BEFORE window creation so window size,
+    // VSync and MSAA are applied by InitWindow.
+    LoadClientSettings();
+    if (VSYNCToggle) SetConfigFlags(FLAG_VSYNC_HINT);
+    if (MXAAToggle)  SetConfigFlags(FLAG_MSAA_4X_HINT);
 
-    InitWindow(1280 , 720 , "Angels95");
+    InitWindow(ConfigWindowWidth, ConfigWindowHeight, "Angels95");
     SetExitKey(0);
     SetTargetFPS(60);
 
     InitAudioDevice();
 
-    if (!IsAudioDeviceReady()){
+    if (IsAudioDeviceReady()) {
+        // Wire the zone reverb DSP into the master output mix.
+        DspReverb::Reset();
+        AttachAudioMixedProcessor(DspReverb::AudioCallback);
+    } else {
         CloseAudioDevice();
     }
+    if (!MuteToggle) SetMasterVolume(AudioSlider);
 
     OmegaTechInit();
 #ifdef _WIN32
@@ -794,9 +811,9 @@ int main(int argc, char** argv){
     });
 
     if (SetServerJoinFlag && SetServerJoinIP) {
-        g_network_enabled = g_client.connect(SetServerJoinIP, 27015);
+        g_network_enabled = g_client.connect(SetServerJoinIP, SetServerJoinPort);
         if (g_network_enabled) {
-            OZ_INFO("Network: connected to %s:27015", SetServerJoinIP);
+            OZ_INFO("Network: connected to %s:%d", SetServerJoinIP, SetServerJoinPort);
         }
         SetServerJoinFlag = false;
     }
@@ -976,9 +993,26 @@ int main(int argc, char** argv){
             }
         }
 
+        // Fixed 60 Hz timestep for movement physics (zone/water/jump/gravity).
+        // Discrete 1/60s steps, at most 4 per render frame, with leftover time
+        // carried across frames so the sim advances at a constant 60 Hz cadence
+        // regardless of render FPS.
+        static double s_move_accumulator = 0.0;
+        static constexpr double kMoveTickS = 1.0 / 60.0;
+        s_move_accumulator += GetFrameTime();
+        int move_steps = 0;
+        while (s_move_accumulator >= kMoveTickS && move_steps < 4) {
+            s_move_accumulator -= kMoveTickS;
+            ++move_steps;
+        }
+        if (move_steps >= 4 && s_move_accumulator >= kMoveTickS)
+            s_move_accumulator = 0.0; // drift guard
+        const float kMoveDt = static_cast<float>(kMoveTickS);
+
         // --- Zone volume detection + movement effects (uses pre-computed player region) ---
+        for (int s = 0; s < move_steps; ++s) {
         {
-            float dt = GetFrameTime();
+            const float dt = kMoveDt;
             Vector3 playerPos = OmegaTechData.MainCamera.position;
             static std::string lastZoneName;
 
@@ -1025,10 +1059,12 @@ int main(int argc, char** argv){
                 lastZoneName.clear();
             }
         }
+        }
 
         // ---  Jump / Fly / Noclip Y management ---
+        for (int s = 0; s < move_steps; ++s) {
         {
-            float dt = GetFrameTime();
+            const float dt = kMoveDt;
 
             if (g_playerMovement.isNoClip) {
                 // Noclip: let raylib control Y natively (space up / shift down)
@@ -1062,6 +1098,7 @@ int main(int argc, char** argv){
                     OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;
                 }
             }
+        }
         }
 
         // Weapon fire AFTER camera so left-click does not disrupt movement

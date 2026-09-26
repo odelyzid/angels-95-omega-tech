@@ -6,6 +6,8 @@
 #include <vector>
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
+#include "../miniz/miniz.h"
 
 // ============================================================================
 // OzPackage — universal asset container format for Angels95 / OmegaTech
@@ -23,6 +25,12 @@
 //   [DATA_1]
 //   ...
 //   [INDEX]   array of OzPackageEntry
+//
+// Compression (zlib/deflate via bundled miniz):
+//   Header flags bit 0 = package may contain compressed entries.
+//   Per-entry compression flag lives in OzPackageEntry.reserved bit 0.
+//   Readers produced before this flag ignore both fields — the format
+//   stays backwards compatible (they simply read sizeRaw bytes raw).
 // ============================================================================
 
 constexpr uint32_t OZ_PACKAGE_MAGIC_PK  = 0x4B5A504F; // "OZPK"
@@ -33,6 +41,12 @@ constexpr uint32_t OZ_PACKAGE_MAGIC_WN  = 0x4E575A4F; // "OZWN"
 
 constexpr uint32_t OZ_PACKAGE_VERSION   = 1;
 constexpr size_t   OZ_FILENAME_MAX      = 128;
+
+// Header flag: package may contain deflate-compressed entries (per-entry flag
+// in OzPackageEntry.reserved bit 0).
+constexpr uint16_t OZ_PACKAGE_FLAG_COMPRESSED = 0x0001;
+// Minimum raw size worth attempting to compress.
+constexpr uint32_t OZ_PACKAGE_COMPRESS_MIN = 512;
 
 #pragma pack(push, 1)
 struct OzPackageHeader {
@@ -76,7 +90,9 @@ public:
         m_files.push_back(std::move(f));
     }
 
-    bool WriteToFile(const char* path) {
+    // enableCompression: deflate entries >= OZ_PACKAGE_COMPRESS_MIN when the
+    // packed form is actually smaller (stored raw otherwise).
+    bool WriteToFile(const char* path, bool enableCompression = true) {
         // Ensure parent directory exists
         std::string pathStr(path);
         auto slash = pathStr.find_last_of("/\\");
@@ -103,18 +119,40 @@ public:
                 return a.filename < b.filename;
             });
 
-        // Build entries array
+        // Build entries array (compressing eligible files)
+        struct OutBlob { const uint8_t* data; size_t size; };
+        std::vector<OutBlob> blobs(m_files.size());
+        std::vector<std::vector<uint8_t>> packed(m_files.size());
+
+        for (size_t i = 0; i < m_files.size(); i++) {
+            const auto& raw = m_files[i].data;
+            if (enableCompression && raw.size() >= OZ_PACKAGE_COMPRESS_MIN) {
+                mz_ulong packedCap = mz_compressBound((mz_ulong)raw.size());
+                packed[i].resize((size_t)packedCap);
+                mz_ulong packedSize = packedCap;
+                if (mz_compress(packed[i].data(), &packedSize, raw.data(), (mz_ulong)raw.size()) == MZ_OK &&
+                    packedSize > 0 && packedSize < (mz_ulong)raw.size()) {
+                    packed[i].resize((size_t)packedSize);
+                } else {
+                    packed[i].clear(); // incompressible — store raw
+                }
+            }
+            blobs[i].data = packed[i].empty() ? raw.data() : packed[i].data();
+            blobs[i].size = packed[i].empty() ? raw.size() : packed[i].size();
+        }
+
         std::vector<OzPackageEntry> entries;
-        for (auto& fdata : m_files) {
+        for (size_t i = 0; i < m_files.size(); i++) {
             OzPackageEntry e;
             memset(&e, 0, sizeof(e));
-            strncpy(e.filename, fdata.filename.c_str(), OZ_FILENAME_MAX - 1);
+            strncpy(e.filename, m_files[i].filename.c_str(), OZ_FILENAME_MAX - 1);
             e.offset = dataOff;
-            e.sizeRaw = fdata.data.size();
-            e.sizePacked = fdata.data.size();
-            e.reserved = 0;
+            e.sizeRaw = m_files[i].data.size();
+            e.sizePacked = blobs[i].size;
+            e.reserved = packed[i].empty() ? 0 : OZ_PACKAGE_FLAG_COMPRESSED;
             entries.push_back(e);
-            dataOff += fdata.data.size();
+            dataOff += blobs[i].size;
+            if (!packed[i].empty()) hdr.flags |= OZ_PACKAGE_FLAG_COMPRESSED;
         }
 
         hdr.indexOffset = (uint32_t)dataOff;
@@ -125,7 +163,7 @@ public:
 
         // Write file data
         for (size_t i = 0; i < m_files.size(); i++) {
-            fwrite(m_files[i].data.data(), 1, m_files[i].data.size(), f);
+            fwrite(blobs[i].data, 1, blobs[i].size, f);
         }
 
         // Write index
@@ -182,6 +220,9 @@ public:
 
         OzPackageHeader hdr;
         if (fread(&hdr, sizeof(hdr), 1, f) != 1) { fclose(f); return false; }
+        if (!is_valid_magic(hdr.magic) ||
+            hdr.version != OZ_PACKAGE_VERSION) { fclose(f); return false; }
+        m_headerFlags = hdr.flags;
 
         m_magic = hdr.magic;
         m_version = hdr.version;
@@ -200,6 +241,14 @@ public:
     }
 
     bool OpenMem(const void* data, size_t size) {
+        OzPackageHeader hdr;
+        if (size < sizeof(hdr)) return false;
+        memcpy(&hdr, data, sizeof(hdr));
+        if (!is_valid_magic(hdr.magic) ||
+            hdr.version != OZ_PACKAGE_VERSION) return false;
+        m_headerFlags = hdr.flags;
+        m_magic = hdr.magic;
+        m_version = hdr.version;
         m_data = (uint8_t*)data;
         m_size = size;
         m_owned = false;
@@ -211,6 +260,8 @@ public:
         m_data = nullptr;
         m_size = 0;
         m_entries.clear();
+        m_decompressed.clear();
+        m_headerFlags = 0;
         m_owned = false;
     }
 
@@ -238,21 +289,49 @@ public:
         return nullptr;
     }
 
-    // Read file data into a buffer. Returns bytes read, 0 if not found.
+    // Read file data into a buffer (decompressing if needed).
+    // Returns bytes read, 0 if not found / corrupt.
     size_t Read(const char* name, std::vector<uint8_t>& out) const {
         const OzPackageEntry* e = Find(name);
         if (!e) return 0;
+        if (!entry_is_compressed(*e)) {
+            out.resize((size_t)e->sizeRaw);
+            memcpy(out.data(), m_data + e->offset, (size_t)e->sizeRaw);
+            return (size_t)e->sizeRaw;
+        }
         out.resize((size_t)e->sizeRaw);
-        memcpy(out.data(), m_data + e->offset, (size_t)e->sizeRaw);
-        return (size_t)e->sizeRaw;
+        mz_ulong outLen = (mz_ulong)e->sizeRaw;
+        if (mz_uncompress(out.data(), &outLen,
+                          m_data + e->offset, (mz_ulong)e->sizePacked) != MZ_OK) {
+            out.clear();
+            return 0;
+        }
+        return (size_t)outLen;
     }
 
-    // Get pointer to file data in the memory-mapped buffer
+    // Get pointer to file data. Uncompressed entries point straight into the
+    // mapped buffer; compressed entries are inflated once into an owned cache.
     const uint8_t* GetData(const char* name, size_t& outSize) const {
         const OzPackageEntry* e = Find(name);
         if (!e) { outSize = 0; return nullptr; }
-        outSize = (size_t)e->sizeRaw;
-        return m_data + e->offset;
+        if (!entry_is_compressed(*e)) {
+            outSize = (size_t)e->sizeRaw;
+            return m_data + e->offset;
+        }
+        std::vector<uint8_t>& slot = m_decompressed[std::string(name)];
+        if (slot.empty()) {
+            slot.resize((size_t)e->sizeRaw);
+            mz_ulong outLen = (mz_ulong)e->sizeRaw;
+            if (mz_uncompress(slot.data(), &outLen,
+                               m_data + e->offset, (mz_ulong)e->sizePacked) != MZ_OK) {
+                slot.clear();
+                outSize = 0;
+                return nullptr;
+            }
+            slot.resize((size_t)outLen);
+        }
+        outSize = slot.size();
+        return slot.data();
     }
 
     // List all filenames
@@ -266,11 +345,26 @@ public:
     const std::vector<OzPackageEntry>& Entries() const { return m_entries; }
 
 private:
+    static bool is_valid_magic(uint32_t magic) {
+        return magic == OZ_PACKAGE_MAGIC_PK || magic == OZ_PACKAGE_MAGIC_TX ||
+               magic == OZ_PACKAGE_MAGIC_SD || magic == OZ_PACKAGE_MAGIC_MX ||
+               magic == OZ_PACKAGE_MAGIC_WN;
+    }
+
+    bool entry_is_compressed(const OzPackageEntry& e) const {
+        return (m_headerFlags & OZ_PACKAGE_FLAG_COMPRESSED) &&
+               (e.reserved & OZ_PACKAGE_FLAG_COMPRESSED) != 0;
+    }
+
     bool ParseIndex() {
         OzPackageHeader* hdr = (OzPackageHeader*)m_data;
         if (hdr->version != OZ_PACKAGE_VERSION) return false;
 
         uint32_t count = hdr->entryCount;
+        // Bounds sanity: index must live inside the mapped buffer.
+        if ((size_t)hdr->indexOffset + (size_t)hdr->indexSize > m_size ||
+            (size_t)hdr->indexSize != (size_t)count * sizeof(OzPackageEntry))
+            return false;
         OzPackageEntry* idx = (OzPackageEntry*)(m_data + hdr->indexOffset);
 
         m_entries.clear();
@@ -286,5 +380,7 @@ private:
     bool m_owned;
     uint32_t m_magic;
     uint32_t m_version;
+    uint16_t m_headerFlags = 0;
     std::vector<OzPackageEntry> m_entries;
+    mutable std::unordered_map<std::string, std::vector<uint8_t>> m_decompressed;
 };

@@ -43,8 +43,16 @@ Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `
 - Most suites use `SERVER_CXX` + `-DOMEGA_TEST_ENV` (no raylib). **Exceptions:** `test_entity_manager` and `test_pawn_system` link raylib (Vector3/BoundingBox types).
 - Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_network` / `make test_game_state` etc.
 
-## Runtime config quirk (verified)
-- `System/Angels95.ini` and `System/OzServer.ini` are **templates written by build scripts - never read at runtime**. The client and server accept no INI config. Server behavior is controlled entirely by CLI flags (`--port`, `--http-port`, `--dir`). Only `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`). To change defaults, edit the code, not the INI.
+## Runtime config (verified)
+- **Client:** reads/writes `System/Angels95.ini` for real (loaded via
+  `LoadClientSettings()` before `InitWindow` so window size/VSync/MSAA apply at
+  creation; saved on exit by a static dtor in `Main.cpp`). Keys live in the
+  `[Settings]` section; parser is `Source/IniConfig.hpp`. The build scripts'
+  template ini is only a fallback.
+- **Server:** `System/OzServer.ini` is a template written by build scripts -
+  never read at runtime. Server behavior is controlled entirely by CLI flags
+  (`--port`, `--http-port`, `--dir`).
+- `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`).
 
 ## Entrypoints
 - **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`.

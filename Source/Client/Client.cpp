@@ -66,6 +66,24 @@ void OmegaClient::update(float cam_x, float cam_y, float cam_z,
     std::memcpy(msg.payload, &pud, sizeof(pud));
 
     m_client.send_message(msg);
+
+    // Interpolate NPC render transforms between server snapshots (2.5 Hz).
+    static constexpr double kNpcInterpInterval = 0.4; // 1 / 2.5 Hz
+    double now = now_seconds();
+    for (auto& n : m_npcs) {
+        if (!n.has_snapshot || !n.active) continue;
+        double t = (now - n.snapshot_time) / kNpcInterpInterval;
+        if (t < 0.0) t = 0.0;
+        else if (t > 1.0) t = 1.0;
+        float f = static_cast<float>(t);
+        n.position.x = n.prev.x + (n.target.x - n.prev.x) * f;
+        n.position.y = n.prev.y + (n.target.y - n.prev.y) * f;
+        n.position.z = n.prev.z + (n.target.z - n.prev.z) * f;
+        float dyaw = n.yaw_target - n.yaw_prev;
+        while (dyaw > 3.14159265f) dyaw -= 2.0f * 3.14159265f;
+        while (dyaw < -3.14159265f) dyaw += 2.0f * 3.14159265f;
+        n.yaw = n.yaw_prev + dyaw * f;
+    }
 }
 
 void OmegaClient::send_chat(const char* text) {
@@ -202,13 +220,18 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::NpcStateUpdateData nsud;
             memcpy(&nsud, msg.payload, sizeof(nsud));
+            double snaptime = now_seconds();
             bool found = false;
             for (auto& n : m_npcs) {
                 if (n.npc_index == nsud.npc_index &&
                     n.world_index == nsud.world_index &&
                     n.partition_index == nsud.partition_index) {
-                    n.position = nsud.position;
-                    n.yaw = nsud.yaw;
+                    n.prev = n.position;      // last interpolated point -> continuity
+                    n.yaw_prev = n.yaw;
+                    n.target = nsud.position;
+                    n.yaw_target = nsud.yaw;
+                    n.snapshot_time = snaptime;
+                    n.has_snapshot = true;
                     n.state = nsud.state;
                     n.health = nsud.health;
                     n.active = nsud.active;
@@ -221,8 +244,14 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 cn.world_index = nsud.world_index;
                 cn.npc_index = nsud.npc_index;
                 cn.partition_index = nsud.partition_index;
+                cn.prev = nsud.position;
+                cn.target = nsud.position;
                 cn.position = nsud.position;
                 cn.yaw = nsud.yaw;
+                cn.yaw_prev = nsud.yaw;
+                cn.yaw_target = nsud.yaw;
+                cn.snapshot_time = snaptime;
+                cn.has_snapshot = true;
                 cn.state = nsud.state;
                 cn.health = nsud.health;
                 cn.active = nsud.active;

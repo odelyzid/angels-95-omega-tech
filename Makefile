@@ -42,7 +42,7 @@ SERVER_FLAGS := -O3 --std=c++20 $(RAYLIB_INC)
 BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
-          OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o \
+          OzAssetMapper.o OzPawnSystem.o \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
@@ -70,6 +70,12 @@ $(BUILD_DIR)/Encoder.o: Source/Encoder/Encoder.cpp | $(BUILD_DIR)
 $(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
 	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o $@
 
+# 4b. Compile miniz (public-domain zlib substitute used by OzPackage).
+# Must be compiled as C (gcc): g++ would C++-mangle the definitions while
+# consumers see extern "C" prototypes from miniz.h.
+$(BUILD_DIR)/miniz.o: Source/miniz/miniz.c Source/miniz/miniz.h | $(BUILD_DIR)
+	gcc -O3 -std=c99 $(PIC) -ISource/miniz -c Source/miniz/miniz.c -o $@
+
 # 5. Compile Network library (used by both client and server)
 $(BUILD_DIR)/Network.o: Source/Network/Network.cpp Source/Network/Network.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Network/Network.cpp -o $@
@@ -85,9 +91,6 @@ $(BUILD_DIR)/Client.o: Source/Client/Client.cpp Source/Client/Client.hpp | $(BUI
 # 5d. Compile the Oz* subsystem modules
 $(BUILD_DIR)/OzAssetMapper.o: Source/Package/OzAssetMapper.cpp Source/Package/OzAssetMapper.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Package/OzAssetMapper.cpp -o $@
-
-$(BUILD_DIR)/OzSoundLoader.o: Source/Audio/OzSoundLoader.cpp Source/Audio/OzSoundLoader.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Audio/OzSoundLoader.cpp -o $@
 
 $(BUILD_DIR)/OzPawnSystem.o: Source/Pawn/OzPawnSystem.cpp Source/Pawn/OzPawnSystem.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Pawn/OzPawnSystem.cpp -o $@
@@ -137,7 +140,7 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzSoundLoader.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib)
@@ -148,8 +151,8 @@ AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DI
 	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
-ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp -o OzPack$(EXE) $(SERVER_LIBS)
+ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp Source/miniz/miniz.h $(BUILD_DIR)/miniz.o
+	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp $(BUILD_DIR)/miniz.o -o OzPack$(EXE) $(SERVER_LIBS)
 
 # 9. Unit tests (no raylib dependency)
 TEST_FLAGS := -O0 -g --std=c++20 -DOMEGA_TEST_ENV
@@ -160,13 +163,13 @@ test_parser: tests/LightningScriptParser.test.cpp Source/Script/LightningScriptP
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
 test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@
+	$(SERVER_CXX) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
-	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)
+	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
 test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp
-	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ -o $@ $(LDFLAGS)
+	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
 test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@

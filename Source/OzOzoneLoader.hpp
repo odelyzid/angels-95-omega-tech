@@ -42,6 +42,8 @@ struct OzoneRenderable {
     float texOffsetV = 0.0f;     // texture shift V
     std::string texPath;         // filesystem/package path to custom texture (empty = use tileset)
     Texture2D customTex = {0};   // loaded custom texture (id=0 if using tileset)
+    BoundingBox bounds{{0,0,0},{0,0,0}}; // world-space AABB for frustum culling
+    bool hasBounds = false;      // true once bounds is meaningful
 };
 
 // Collision AABB for an OZONE brush primitive.

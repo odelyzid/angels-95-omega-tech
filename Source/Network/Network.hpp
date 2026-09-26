@@ -306,8 +306,9 @@ public:
     uint16_t server_port() const { return m_server_port; }
     double get_last_ping_time() const { return m_last_ping_time; }
     double get_last_pong_time() const { return m_last_pong_time; }
-    double get_rtt_s() const;
-    int get_ping_ms() const;
+    double get_rtt_s() const { return m_rtt; }
+    int get_ping_ms() const { return static_cast<int>(std::round(m_rtt * 1000.0)); }
+    void set_ping_interval(double seconds) { m_ping_interval = seconds; }
 
 private:
     bool        m_winsock_initialized = false;
@@ -322,6 +323,15 @@ private:
     double      m_last_pong_time = 0;
     ClientCallbacks m_callbacks;
 
+    // Real RTT measurement: the client sends PING with an incremented
+    // sequence and records the send time; the server echoes the sequence on
+    // PONG, which pairs the round trip.
+    double      m_rtt = 0;
+    double      m_ping_sent_at = 0;
+    double      m_last_ping_sent = 0;
+    double      m_ping_interval = 5.0;
+    uint32_t    m_pending_ping_seq = 0xFFFFFFFF;
+
     // Handshake state
     int         m_handshake_retries = 0;
     uint32_t    m_challenge_token = 0;
@@ -333,6 +343,16 @@ private:
 // ---------------------------------------------------------------------------
 // NetworkDiscovery
 // ---------------------------------------------------------------------------
+struct DiscoveredServer {
+    std::string name;
+    std::string version;
+    std::string ip;
+    uint16_t port = 0;
+    uint32_t cur_players = 0;
+    uint32_t max_players = 0;
+    double last_seen = 0.0;   // monotonic seconds, for staleness pruning
+};
+
 class NetworkDiscovery {
 public:
     NetworkDiscovery();
@@ -340,6 +360,8 @@ public:
     NetworkDiscovery(const NetworkDiscovery&) = delete;
     NetworkDiscovery& operator=(const NetworkDiscovery&) = delete;
 
+    // Server mode: pass the game port (announces presence + answers probes).
+    // Client mode: pass 0 (sends probes, collects OZRESPONSE replies).
     bool init(const char* game_name, const char* game_version, uint16_t port);
     bool start();
     void stop();
@@ -349,11 +371,23 @@ public:
                         std::string& out_name,
                         std::string& out_version,
                         uint32_t& out_cur_players,
-                        uint32_t* out_max_players);
+                        uint32_t* out_max_players,
+                        uint16_t* out_port = nullptr);
+
+    // Server mode: keep the announced player counts current.
+    void set_player_count(uint32_t cur, uint32_t max) {
+        m_current_players = cur;
+        m_max_players = max;
+    }
+
+    // Client mode: copy currently-known servers (entries unseen for >9s are dropped).
+    void poll_discovered(std::vector<DiscoveredServer>& out);
 
     bool is_running() const { return m_running; }
 
 private:
+    void handle_datagram(char* buf, size_t len, uint32_t sender_addr, uint16_t sender_port);
+
     bool        m_winsock_initialized = false;
     int         m_socket_fd = -1;
     struct sockaddr_in m_broadcast_address;
@@ -363,6 +397,7 @@ private:
     uint16_t    m_game_port = 0;
     uint32_t    m_max_players = 32;
     uint32_t    m_current_players = 0;
+    std::vector<DiscoveredServer> m_discovered;
 };
 
 // ---------------------------------------------------------------------------

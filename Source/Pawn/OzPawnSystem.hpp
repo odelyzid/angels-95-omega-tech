@@ -125,6 +125,7 @@ struct Pawn {
 
     Texture2D sprite;       // billboard frame (loaded externally)
     Sound scream;           // aggro sound (loaded externally)
+    float lastScreamTime = -10.0f; // last time the scream was played (aggro cooldown)
     std::string defName;    // name of the pawn definition (e.g., "Walker", "Skaarj")
     int scriptInstanceIndex = -1; // LightningEntityManager instance index, -1 = none
 };
