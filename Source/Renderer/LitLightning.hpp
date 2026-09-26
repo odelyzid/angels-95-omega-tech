@@ -48,6 +48,8 @@ struct LightNode {
     // Static = baked into lightmap, skipped per-frame update
     bool isStatic = false;
     bool castShadow = false;    // deferred to later shadow phase
+    bool flare = false;         // draws a bright additive billboard at the light
+    bool corona = false;        // draws a larger, dimmer halo billboard
 
     int zoneId = -1;            // -1 = affects all zones, 0+ = only affects matching zone
     std::string name;           // editor label

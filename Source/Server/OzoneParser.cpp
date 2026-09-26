@@ -162,6 +162,16 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                     catch (...) { break; }
                 }
             }
+        } else if (type_name == "emitter") {
+            prim.type = OzonePrimitiveType::ENTITY_EMITTER;
+            // emitter sound|music x y z   (Z-up coordinates)
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
         } else if (type_name == "levelinfo") {
             prim.type = OzonePrimitiveType::ENTITY_LEVELINFO;
             // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes

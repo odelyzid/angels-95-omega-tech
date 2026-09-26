@@ -810,6 +810,50 @@ int main(int argc, char** argv){
             PlaySound(OmegaTechSoundData.Death);
     });
 
+    // Weapon pickup granted by the server (item_id 15) — add to hotbar.
+    g_client.set_on_weapon_collected([](const char* weapon_def_name) {
+        auto& registry = LightningEntityRegistry::Instance();
+        auto& lem = LightningEntityManager::Instance();
+        const EntityDef* def = registry.Find(weapon_def_name);
+        if (!def) {
+            OZ_WARN("Weapon collect: unknown def '%s' — falling back to automag", weapon_def_name);
+            def = registry.Find("automag");
+            if (!def) return;
+        }
+        int instIdx = lem.Spawn(def->name);
+        if (instIdx < 0) return;
+        bool assigned = false;
+        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
+            if (lem.HotbarAt(s) < 0) { lem.HotbarAssign(s, instIdx); assigned = true; break; }
+        }
+        if (assigned) OmegaTechTextSystem.Write(TextFormat("Picked up weapon: %s", def->name.c_str()));
+        else { OZ_WARN("Hotbar full — weapon %s lost", def->name.c_str()); lem.Despawn(instIdx); }
+        if (OmegaTechSoundData.UIClick.frameCount > 0)
+            PlaySound(OmegaTechSoundData.UIClick);
+    });
+
+    // Ammo changes (fire/reload) are reported to the server for remote sync.
+    LightningEntityManager::Instance().set_on_ammo_changed([](int slot, int ammo, int magazine, int action) {
+        if (g_network_enabled) g_client.send_weapon_ammo(slot, ammo, magazine, action);
+    });
+
+    // Server tells us which world is active — switch to it on mismatch.
+    g_client.set_on_scene_received([](const std::string& sceneJson) {
+        // Tiny hand-parse of the fixed server template: "active_world":"<name>"
+        static const std::string key = "\"active_world\":\"";
+        size_t kpos = sceneJson.find(key);
+        if (kpos == std::string::npos) return;
+        size_t start = kpos + key.size();
+        size_t end = sceneJson.find('"', start);
+        if (end == std::string::npos) return;
+        std::string activeWorld = sceneJson.substr(start, end - start);
+        if (activeWorld.empty() || activeWorld == g_world_to_load) return;
+        OZ_INFO("Network: server active world is '%s' — switching", activeWorld.c_str());
+        strncpy(g_world_to_load, activeWorld.c_str(), sizeof(g_world_to_load) - 1);
+        g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
+        SetSceneFlag = true;
+    });
+
     if (SetServerJoinFlag && SetServerJoinIP) {
         g_network_enabled = g_client.connect(SetServerJoinIP, SetServerJoinPort);
         if (g_network_enabled) {
@@ -1222,7 +1266,19 @@ int main(int argc, char** argv){
                         p->position = { npcs[i].position.x, npcs[i].position.y, npcs[i].position.z };
                         p->active = npcs[i].active;
                     } else if (npcs[i].active) {
-                        PawnSystem::Instance().Spawn({ npcs[i].position.x, npcs[i].position.y, npcs[i].position.z }, "Walker");
+                        // Spawn with the server-reported def type (falls back to Walker)
+                        const char* type = npcs[i].npc_type[0] ? npcs[i].npc_type : "Walker";
+                        int pawnId = PawnSystem::Instance().Spawn({ npcs[i].position.x, npcs[i].position.y, npcs[i].position.z }, type);
+                        if (pawnId < 0)
+                            pawnId = PawnSystem::Instance().Spawn({ npcs[i].position.x, npcs[i].position.y, npcs[i].position.z }, "Walker");
+                        if (pawnId >= 0) {
+                            Pawn* np = PawnSystem::Instance().Get(pawnId);
+                            if (np) {
+                                np->networkControlled = true;
+                                // Server owns AI/position; don't double-simulate locally.
+                                if (strcmp(np->defName.c_str(), type) != 0) np->defName = type;
+                            }
+                        }
                     }
                 }
 

@@ -180,7 +180,7 @@ test_ozone_parser: tests/OzoneParser.test.cpp Source/Server/OzoneParser.cpp
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
-test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Network/Network.cpp Source/Log.cpp
+test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
 test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_network test_game_state

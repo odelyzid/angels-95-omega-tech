@@ -97,7 +97,7 @@ Each brush primitive stores a CSG operation metadata:
 | 3 | INTERSECT (keep only overlap) |
 | 4 | DE_RESC (same as SUB) |
 
-The `CsgProcessor` in `Source/Physics/OzBsp.hpp` implements AABB-based boolean operations. In the editor, brushes are placed with their CSG operation stored as metadata but the backend processor is not yet called.
+The `CsgProcessor` in `Source/Physics/OzBsp.hpp` implements AABB-based boolean operations and runs at load time: `OzoneLoader::RebuildCollisionVolumes` feeds every brush's stored op through it to produce collision volumes. Render meshes are not carved (whole-brush rendering).
 
 ## Package Loading
 

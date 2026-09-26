@@ -25,6 +25,7 @@ struct ClientNPC {
     int state = 0;     // NpcState as int
     int health = 100;
     bool active = true;
+    char npc_type[32] = {0}; // pawn def name (e.g. "Walker"), from server
 };
 
 // Client-side pickup representation
@@ -47,6 +48,8 @@ struct RemotePlayer {
     float health = 100;
     bool active = false;
     uint32_t color_packed = 0xFFFFFFFF; // RGBA
+    int ammo = 0;           // current ammo in the remote player's selected weapon
+    int magazine = 0;       // its magazine size
 };
 
 // Projectile from weapon fire for rendering

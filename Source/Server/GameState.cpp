@@ -1,4 +1,5 @@
 #include "GameState.hpp"
+#include "OzoneParser.hpp"
 #include "../Log.hpp"
 #include <cmath>
 #include <cstring>
@@ -116,6 +117,27 @@ void GameState::init_worlds(const std::string& gamedata_dir,
         ws.world_min_z = -2000.0f;
         ws.world_max_z = 2000.0f;
 
+        // Parse the world file's levelinfo so game rules (maxPlayers,
+        // friendlyFire) come from the world itself.
+        {
+            std::string ozonePath = gamedata_dir + "/Worlds/" + world_list[i] + "/World.ozone";
+            auto prims = OzoneParser::parse_file(ozonePath);
+            for (auto& pr : prims) {
+                if (pr.type != OzonePrimitiveType::ENTITY_LEVELINFO) continue;
+                auto arg = [&](size_t idx) -> float {
+                    return idx < pr.args.size() ? pr.args[idx] : 0.0f;
+                };
+                // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes scoreLimit friendlyFire skyboxPath
+                if (pr.args.size() >= 2 && arg(1) > 0.0f)
+                    m_max_players = (uint32_t)arg(1);
+                if (pr.args.size() >= 7)
+                    m_friendly_fire = arg(6) != 0.0f;
+                OZ_INFO("World %s rules: maxPlayers=%u friendlyFire=%d",
+                        world_list[i].c_str(), m_max_players, (int)m_friendly_fire);
+                break; // first levelinfo wins
+            }
+        }
+
         // Create partitions
         ws.partitions.resize(PARTITIONS_PER_WORLD);
         float dx = (ws.world_max_x - ws.world_min_x) / PARTITION_COLS;
@@ -174,7 +196,6 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
             npc.damage = d.damage;
             npc.max_health = d.max_health;
             npc.health = d.max_health;
-            npc.return_range = d.return_range;
             npc.give_up_range = d.give_up_range;
             npc.attack_cooldown_max = d.attack_cooldown_max;
         }
@@ -244,8 +265,8 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
 // ---------------------------------------------------------------------------
 uint32_t GameState::add_player(uint32_t id, const char* name)
 {
-    if (m_player_count >= net::MAX_PLAYERS) {
-        OZ_WARN("Cannot add player, server full");
+    if (m_player_count >= (int)m_max_players) {
+        OZ_WARN("Cannot add player, server full (%u/%u)", m_max_players, m_max_players);
         return 0;
     }
     // Idempotent: re-join / re-auth for an already-connected id just refreshes
@@ -416,7 +437,8 @@ WorldState* GameState::get_world(int idx) {
 // ---------------------------------------------------------------------------
 void GameState::tick_npcs(WorldState& ws, float dt) {
     auto process_npc = [&](ServerNPC& npc, int part_idx) {
-        if (!npc.active) return;
+        // Dead NPCs still tick (respawn countdown) — everything else skips.
+        if (!npc.active && npc.state != NpcState::DEAD) return;
 
         // Find nearest player in same or adjacent partitions
         ServerPlayer* nearest_player = nullptr;
@@ -547,6 +569,7 @@ void GameState::tick_npcs(WorldState& ws, float dt) {
                     npc.health = npc.max_health;
                     npc.position = npc.spawn_pos;
                     npc.death_timer = 0.0f;
+                    npc.active = true; // back in the world; broadcast loop picks it up again
                 }
                 break;
         }
@@ -709,10 +732,13 @@ void GameState::add_xp(uint32_t player_id, int amount) {
 // Damage system
 // ---------------------------------------------------------------------------
 void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id) {
+    if (npc.state == NpcState::DEAD) return; // dead NPCs can't be re-killed
     npc.health -= amount;
     if (npc.health <= 0) {
         npc.active = false;
         npc.health = 0;
+        npc.state = NpcState::DEAD;
+        npc.death_timer = 0.0f;
         OZ_INFO("NPC killed at (%.2f, %.2f, %.2f)", npc.position.x, npc.position.y, npc.position.z);
         if (killer_id != UINT32_MAX) {
             add_xp(killer_id, XP_PER_KILL);
@@ -790,10 +816,12 @@ void GameState::tick_projectiles(WorldState& ws, float dt) {
         }
         if (!p.active) continue;
 
-        // Check collision with players (skip owner)
+        // Check collision with players (skip owner). Projectiles are the only
+        // PvP path — gated by the world's friendlyFire levelinfo rule.
         for (auto& player : m_players) {
             if (!player.connected) continue;
             if (player.id == p.owner_id) continue;
+            if (!m_friendly_fire) continue;
             float dx = p.position.x - player.position.x;
             float dy = p.position.y - player.position.y;
             float dz = p.position.z - player.position.z;

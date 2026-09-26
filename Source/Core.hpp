@@ -40,6 +40,14 @@ bool g_portalTransitionPending = false;
 Vector3 g_portalSpawnPos = {0, 20, 0};
 float g_portalCooldown = 0.0f;
 
+// Bidirectional portals: remember where we came from so a reverse portal can
+// be spawned at the arrival point. g_returnPortalId indexes PawnSystem's
+// portals (-1 = none); it starts disabled and arms once the player steps away.
+std::string g_portalReturnWorld;
+Vector3 g_portalReturnPos = {0, 0, 0};
+bool g_portalHasReturn = false;
+int g_returnPortalId = -1;
+
 int ScriptTimer = 0;
 
 // Cross-world state that must be reset on each LoadWorld()
@@ -694,6 +702,50 @@ void DrawLights()
         Color c = node.color;
         DrawSphereEx(node.position, 0.2f, 8, 8, c);
     }
+}
+
+// DrawLightFlares — additive billboard glows for lights with flare/corona.
+// The glow texture is generated procedurally once (radial falloff) — no asset file.
+inline Texture2D g_lightGlowTex = {0};
+void DrawLightFlares(Camera3D& camera)
+{
+    const auto& lights = PawnSystem::Instance().GetLights();
+    bool any = false;
+    for (const auto& l : lights)
+        if (l.active && (l.flare || l.corona)) { any = true; break; }
+    if (!any) return;
+
+    if (g_lightGlowTex.id == 0)
+    {
+        constexpr int S = 128;
+        Image img = GenImageColor(S, S, BLANK);
+        Color* px = (Color*)img.data;
+        for (int y = 0; y < S; y++)
+            for (int x = 0; x < S; x++) {
+                float dx = (x - S/2 + 0.5f) / (S/2);
+                float dy = (y - S/2 + 0.5f) / (S/2);
+                float d = sqrtf(dx*dx + dy*dy);
+                float a = (d < 1.0f) ? powf(1.0f - d, 2.5f) : 0.0f;
+                px[y*S + x] = (Color){255, 255, 255, (unsigned char)(a * 255.0f)};
+            }
+        g_lightGlowTex = LoadTextureFromImage(img);
+        UnloadImage(img);
+    }
+
+    BeginBlendMode(BLEND_ADDITIVE);
+    for (const auto& l : lights)
+    {
+        if (!l.active || (!l.flare && !l.corona)) continue;
+        // Size from light radius/intensity, clamped to sane screen presence
+        float base = fminf(fmaxf(l.radius * 0.08f, 0.8f), 8.0f);
+        if (l.corona)
+            DrawBillboard(camera, g_lightGlowTex, l.position, base * 2.5f,
+                          (Color){l.color.r, l.color.g, l.color.b, 70});
+        if (l.flare)
+            DrawBillboard(camera, g_lightGlowTex, l.position, base,
+                          (Color){l.color.r, l.color.g, l.color.b, (unsigned char)(120 + l.intensity * 20)});
+    }
+    EndBlendMode();
 }
 
 void OmegaTechInit()
@@ -1586,6 +1638,16 @@ void UpdateEntitiesSim(float dt)
         if (portal && !SetSceneFlag)
         {
             OZ_INFO("Portal: entering level '%s'", portal->targetWorld.c_str());
+            // Bidirectional portals record the origin so the destination gets a
+            // reverse portal back to this exact spot. (g_world_to_load still
+            // holds the CURRENT world name until the strncpy below.)
+            if (portal->bidirectional) {
+                g_portalReturnWorld = g_world_to_load;
+                g_portalReturnPos = playerPos;
+                g_portalHasReturn = true;
+            } else {
+                g_portalHasReturn = false;
+            }
             strncpy(g_world_to_load, portal->targetWorld.c_str(), sizeof(g_world_to_load) - 1);
             g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
             g_portalSpawnPos = portal->targetSpawn;
@@ -1593,6 +1655,25 @@ void UpdateEntitiesSim(float dt)
             SetSceneFlag = true;      // LoadWorld runs at end of frame
             g_portalCooldown = 3.0f;  // latch so the trigger can't re-fire mid-transition
         }
+    }
+
+    // Arm the transient return portal once the player has walked away from it.
+    if (g_returnPortalId >= 0)
+    {
+        const auto& portals = PawnSystem::Instance().GetPortals();
+        if (g_returnPortalId < (int)portals.size())
+        {
+            ZonePortal& rp = PawnSystem::Instance().GetPortals()[g_returnPortalId];
+            Vector3 c = {(rp.bounds.min.x + rp.bounds.max.x) * 0.5f,
+                         (rp.bounds.min.y + rp.bounds.max.y) * 0.5f,
+                         (rp.bounds.min.z + rp.bounds.max.z) * 0.5f};
+            float dx = playerPos.x - c.x, dy = playerPos.y - c.y, dz = playerPos.z - c.z;
+            if (!rp.enabled && sqrtf(dx*dx + dy*dy + dz*dz) > 3.5f) {
+                rp.enabled = true; // armed — walking back in now returns
+                OZ_INFO("Portal: return portal armed");
+            }
+        }
+        else g_returnPortalId = -1;
     }
 
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
@@ -1631,17 +1712,38 @@ void UpdateEntitiesSim(float dt)
         }
     }
 
-    // Death / respawn check
-    if (LightningEntityManager::Instance().GetPlayerHealth() <= 0.0f)
+    // Death / respawn check — respawn is delayed by the world's
+    // LevelSettings.respawnTime (default 5s, immediate = 0).
     {
-        LightningEntityManager::Instance().SetPlayerHealth(100.0f);
-        LightningEntityManager::Instance().SetPlayerMana(100.0f);
-        OmegaTechData.Deaths++;
-        OZ_INFO("Player died! Death #%d", OmegaTechData.Deaths);
-        OmegaTechTextSystem.Write(TextFormat("You died! Death #%d", OmegaTechData.Deaths));
-        PawnSystem::Instance().RespawnPlayerAtStart(OmegaTechData.MainCamera);
-        // Refill items from save
-        LoadSave();
+        static float s_respawnTimer = 0.0f;
+        if (LightningEntityManager::Instance().GetPlayerHealth() <= 0.0f)
+        {
+            if (s_respawnTimer <= 0.0f)
+            {
+                // First death frame: start the countdown, reset stats now.
+                LightningEntityManager::Instance().SetPlayerHealth(100.0f);
+                LightningEntityManager::Instance().SetPlayerMana(100.0f);
+                OmegaTechData.Deaths++;
+                OZ_INFO("Player died! Death #%d", OmegaTechData.Deaths);
+                OmegaTechTextSystem.Write(TextFormat("You died! Death #%d", OmegaTechData.Deaths));
+                float respawnTime = 5.0f;
+                const auto& settings = PawnSystem::Instance().GetWorldInfo().settings;
+                if (settings.respawnTime >= 0.0f) respawnTime = settings.respawnTime;
+                s_respawnTimer = respawnTime;
+            }
+            else
+            {
+                s_respawnTimer -= dt;
+                if (s_respawnTimer <= 0.0f)
+                {
+                    s_respawnTimer = 0.0f;
+                    PawnSystem::Instance().RespawnPlayerAtStart(OmegaTechData.MainCamera);
+                    // Refill items from save
+                    LoadSave();
+                }
+            }
+        }
+        else s_respawnTimer = 0.0f;
     }
 }
 
@@ -2284,6 +2386,7 @@ if (inSkyZone)
         // the sim steps so a catch-up frame doesn't re-draw the scene).
         PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
         PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights);
+        DrawLightFlares(OmegaTechData.MainCamera);
     }
     if (ObjectCollision)
     {
@@ -2513,6 +2616,27 @@ if (inSkyZone)
             g_playerMovement.velocityY = 0.0f;
             g_playerMovement.onGround = true;
             g_portalTransitionPending = false;
+
+            // Bidirectional portal: drop a return portal at the arrival point.
+            // It starts disabled and arms once the player steps away (the
+            // arming check lives in the portal trigger block above).
+            if (g_portalHasReturn && !g_portalReturnWorld.empty())
+            {
+                ZonePortal rp;
+                rp.targetWorld = g_portalReturnWorld;
+                rp.targetSpawn = g_portalReturnPos;
+                rp.bidirectional = true;
+                rp.enabled = false; // armed after the player moves away
+                Vector3 c = OmegaTechData.MainCamera.position;
+                rp.bounds = {
+                    {c.x - 1.5f, c.y - 1.5f, c.z - 1.5f},
+                    {c.x + 1.5f, c.y + 1.5f, c.z + 1.5f}
+                };
+                g_returnPortalId = PawnSystem::Instance().AddPortal(rp);
+                OZ_INFO("Portal: return portal to '%s' placed at arrival point",
+                        g_portalReturnWorld.c_str());
+            }
+            else g_returnPortalId = -1;
         }
         SetSceneFlag = false;
     }

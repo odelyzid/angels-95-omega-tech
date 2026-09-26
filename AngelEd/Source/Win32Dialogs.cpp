@@ -976,11 +976,23 @@ PawnTreeNode BuildPawnTree() {
     }
     invBranch.children.push_back(pickupBranch);
 
-    // Weapon stubs
+    // Weapons branch — weapon .ozls defs; placing one creates a weapon pickup
+    // (world files represent weapons as `pickup <weaponDefName>`).
     PawnTreeNode weaponBranch;
     weaponBranch.label = "Weapons";
     weaponBranch.isExpanded = false;
     weaponBranch.typeTag = "category";
+    {
+        std::vector<const EntityDef*> weaponDefs;
+        LightningEntityRegistry::Instance().FindByType(EntityType::WEAPON, weaponDefs);
+        for (auto* def : weaponDefs) {
+            PawnTreeNode leaf;
+            leaf.label = def->name;
+            leaf.defName = def->name;
+            leaf.typeTag = "pickup";
+            weaponBranch.children.push_back(leaf);
+        }
+    }
     pawnBranch.children.push_back(invBranch);
     pawnBranch.children.push_back(weaponBranch);
 
@@ -1079,7 +1091,9 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         else if (id == ID_PAWN_REFRESH) {
             SendMessage(hwnd, WM_USER + 50, 0, 0);
         } else if (id == ID_PAWN_SPAWN) {
-            // Spawn selected leaf node into world
+            // Spawn selected leaf node into world.
+            // lParam = "typeTag|defName" — pickups (items/weapons) route to
+            // pickup placement; everything else spawns as an NPC pawn.
             TVITEMW item;
             item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
             item.mask = TVIF_PARAM;
@@ -1089,9 +1103,13 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                     char* pipe = strchr(paramStr, '|');
                     if (pipe) {
                         *pipe = '\0';
+                        const char* typeTag = paramStr;
                         const char* defName = pipe + 1;
                         if (strlen(defName) > 0) {
-                            g_editorPanels.actionSpawnPawn = defName;
+                            if (strcmp(typeTag, "pickup") == 0)
+                                g_editorPanels.actionSpawnPickup = defName;
+                            else
+                                g_editorPanels.actionSpawnPawn = defName;
                         }
                     }
                 }
@@ -2351,7 +2369,7 @@ static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             float outerDeg = acosf(ln.outerCone) * RAD2DEG;
             SetWindowTextW(GetDlgItem(hwnd, ID_LP_INNER), std::to_wstring(innerDeg).c_str());
             SetWindowTextW(GetDlgItem(hwnd, ID_LP_OUTER), std::to_wstring(outerDeg).c_str());
-            SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_SETCHECK, ln.castShadow ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_SETCHECK, ln.flare ? BST_CHECKED : BST_UNCHECKED, 0);
             SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_SETCHECK, 0, 0); // reserved
         }
         g_editorPanels.lightColorR = (float)SendDlgItemMessage(hwnd, ID_LP_R, SBM_GETPOS, 0, 0);
@@ -3230,10 +3248,10 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
             case ID_TB_OP_INTER: Editor_SetCsgOperation(3); Editor_SetPlaceMode(0);
                 g_editorPanels.actionCsgCommitNow = 3; break;
             // --- Tool Modes ---
-            case ID_TB_MODE_CAM:   g_editorPanels.currentToolMode = 0; Editor_SetPlaceMode(0); break;
-            case ID_TB_MODE_MOVE:  g_editorPanels.currentToolMode = 1; Editor_SetPlaceMode(0); break;
-            case ID_TB_MODE_SCALE: g_editorPanels.currentToolMode = 2; Editor_SetPlaceMode(0); break;
-            case ID_TB_MODE_ROT:   g_editorPanels.currentToolMode = 3; Editor_SetPlaceMode(0); break;
+            case ID_TB_MODE_CAM:   g_editorPanels.currentToolMode = 0; break;
+            case ID_TB_MODE_MOVE:  g_editorPanels.currentToolMode = 1; break;
+            case ID_TB_MODE_SCALE: g_editorPanels.currentToolMode = 2; break;
+            case ID_TB_MODE_ROT:   g_editorPanels.currentToolMode = 3; break;
         }
         break;
     }

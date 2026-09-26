@@ -765,9 +765,11 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
 
 // World-list JSON for a joining player, clamped to the network payload size so
 // a long world list can never overflow the fixed-size message buffer.
+// Includes the server's active world (world 0) so the client can switch to it.
 static void send_join_world_list(const net::NetworkPlayer& player) {
     constexpr size_t kMaxPayload = net::MAX_MESSAGE_SIZE;
-    std::string world_list = "{\"type\":\"world_list\",\"worlds\":[";
+    std::string active_world = g_world_list.empty() ? std::string() : g_world_list[0];
+    std::string world_list = "{\"type\":\"world_list\",\"active_world\":\"" + json_escape(active_world) + "\",\"worlds\":[";
     for (size_t i = 0; i < g_world_list.size(); ++i) {
         std::string entry = json_escape(g_world_list[i]);
         if (world_list.size() + entry.size() + 2 > kMaxPayload) break; // room for ",]"
@@ -785,6 +787,24 @@ static void send_join_world_list(const net::NetworkPlayer& player) {
     msg.timestamp = static_cast<uint32_t>(time(nullptr));
     memcpy(msg.payload, world_list.data(), world_list.size());
     g_game_server->send_message(player, msg);
+}
+
+// Build an NPC state snapshot (includes the pawn def type name so clients
+// can spawn the correct sprite/scream instead of hardcoding "Walker").
+static net::NpcStateUpdateData make_npc_state(const WorldState& ws, int npc_index,
+                                              int partition_index, const ServerNPC& n) {
+    net::NpcStateUpdateData nsud{};
+    nsud.world_index = ws.world_index;
+    nsud.npc_index = npc_index;
+    nsud.partition_index = partition_index;
+    nsud.position = n.position;
+    nsud.yaw = n.yaw;
+    nsud.state = static_cast<int>(n.state);
+    nsud.health = n.health;
+    nsud.active = n.active;
+    strncpy(nsud.npc_type, n.typeName.c_str(), sizeof(nsud.npc_type) - 1);
+    nsud.npc_type[sizeof(nsud.npc_type) - 1] = '\0';
+    return nsud;
 }
 
 static void on_player_join(net::NetworkPlayer& player) {
@@ -1166,15 +1186,7 @@ static void on_server_message(const net::NetworkMessage& msg,
             attacker->last_damage_tick = g_game_state.tick_count();
             g_game_state.damage_npc(*npc, ndd.damage, sender.id);
             // Broadcast updated NPC state
-            net::NpcStateUpdateData nsud;
-            nsud.world_index = ndd.world_index;
-            nsud.npc_index = ndd.npc_index;
-            nsud.partition_index = ndd.partition_index;
-            nsud.position = npc->position;
-            nsud.yaw = npc->yaw;
-            nsud.state = static_cast<int>(npc->state);
-            nsud.health = npc->health;
-            nsud.active = npc->active;
+            net::NpcStateUpdateData nsud = make_npc_state(*ws, ndd.npc_index, ndd.partition_index, *npc);
             net::NetworkMessage relay;
             relay.magic = net::MAGIC;
             relay.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
@@ -1376,16 +1388,9 @@ int main(int argc, char** argv) {
                     // Global NPCs
                     for (size_t i = 0; i < world.global_npcs.size(); i++) {
                         const auto& n = world.global_npcs[i];
-                        if (!n.active) continue;
-                        net::NpcStateUpdateData nsud;
-                        nsud.world_index = world.world_index;
-                        nsud.npc_index = static_cast<int>(i);
-                        nsud.partition_index = -1;
-                        nsud.position = n.position;
-                        nsud.yaw = n.yaw;
-                        nsud.state = static_cast<int>(n.state);
-                        nsud.health = n.health;
-                        nsud.active = n.active;
+                        // Inactive (dead) NPCs are broadcast too so clients
+                        // hide them and late joiners learn the state.
+                        net::NpcStateUpdateData nsud = make_npc_state(world, static_cast<int>(i), -1, n);
                         net::NetworkMessage bmsg;
                         bmsg.magic = net::MAGIC;
                         bmsg.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
@@ -1399,16 +1404,8 @@ int main(int argc, char** argv) {
                     for (const auto& part : world.partitions) {
                         for (size_t i = 0; i < part.npcs.size(); i++) {
                             const auto& n = part.npcs[i];
-                            if (!n.active) continue;
-                            net::NpcStateUpdateData nsud;
-                            nsud.world_index = world.world_index;
-                            nsud.npc_index = static_cast<int>(i);
-                            nsud.partition_index = part.id;
-                            nsud.position = n.position;
-                            nsud.yaw = n.yaw;
-                            nsud.state = static_cast<int>(n.state);
-                            nsud.health = n.health;
-                            nsud.active = n.active;
+                            // Inactive (dead) NPCs are broadcast too (see above).
+                            net::NpcStateUpdateData nsud = make_npc_state(world, static_cast<int>(i), part.id, n);
                             net::NetworkMessage bmsg;
                             bmsg.magic = net::MAGIC;
                             bmsg.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);

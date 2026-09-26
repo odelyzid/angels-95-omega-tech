@@ -87,6 +87,10 @@ $(BUILD_DIR)/Log.o: ../Source/Log.cpp ../Source/Log.hpp | $(BUILD_DIR)
 $(BUILD_DIR)/OzAssetMapper.o: ../Source/Package/OzAssetMapper.cpp ../Source/Package/OzAssetMapper.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Package/OzAssetMapper.cpp -o $@
 
+# miniz (C compile; g++ would mangle symbols vs the extern "C" prototypes)
+$(BUILD_DIR)/miniz.o: ../Source/miniz/miniz.c ../Source/miniz/miniz.h | $(BUILD_DIR)
+	gcc -O3 -std=c99 -I../Source/miniz -c ../Source/miniz/miniz.c -o $@
+
 $(BUILD_DIR)/WorldChunk.o: ../Source/Physics/WorldChunk.cpp ../Source/Physics/WorldChunk.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/WorldChunk.cpp -o $@
 
@@ -98,7 +102,7 @@ $(BUILD_DIR)/rlights.o: ../Source/rlights/rlights.cpp ../Source/rlights/rlights.
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/WDLParser.o $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
-             $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/rlights.o
+             $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o
 
 # 5c. Editor Windows resource
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)

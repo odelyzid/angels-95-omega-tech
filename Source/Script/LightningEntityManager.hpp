@@ -75,6 +75,10 @@ public:
     int FireSelectedWeapon(const Vector3& origin, const Vector3& direction);
     bool ReloadSelectedWeapon();
 
+    // Ammo-change hook (fire/reload) for network sync; action: 0=fire, 1=reload.
+    // Signatures: (hotbarSlot, ammoInMag, magazineSize, action)
+    void set_on_ammo_changed(std::function<void(int, int, int, int)> cb) { m_on_ammo_changed = std::move(cb); }
+
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
     void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
@@ -175,6 +179,9 @@ private:
     // Simple one-shot sound cache: path -> loaded Sound
     struct CachedSound { Sound sound; float timer = 0.0f; };
     std::unordered_map<std::string, CachedSound> m_soundCache;
+
+    // Ammo-change hook (bridged by the host to the network layer)
+    std::function<void(int, int, int, int)> m_on_ammo_changed;
 
     int CacheModel(const std::string& path);
     int CacheTexture(const std::string& path);

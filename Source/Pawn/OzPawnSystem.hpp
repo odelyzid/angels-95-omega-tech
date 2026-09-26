@@ -128,6 +128,7 @@ struct Pawn {
     float lastScreamTime = -10.0f; // last time the scream was played (aggro cooldown)
     std::string defName;    // name of the pawn definition (e.g., "Walker", "Skaarj")
     int scriptInstanceIndex = -1; // LightningEntityManager instance index, -1 = none
+    bool networkControlled = false; // true = AI/position owned by the server; local FSM skipped
 };
 
 // Player start node - position and orientation for player spawn
@@ -189,11 +190,8 @@ struct ZoneVolumeNode {
 // ZonePortal — connects two zones / two LEVELS (enable zone transitions + campaigns)
 struct ZonePortal {
     BoundingBox bounds;           // trigger volume
-    std::string fromZoneName;     // source zone name (or "" for any)
-    std::string toZoneName;       // target zone name (or "" for world default)
     std::string targetWorld;      // destination level folder name in GameData/Worlds/ ("" = unassigned)
     Vector3 targetSpawn{0, 20, 0}; // player position on arrival in targetWorld
-    Vector3 teleportOffset;       // legacy: position delta on same-level transition
     bool bidirectional = true;
     bool enabled = true;
 };

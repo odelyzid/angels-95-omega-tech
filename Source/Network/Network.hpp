@@ -133,6 +133,7 @@ struct NpcStateUpdateData {
     int state;          // NpcState as int
     int health;
     bool active;
+    char npc_type[32];  // pawn def name (e.g. "Walker") so clients spawn the right sprite/scream
 };
 
 struct XpUpdateData {

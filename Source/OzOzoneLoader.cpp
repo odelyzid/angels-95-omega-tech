@@ -151,6 +151,15 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
             if (prim.args.size() >= 3)
                 pawns.Spawn({prim.args[0], prim.args[2], prim.args[1]}, prim.entityType.c_str());
             return true;
+        case OzonePrimitiveType::ENTITY_EMITTER:
+            // emitter sound|music x y z  (Z-up conversion like the other entities)
+            if (prim.args.size() >= 3) {
+                EmitterNode node;
+                node.type = (prim.entityType == "music") ? EmitterType::MUSIC : EmitterType::SOUND;
+                node.position = {prim.args[0], prim.args[2], prim.args[1]};
+                pawns.AddEmitter(node);
+            }
+            return true;
         case OzonePrimitiveType::ENTITY_LIGHT: {
             LightNode node;
             node.active = true;
@@ -166,8 +175,11 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 node.intensity = arg(6);
                 node.radius = arg(7);
                 if (prim.args.size() >= 9) node.effect = (LitLightEffect)(int)arg(8);
+                // Optional trailing floats: [flare] [corona]
+                if (prim.args.size() >= 10) node.flare = arg(9) != 0.0f;
+                if (prim.args.size() >= 11) node.corona = arg(10) != 0.0f;
             } else if (subtype == "spot" && prim.args.size() >= 12) {
-                // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect]
+                // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect] [flare] [corona]
                 node.type = LitLightType::SPOT;
                 node.position = {arg(0), arg(2), arg(1)};
                 node.target = {arg(3), arg(5), arg(4)};
@@ -177,12 +189,16 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 node.innerCone = arg(11);
                 node.outerCone = arg(12);
                 if (prim.args.size() >= 14) node.effect = (LitLightEffect)(int)arg(13);
+                if (prim.args.size() >= 15) node.flare = arg(14) != 0.0f;
+                if (prim.args.size() >= 16) node.corona = arg(15) != 0.0f;
             } else if (subtype == "directional" && prim.args.size() >= 6) {
-                // light directional tx ty tz r g b intensity
+                // light directional tx ty tz r g b intensity [flare] [corona]
                 node.type = LitLightType::DIRECTIONAL;
                 node.target = {arg(0), arg(2), arg(1)};
                 node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
                 node.intensity = arg(6);
+                if (prim.args.size() >= 8) node.flare = arg(7) != 0.0f;
+                if (prim.args.size() >= 9) node.corona = arg(8) != 0.0f;
             } else {
                 OZ_WARN("OZONE: invalid light definition (subtype=%s args=%zu)", subtype.c_str(), prim.args.size());
                 return true;
@@ -1110,6 +1126,15 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
             out.max = {position.x + w/2, position.y + h/2, position.z + d/2};
             break;
         }
+        case OzonePrimitiveType::PLANE: {
+            // BuildPlane renders a fixed 10x10 horizontal patch (normal args are
+            // not applied yet), so the AABB is a thin slab to match.
+            constexpr float kPlaneExtent = 5.0f;   // half of GenMeshPlane(10,10)
+            constexpr float kPlaneThickness = 0.05f;
+            out.min = {position.x - kPlaneExtent, position.y - kPlaneThickness, position.z - kPlaneExtent};
+            out.max = {position.x + kPlaneExtent, position.y + kPlaneThickness, position.z + kPlaneExtent};
+            break;
+        }
         default:
             break;
     }
@@ -1156,6 +1181,12 @@ void OzoneLoader::RebuildCollisionVolumes() {
         brush.maxX = r.position.x + mb.max.x * r.scale;
         brush.maxY = r.position.y + mb.max.y * r.scale;
         brush.maxZ = r.position.z + mb.max.z * r.scale;
+        // Zero-thickness geometry (plane slabs) can't overlap in CSG — inflate
+        // slightly so SUB/INTERSECT against them still produces a volume.
+        if (brush.maxY - brush.minY < 0.02f) {
+            brush.minY -= 0.05f;
+            brush.maxY += 0.05f;
+        }
         brush.op   = (CsgOp)r.csgOp;
         csg.Apply(brush);
     }

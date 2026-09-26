@@ -202,6 +202,8 @@ bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
     outDamage = 0.0f;
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
+        // Server-owned NPCs apply damage server-side (PLAYER_HURT) — skip locally.
+        if (p.networkControlled) continue;
 
         float dx = playerPos.x - p.position.x;
         float dz = playerPos.z - p.position.z;
@@ -375,7 +377,6 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
 
         if (CheckCollisionBoxes(pickupBox, playerBounds)) {
             n.active = false;
-            n.respawnTimer = n.respawnTime;
 
             // Map typeName to item ID via LightningScript entity registry
             int itemId = 0;
@@ -384,7 +385,12 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                 auto it = edef->stats.floats.find("item_id");
                 if (it != edef->stats.floats.end())
                     itemId = (int)it->second;
+                // Def-stat respawn override (0 = never respawns, e.g. Key/Coin)
+                auto rt = edef->stats.floats.find("respawn_time");
+                if (rt != edef->stats.floats.end())
+                    n.respawnTime = rt->second;
             }
+            n.respawnTimer = n.respawnTime;
             if (itemId == 0) {
                 // Fallback: scan ItemDB by name
                 for (int i = 0; i < ITEM_DB_SIZE; i++) {
@@ -690,6 +696,9 @@ void PawnSystem::SyncSkyboxState() {
 void PawnSystem::Update(Vector3 playerPos, float dt) {
     for (auto& p : m_pawns) {
         if (!p.active) continue;
+        // Network-controlled pawns: the server owns AI/position — no local FSM
+        // (prevents double simulation and fights over position).
+        if (p.networkControlled) continue;
 
         float dx = playerPos.x - p.position.x;
         float dz = playerPos.z - p.position.z;

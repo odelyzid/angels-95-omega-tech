@@ -76,7 +76,6 @@ struct ServerPawnDef {
     float attack_range = 1.5f;
     float damage = 10.0f;
     int max_health = 100;
-    float return_range = 15.0f;
     float give_up_range = 20.0f;
     int attack_cooldown_max = 30;
 };
@@ -85,17 +84,14 @@ struct ServerNPC {
     bool active = true;
     NpcState state = NpcState::PATROL;
     NetVec3 position{0, 0, 0};
-    NetVec3 velocity{0, 0, 0};
     float yaw = 0;
     float speed = 1.5f;
     float patrol_radius = 3.0f;
     NetVec3 spawn_pos{0, 0, 0};
     float state_timer = 0;
-    float state_accumulator = 0;
     int health = 100;
     int max_health = 100;
     float aggro_range = 6.0f;
-    float return_range = 15.0f;
     float give_up_range = 20.0f;
     float damage = 10.0f;
     float attack_range = 1.5f;
@@ -339,6 +335,8 @@ public:
 private:
     std::vector<ServerPlayer> m_players;
     int m_player_count = 0;
+    uint32_t m_max_players = net::MAX_PLAYERS; // from world levelinfo (maxPlayers)
+    bool m_friendly_fire = false;              // from world levelinfo (friendlyFire)
     uint32_t m_next_player_id = 1;
     uint32_t m_tick_count = 0;
     std::vector<WorldState> m_worlds;

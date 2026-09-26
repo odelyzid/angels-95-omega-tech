@@ -235,6 +235,8 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                     n.state = nsud.state;
                     n.health = nsud.health;
                     n.active = nsud.active;
+                    if (nsud.npc_type[0]) strncpy(n.npc_type, nsud.npc_type, sizeof(n.npc_type) - 1);
+                    n.npc_type[sizeof(n.npc_type) - 1] = '\0';
                     found = true;
                     break;
                 }
@@ -255,6 +257,8 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 cn.state = nsud.state;
                 cn.health = nsud.health;
                 cn.active = nsud.active;
+                strncpy(cn.npc_type, nsud.npc_type, sizeof(cn.npc_type) - 1);
+                cn.npc_type[sizeof(cn.npc_type) - 1] = '\0';
                 m_npcs.push_back(cn);
             }
             break;
@@ -400,10 +404,11 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::WeaponAmmoData wad;
             memcpy(&wad, msg.payload, sizeof(wad));
-            // Update remote player ammo if needed
+            // Update remote player ammo (for HUD / animation sync)
             for (auto& rp : m_remote_players) {
                 if (rp.player_id == wad.player_id) {
-                    // Store ammo info in a future remote player extension
+                    rp.ammo = wad.ammo;
+                    rp.magazine = wad.magazine;
                     break;
                 }
             }

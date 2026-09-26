@@ -71,11 +71,11 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 | **[0/2]** Prediction/interpolation | NPCs snap at 2.5 Hz broadcast; no client interpolation; no remote-player prediction | `Source/Server/Server.cpp:1293-1343` |
 | **[0/2]** Reliability | `sequence` is never set/checked (raw UDP, no acks) | valid everywhere; `Source/Network/Network.cpp` |
 | **[2]** Entity replication | NPC/pickup identity is index-triples, no stable net IDs | `Source/Network/Network.hpp:127-136` |
-| **[2]** Game modes | `levelinfo` parsed but unused; menu Deathmatch/CTF cosmetic; no scoreboards/timers | `Source/Server/Server.cpp:276-291`; `Source/Menu/TitleMenu.hpp` |
-| **[2]** Respawn | No server-side death/respawn flow | `Source/Server/GameState.cpp:690-694` (damage only) |
+| **[2]** Game modes | `levelinfo` maxPlayers/friendlyFire are enforced (b58); gameType/timeLimit/scoreLimit still cosmetic; no scoreboards/timers | `Source/Server/GameState.cpp` |
+| **[2]** Respawn | Server NPC death/respawn implemented (b58: DEAD state + 10s revive); no player death/respawn flow server-side | `Source/Server/GameState.cpp` |
 | **[2]** Admin | No kick/ban/RCON; `COMMAND` unhandled | `Source/Server/Server.cpp:1129-1133` |
-| **[1]** Ping | Measures time-since-connect, not RTT | `Source/Network/Network.cpp:623-630` |
-| **[2]** Join UX | Join port hardcoded 27015; no LAN browser UI; discovery is server-only | `Source/Main.cpp:797`; `Source/Network/Network.cpp:706-740` |
+| **[x] Ping** | Real RTT implemented (PING/PONG sequence-paired round-trip) | `Source/Network/Network.cpp` |
+| **[x] Join UX** | LAN server browser in the menu (Scan LAN); join/host ports functional from UI | `Source/Menu/TitleMenu.hpp`; `Source/Network/Network.cpp` |
 | **[2]** Reconnect | None — dropped client must restart | `Source/Network/Network.cpp:608-611` |
 | **[2]** Game stats | `save_player_data()`/`load_player_data()` declared but unimplemented | `Source/Server/GameState.hpp:332-333` |
 
@@ -102,7 +102,6 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 | **[2]** Functions/coroutines | No user functions or coroutines | `Source/Script/` |
 | **[2]** Debugger | No breakpoints/step/trace | — |
 | **[2]** Event bus | Actions fire ad-hoc; no publish/subscribe | `Source/Script/` |
-| **[1]** `on_fire` stub | Weapon fire script action is a placeholder | `Source/Main.cpp:256` |
 
 ### Editor (AngelEd)
 

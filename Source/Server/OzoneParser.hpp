@@ -24,6 +24,7 @@ enum class OzonePrimitiveType : uint8_t {
     ENTITY_PORTAL,       // Portal zone (level-to-level connection)
     ENTITY_LEVELINFO,    // Level metadata (game rules, skybox)
     ENTITY_PARTICLES,    // Ambient particle weather settings
+    ENTITY_EMITTER,      // Sound/music emitter marker (emitter sound|music x y z)
     HEIGHTMAP,           // Terrain heightmap (grayscale image)
     UNKNOWN
 };

@@ -93,7 +93,7 @@ The CSG Brushes panel provides:
 - **Place Brush** — commits the brush to the collision volume list
 - **Enable Collision** — toggle collision for placed brush
 
-The CSG operation value is stored but the backend `CsgProcessor` boolean operations are not yet integrated for render-time geometry.
+The CSG operation value is stored per brush and fed to the backend `CsgProcessor` for **collision** geometry (`OzoneLoader::RebuildCollisionVolumes`); render meshes stay whole (no render-time CSG carving). The OZONE export preserves each brush's `add`/`sub`/`intersect` op.
 
 ## Panels
 
@@ -205,7 +205,7 @@ Worlds are saved in WDL or OZONE text format stored in `OTEditor.WorldData`. OZO
 ## Known Limitations
 
 - Lighting toggle (Lit/Unlit) does not actually unset shader from model materials
-- CSG operation booleans are stored as metadata but not processed into geometry by the backend `CsgProcessor`
+- Render meshes are not CSG-carved (CSG booleans process collision volumes only)
 - No undo/redo system
 - No test-play save prompts ("Reload world from playtest changes?")
 - Model/Texture preview rendering requires the raylib viewport to be focused

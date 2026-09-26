@@ -68,6 +68,7 @@ struct EditorPanelState {
     bool actionApplyLight = false;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
     int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
+    std::string actionSpawnPickup;   // Pawn Manager "Spawn Selected" — weapon/item pickup def name
 
     // Terrain editing
     int terrainBrushMode = 0;       // 0=raise, 1=lower, 2=flatten

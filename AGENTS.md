@@ -97,17 +97,19 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 
 ## Pawn system
 - Data-driven NPC defs from `GameData/Global/PawnDefs/*.cfg` (name, speed, aggroRange, attackRange, damage, maxHealth, sprite_path, scream_path). Fallback hardcoded defs: Walker, Skaarj, Brute, Floater.
-- **FSM is `PawnState`: IDLE, PATROL, CHASE, RETURN, DEAD** (no ATTACK state - check `Source/Pawn/OzPawnSystem.hpp:25`). State transitions fire `.ozls` script actions `on_patrol`/`on_chase`/`on_return`/`on_death`.
-- NPCs attack only via melee range check (+ projectiles) - no ranged NPC fire.
+- **FSM is `PawnState`: IDLE, PATROL, CHASE, RETURN, DEAD** (no ATTACK state - check `Source/Pawn/OzPawnSystem.hpp:25`). State transitions fire `.ozls` script actions `on_patrol`/`on_chase`/`on_return`/`on_death` — **only if a pawn-named `.ozls` def exists in the registry** (e.g. `Walker.ozls`); without one, `scriptInstanceIndex` stays -1 and hooks never fire. Projectile kills call `TransitionState(DEAD)`.
+- NPCs attack only via melee range check (+ projectiles) - no ranged NPC fire. Scream plays on IDLE→CHASE (4s per-pawn cooldown).
+- Multiplayer: server-owned NPCs carry `npc_type` in `NpcStateUpdateData` and spawn with `networkControlled=true` (local FSM + contact damage skipped; server applies damage via `PLAYER_HURT`).
 
 ## Weapons (b54+)
 - Data-driven `.ozls` entities of type `weapon`: ranged (ProjectileNode; speed/spread/damage/lifetime; `magazine`/`reload_time` stats) or melee (`reach` stat, `on_swing`/`on_hit` actions).
 - Key code: `Source/Script/LightningEntityManager.cpp` `FireSelectedWeapon()` (ammo/reload/cooldown dispatch); projectile sim in `Source/Pawn/OzPawnSystem.cpp` `SpawnProjectile`/`UpdateProjectiles` (client radius 1.5) and `Source/Server/GameState.cpp` `spawn_projectile`/`tick_projectiles` (server radius 2.0 - radii intentionally differ).
 
-## Editor state (verified as of b54)
+## Editor state (verified as of b58)
 - Win32 native panels + raylib viewport. Dynamic file scanning of `GameData/` + packages. Reads `System/AngelEd.ini`.
-- Lit/Unlit/Wire toggle now swaps material shaders; right-click context menu exists; CSG `Apply`/`MergePass` is called for OZONE primitives (EMID >= 200).
-- Still missing: undo/redo, test-play mode. Docs: `Wiki/Editor-Usage.md`.
+- Lit/Unlit/Wire toggle swaps material shaders; right-click context menu exists; collision CSG runs via `OzoneLoader::RebuildCollisionVolumes` per brush `csgOp` (render meshes are not carved). Export preserves `add`/`sub`/`intersect`.
+- Tool modes (Cam/Move/Scale/Rotate) are wired in placement mode; Pawn-tree Weapons branch places weapon pickups; sound preview has volume + loop.
+- Still missing: undo/redo. Docs: `Wiki/Editor-Usage.md`.
 
 ## CI (.github/workflows/ci.yml)
 - Runs on every push/PR; tags matching `b*` also create a GitHub Release with zipped `System/`.

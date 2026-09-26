@@ -127,6 +127,7 @@ jobs:
           EDITOR_LIBS="-lraylib -lopengl32 -lgdi32 -lwinmm -lcomctl32 -lcomdlg32 -lws2_32 -lm"
           
           g++ -fpermissive $EDITOR_FLAGS $EDITOR_INC -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o
+          gcc -O3 -std=c99 -I ../Source/miniz -c ../Source/miniz/miniz.c -o miniz.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Main.cpp -o Main.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o
@@ -146,7 +147,7 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o rlights.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

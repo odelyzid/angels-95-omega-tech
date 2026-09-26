@@ -832,8 +832,17 @@ static void ExportToOzone(std::ostream& output) {
         if (w < 0.01f) w = 1.0f;
         if (h < 0.01f) h = 1.0f;
         if (d < 0.01f) d = 1.0f;
-        // Use CSG op from stored data (default to add)
+        // Use the CSG op stored on the owning renderable (default: add).
+        // CsgOp: SOLID=0, ADD=1, SUB=2, INTERSECT=3, DE_RESC=4 (exported as sub).
         const char* csgPrefix = "add";
+        int rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol((int)i);
+        if (rIdx >= 0) {
+            auto* r = OzoneLoader::Instance().Get(rIdx);
+            if (r) {
+                if (r->csgOp == (int)CsgOp::SUB || r->csgOp == (int)CsgOp::DE_RESC) csgPrefix = "sub";
+                else if (r->csgOp == (int)CsgOp::INTERSECT) csgPrefix = "intersect";
+            }
+        }
         output << csgPrefix << " box " << center.x << " " << center.y << " " << center.z
                << " " << w << " " << h << " " << d << " 0\n";
     }
@@ -887,6 +896,8 @@ static void ExportToOzone(std::ostream& output) {
                << " " << light.color.r << " " << light.color.g << " " << light.color.b
                << " " << light.intensity << " " << light.radius;
         if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
+        // Flare/corona trailing floats (parsed back by OzOzoneLoader)
+        if (light.flare || light.corona) output << " " << (light.flare ? 1 : 0) << " " << (light.corona ? 1 : 0);
         output << "\n";
     }
 
@@ -1333,8 +1344,18 @@ int main(int argc, char **argv){
             StopSoundPreview();
             g_previewSound = LoadSound(g_editorPanels.actionPreviewSoundPath.c_str());
             g_previewSoundLoaded = g_previewSound.frameCount > 0;
-            if (g_previewSoundLoaded) PlaySound(g_previewSound);
+            if (g_previewSoundLoaded) {
+                SetSoundVolume(g_previewSound, g_editorPanels.actionSoundVolume / 100.0f);
+                PlaySound(g_previewSound);
+            }
             g_editorPanels.actionPreviewSoundPath.clear();
+        }
+        // Live volume + optional loop for the sound preview (Sound has no loop
+        // flag, so looping is a replay poll).
+        if (g_previewSoundLoaded) {
+            SetSoundVolume(g_previewSound, g_editorPanels.actionSoundVolume / 100.0f);
+            if (g_editorPanels.actionSoundLoop && !IsSoundPlaying(g_previewSound))
+                PlaySound(g_previewSound);
         }
         if (g_editorPanels.actionTextureTarget > 0 && !g_editorPanels.actionTexturePath.empty()) {
             ApplyTextureToModel(g_editorPanels.actionTextureTarget, g_editorPanels.actionTexturePath.c_str());
@@ -1527,16 +1548,23 @@ int main(int argc, char **argv){
                 }
             }
 
-            // Scroll wheel = dolly forward/backward
-            float wheel = GetMouseWheelMove();
-            if (wheel != 0) {
-                Vector3 dir = Vector3Normalize(Vector3Subtract(OTEditor.MainCamera.target, OTEditor.MainCamera.position));
-                OTEditor.MainCamera.position.x += dir.x * wheel * 2.0f;
-                OTEditor.MainCamera.position.y += dir.y * wheel * 2.0f;
-                OTEditor.MainCamera.position.z += dir.z * wheel * 2.0f;
-                OTEditor.MainCamera.target.x += dir.x * wheel * 2.0f;
-                OTEditor.MainCamera.target.y += dir.y * wheel * 2.0f;
-                OTEditor.MainCamera.target.z += dir.z * wheel * 2.0f;
+            // Scroll wheel = dolly forward/backward.
+            // In MODEL placement with Scale/Rotate tool modes the wheel is
+            // reserved for scaling/rotating the ghost instead.
+            bool wheelReservedForTool =
+                (g_placeMode == PlaceMode::MODEL && OmegaTechEditor.DrawModel &&
+                 g_editorPanels.currentToolMode != 0);
+            if (!wheelReservedForTool) {
+                float wheel = GetMouseWheelMove();
+                if (wheel != 0) {
+                    Vector3 dir = Vector3Normalize(Vector3Subtract(OTEditor.MainCamera.target, OTEditor.MainCamera.position));
+                    OTEditor.MainCamera.position.x += dir.x * wheel * 2.0f;
+                    OTEditor.MainCamera.position.y += dir.y * wheel * 2.0f;
+                    OTEditor.MainCamera.position.z += dir.z * wheel * 2.0f;
+                    OTEditor.MainCamera.target.x += dir.x * wheel * 2.0f;
+                    OTEditor.MainCamera.target.y += dir.y * wheel * 2.0f;
+                    OTEditor.MainCamera.target.z += dir.z * wheel * 2.0f;
+                }
             }
         }
         
@@ -1804,7 +1832,8 @@ int main(int argc, char **argv){
             if (IsKeyPressed(KEY_O)) OmegaTechEditor.R += 90.0f;
             if (IsKeyPressed(KEY_L)) OmegaTechEditor.R -= 90.0f;
             if (IsKeyDown(KEY_T)) OmegaTechEditor.S += 0.5f;
-            if (IsKeyDown(KEY_G)) OmegaTechEditor.S -= 0.5f;
+            // NOTE: scale-down is B, not G — G cycles the CSG op in MODEL mode.
+            if (IsKeyDown(KEY_B)) OmegaTechEditor.S -= 0.5f;
 
             // Sync gizmo position back to selected entity (for manipulation)
             if (g_sel.type != SelType::NONE) {
@@ -1837,6 +1866,9 @@ int main(int argc, char **argv){
                                              r->position.y - center.y,
                                              r->position.z - center.z};
                             r->position = {newPos.x + delta.x, newPos.y + delta.y, newPos.z + delta.z};
+                            // Scale/Rotate tool modes write back to the renderable
+                            if (g_editorPanels.currentToolMode == 2) r->scale = OmegaTechEditor.S;
+                            if (g_editorPanels.currentToolMode == 3) r->rotation = OmegaTechEditor.R;
                         }
                     }
                     OzoneLoader::Instance().RebuildCollisionVolumes();
@@ -2002,7 +2034,18 @@ int main(int argc, char **argv){
                 CacheWDL();
             }
 
-            if (IsMouseButtonDown(0)) {
+            // Tool modes (toolbar Cam/Move/Scale/Rotate) while placing:
+            //   Cam (0)    — wheel shifts ghost depth (default, below)
+            //   Move (1)   — LMB drag moves the ghost (same as Cam)
+            //   Scale (2)  — wheel scales the ghost
+            //   Rotate (3) — wheel rotates the ghost in 15 degree steps
+            if (g_editorPanels.currentToolMode == 2) {
+                float wheel = GetMouseWheelMove();
+                if (wheel != 0) OmegaTechEditor.S += wheel * 0.25f;
+            } else if (g_editorPanels.currentToolMode == 3) {
+                float wheel = GetMouseWheelMove();
+                if (wheel != 0) OmegaTechEditor.R += wheel * 15.0f;
+            } else if (IsMouseButtonDown(0)) {
                 OmegaTechEditor.X += GetMouseDelta().x / 8;
                 OmegaTechEditor.Y += GetMouseDelta().y / 8;
                 OmegaTechEditor.Z -= (GetMouseWheelMove() * 2);
@@ -2565,6 +2608,18 @@ int main(int argc, char **argv){
             OmegaTechEditor.R = 1;
             g_editorPanels.actionNodeType = -1;
         }
+        if (!g_editorPanels.actionSpawnPickup.empty()) {
+            // Pawn Manager weapon/item leaf → weapon pickup placement
+            // (world files carry weapons as `pickup <defName>`)
+            g_placeMode = PlaceMode::PICKUP;
+            OmegaTechEditor.ActivePickupName = g_editorPanels.actionSpawnPickup;
+            OmegaTechEditor.DrawModel = true;
+            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+            OmegaTechEditor.R = 1;
+            g_editorPanels.actionSpawnPickup.clear();
+        }
         if (g_editorPanels.actionPlaceModel >= 0) {
             g_placeMode = PlaceMode::MODEL;
             OmegaTechEditor.DrawModel = true;
@@ -2671,7 +2726,8 @@ int main(int argc, char **argv){
                     float outerRad = g_editorPanels.lightOuterAngle * DEG2RAD;
                     ln.innerCone = cosf(innerRad);
                     ln.outerCone = cosf(outerRad);
-                    ln.castShadow = g_editorPanels.lightFlare;
+                    ln.flare = g_editorPanels.lightFlare;
+                    ln.corona = g_editorPanels.lightCorona;
                     EditorLog("Applied light properties to idx=%d: color=(%.0f,%.0f,%.0f) "
                               "intensity=%.1f radius=%.0f type=%d effect=%d",
                         idx,
@@ -2781,10 +2837,15 @@ int main(int argc, char **argv){
             g_placeMode = PlaceMode::TERRAIN;
 
         // Primitive type cycling (1-5 for box/cyl/sph/pyr/pln, only in MODEL mode)
+        // Reads real state from EMID (200+prim); never re-fires the actionCsgPlace
+        // one-shot (that would reset the ghost's size every frame).
         if (g_placeMode == PlaceMode::MODEL) {
-            int prim = g_editorPanels.actionCsgPlace;
-            if (prim < 0 || prim > 4) prim = 0;
-            if (IsKeyPressed(KEY_FIVE))  { prim = (prim + 1) % 5; g_editorPanels.actionCsgPlace = prim; }
+            int prim = (EMID >= 200 && EMID <= 204) ? EMID - 200 : 0;
+            if (IsKeyPressed(KEY_FIVE)) {
+                prim = (prim + 1) % 5;
+                EMID = 200 + prim;
+                EditorLog("Primitive: %s", prim == 0 ? "box" : prim == 1 ? "cylinder" : prim == 2 ? "sphere" : prim == 3 ? "pyramid" : "plane");
+            }
         }
 
         // CSG operation cycling (G key)

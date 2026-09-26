@@ -86,9 +86,11 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             ent->ctx.RunAction("on_reload", 30);
             float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
             if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
+            if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
             return -1;
         }
         ammoIt->second -= 1.0f;
+        if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)ammoIt->second, (int)magazine, 0);
     }
 
     ent->cooldownRemaining = fireRate;
@@ -167,6 +169,7 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     ent->ctx.RunAction("on_reload", 30);
     float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
     if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
+    if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
     return true;
 }
 
