@@ -1,7 +1,7 @@
 # OZONE world exported from AngelEd
 # Format: ozone v1.0
 
-add box 0 0 -0.5 200 0.5 200 0 texScaleU=8 texScaleV=8
+add box -0.5 0 -1.25 200 0.5 200 0 texPath=GameData/Worlds/Legacy/Snowy/oztex/tileset/industrial_checker_a2_48x48.png texScaleU=8 texScaleV=8
 add cyl 0 30 5 0.8 0.8 10 16 0 texPath=GameData/Global/Title/Title.png
 add cyl 30 0 5 0.8 0.8 10 16 0 texPath=GameData/Global/Title/Title.png
 add cyl 0 -30 5 0.8 0.8 10 16 0 texPath=GameData/Global/Title/Title.png
@@ -69,32 +69,6 @@ npc Skaarj 0 50 0
 npc Walker -40 -30 0
 npc Walker -40 30 0
 npc Walker -50 0 0
-light point 0 -30 5 ÿ ´ P 1 40
-light point 0 -30 5 ÿ ´ P 1 40
-light point 0 0 3 d È ÿ 0.925542 37.7614 2
-light point 0 0 3 d È ÿ 0.744173 54.0495 2
-light directional 0 0 0 ÿ Ü   1 50
-light directional 0 0 0 ÿ Ü   1 50
-light point 30 0 5 ÿ ´ P 1 40
-light point 30 0 5 ÿ ´ P 1 40
-light point -30 0 5 ÿ ´ P 1 40
-light point -30 0 5 ÿ ´ P 1 40
-light point -40 -50 4 È x < 1 25
-light point -40 -50 4 È x < 1 25
-light point 0 -85 5 ÿ   < 1 35
-light point 0 -85 5 ÿ   < 1 35
-light point 0 30 5 ÿ ´ P 1 40
-light point 0 30 5 ÿ ´ P 1 40
-light point 70 -25 4 È x < 1 25
-light point 70 -25 4 È x < 1 25
-light point 80 -20 5 ÿ   < 1 35
-light point 80 -20 5 ÿ   < 1 35
-light point -50 50 4 È x < 1 25
-light point -50 50 4 È x < 1 25
-light point -80 20 4 È x < 1 25
-light point -80 20 4 È x < 1 25
-light point -20 80 5 ÿ   < 1 35
-light point -20 80 5 ÿ   < 1 35
 zone sky -120 -120 -30 120 120 80 1 name=zone_sky_0
 zone water -8 -8 0 8 8 2 1 name=zone_water_0
 

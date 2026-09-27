@@ -1694,6 +1694,10 @@ static const int ID_SB_FOG_DENSITY = 113;
 static const int ID_SF_FOG_START = 114, ID_SF_FOG_END = 115;
 static const int ID_SF_SKYBOX_PATH = 116;
 static const int ID_ZONE_APPLY_FOG = 140;
+// Fog tab — skybox pickers (browse file / use Texture Manager selection / apply)
+static const int ID_SF_SKYBOX_BROWSE = 117;
+static const int ID_SF_SKYBOX_ACTIVE = 118;
+static const int ID_ZONE_APPLY_SKY   = 119;
 
 // Ambient controls
 static const int ID_SB_AMB_R = 120, ID_SB_AMB_G = 121, ID_SB_AMB_B = 122;
@@ -1879,6 +1883,38 @@ PortalEditValues GetPortalEditValues() {
     return out;
 }
 
+// Skybox texture picker for the Zone Properties Fog tab. Prefers a
+// repo-relative GameData/ path so saved worlds stay portable.
+static bool ChooseSkyboxFile(std::string& outPath) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_hRaylibWnd;
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter = L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0All Files (*.*)\0*.*\0\0";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
+    if (!GetOpenFileNameW(&dialog)) return false;
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return false;
+    std::vector<char> utf8((size_t)size);
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), size, nullptr, nullptr);
+    outPath.assign(utf8.data());
+
+    std::string s = outPath;
+    for (auto& c : s) if (c == '\\') c = '/';
+    size_t gd = s.find("GameData/");
+    if (gd != std::string::npos) outPath = s.substr(gd);
+    return true;
+}
+
+static void SetSkyboxField(HWND hwnd, const std::string& path) {
+    std::wstring w(path.begin(), path.end());
+    SetWindowTextW(GetDlgItem(hwnd, ID_SF_SKYBOX_PATH), w.c_str());
+    g_zoneProps.skyboxTexturePath = path;
+}
+
 static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
     case WM_CREATE: {
@@ -1894,6 +1930,10 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         CreateButton(hwnd, L"Particles", x + 232, y, 80, 24, ID_ZONE_TAB_PAR);
         CreateButton(hwnd, L"Portals",   x + 316, y, 80, 24, ID_ZONE_TAB_POR);
         y += 30;
+        // Every tab lays its controls out from the same origin; ShowZoneTab()
+        // toggles visibility, so tabs would otherwise render below the window
+        // (that is what made Particles/Portals look unimplemented).
+        const int tabTop = y;
 
         auto addSliderToGroup = [&](int tabIdx, int id, const wchar_t* label, int minv, int maxv, int def) {
             CreateLabel(hwnd, label, x, y, 55, 20, id + 1000);
@@ -1936,9 +1976,19 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
             x + 78, y, 180, 20, ID_SF_SKYBOX_PATH, WS_BORDER);
         g_zoneControlGroups[0].push_back(GetDlgItem(hwnd, 13));
         g_zoneControlGroups[0].push_back(hSkyboxPath);
-        y += 26;
+        y += 24;
+        {
+            HWND hBrowse = CreateButton(hwnd, L"Browse...", x, y, 90, 24, ID_SF_SKYBOX_BROWSE);
+            HWND hActive = CreateButton(hwnd, L"Use Active Tex", x + 96, y, 110, 24, ID_SF_SKYBOX_ACTIVE);
+            HWND hApplySky = CreateButton(hwnd, L"Apply Skybox", x + 212, y, 110, 24, ID_ZONE_APPLY_SKY);
+            g_zoneControlGroups[0].push_back(hBrowse);
+            g_zoneControlGroups[0].push_back(hActive);
+            g_zoneControlGroups[0].push_back(hApplySky);
+            y += 30;
+        }
 
         // --- Ambient tab (1) ---
+        y = tabTop;
         CreateLabel(hwnd, L"Ambient Color:", x, y, 100, 18, 20);
         g_zoneControlGroups[1].push_back(GetDlgItem(hwnd, 20));
         y += 20;
@@ -1952,6 +2002,7 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         y += 32;
 
         // --- GameType tab (2) ---
+        y = tabTop;
         CreateLabel(hwnd, L"Game Mode:", x, y, 80, 20, 30);
         g_zoneControlGroups[2].push_back(GetDlgItem(hwnd, 30));
         HWND hGT = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
@@ -1987,6 +2038,7 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         y += 32;
 
         // --- Particles tab (3) ---
+        y = tabTop;
         CreateLabel(hwnd, L"Particle Type:", x, y, 85, 22, 40);
         g_zoneControlGroups[3].push_back(GetDlgItem(hwnd, 40));
         HWND hPT = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
@@ -2009,6 +2061,7 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
 
         // --- Portal tab (4) ---
         {
+            y = tabTop;
             // Portal selector (existing portals in this world)
             CreateLabel(hwnd, L"Portal:", x, y, 55, 20, 50);
             g_zoneControlGroups[4].push_back(GetDlgItem(hwnd, 50));
@@ -2126,6 +2179,32 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
             g_zoneProps.fogEnd = readFloat(ID_SF_FOG_END, 100.0f);
             g_zoneProps.applyFog = true;
             break;
+        }
+        if (id == ID_SF_SKYBOX_BROWSE) {
+            std::string p;
+            if (ChooseSkyboxFile(p)) {
+                SetSkyboxField(hwnd, p);
+                g_zoneProps.applySkybox = true; // take effect immediately
+            }
+            break;
+        }
+        if (id == ID_SF_SKYBOX_ACTIVE) {
+            if (g_editorPanels.activeTexturePath.empty()) {
+                OZ_WARN("Zone Properties: no active texture in the Texture Manager");
+                break;
+            }
+            std::string s = g_editorPanels.activeTexturePath;
+            for (auto& c : s) if (c == '\\') c = '/';
+            size_t gd = s.find("GameData/");
+            if (gd != std::string::npos) s = s.substr(gd);
+            SetSkyboxField(hwnd, s);
+            g_zoneProps.applySkybox = true;
+            break;
+        }
+        if (id == ID_ZONE_APPLY_SKY) {
+            // Fall through to the generic field reader below so the typed path
+            // is captured, then take effect via applySkybox.
+            g_zoneProps.applySkybox = true;
         }
         if (id == ID_ZONE_APPLY_AMB) {
             g_zoneProps.applyAmbient = true;
