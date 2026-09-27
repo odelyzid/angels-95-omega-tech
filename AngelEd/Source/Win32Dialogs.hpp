@@ -121,6 +121,24 @@ struct EditorPanelState {
     float propTexOffsetU = 0.0f;
     float propTexOffsetV = 0.0f;
 
+    // Def-aligned property sections (filled by ShowPropertiesPanel, read by Main.cpp)
+    std::string propDefPath;        // .ozls/.cfg source path ("" = no def / section hidden)
+    std::string propDefTitle;       // e.g. "HealthVial  [pickup]"
+    std::string propDefSource;      // source file path shown as a row
+    struct DefField { std::string key; std::string value; };
+    std::vector<DefField> propDefPawnFields; // PawnDefs/*.cfg values (pawns only)
+    std::vector<DefField> propDefFields;     // .ozls stats (floats + strings)
+    std::vector<DefField> propDefActions;    // action name -> "N lines"
+    float propHealth = 100;         // NPC instance health override
+    float propSpeed = 1.5f;         // NPC instance speed override
+    float propRespawnTime = 30;     // pickup instance respawn time
+    int   propZoneType = 0;         // ZoneType index (0=water 1=ladder 2=sky 3=reverb 4=sound)
+    float propZoneIntensity = 1;
+    std::string propZoneName;       // zone script-hook name
+    std::string propPortalWorld;    // portal target world
+    float propPortalSpawn[3] = {0,0,0};
+    bool  propPortalBidir = true;
+
 #ifdef _WIN32
     // Window handles (Windows only)
     void* hSoundMgr = nullptr;
@@ -147,7 +165,7 @@ struct EditorPanelState {
     WinPos soundMgrPos   = {50, 50, 400, 280};
     WinPos textureMgrPos = {480, 50, 520, 480};
     WinPos pawnMgrPos    = {50, 360, 360, 200};
-    WinPos scriptMgrPos  = {440, 400, 420, 300};
+    WinPos scriptMgrPos  = {440, 340, 560, 450};
     WinPos modelBrwPos   = {100, 80, 540, 500};
     WinPos envPanelPos   = {60, 60, 440, 560};
     WinPos pickPanelPos  = {60, 400, 200, 280};
@@ -156,7 +174,7 @@ struct EditorPanelState {
     WinPos heightmapEditorPos = {120, 100, 520, 480};
     WinPos lightPropsPos = {400, 100, 340, 480};
     WinPos worldGraphPos = {540, 100, 600, 400};
-    WinPos propsPanelPos = {300, 150, 400, 500};
+    WinPos propsPanelPos = {300, 120, 470, 560};
     WinPos levelListPos = {200, 120, 560, 420};
 #endif
 };

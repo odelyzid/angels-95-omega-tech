@@ -1,5 +1,7 @@
 #include "OzoneParser.hpp"
+#include "../Package/OzPackage.hpp"
 #include <cstdio>
+#include <cstring>
 
 // Particle type names -> numeric index (0=none 1=snow 2=rain 3=void 4=psychic)
 static int ParticleTypeNameToIndex(const std::string& s) {
@@ -12,6 +14,27 @@ static int ParticleTypeNameToIndex(const std::string& s) {
 }
 
 std::vector<OzonePrimitive> OzoneParser::parse_file(const std::string& path) {
+    // Peek at the magic: OZWN/.ozone files may be OzPackage containers
+    // (System/Data/Zones/world_<name>.ozone) holding the world text inside.
+    {
+        uint32_t magic = 0;
+        FILE* peek = fopen(path.c_str(), "rb");
+        if (peek) {
+            if (fread(&magic, sizeof(magic), 1, peek) != 1) magic = 0;
+            fclose(peek);
+        }
+        if (magic == OZ_PACKAGE_MAGIC_WN || magic == OZ_PACKAGE_MAGIC_PK) {
+            OzPackageReader reader;
+            if (!reader.Open(path.c_str())) return {};
+            // Find the world text inside the package (exact or basename)
+            std::vector<uint8_t> text;
+            size_t got = reader.Read("World.ozone", text);
+            if (got == 0) got = reader.ReadBasename("World.ozone", text);
+            if (got == 0) return {};
+            return parse_string(std::string((const char*)text.data(), text.size()));
+        }
+    }
+
     std::ifstream file(path);
     if (!file.is_open()) {
         fprintf(stderr, "OZONE: cannot open %s\n", path.c_str());

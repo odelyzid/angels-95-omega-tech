@@ -1,6 +1,8 @@
 #include "Core.hpp"
 #include "Log.hpp"
 #include "ClientSettings.hpp"
+#include "JoinUri.hpp"
+#include "ProtocolHandler.hpp"
 #include "Client/Client.hpp"
 #include "Script/LightningEntityManager.hpp"
 #include "Script/LightningEntityRegistry.hpp"
@@ -91,6 +93,27 @@ static void CreateNativeMenuBar() {
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
+
+// Deep-link / CLI join target. SetServerJoinIP is a raw pointer consumed long
+// after parsing, so the host string must live for the whole process.
+static std::string g_cliJoinHost;
+
+static bool ApplyJoinTarget(const char* value)
+{
+    std::string host;
+    int port = JoinUri::kDefaultPort;
+    if (!JoinUri::Parse(value, host, port, JoinUri::kDefaultPort) &&
+        !JoinUri::ParseHostPort(value, host, port, JoinUri::kDefaultPort))
+        return false;
+
+    g_cliJoinHost = host;
+    SetServerJoinIP = g_cliJoinHost.c_str();
+    SetServerJoinPort = port;
+    SetServerJoinFlag = true;
+    g_skipMenu = true;
+    OZ_INFO("Deep link: joining %s:%d", SetServerJoinIP, SetServerJoinPort);
+    return true;
+}
 
 // Recoil & crosshair state
 static float g_recoilPitch = 0.0f;
@@ -462,16 +485,30 @@ static void ExecuteConsoleCommand(const char* cmd) {
     } else if (strcmp(cmd, "/showcollisions") == 0) {
         g_showCollisionDebug = !g_showCollisionDebug;
         OZ_INFO("Collision debug %s", g_showCollisionDebug ? "ON" : "OFF");
-    } else if (strncmp(cmd, "/connect ", 9) == 0) {
-        const char* ip = cmd + 9;
-        while (*ip == ' ') ip++;
-        if (*ip) {
-            SetServerJoinIP = ip;
-            SetServerJoinFlag = true;
-            OZ_INFO("Connecting to %s:27015", ip);
+    } else if (strncmp(cmd, "/connect ", 9) == 0 || strcmp(cmd, "/connect") == 0) {
+        const char* arg = (cmd[8] == ' ') ? cmd + 9 : "";
+        while (*arg == ' ') arg++;
+        std::string host;
+        int port = JoinUri::kDefaultPort;
+        if (!JoinUri::ParseHostPort(arg, host, port, JoinUri::kDefaultPort)) {
+            OZ_WARN("Usage: /connect <ip|host>[:port]");
+        } else if (g_network_enabled) {
+            OZ_WARN("Already connected - use /disconnect first");
         } else {
-            OZ_WARN("Usage: /connect <ip>");
+            static std::string s_consoleJoinHost;
+            s_consoleJoinHost = host;
+            SetServerJoinIP = s_consoleJoinHost.c_str();
+            SetServerJoinPort = port;
+            SetServerJoinFlag = true;
+            g_network_enabled = g_client.connect(SetServerJoinIP, SetServerJoinPort);
+            OZ_INFO("Connecting to %s:%d", SetServerJoinIP, SetServerJoinPort);
         }
+    } else if (strcmp(cmd, "/registerprotocol") == 0) {
+        if (ProtocolHandler::EnsureRegistered())
+            OZ_INFO("angels95:// protocol handler registered -> %s",
+                    ProtocolHandler::ExecutablePath().c_str());
+        else
+            OZ_WARN("Could not register angels95:// protocol handler");
     } else if (strcmp(cmd, "/disconnect") == 0) {
         if (g_network_enabled) {
             g_client.disconnect();
@@ -730,22 +767,39 @@ static void DrawInventoryOverlay() {
 
 int main(int argc, char** argv){
     // CLI args
-    for (int i = 1; i + 1 < argc; i++) {
-        if (strcmp(argv[i], "--world") == 0) {
-            strncpy(g_world_to_load, argv[i + 1], sizeof(g_world_to_load) - 1);
+    for (int i = 1; i < argc; i++) {
+        const char* arg = argv[i];
+        const std::string argLower = JoinUri::Lower(arg);
+        if (strcmp(arg, "--world") == 0 && i + 1 < argc) {
+            strncpy(g_world_to_load, argv[++i], sizeof(g_world_to_load) - 1);
             g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
             g_skipMenu = true;
-            i++;
-        } else if (strcmp(argv[i], "--world-dir") == 0) {
-            strncpy(g_world_dir_override, argv[i + 1], sizeof(g_world_dir_override) - 1);
+        } else if (strcmp(arg, "--world-dir") == 0 && i + 1 < argc) {
+            strncpy(g_world_dir_override, argv[++i], sizeof(g_world_dir_override) - 1);
             g_world_dir_override[sizeof(g_world_dir_override) - 1] = '\0';
-            i++;
+        } else if ((strcmp(arg, "--join") == 0 || strcmp(arg, "--connect") == 0) && i + 1 < argc) {
+            if (!ApplyJoinTarget(argv[++i]))
+                OZ_WARN("Invalid --join target: %s", argv[i]);
+        } else if (strncmp(arg, "--join=", 7) == 0 || strncmp(arg, "--connect=", 10) == 0) {
+            const char* value = arg + ((arg[2] == 'j') ? 7 : 10);
+            if (!ApplyJoinTarget(value))
+                OZ_WARN("Invalid --join target: %s", value);
+        } else if (argLower.rfind("angels95://", 0) == 0) {
+            if (!ApplyJoinTarget(arg))
+                OZ_WARN("Unrecognized join URI: %s", arg);
         }
     }
 
     // Load persisted user settings BEFORE window creation so window size,
     // VSync and MSAA are applied by InitWindow.
     LoadClientSettings();
+
+    // Browser deep links (angels95://join/...) need an OS protocol handler.
+    // HKCU / user .desktop only, so no elevation is required.
+    if (ProtocolHandler::EnsureRegistered())
+        OZ_INFO("Protocol handler: angels95:// -> %s", ProtocolHandler::ExecutablePath().c_str());
+    else
+        OZ_WARN("Protocol handler: angels95:// registration unavailable");
     if (VSYNCToggle) SetConfigFlags(FLAG_VSYNC_HINT);
     if (MXAAToggle)  SetConfigFlags(FLAG_MSAA_4X_HINT);
 

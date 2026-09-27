@@ -192,10 +192,13 @@ public:
 
     OzPackageReader(OzPackageReader&& other) noexcept
         : m_data(other.m_data), m_size(other.m_size), m_owned(other.m_owned),
-          m_magic(other.m_magic), m_version(other.m_version), m_entries(std::move(other.m_entries)) {
+          m_magic(other.m_magic), m_version(other.m_version),
+          m_headerFlags(other.m_headerFlags), m_entries(std::move(other.m_entries)),
+          m_decompressed(std::move(other.m_decompressed)) {
         other.m_data = nullptr;
         other.m_size = 0;
         other.m_owned = false;
+        other.m_headerFlags = 0;
     }
 
     OzPackageReader& operator=(OzPackageReader&& other) noexcept {
@@ -206,10 +209,13 @@ public:
             m_owned = other.m_owned;
             m_magic = other.m_magic;
             m_version = other.m_version;
+            m_headerFlags = other.m_headerFlags;
             m_entries = std::move(other.m_entries);
+            m_decompressed = std::move(other.m_decompressed);
             other.m_data = nullptr;
             other.m_size = 0;
             other.m_owned = false;
+            other.m_headerFlags = 0;
         }
         return *this;
     }
@@ -294,20 +300,34 @@ public:
     size_t Read(const char* name, std::vector<uint8_t>& out) const {
         const OzPackageEntry* e = Find(name);
         if (!e) return 0;
-        if (!entry_is_compressed(*e)) {
-            out.resize((size_t)e->sizeRaw);
-            memcpy(out.data(), m_data + e->offset, (size_t)e->sizeRaw);
-            return (size_t)e->sizeRaw;
+        return ReadEntry(*e, out);
+    }
+
+    // Like Read() but matches by basename (ignores directory components)
+    size_t ReadBasename(const char* basename, std::vector<uint8_t>& out) const {
+        const OzPackageEntry* e = FindBasename(basename);
+        if (!e) return 0;
+        return ReadEntry(*e, out);
+    }
+
+private:
+    size_t ReadEntry(const OzPackageEntry& e, std::vector<uint8_t>& out) const {
+        if (!entry_is_compressed(e)) {
+            out.resize((size_t)e.sizeRaw);
+            memcpy(out.data(), m_data + e.offset, (size_t)e.sizeRaw);
+            return (size_t)e.sizeRaw;
         }
-        out.resize((size_t)e->sizeRaw);
-        mz_ulong outLen = (mz_ulong)e->sizeRaw;
+        out.resize((size_t)e.sizeRaw);
+        mz_ulong outLen = (mz_ulong)e.sizeRaw;
         if (mz_uncompress(out.data(), &outLen,
-                          m_data + e->offset, (mz_ulong)e->sizePacked) != MZ_OK) {
+                          m_data + e.offset, (mz_ulong)e.sizePacked) != MZ_OK) {
             out.clear();
             return 0;
         }
         return (size_t)outLen;
     }
+
+public:
 
     // Get pointer to file data. Uncompressed entries point straight into the
     // mapped buffer; compressed entries are inflated once into an owned cache.

@@ -143,12 +143,12 @@ endif
 OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
-# 7. Build AngelServ (dedicated server, no raylib)
+# 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
+AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp Source/miniz/miniz.h $(BUILD_DIR)/miniz.o
@@ -175,15 +175,18 @@ test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
 test_ozone_parser: tests/OzoneParser.test.cpp Source/Server/OzoneParser.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
+
+test_join_uri: tests/JoinUri.test.cpp Source/JoinUri.hpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/JoinUri.test.cpp -o $@
 
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
 test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ -lws2_32
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_network test_game_state
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_network test_game_state
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -205,6 +208,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== OzoneParser Tests ==="
 	-./test_ozone_parser
 	@echo ""
+	@echo "=== JoinUri Tests ==="
+	-./test_join_uri
+	@echo ""
 	@echo "=== Network Packet Tests ==="
 	-./test_network
 	@echo ""
@@ -212,4 +218,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_game_state
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_network test_game_state
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_network test_game_state

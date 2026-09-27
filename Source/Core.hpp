@@ -422,11 +422,26 @@ auto LoadWorld()
 
         OmegaTechData.SkyboxEnabled = false;
 
-        const char* worldAssetDir = g_world_dir_override[0] ? g_world_dir_override : g_world_to_load;
+        // Resolve the asset directory prefix. g_world_to_load may be a world NAME
+        // (assets live in GameData/Worlds/<name>/) or a direct file path (editor
+        // playtest passes --world <path>; assets then live beside the file).
+        std::string worldLoad = g_world_to_load;
+        bool directWorldPath = worldLoad.find(".ozone") != std::string::npos ||
+                               worldLoad.find(".wdl") != std::string::npos;
+        std::string assetPrefix;
+        if (directWorldPath) {
+            size_t slash = worldLoad.find_last_of("/\\");
+            assetPrefix = (slash != std::string::npos) ? worldLoad.substr(0, slash + 1) : std::string();
+        } else if (g_world_dir_override[0]) {
+            assetPrefix = std::string("GameData/Worlds/") + g_world_dir_override + "/";
+        } else {
+            assetPrefix = std::string("GameData/Worlds/") + worldLoad + "/";
+        }
 
         for (int ne = 1; ne <= 3; ne++)
         {
-            const char* path = TextFormat("GameData/Worlds/%s/NoiseEmitter/NE%d.mp3", worldAssetDir, ne);
+            std::string nePath = assetPrefix + "NoiseEmitter/NE" + std::to_string(ne) + ".mp3";
+            const char* path = nePath.c_str();
             auto getStream = [&](Music& ms) {
                 if (IsPathFile(path)) {
                     StopMusicStream(ms);
@@ -441,18 +456,18 @@ auto LoadWorld()
             else getStream(OmegaTechSoundData.NESound3);
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/Skybox.png", worldAssetDir)))
+        if (IsPathFile(TextFormat("%sModels/Skybox.png", assetPrefix.c_str())))
         {
             if (WDLModels.Skybox.id > 0)
                 UnloadTexture(WDLModels.Skybox);
-            WDLModels.Skybox = LoadTexture(TextFormat("GameData/Worlds/%s/Models/Skybox.png", worldAssetDir));
+            WDLModels.Skybox = LoadTexture(TextFormat("%sModels/Skybox.png", assetPrefix.c_str()));
             OmegaTechData.SkyboxEnabled = true;
         }
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", worldAssetDir)))
+        if (IsPathFile(TextFormat("%sScripts/Launch.ps", assetPrefix.c_str())))
         {
             ParasiteScriptInit();
-            LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Launch.ps", worldAssetDir));
+            LoadScript(TextFormat("%sScripts/Launch.ps", assetPrefix.c_str()));
             for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
             {
                 CycleInstruction();
@@ -467,17 +482,17 @@ auto LoadWorld()
         }
         WDLModels.HeightMapReady = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", worldAssetDir)))
+        if (IsPathFile(TextFormat("%sModels/HeightMap.png", assetPrefix.c_str())))
         {
-            WDLModels.HeightMapTexture = LoadTexture(TextFormat("GameData/Worlds/%s/Models/HeightMapTexture.png", worldAssetDir));
-            WDLModels.HeightMapImage = LoadImage(TextFormat("GameData/Worlds/%s/Models/HeightMap.png", worldAssetDir));
+            WDLModels.HeightMapTexture = LoadTexture(TextFormat("%sModels/HeightMapTexture.png", assetPrefix.c_str()));
+            WDLModels.HeightMapImage = LoadImage(TextFormat("%sModels/HeightMap.png", assetPrefix.c_str()));
             WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
             if (WDLModels.HeightMapReady)
             {
                 ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
-                int X = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 0);
-                int Y = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 1);
-                int Z = PullConfigValue(TextFormat("GameData/Worlds/%s/Models/HeightMapConfig.conf", worldAssetDir), 2);
+                int X = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 0);
+                int Y = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 1);
+                int Z = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 2);
                 WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
                 Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
                 OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
@@ -500,8 +515,8 @@ auto LoadWorld()
         for (int mid = 1; mid <= GameModels::MAX_WDL_MODELS; mid++)
         {
             char modelPath[256], texPath[256];
-            snprintf(modelPath, sizeof(modelPath), "GameData/Worlds/%s/Models/Model%d.obj", worldAssetDir, mid);
-            snprintf(texPath, sizeof(texPath), "GameData/Worlds/%s/Models/Model%dTexture.png", worldAssetDir, mid);
+            snprintf(modelPath, sizeof(modelPath), "%sModels/Model%d.obj", assetPrefix.c_str(), mid);
+            snprintf(texPath, sizeof(texPath), "%sModels/Model%dTexture.png", assetPrefix.c_str(), mid);
             if (IsPathFile(modelPath))
             {
                 WDLModels.wdlModels[mid] = LoadModel(modelPath);
@@ -531,7 +546,7 @@ auto LoadWorld()
         else
         {
             WorldData = L"";
-            WorldData = LoadFile(TextFormat("GameData/Worlds/%s/World.wdl", worldAssetDir));
+            WorldData = LoadFile(TextFormat("%sWorld.wdl", assetPrefix.c_str()));
             OtherWDLData = L"";
             CacheWDL();
         }
@@ -558,7 +573,10 @@ auto LoadWorld()
         if (!isDirectWdl)
         {
             char ozonePath[512];
-            snprintf(ozonePath, sizeof(ozonePath), "GameData/Worlds/%s/World.ozone", worldAssetDir);
+            if (strstr(g_world_to_load, ".ozone") != nullptr)
+                snprintf(ozonePath, sizeof(ozonePath), "%s", g_world_to_load); // direct path (editor playtest)
+            else
+                snprintf(ozonePath, sizeof(ozonePath), "%sWorld.ozone", assetPrefix.c_str());
             if (IsPathFile(ozonePath))
                 OzoneLoader::Instance().LoadFile(ozonePath);
             else
@@ -614,9 +632,9 @@ auto LoadWorld()
 
         OmegaTechSoundData.MusicFound = false;
 
-        if (IsPathFile(TextFormat("GameData/Worlds/%s/Music/Main.mp3", worldAssetDir)))
+        if (IsPathFile(TextFormat("%sMusic/Main.mp3", assetPrefix.c_str())))
         {
-            OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("GameData/Worlds/%s/Music/Main.mp3", worldAssetDir));
+                OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("%sMusic/Main.mp3", assetPrefix.c_str()));
             OmegaTechSoundData.MusicFound = true;
             PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
         }

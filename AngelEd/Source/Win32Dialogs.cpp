@@ -8,6 +8,7 @@
 #include "../../Source/OzOzoneLoader.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
+#include <shellapi.h>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <cstdio>
@@ -1130,42 +1131,199 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Script Manager Ã¢â‚¬â€ Dynamic file scanning (GameData/ + packages)
+// Script Manager — LightningScript (.ozls) browser + editor launcher
 // =====================================================================
-static const int ID_SCRIPT_CLOSE = 100;
-static const int ID_SCRIPT_LIST  = 101;
+static const int ID_SCRIPT_CLOSE  = 100;
+static const int ID_SCRIPT_LIST   = 101;
 static const int ID_SCRIPT_REFRESH = 102;
+static const int ID_SCRIPT_EDIT   = 103;
+static const int ID_SCRIPT_NEW    = 104;
+static const int ID_SCRIPT_DELETE = 105;
+static const int ID_SCRIPT_RELOAD = 106;
+static const int ID_SCRIPT_DETAIL = 107;
+static const int ID_SCRIPT_NEWNAME = 108;
+static const int ID_SCRIPT_NEWTYPE = 109;
+static const int ID_SCRIPT_NEWCREATE = 110;
+static const int ID_SCRIPT_NEWCANCEL = 111;
 
-static std::vector<ResourceEntry> g_scriptFiles;
+struct ScriptListEntry {
+    std::string name;
+    std::string typeName;   // EntityTypeName() or "?" for unparsed files
+    int actionCount = 0;
+    std::string path;
+    int defIndex = -1;      // index into LightningEntityRegistry::GetAllDefs(), -1 = parse error
+};
 
-void ScanScriptFiles() {
-    ScanFilesAndPackages("", { ".ps", ".wdl", ".ozone" }, g_scriptFiles);
-    if (g_editorPanels.hScriptMgr) {
-        SendMessage((HWND)g_editorPanels.hScriptMgr, WM_USER + 50, 0, 0);
+static std::vector<ScriptListEntry> g_scripts;
+static bool s_scriptNewMode = false;
+
+// Folder for newly created defs, by entity type
+static const char* ScriptFolderForType(const std::string& type) {
+    if (type == "weapon") return "gun";
+    if (type == "pawn") return "Pawns";
+    if (type == "skyzone") return "Zones";
+    return "Items"; // pickup / consumable / upgrade / armor
+}
+
+// Minimal .ozls skeleton per type
+static std::string ScriptTemplate(const std::string& name, const std::string& type) {
+    if (type == "weapon")
+        return "entity \"" + name + "\" : weapon {\n"
+               "    stats {\n        damage = 10\n        fire_rate = 0.4\n"
+               "        projectile_speed = 20\n        projectile_lifetime = 2.0\n"
+               "        magazine = 12\n        reload_time = 2.0\n    }\n"
+               "    actions {\n        on_fire {\n            say \"Bang!\"\n        }\n"
+               "        on_reload {\n            say \"Reloading...\"\n        }\n    }\n}\n";
+    if (type == "pickup")
+        return "entity \"" + name + "\" : pickup {\n"
+               "    stats {\n        item_id = 0\n        respawn_time = 30\n    }\n"
+               "    actions {\n        on_collect {\n            msg \"Picked up\"\n        }\n    }\n}\n";
+    if (type == "pawn")
+        return "entity \"" + name + "\" : pawn {\n"
+               "    actions {\n        on_death {\n            msg \"Enemy down.\"\n        }\n    }\n}\n";
+    if (type == "skyzone")
+        return "entity \"" + name + "\" : skyzone {\n"
+               "    actions {\n        on_enter {\n            msg \"Entered zone.\"\n        }\n"
+               "        on_exit {\n            msg \"Left zone.\"\n        }\n    }\n}\n";
+    if (type == "consumable")
+        return "entity \"" + name + "\" : consumable {\n"
+               "    stats {\n        value = 25\n    }\n"
+               "    actions {\n        on_use {\n            playerstat health += 25\n            consume\n        }\n    }\n}\n";
+    return "entity \"" + name + "\" : upgrade {\n    stats {\n    }\n    actions {\n    }\n}\n";
+}
+
+// Registry-driven .ozls list: parsed defs first, then files that failed to parse
+static void ScanScriptFiles() {
+    g_scripts.clear();
+    auto& registry = LightningEntityRegistry::Instance();
+    const auto& defs = registry.GetAllDefs();
+    for (size_t i = 0; i < defs.size(); i++) {
+        const EntityDef& def = defs[i];
+        ScriptListEntry e;
+        e.name = def.name;
+        e.typeName = EntityTypeName(def.type);
+        e.actionCount = (int)def.actions.size();
+        e.path = def.sourcePath;
+        e.defIndex = (int)i;
+        g_scripts.push_back(e);
     }
+    // Filesystem fallback: .ozls files that produced no def (parse errors)
+    fs::path gd = fs::current_path() / "GameData";
+    if (fs::exists(gd)) {
+        for (auto& entry : fs::recursive_directory_iterator(gd)) {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext != ".ozls") continue;
+            std::string p = entry.path().string();
+            bool known = false;
+            for (auto& s : g_scripts) if (s.path == p) { known = true; break; }
+            if (!known) {
+                ScriptListEntry e;
+                e.name = entry.path().stem().string();
+                e.typeName = "?";
+                e.path = p;
+                g_scripts.push_back(e);
+            }
+        }
+    }
+    std::sort(g_scripts.begin(), g_scripts.end(),
+              [](const ScriptListEntry& a, const ScriptListEntry& b) { return a.name < b.name; });
+    if (g_editorPanels.hScriptMgr)
+        SendMessage((HWND)g_editorPanels.hScriptMgr, WM_USER + 50, 0, 0);
+}
+
+// Read-only detail text for the selected script (def stats + actions)
+static void BuildDefSummary(const EntityDef& def, const std::string& sourcePath,
+                            int actionCountHint, std::string& out);
+static void BuildScriptDetail(int sel, std::string& out) {
+    out.clear();
+    if (sel < 0 || sel >= (int)g_scripts.size()) return;
+    const ScriptListEntry& e = g_scripts[sel];
+    if (e.defIndex < 0) {
+        out += e.name + "  [" + e.typeName + "]\n";
+        out += "source: " + e.path + "\n";
+        out += "\n(parse error — file did not produce an entity definition)\n";
+        return;
+    }
+    auto& defs = LightningEntityRegistry::Instance().GetAllDefs();
+    if (e.defIndex >= (int)defs.size()) return;
+    BuildDefSummary(defs[e.defIndex], e.path, -1, out);
 }
 
 void ShowScriptManager(bool show) {
     g_editorPanels.showScriptMgr = show;
-    if (g_editorPanels.hScriptMgr)
+    if (g_editorPanels.hScriptMgr) {
+        if (show) SendMessage((HWND)g_editorPanels.hScriptMgr, WM_USER + 50, 0, 0);
         ShowWindow((HWND)g_editorPanels.hScriptMgr, show ? SW_SHOW : SW_HIDE);
+    }
 }
 
 static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hList;
+    static HWND hList = nullptr;
+    static HWND hDetail = nullptr;
+
+    // Builds the panel contents for the current mode (normal / new-script form).
+    // Destroy-and-rebuild follows the house PopulatePropertiesPanel pattern.
+    auto buildPanel = [&]() {
+        HWND child = GetWindow(hwnd, GW_CHILD);
+        while (child) {
+            HWND next = GetWindow(child, GW_HWNDNEXT);
+            DestroyWindow(child);
+            child = next;
+        }
+        hList = nullptr;
+        hDetail = nullptr;
+        SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+        if (s_scriptNewMode) {
+            CreateLabel(hwnd, L"New Script Name:", 10, 14, 120, 20, 0);
+            CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"my_script",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                130, 10, 180, 22, hwnd, (HMENU)(INT_PTR)ID_SCRIPT_NEWNAME, g_hInst, nullptr);
+            CreateLabel(hwnd, L"Type:", 10, 42, 120, 20, 0);
+            HWND hCombo = CreateWindowEx(0, L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                130, 38, 180, 200, hwnd, (HMENU)(INT_PTR)ID_SCRIPT_NEWTYPE, g_hInst, nullptr);
+            const wchar_t* types[] = { L"weapon", L"pickup", L"pawn", L"skyzone", L"consumable", L"upgrade" };
+            for (auto* t : types) SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)t);
+            SendMessage(hCombo, CB_SETCURSEL, 0, 0);
+            CreateButton(hwnd, L"Create", 320, 10, 90, 26, ID_SCRIPT_NEWCREATE);
+            CreateButton(hwnd, L"Cancel", 320, 40, 90, 26, ID_SCRIPT_NEWCANCEL);
+            CreateLabel(hwnd, L"Folder: GameData/Global/<type>  —  opened in your editor after creation.",
+                        10, 72, 500, 20, 0);
+        } else {
+            CreateLabel(hwnd, L"LightningScript files (.ozls — GameData/ + packages):", 10, 10, 520, 20, 1);
+            hList = CreateListBox(hwnd, 10, 32, 520, 170, ID_SCRIPT_LIST);
+            hDetail = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                10, 210, 520, 160, hwnd, (HMENU)(INT_PTR)ID_SCRIPT_DETAIL, g_hInst, nullptr);
+            CreateButton(hwnd, L"Edit", 10, 378, 90, 28, ID_SCRIPT_EDIT);
+            CreateButton(hwnd, L"New Script...", 106, 378, 110, 28, ID_SCRIPT_NEW);
+            CreateButton(hwnd, L"Delete", 222, 378, 90, 28, ID_SCRIPT_DELETE);
+            CreateButton(hwnd, L"Reload", 318, 378, 90, 28, ID_SCRIPT_RELOAD);
+            CreateButton(hwnd, L"Close", 440, 378, 90, 28, ID_SCRIPT_CLOSE);
+        }
+        SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(hwnd, nullptr, TRUE);
+    };
+
     switch (msg) {
-    case WM_CREATE: {
-        CreateLabel(hwnd, L"Available Scripts (GameData/.ps .wdl .ozone):", 10, 10, 380, 20, 1);
-        hList = CreateListBox(hwnd, 10, 35, 380, 220, ID_SCRIPT_LIST);
-        CreateButton(hwnd, L"Refresh", 10, 265, 90, 28, ID_SCRIPT_REFRESH);
-        CreateButton(hwnd, L"Close", 300, 265, 100, 28, ID_SCRIPT_CLOSE);
-        ScanScriptFiles();
+    case WM_CREATE:
+        buildPanel();
+        if (!s_scriptNewMode) {
+            ScanScriptFiles();
+            SendMessage(hwnd, WM_USER + 50, 0, 0); // fill list (hScriptMgr not set yet during WM_CREATE)
+        }
         break;
-    }
     case WM_USER + 50: {
+        if (s_scriptNewMode || !hList) break;
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (const auto& scr : g_scriptFiles) {
-            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)scr.name.c_str());
+        for (const auto& scr : g_scripts) {
+            char line[320];
+            snprintf(line, sizeof(line), "%s  [%s]%s", scr.name.c_str(), scr.typeName.c_str(),
+                     scr.defIndex < 0 ? "  (parse error)" :
+                     (scr.actionCount > 0 ? "" : "  (no actions)"));
+            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)line);
         }
         break;
     }
@@ -1173,20 +1331,102 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         int id = LOWORD(w);
         if (id == ID_SCRIPT_CLOSE) {
             ShowScriptManager(false);
+        } else if (id == ID_SCRIPT_NEW) {
+            s_scriptNewMode = true;
+            buildPanel();
+        } else if (id == ID_SCRIPT_NEWCANCEL) {
+            s_scriptNewMode = false;
+            buildPanel();
+            ScanScriptFiles();
+        } else if (id == ID_SCRIPT_NEWCREATE) {
+            wchar_t nameBuf[128] = {0};
+            GetWindowTextW(GetDlgItem(hwnd, ID_SCRIPT_NEWNAME), nameBuf, 128);
+            char nameA[128] = {0};
+            WideCharToMultiByte(CP_UTF8, 0, nameBuf, -1, nameA, 128, nullptr, nullptr);
+            int typeSel = (int)SendMessage(GetDlgItem(hwnd, ID_SCRIPT_NEWTYPE), CB_GETCURSEL, 0, 0);
+            static const char* types[] = { "weapon", "pickup", "pawn", "skyzone", "consumable", "upgrade" };
+            std::string type = (typeSel >= 0 && typeSel < 6) ? types[typeSel] : "pickup";
+            std::string name = nameA;
+            while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.erase(0, 1);
+            while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+            for (auto& c : name) if (c == ' ' || c == '\\' || c == '/' || c == ':') c = '_';
+            if (name.empty()) {
+                MessageBoxA(hwnd, "Script name must not be empty.", "New Script", MB_OK);
+                break;
+            }
+            fs::path dir = fs::current_path() / "GameData" / "Global" / ScriptFolderForType(type);
+            std::error_code ec;
+            fs::create_directories(dir, ec);
+            fs::path out = dir / (name + ".ozls");
+            if (fs::exists(out)) {
+                MessageBoxA(hwnd, ("Already exists: " + out.string()).c_str(), "New Script", MB_OK);
+                break;
+            }
+            std::ofstream ofs(out, std::ios::binary);
+            if (!ofs) {
+                MessageBoxA(hwnd, ("Could not write: " + out.string()).c_str(), "New Script", MB_OK);
+                break;
+            }
+            ofs << ScriptTemplate(name, type);
+            ofs.close();
+            LightningEntityRegistry::Instance().Init();
+            if (g_editorPanels.hPawnMgr)
+                SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
+            ShellExecuteA(hwnd, "open", out.string().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            s_scriptNewMode = false;
+            buildPanel();
+            ScanScriptFiles();
         } else if (id == ID_SCRIPT_REFRESH) {
             ScanScriptFiles();
-        } else if (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_DBLCLK) {
+        } else if (id == ID_SCRIPT_RELOAD) {
+            LightningEntityRegistry::Instance().Init();
+            ScanScriptFiles();
+            if (g_editorPanels.hPawnMgr)
+                SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
+            OZ_INFO("Script registry reloaded (%zu defs)", g_scripts.size());
+        } else if (id == ID_SCRIPT_DELETE) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < (int)g_scriptFiles.size()) {
-                char msgBuf[512];
-                snprintf(msgBuf, sizeof(msgBuf), "Script: %s\nPath: %s",
-                         g_scriptFiles[sel].name.c_str(), g_scriptFiles[sel].path.c_str());
-                MessageBoxA(hwnd, msgBuf, "Script Info", MB_OK);
+            if (sel >= 0 && sel < (int)g_scripts.size()) {
+                const ScriptListEntry& e = g_scripts[sel];
+                if (!fs::exists(e.path)) {
+                    MessageBoxA(hwnd,
+                        "This script lives inside a package.\nEdit the source .ozls and repack to change it.",
+                        "Delete Script", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                std::string q = "Delete '" + e.name + "'?\n" + e.path;
+                if (MessageBoxA(hwnd, q.c_str(), "Delete Script", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                    std::error_code ec;
+                    fs::remove(e.path, ec);
+                    LightningEntityRegistry::Instance().Init();
+                    ScanScriptFiles();
+                    if (g_editorPanels.hPawnMgr)
+                        SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
+                }
             }
+        } else if (id == ID_SCRIPT_EDIT ||
+                   (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_DBLCLK)) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_scripts.size()) {
+                const std::string& p = g_scripts[sel].path;
+                if (!fs::exists(p)) {
+                    std::string msg = "Script is packaged (no editable source file):\n" + p +
+                                      "\n\nEdit the GameData source .ozls and repack.";
+                    MessageBoxA(hwnd, msg.c_str(), "Edit Script", MB_OK | MB_ICONINFORMATION);
+                } else {
+                    ShellExecuteA(hwnd, "open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+            }
+        } else if (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_SELCHANGE) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            std::string detail;
+            BuildScriptDetail(sel, detail);
+            SetWindowTextA(hDetail, detail.c_str());
         }
         break;
     }
     case WM_CLOSE:
+        s_scriptNewMode = false;
         ShowScriptManager(false);
         break;
     case WM_DESTROY:
@@ -2929,6 +3169,82 @@ static const int ID_PP_TEX_SCALE_U = 411;
 static const int ID_PP_TEX_SCALE_V = 412;
 static const int ID_PP_TEX_OFF_U = 413;
 static const int ID_PP_TEX_OFF_V = 414;
+// Def-aligned sections
+static const int ID_PP_DEFBLOCK = 415;   // read-only def summary
+static const int ID_PP_EDITDEF  = 416;   // "Edit .ozls" button
+static const int ID_PP_HEALTH   = 417;   // NPC instance
+static const int ID_PP_SPEED    = 418;   // NPC instance
+static const int ID_PP_RESPAWN  = 419;   // pickup instance
+static const int ID_PP_ZONETYPE = 420;   // zone combo
+static const int ID_PP_ZONEINT  = 421;   // zone intensity
+static const int ID_PP_ZONENAME = 422;   // zone script-hook name
+static const int ID_PP_PORTALWORLD = 423;
+static const int ID_PP_PSPAWNX  = 424;
+static const int ID_PP_PSPAWNY  = 425;
+static const int ID_PP_PSPAWNZ  = 426;
+static const int ID_PP_PBIDIR   = 427;
+static const int ID_PP_PORTALBROWSE = 428; // browse target world
+
+// Build a read-only def summary (stats + actions + PawnDef block). Shared by the
+// Script Manager detail pane and the Properties panel def section.
+static void BuildDefSummary(const EntityDef& def, const std::string& sourcePath,
+                            int actionCountHint, std::string& out) {
+    out.clear();
+    out += def.name + "  [" + EntityTypeName(def.type) + "]\n";
+    if (!sourcePath.empty()) out += "source: " + sourcePath + "\n";
+    if (!def.mesh.empty())    out += "mesh: " + def.mesh + "\n";
+    if (!def.texture.empty()) out += "texture: " + def.texture + "\n";
+    if (!def.icon.empty())    out += "icon: " + def.icon + "\n";
+    if (!def.skybox.empty())  out += "skybox: " + def.skybox + "\n";
+    if (!def.music.empty())   out += "music: " + def.music + "\n";
+
+    if (def.type == EntityType::PAWN) {
+        for (const auto& pd : PawnSystem::Instance().GetDefs()) {
+            if (pd.name != def.name) continue;
+            out += "\npawn stats (PawnDefs/*.cfg):\n";
+            out += "  speed = " + std::to_string(pd.speed) + "\n";
+            out += "  aggroRange = " + std::to_string(pd.aggroRange) + "\n";
+            out += "  attackRange = " + std::to_string(pd.attackRange) + "\n";
+            out += "  damage = " + std::to_string(pd.damage) + "\n";
+            out += "  maxHealth = " + std::to_string(pd.maxHealth) + "\n";
+            if (!pd.sprite_path.empty()) out += "  sprite = " + pd.sprite_path + "\n";
+            if (!pd.scream_path.empty()) out += "  scream = " + pd.scream_path + "\n";
+            break;
+        }
+    }
+    if (!def.stats.floats.empty()) {
+        out += "\nstats:\n";
+        std::vector<std::pair<std::string, float>> sv(def.stats.floats.begin(), def.stats.floats.end());
+        std::sort(sv.begin(), sv.end());
+        for (auto& [k, v] : sv) out += "  " + k + " = " + std::to_string(v) + "\n";
+    }
+    if (!def.stats.strings.empty()) {
+        out += "\nstrings:\n";
+        std::vector<std::pair<std::string, std::string>> ss(def.stats.strings.begin(), def.stats.strings.end());
+        std::sort(ss.begin(), ss.end());
+        for (auto& [k, v] : ss) out += "  " + k + " = " + v + "\n";
+    }
+    int actions = actionCountHint >= 0 ? actionCountHint : (int)def.actions.size();
+    if (actions > 0) {
+        out += "\nactions:\n";
+        if (!def.actions.empty()) {
+            for (const auto& a : def.actions)
+                out += "  " + a.name + " (" + std::to_string(a.scriptLines.size()) + " lines)\n";
+        } else {
+            out += "  (" + std::to_string(actions) + ")\n";
+        }
+    }
+}
+
+// Compact number formatting for read-only def value rows (1 not 1.000000)
+static std::string FormatStat(float v) {
+    char buf[32];
+    if (std::fabs(v - std::round(v)) < 0.0001f)
+        snprintf(buf, sizeof(buf), "%d", (int)std::round(v));
+    else
+        snprintf(buf, sizeof(buf), "%g", v);
+    return std::string(buf);
+}
 
 static void PopulatePropertiesPanel(HWND hwnd) {
     // Destroy existing controls
@@ -2943,7 +3259,7 @@ static void PopulatePropertiesPanel(HWND hwnd) {
     int selIdx  = g_editorPanels.propsTargetIndex;
     RECT rc;
     GetClientRect(hwnd, &rc);
-    int x = 10, y = 10, lw = 60, ew = 100, bw = 80, rowH = 24;
+    int x = 10, y = 10, lw = 74, ew = 100, bw = 80, rowH = 24;
 
     // Title label
     {
@@ -2988,9 +3304,112 @@ static void PopulatePropertiesPanel(HWND hwnd) {
     // Rotation
     addField(L"Rot:", ID_PP_ROT, g_editorPanels.propRotation);
 
+    // ---- Def-aligned sections -------------------------------------------------
+    // Section header + read-only key/value row helpers
+    auto addSection = [&](const char* title) {
+        std::wstring wt(title, title + strlen(title));
+        CreateLabel(hwnd, wt.c_str(), x, y, rc.right - 20, 18, 1);
+        y += 20;
+    };
+    const int defLabelW = 96;
+    auto addReadOnlyRow = [&](const std::string& key, const std::string& val) {
+        std::wstring wk(key.begin(), key.end());
+        CreateLabel(hwnd, wk.c_str(), x, y, defLabelW, 20, 0);
+        std::wstring wv(val.begin(), val.end());
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", wv.c_str(),
+            WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
+            x + defLabelW, y, rc.right - (x + defLabelW) - 20, 22,
+            hwnd, nullptr, g_hInst, nullptr);
+        y += rowH;
+    };
+    auto addTextField = [&](const wchar_t* label, int id, const std::string& val) {
+        CreateLabel(hwnd, label, x, y, defLabelW, 20, 0);
+        std::wstring wval(val.begin(), val.end());
+        HWND h = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", wval.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+            x + defLabelW, y, rc.right - (x + defLabelW) - 20, 22, hwnd, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+        y += rowH;
+        return h;
+    };
+
+    // Definition block (read-only, per-key rows) — shown for NPC/pickup/zone
+    if (!g_editorPanels.propDefTitle.empty()) {
+        addSection("Definition (read-only)");
+        addReadOnlyRow("type", g_editorPanels.propDefTitle);
+        if (!g_editorPanels.propDefSource.empty())
+            addReadOnlyRow("source", g_editorPanels.propDefSource);
+        if (!g_editorPanels.propDefPawnFields.empty()) {
+            addSection("PawnDefs stats");
+            for (auto& f : g_editorPanels.propDefPawnFields) addReadOnlyRow(f.key, f.value);
+        }
+        if (!g_editorPanels.propDefFields.empty()) {
+            addSection(".ozls stats");
+            for (auto& f : g_editorPanels.propDefFields) addReadOnlyRow(f.key, f.value);
+        }
+        if (!g_editorPanels.propDefActions.empty()) {
+            addSection("Actions");
+            for (auto& f : g_editorPanels.propDefActions) addReadOnlyRow(f.key, f.value);
+        }
+        if (!g_editorPanels.propDefPath.empty()) {
+            CreateButton(hwnd, L"Edit .ozls", x, y, 100, 24, ID_PP_EDITDEF);
+            y += 30;
+        }
+    }
+
+    if (selType == 3) { // NPC — instance overrides
+        addSection("Instance overrides");
+        addField(L"Health:", ID_PP_HEALTH, g_editorPanels.propHealth);
+        addField(L"Speed:", ID_PP_SPEED, g_editorPanels.propSpeed);
+    } else if (selType == 4) { // PICKUP / weapon — instance overrides
+        addSection("Instance overrides");
+        addField(L"Respawn:", ID_PP_RESPAWN, g_editorPanels.propRespawnTime);
+    } else if (selType == 6) { // ZONE
+        addSection("Zone");
+        CreateLabel(hwnd, L"Type:", x, y, lw, 20, 0);
+        {
+            HWND hCombo = CreateWindowEx(0, L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                x + lw, y, ew, 200, hwnd, (HMENU)(INT_PTR)ID_PP_ZONETYPE, g_hInst, nullptr);
+            const wchar_t* zt[] = { L"water", L"ladder", L"sky", L"reverb", L"sound" };
+            for (auto* t : zt) SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)t);
+            int zsel = g_editorPanels.propZoneType;
+            if (zsel < 0 || zsel > 4) zsel = 0;
+            SendMessage(hCombo, CB_SETCURSEL, zsel, 0);
+        }
+        y += rowH;
+        addField(L"Intensity:", ID_PP_ZONEINT, g_editorPanels.propZoneIntensity);
+        addTextField(L"Name:", ID_PP_ZONENAME, g_editorPanels.propZoneName);
+    } else if (selType == 8) { // PORTAL
+        addSection("Destination");
+        addTextField(L"Target World:", ID_PP_PORTALWORLD, g_editorPanels.propPortalWorld);
+        addField(L"Spawn X:", ID_PP_PSPAWNX, g_editorPanels.propPortalSpawn[0]);
+        addField(L"Spawn Y:", ID_PP_PSPAWNY, g_editorPanels.propPortalSpawn[1]);
+        addField(L"Spawn Z:", ID_PP_PSPAWNZ, g_editorPanels.propPortalSpawn[2]);
+        {
+            HWND hCheck = CreateWindowEx(0, L"BUTTON", L"Bidirectional",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                x, y, 200, 22, hwnd, (HMENU)(INT_PTR)ID_PP_PBIDIR, g_hInst, nullptr);
+            SendMessage(hCheck, BM_SETCHECK, g_editorPanels.propPortalBidir ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+        y += rowH;
+    }
+    // ---------------------------------------------------------------------------
+
     y += 8;
     CreateButton(hwnd, L"Apply", x, y, bw, 26, ID_PP_APPLY);
     CreateButton(hwnd, L"Close", x + bw + 6, y, bw, 26, ID_PP_CLOSE);
+
+    // Grow the window (never shrink) so every generated row is visible
+    {
+        int needed = y + 26 + 24; // buttons + margin
+        RECT wr;
+        GetWindowRect(hwnd, &wr);
+        int curH = wr.bottom - wr.top;
+        if (needed > curH) {
+            SetWindowPos(hwnd, nullptr, 0, 0, wr.right - wr.left, needed,
+                         SWP_NOMOVE | SWP_NOZORDER);
+        }
+    }
 }
 
 static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -3006,6 +3425,13 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     case WM_COMMAND: {
         int id = LOWORD(w);
         if (id == ID_PP_CLOSE) { ShowPropertiesPanel(false); break; }
+        if (id == ID_PP_EDITDEF) {
+            // Hand off to the OS editor (defs stay read-only in the panel)
+            if (!g_editorPanels.propDefPath.empty())
+                ShellExecuteA(hwnd, "open", g_editorPanels.propDefPath.c_str(),
+                              nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
         if (id == ID_PP_APPLY) {
             // Read all edit fields and set action flags
             auto readFloat = [hwnd](int id, float def) -> float {
@@ -3014,6 +3440,15 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                 wchar_t buf[64];
                 GetWindowTextW(hCtrl, buf, 64);
                 return (float)wcstod(buf, nullptr);
+            };
+            auto readString = [hwnd](int id, const std::string& def) -> std::string {
+                HWND hCtrl = GetDlgItem(hwnd, id);
+                if (!hCtrl) return def;
+                wchar_t buf[256];
+                GetWindowTextW(hCtrl, buf, 256);
+                char out[256] = {0};
+                WideCharToMultiByte(CP_UTF8, 0, buf, -1, out, 256, nullptr, nullptr);
+                return std::string(out);
             };
             g_editorPanels.propPosX = readFloat(ID_PP_POSX, 0);
             g_editorPanels.propPosY = readFloat(ID_PP_POSY, 0);
@@ -3026,6 +3461,23 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.propTexScaleV = readFloat(ID_PP_TEX_SCALE_V, 1.0f);
             g_editorPanels.propTexOffsetU = readFloat(ID_PP_TEX_OFF_U, 0.0f);
             g_editorPanels.propTexOffsetV = readFloat(ID_PP_TEX_OFF_V, 0.0f);
+            // Def-aligned instance overrides
+            g_editorPanels.propHealth = readFloat(ID_PP_HEALTH, g_editorPanels.propHealth);
+            g_editorPanels.propSpeed = readFloat(ID_PP_SPEED, g_editorPanels.propSpeed);
+            g_editorPanels.propRespawnTime = readFloat(ID_PP_RESPAWN, g_editorPanels.propRespawnTime);
+            g_editorPanels.propZoneIntensity = readFloat(ID_PP_ZONEINT, g_editorPanels.propZoneIntensity);
+            g_editorPanels.propZoneName = readString(ID_PP_ZONENAME, g_editorPanels.propZoneName);
+            g_editorPanels.propPortalWorld = readString(ID_PP_PORTALWORLD, g_editorPanels.propPortalWorld);
+            g_editorPanels.propPortalSpawn[0] = readFloat(ID_PP_PSPAWNX, g_editorPanels.propPortalSpawn[0]);
+            g_editorPanels.propPortalSpawn[1] = readFloat(ID_PP_PSPAWNY, g_editorPanels.propPortalSpawn[1]);
+            g_editorPanels.propPortalSpawn[2] = readFloat(ID_PP_PSPAWNZ, g_editorPanels.propPortalSpawn[2]);
+            if (HWND hz = GetDlgItem(hwnd, ID_PP_ZONETYPE)) {
+                int s = (int)SendMessage(hz, CB_GETCURSEL, 0, 0);
+                if (s >= 0 && s <= 4) g_editorPanels.propZoneType = s;
+            }
+            if (HWND hb = GetDlgItem(hwnd, ID_PP_PBIDIR))
+                g_editorPanels.propPortalBidir =
+                    SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
             g_editorPanels.actionApplyProperties = true;
         }
         break;
@@ -3046,6 +3498,106 @@ void ShowPropertiesPanel(bool show) {
         g_editorPanels.propPosZ = g_editorPanels.propsTargetPos[2];
         g_editorPanels.propRotation = g_editorPanels.propsTargetRotation;
         g_editorPanels.propScale = g_editorPanels.propsTargetScale;
+        g_editorPanels.propDefPath.clear();
+        g_editorPanels.propDefTitle.clear();
+        g_editorPanels.propDefSource.clear();
+        g_editorPanels.propDefPawnFields.clear();
+        g_editorPanels.propDefFields.clear();
+        g_editorPanels.propDefActions.clear();
+
+        // Helper: fill the structured def rows from the registry by def name
+        // (+ PawnDefs/*.cfg fallback for pawns without an .ozls def).
+        auto fillDefBlock = [](const std::string& defName, const std::string& fallbackPath) {
+            using DefField = EditorPanelState::DefField;
+            auto& P = g_editorPanels;
+            P.propDefPath.clear(); P.propDefTitle.clear(); P.propDefSource.clear();
+            P.propDefPawnFields.clear(); P.propDefFields.clear(); P.propDefActions.clear();
+
+            auto addPawnDefFields = [&](const std::string& name) {
+                for (const auto& pd : PawnSystem::Instance().GetDefs()) {
+                    if (pd.name != name) continue;
+                    P.propDefPawnFields.push_back({"speed", FormatStat(pd.speed)});
+                    P.propDefPawnFields.push_back({"aggroRange", FormatStat(pd.aggroRange)});
+                    P.propDefPawnFields.push_back({"attackRange", FormatStat(pd.attackRange)});
+                    P.propDefPawnFields.push_back({"damage", FormatStat(pd.damage)});
+                    P.propDefPawnFields.push_back({"maxHealth", std::to_string(pd.maxHealth)});
+                    if (!pd.sprite_path.empty()) P.propDefPawnFields.push_back({"sprite", pd.sprite_path});
+                    if (!pd.scream_path.empty()) P.propDefPawnFields.push_back({"scream", pd.scream_path});
+                    return true;
+                }
+                return false;
+            };
+
+            const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
+            if (def) {
+                P.propDefPath = def->sourcePath;
+                P.propDefTitle = def->name + "  [" + EntityTypeName(def->type) + "]";
+                P.propDefSource = def->sourcePath;
+                if (!def->mesh.empty())    P.propDefFields.push_back({"mesh", def->mesh});
+                if (!def->texture.empty()) P.propDefFields.push_back({"texture", def->texture});
+                if (!def->icon.empty())    P.propDefFields.push_back({"icon", def->icon});
+                if (!def->skybox.empty())  P.propDefFields.push_back({"skybox", def->skybox});
+                if (!def->music.empty())   P.propDefFields.push_back({"music", def->music});
+                std::vector<std::pair<std::string, float>> sv(def->stats.floats.begin(), def->stats.floats.end());
+                std::sort(sv.begin(), sv.end());
+                for (auto& [k, v] : sv) P.propDefFields.push_back({k, FormatStat(v)});
+                std::vector<std::pair<std::string, std::string>> ss(def->stats.strings.begin(), def->stats.strings.end());
+                std::sort(ss.begin(), ss.end());
+                for (auto& [k, v] : ss) P.propDefFields.push_back({k, "\"" + v + "\""});
+                for (const auto& a : def->actions)
+                    P.propDefActions.push_back({a.name, std::to_string(a.scriptLines.size()) + " lines"});
+                if (def->type == EntityType::PAWN) addPawnDefFields(def->name);
+                return;
+            }
+            // No .ozls def — PawnDefs/*.cfg-only pawn fallback
+            if (addPawnDefFields(defName)) {
+                std::string path = fallbackPath.empty()
+                    ? ("GameData/Global/PawnDefs/" + defName + ".cfg") : fallbackPath;
+                if (!fs::exists(path)) path.clear();
+                P.propDefPath = path;
+                P.propDefTitle = defName + "  [pawn - PawnDefs only]";
+                P.propDefSource = path;
+            }
+        };
+
+        if (g_editorPanels.propsTargetType == 3) { // NPC
+            if (Pawn* p = PawnSystem::Instance().Get(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propHealth = (float)p->health;
+                g_editorPanels.propSpeed = p->speed;
+                fillDefBlock(p->defName, "");
+            }
+        } else if (g_editorPanels.propsTargetType == 4) { // PICKUP / weapon
+            for (auto& pk : PawnSystem::Instance().GetPickups()) {
+                if ((int)pk.id == g_editorPanels.propsTargetIndex) {
+                    g_editorPanels.propRespawnTime = pk.respawnTime;
+                    fillDefBlock(pk.typeName, "");
+                    break;
+                }
+            }
+        } else if (g_editorPanels.propsTargetType == 6) { // ZONE
+            for (auto& z : PawnSystem::Instance().GetZones()) {
+                if ((int)z.id == g_editorPanels.propsTargetIndex) {
+                    g_editorPanels.propZoneType = (int)z.zoneType;
+                    if (g_editorPanels.propZoneType > 4) g_editorPanels.propZoneType = 0;
+                    g_editorPanels.propZoneIntensity = z.intensity;
+                    g_editorPanels.propZoneName = z.name;
+                    if (!z.name.empty()) fillDefBlock(z.name, "");
+                    break;
+                }
+            }
+        } else if (g_editorPanels.propsTargetType == 8) { // PORTAL
+            auto& portals = PawnSystem::Instance().GetPortals();
+            if (g_editorPanels.propsTargetIndex >= 0 &&
+                g_editorPanels.propsTargetIndex < (int)portals.size()) {
+                auto& p = portals[g_editorPanels.propsTargetIndex];
+                g_editorPanels.propPortalWorld = p.targetWorld;
+                g_editorPanels.propPortalSpawn[0] = p.targetSpawn.x;
+                g_editorPanels.propPortalSpawn[1] = p.targetSpawn.y;
+                g_editorPanels.propPortalSpawn[2] = p.targetSpawn.z;
+                g_editorPanels.propPortalBidir = p.bidirectional;
+            }
+        }
+
         // For brush/zone, derive size from position data if needed
         if (g_editorPanels.propsTargetType == 1) { // BRUSH
             int idx = g_editorPanels.propsTargetIndex;

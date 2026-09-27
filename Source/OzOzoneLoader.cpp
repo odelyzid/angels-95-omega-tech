@@ -784,6 +784,9 @@ bool OzoneLoader::LoadFile(const char* path) {
         // Resolve relative paths: prefer GameData/Worlds/<name>/, fall back to package directory
         std::string imgPath = StripQuotes(prim.entityType);
         std::string texPath = StripQuotes(prim.entitySubType);
+        // Keep the authored relative paths for round-trip export
+        m_hmImageRel = imgPath;
+        m_hmTexRel = texPath;
         if (!gameDataWorldDir.empty()) {
             imgPath = gameDataWorldDir + imgPath;
             if (!texPath.empty()) texPath = gameDataWorldDir + texPath;
@@ -1290,7 +1293,9 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     if (primType == 1) r.position.y -= size.z / 2.0f;  // cylinder: h = size.z
     if (primType == 3) r.position.y -= size.y / 2.0f;  // pyramid: h = size.y
     r.scale = scale;
-    r.rotation = rot;
+    // Store rotation in radians (matches file-loaded renderables); the editor
+    // passes degrees from its UI fields.
+    r.rotation = rot * DEG2RAD;
     r.model = mdl;
     r.loaded = true;
     r.csgOp = csgOp;
@@ -1459,7 +1464,7 @@ void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vecto
 
     // Update transform
     r->position = pos;
-    r->rotation = rot;
+    r->rotation = rot * DEG2RAD; // caller passes degrees; store radians
 
     // Re-apply the Y-center adjustment for cylinder/pyramid
     if (r->typeId == 1) r->position.y -= size.z / 2.0f;  // cylinder: h = size.z

@@ -37,11 +37,11 @@ make -j$(nproc)        # all three
 ```bash
 make test   # builds + runs ALL suites (continues past failures)
 ```
-Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_wdl_parser`, `test_ozone_parser`, `test_network`, `test_game_state`.
+Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_wdl_parser`, `test_ozone_parser`, `test_join_uri`, `test_network`, `test_game_state`.
 
 - No test framework - standalone `tests/*.test.cpp` compiled directly. **Test executables land in repo root** (`./test_parser`, not `./tests/`).
 - Most suites use `SERVER_CXX` + `-DOMEGA_TEST_ENV` (no raylib). **Exceptions:** `test_entity_manager` and `test_pawn_system` link raylib (Vector3/BoundingBox types).
-- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_network` / `make test_game_state` etc.
+- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_join_uri` / `make test_network` / `make test_game_state` etc.
 
 ## Runtime config (verified)
 - **Client:** reads/writes `System/Angels95.ini` for real (loaded via
@@ -55,7 +55,7 @@ Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `
 - `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`).
 
 ## Entrypoints
-- **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`.
+- **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`, `--join <ip[:port]>`; also accepts an `angels95://join/<ip>:<port>` positional arg (web-portal deep link) and auto-joins/skips the menu. Registers the `angels95://` OS handler on launch (`Source/ProtocolHandler.hpp`, HKCU on Windows / user .desktop on Linux); URI parsing is `Source/JoinUri.hpp`.
 - **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData), `--auth-token` (HTTP Bearer gate; env `OZ_AUTH_TOKEN`), `--admin-token` (enables COMMAND list/say/kick; env `OZ_ADMIN_TOKEN`). LAN discovery UDP 27100. Worlds seed NPCs/pickups from `World.ozone` entities (procedural ring only as fallback); server saves in `GameData/Saves/` (autosave 60s + shutdown).
 - **Editor:** `AngelEd/Source/Main.cpp` - `main(argc, argv)`. Win32 panels + raylib viewport.
 - **Core engine:** `Source/Core.hpp` (~2400 lines, single header) - init, splash, menu, world loading, render loop, shaders.

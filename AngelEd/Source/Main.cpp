@@ -15,6 +15,7 @@
 #include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Server/WDLParser.hpp"
+#include "../../Source/Server/OzoneParser.hpp"
 #include "../../Source/Physics/OzBsp.hpp"
 #include "../../Source/Renderer/LitLightning.hpp"
 #ifdef _WIN32
@@ -127,7 +128,7 @@ static RayCollision RaycastTestOzPrimitives(Ray ray, EditorSelection& out) {
             // Store ACTUAL mesh center as selection position, not r->position
             Vector3 center = {(wMin.x + wMax.x) * 0.5f, (wMin.y + wMax.y) * 0.5f, (wMin.z + wMax.z) * 0.5f};
             out = { SelType::BRUSH, i, TextFormat("OzPrimitive %d", i),
-                    center, r->scale, r->rotation };
+                    center, r->scale, r->rotation * RAD2DEG }; // UI works in degrees
         }
     }
     return best;
@@ -813,42 +814,123 @@ static void AppendOzoneEntities(std::wofstream& output) {
     }
 }
 
+static const char* OzonePrimName(int typeId) {
+    switch ((OzonePrimitiveType)typeId) {
+        case OzonePrimitiveType::BOX:      return "box";
+        case OzonePrimitiveType::CYLINDER: return "cyl";
+        case OzonePrimitiveType::SPHERE:   return "sph";
+        case OzonePrimitiveType::PYRAMID:  return "pyr";
+        case OzonePrimitiveType::PLANE:    return "pln";
+        default: return nullptr; // entity types / heightmap
+    }
+}
+
+static const char* CsgPrefixName(int op) {
+    if (op == (int)CsgOp::SUB || op == (int)CsgOp::DE_RESC) return "sub";
+    if (op == (int)CsgOp::INTERSECT) return "intersect";
+    return "add";
+}
+
+// Renderable texture paths are stored resolved (absolute) after loading; convert
+// back to a world-relative path so exports stay portable.
+static std::string MakeWorldRelativePath(const std::string& p) {
+    std::string s = p;
+    for (auto& c : s) if (c == '\\') c = '/';
+    size_t oz = s.find("oztex/");
+    if (oz != std::string::npos) return s.substr(oz);
+    size_t gd = s.find("GameData/Worlds/");
+    if (gd != std::string::npos) {
+        size_t w1 = s.find('/', gd + 15); // end of the world folder
+        if (w1 != std::string::npos && w1 + 1 < s.size()) return s.substr(w1 + 1);
+    }
+    return s;
+}
+
 static void ExportToOzone(std::ostream& output) {
     // Header
     output << "# OZONE world exported from AngelEd\n";
     output << "# Format: ozone v1.0\n\n";
 
-    // Export collision volumes as box primitives
+    // Geometry: export the AUTHORED renderables (original primitives + CSG ops +
+    // material kwargs). Exporting post-CSG collision volumes here would re-apply
+    // add/sub on already-carved hulls (double subtraction → empty world) and
+    // lose textures/csg ops.
     // (OZONE is Z-up: file y/z swapped vs engine coords)
-    auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
-    for (size_t i = 0; i < vols.size(); i++) {
-        auto& v = vols[i];
-        Vector3 center = {(v.aabb.min.x + v.aabb.max.x) * 0.5f,
-                          (v.aabb.min.z + v.aabb.max.z) * 0.5f,
-                          (v.aabb.min.y + v.aabb.max.y) * 0.5f};
-        float w = v.aabb.max.x - v.aabb.min.x;
-        float h = v.aabb.max.z - v.aabb.min.z;
-        float d = v.aabb.max.y - v.aabb.min.y;
+    auto& loader = OzoneLoader::Instance();
+    for (int i = 0; i < loader.Count(); i++) {
+        OzoneRenderable* r = loader.Get(i);
+        if (!r || !r->loaded) continue;
+        const char* prim = OzonePrimName(r->typeId);
+        if (!prim) continue; // entity types / heightmap handled below
+
+        BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+        float sc = (r->scale > 0.0001f) ? r->scale : 1.0f; // mesh bounds are unscaled
+        float w = (mb.max.x - mb.min.x) * sc;
+        float h = (mb.max.y - mb.min.y) * sc;
+        float d = (mb.max.z - mb.min.z) * sc;
         if (w < 0.01f) w = 1.0f;
         if (h < 0.01f) h = 1.0f;
         if (d < 0.01f) d = 1.0f;
-        // Use the CSG op stored on the owning renderable (default: add).
-        // CsgOp: SOLID=0, ADD=1, SUB=2, INTERSECT=3, DE_RESC=4 (exported as sub).
-        const char* csgPrefix = "add";
-        int rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol((int)i);
-        if (rIdx >= 0) {
-            auto* r = OzoneLoader::Instance().Get(rIdx);
-            if (r) {
-                if (r->csgOp == (int)CsgOp::SUB || r->csgOp == (int)CsgOp::DE_RESC) csgPrefix = "sub";
-                else if (r->csgOp == (int)CsgOp::INTERSECT) csgPrefix = "intersect";
-            }
+
+        // Cylinder/pyramid meshes sit with their bottom at Y=0 (the loader
+        // re-centers them on import) — undo the offset so position round-trips.
+        Vector3 center = r->position;
+        if (r->typeId == (int)OzonePrimitiveType::CYLINDER ||
+            r->typeId == (int)OzonePrimitiveType::PYRAMID)
+            center.y += h * 0.5f;
+
+        // Engine Y-up → OZONE Z-up
+        Vector3 c = {center.x, center.z, center.y};
+        float rotDeg = r->rotation * RAD2DEG;
+
+        output << CsgPrefixName(r->csgOp) << " " << prim
+               << " " << c.x << " " << c.y << " " << c.z;
+
+        if (r->typeId == (int)OzonePrimitiveType::BOX) {
+            // box x y z w h d rot
+            output << " " << w << " " << h << " " << d << " " << rotDeg;
+        } else if (r->typeId == (int)OzonePrimitiveType::CYLINDER) {
+            // cyl x y z rTop rBot h slices rot
+            float rad = ((w > d) ? w : d) * 0.5f;
+            output << " " << rad << " " << rad << " " << h << " 16 " << rotDeg;
+        } else if (r->typeId == (int)OzonePrimitiveType::SPHERE) {
+            // sph x y z r segments
+            float rad = ((w > h) ? ((w > d) ? w : d) : ((h > d) ? h : d)) * 0.5f;
+            output << " " << rad << " 16";
+        } else if (r->typeId == (int)OzonePrimitiveType::PYRAMID) {
+            // pyr x y z w d h
+            output << " " << w << " " << d << " " << h;
+        } else { // PLANE — orientation is not stored by the loader yet
+            output << " 0 1 0 0";
         }
-        output << csgPrefix << " box " << center.x << " " << center.y << " " << center.z
-               << " " << w << " " << h << " " << d << " 0\n";
+
+        // Material kwargs (consumed by the OZONE brush parser)
+        if (!r->texPath.empty()) {
+            std::string tp = MakeWorldRelativePath(r->texPath);
+            bool quote = tp.find(' ') != std::string::npos;
+            output << " texPath=" << (quote ? "\"" + tp + "\"" : tp);
+        }
+        if (r->texScaleU != 1.0f || r->texScaleV != 1.0f)
+            output << " texScaleU=" << r->texScaleU << " texScaleV=" << r->texScaleV;
+        if (r->texOffsetU != 0.0f || r->texOffsetV != 0.0f)
+            output << " texOffsetU=" << r->texOffsetU << " texOffsetV=" << r->texOffsetV;
+        if (r->surfaceFlags != 0)
+            output << " flags=" << r->surfaceFlags;
+        output << "\n";
     }
 
-    // Heightmap (position is Z-up in OZONE; size axes are used as-is)
-    if (WDLModels.HeightMapReady) {
+    // Heightmap — prefer the OZONE loader's terrain (authored in this document),
+    // fall back to the legacy WDL heightmap.
+    if (loader.HasHeightmap() && !loader.GetHeightmapImagePath().empty()) {
+        Vector3 hp = loader.GetHeightmapPosition();
+        Vector3 hs = loader.GetHeightmapSize();
+        std::string img = loader.GetHeightmapImagePath();
+        std::string tex = loader.GetHeightmapTexturePath();
+        output << "heightmap " << img << " " << (tex.empty() ? img : tex)
+               << " " << hp.x << " " << hp.z << " " << hp.y   // Z-up
+               << " " << loader.GetHeightmapScale()
+               << " " << hs.x << " " << hs.y << " " << hs.z << "\n";
+    } else if (WDLModels.HeightMapReady) {
         Vector3 hp = {WDLModels.HeightMapPosition.x,
                       WDLModels.HeightMapPosition.z,
                       WDLModels.HeightMapPosition.y};
@@ -919,6 +1001,9 @@ static void ExportToOzone(std::ostream& output) {
                    << " " << eo.ambIntensity
                    << " " << eo.reverbMix << " " << eo.reverbDecay;
         }
+        // Script-hook name (name= kwarg; consumed by the loader, not an arg index)
+        if (!zone.name.empty())
+            output << " name=" << zone.name;
         output << "\n";
     }
 
@@ -965,6 +1050,17 @@ static void ExportToOzone(std::ostream& output) {
 }
 
 static bool SaveWorldDocument(const fs::path& path) {
+    // Never overwrite shipped OZWN packages with plain text
+    std::string pnorm = path.string();
+    for (auto& c : pnorm) if (c == '\\') c = '/';
+    if (pnorm.find("System/Data/Zones") != std::string::npos) {
+        MessageBoxA(nullptr,
+            "This document is a packaged world (System/Data/Zones).\n"
+            "Use Save As into GameData/Worlds/<name>/World.ozone to edit it.",
+            "Save World", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
@@ -1056,6 +1152,16 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_SAVE:          if (!g_documentPath.empty()) SaveWorldDocument(g_documentPath); return 0;
             case IDM_SAVE_AS:       FileSaveAs(); return 0;
             case IDM_PLAY_TEST: {
+                // Compile the current document to disk first so playtest shows
+                // exactly what the editor sees (and never launches a stale file).
+                if (g_documentPath.empty()) {
+                    FileSaveAs();
+                    if (g_documentPath.empty()) return 0; // user cancelled
+                }
+                if (!SaveWorldDocument(g_documentPath)) {
+                    EditorLog("ERROR: could not save '%s' for playtest", g_documentPath.string().c_str());
+                    return 0;
+                }
                 std::string worldDir = g_documentPath.parent_path().filename().string();
                 std::string ext = g_documentPath.extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -1868,7 +1974,7 @@ int main(int argc, char **argv){
                             r->position = {newPos.x + delta.x, newPos.y + delta.y, newPos.z + delta.z};
                             // Scale/Rotate tool modes write back to the renderable
                             if (g_editorPanels.currentToolMode == 2) r->scale = OmegaTechEditor.S;
-                            if (g_editorPanels.currentToolMode == 3) r->rotation = OmegaTechEditor.R;
+                            if (g_editorPanels.currentToolMode == 3) r->rotation = OmegaTechEditor.R * DEG2RAD;
                         }
                     }
                     OzoneLoader::Instance().RebuildCollisionVolumes();
@@ -2191,23 +2297,31 @@ int main(int argc, char **argv){
                 DrawRectangleRec(r, hover ? (Color){50,100,50,255} : (Color){35,80,35,255});
                 DrawText(lbl, bx + 4, 7, 12, WHITE);
                 if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    std::string worldDir = g_documentPath.parent_path().filename().string();
-                    std::string ext = g_documentPath.extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    std::string worldArg;
-                    if (ext == ".ozone") {
-                        worldArg = g_documentPath.string();
-                    } else {
-                        std::string tempPath = "System/Cache/editor_test.wdl";
-                        std::wstring wstr = OTEditor.WorldData;
-                        std::string wd(wstr.begin(), wstr.end());
-                        std::ofstream f(tempPath);
-                        if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
+                    // Compile the current document first (never load a stale file)
+                    if (g_documentPath.empty()) {
+                        FileSaveAs();
                     }
-                    if (!worldArg.empty()) {
-                        std::string cmd = "start \"\" System\\Angels95.exe --world \"" + worldArg + "\" --world-dir " + worldDir;
-                        system(cmd.c_str());
-                        EditorLog("Launched: %s", cmd.c_str());
+                    if (!g_documentPath.empty() && SaveWorldDocument(g_documentPath)) {
+                        std::string worldDir = g_documentPath.parent_path().filename().string();
+                        std::string ext = g_documentPath.extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                        std::string worldArg;
+                        if (ext == ".ozone") {
+                            worldArg = g_documentPath.string();
+                        } else {
+                            std::string tempPath = "System/Cache/editor_test.wdl";
+                            std::wstring wstr = OTEditor.WorldData;
+                            std::string wd(wstr.begin(), wstr.end());
+                            std::ofstream f(tempPath);
+                            if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
+                        }
+                        if (!worldArg.empty()) {
+                            std::string cmd = "start \"\" System\\Angels95.exe --world \"" + worldArg + "\" --world-dir " + worldDir;
+                            system(cmd.c_str());
+                            EditorLog("Launched: %s", cmd.c_str());
+                        }
+                    } else if (!g_documentPath.empty()) {
+                        EditorLog("ERROR: could not save '%s' for playtest", g_documentPath.string().c_str());
                     }
                 }
                 bx += bw + 2;
@@ -2360,11 +2474,24 @@ int main(int argc, char **argv){
 
             if (tgtType == SelType::NPC) {
                 Pawn* p = PawnSystem::Instance().Get(tgtIdx);
-                if (p) p->position = {px, py, pz};
+                if (p) {
+                    p->position = {px, py, pz};
+                    // Instance overrides (def values stay in PawnDefs/.ozls)
+                    int h = (int)g_editorPanels.propHealth;
+                    if (h < 1) h = 1;
+                    if (h > p->maxHealth) h = p->maxHealth;
+                    p->health = h;
+                    if (g_editorPanels.propSpeed > 0.01f) p->speed = g_editorPanels.propSpeed;
+                }
             } else if (tgtType == SelType::PICKUP) {
                 auto& pickups = PawnSystem::Instance().GetPickups();
                 for (auto& pk : pickups) {
-                    if ((int)pk.id == tgtIdx) { pk.position = {px, py, pz}; break; }
+                    if ((int)pk.id == tgtIdx) {
+                        pk.position = {px, py, pz};
+                        if (g_editorPanels.propRespawnTime >= 0.0f)
+                            pk.respawnTime = g_editorPanels.propRespawnTime;
+                        break;
+                    }
                 }
             } else if (tgtType == SelType::BRUSH) {
                 float sx = g_editorPanels.propSizeX;
@@ -2405,6 +2532,21 @@ int main(int argc, char **argv){
                         float szz = g_editorPanels.propSizeZ;
                         zone.bounds.min = {px - szx*0.5f, py - szy*0.5f, pz - szz*0.5f};
                         zone.bounds.max = {px + szx*0.5f, py + szy*0.5f, pz + szz*0.5f};
+                        // Type/intensity/script-hook name (exported by ExportToOzone)
+                        int zt = g_editorPanels.propZoneType;
+                        if (zt < 0 || zt > 4) zt = 0;
+                        zone.zoneType = (ZoneType)zt;
+                        if (g_editorPanels.propZoneIntensity > 0.0f)
+                            zone.intensity = g_editorPanels.propZoneIntensity;
+                        if (!g_editorPanels.propZoneName.empty() &&
+                            g_editorPanels.propZoneName != zone.name) {
+                            // Rename the matching sky-zone node too so runtime
+                            // script hooks (on_enter/on_exit) follow the new name.
+                            std::string oldName = zone.name;
+                            for (auto& sky : PawnSystem::Instance().GetSkyZones())
+                                if (sky.name == oldName) sky.name = g_editorPanels.propZoneName;
+                            zone.name = g_editorPanels.propZoneName;
+                        }
                         break;
                     }
                 }
@@ -2444,6 +2586,13 @@ int main(int argc, char **argv){
                     float szz = g_editorPanels.propSizeZ;
                     p.bounds.min = {px - szx*0.5f, py - szy*0.5f, pz - szz*0.5f};
                     p.bounds.max = {px + szx*0.5f, py + szy*0.5f, pz + szz*0.5f};
+                    // Destination fields (exported by ExportToOzone)
+                    if (!g_editorPanels.propPortalWorld.empty())
+                        p.targetWorld = g_editorPanels.propPortalWorld;
+                    p.targetSpawn = {g_editorPanels.propPortalSpawn[0],
+                                     g_editorPanels.propPortalSpawn[1],
+                                     g_editorPanels.propPortalSpawn[2]};
+                    p.bidirectional = g_editorPanels.propPortalBidir;
                 }
             }
             EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), tgtIdx);

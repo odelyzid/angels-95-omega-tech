@@ -102,7 +102,11 @@ public:
     float SampleHeightmapY(float px, float pz) const;
     const Model& GetHeightmapModel() const { return m_hmModel; }
     Vector3 GetHeightmapPosition() const { return m_hmPosition; }
+    Vector3 GetHeightmapSize() const { return m_hmSize; }
     float GetHeightmapScale() const { return m_hmScale; }
+    // Original (relative) source paths for round-trip export
+    const std::string& GetHeightmapImagePath() const { return m_hmImageRel; }
+    const std::string& GetHeightmapTexturePath() const { return m_hmTexRel; }
 
     // Heightmap grid access for terrain editing
     int GetHeightmapGridW() const { return m_hmGridW; }
@@ -160,6 +164,8 @@ private:
     int m_hmGridW = 0;           // grid columns (image width)
     int m_hmGridH = 0;           // grid rows (image height)
     std::vector<float> m_hmHeights; // CPU-side height values [row * w + col]
+    std::string m_hmImageRel;    // relative image path as authored (for export)
+    std::string m_hmTexRel;      // relative texture path as authored (for export)
 
     std::vector<Texture2D> m_tilesetTex;
 
