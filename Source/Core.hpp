@@ -5,6 +5,7 @@
 #include "OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Package/PackageAssetLoader.hpp"
+#include "Master/MasterList.hpp"
 #include "Renderer/EngineBillboard.hpp"
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityManager.hpp"
@@ -1050,6 +1051,15 @@ void PlayHomeScreen()
         int serverPort = port;
         std::string cmd = "start /B \"\" System\\AngelServ.exe --port " +
                           std::to_string(serverPort) + " --dir GameData";
+        // Announce the hosted server to the configured masters.
+        for (const auto& m : master::LoadMasterUrls("System/Angels95.ini")) {
+            if (m.rfind("http://", 0) == 0)
+                cmd += " --master-http \"" + m + "\"";
+            else if (m.rfind("https://", 0) == 0)
+                OZ_WARN("Host: ignoring https master '%s' (plain http only)", m.c_str());
+            else
+                cmd += " --master " + m;
+        }
         int result = std::system(cmd.c_str());
         if (result == 0) {
             OZ_INFO("Launched AngelServ.exe on port %d", serverPort);

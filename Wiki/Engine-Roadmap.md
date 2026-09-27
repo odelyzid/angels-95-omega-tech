@@ -23,6 +23,9 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 - A working 3D forward renderer: CSG brushes, billboards, rlights
   directional/point/spot, particle effects, post-processing blits
   (`Source/Renderer/`).
+- Internet server discovery: `AngelMaster` master server + `AngelServ`
+  heartbeat uplink + client Internet browser (`Source/Master/`,
+  `Source/Menu/InternetBrowser.hpp`; see `Wiki/Master-Server.md`).
 - Build + test matrix (`make test`, CI on Linux + Windows).
 
 ---
@@ -76,6 +79,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 | **[2]** Admin | `COMMAND` implemented (b61): list/say/kick via `--admin-token`/`OZ_ADMIN_TOKEN`; ban list deferred (kicked clients can re-handshake — UDP identity is ip:port) | `Source/Server/Server.cpp` |
 | **[x] Ping** | Real RTT implemented (PING/PONG sequence-paired round-trip) | `Source/Network/Network.cpp` |
 | **[x] Join UX** | LAN server browser in the menu (Scan LAN); join/host ports functional from UI | `Source/Menu/TitleMenu.hpp`; `Source/Network/Network.cpp` |
+| **[x] Internet discovery** | Master server (`AngelMaster`), `AngelServ` heartbeat uplink (`--master`/`--master-http`) and client Internet browser with direct `/status` RTT queries | `Source/Master/`; `Source/Menu/InternetBrowser.hpp`; `Wiki/Master-Server.md` |
 | **[2]** Reconnect | None — dropped client must restart | `Source/Network/Network.cpp:608-611` |
 | **[x] Game stats** | Player persistence implemented (b61): `Saves/PlayerData.dat` keyed by name, saved on disconnect + 60s autosave + shutdown; world state V2 saves (GlobalNPCs.dat + Partition*.dat) | `Source/Server/GameState.cpp` |
 
@@ -165,6 +169,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 - [ ] `levelinfo` → real game modes (DM timers, score limits; maxPlayers/friendlyFire enforced b58)
 - [x] Kick/ban + server console (`COMMAND` implemented b61: list/say/kick behind --admin-token; ban list still open)
 - [x] Player roster + LAN browser UI; honor the join port field (b57)
+- [x] Internet discovery: `AngelMaster` master (UDP heartbeats + HTTP/JSON list, expiry/rate limits), `AngelServ` uplink, client Internet browser with direct status/RTT queries (see `Wiki/Master-Server.md`)
 - [x] Server world population from world files + server saves (b61: seed_world_entities, PlayerData.dat, V2 world saves, autosave)
 - [ ] Stable entity replication IDs (replace index-triples)
 - [ ] ACK/retry for critical messages (weapon fire, pickup collect)

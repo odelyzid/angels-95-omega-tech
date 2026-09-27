@@ -49,13 +49,13 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           LitLightning.o rlights.o)
 
 .PHONY: all clean test
-all: OTENGINE AngelServ ozpack
+all: OTENGINE AngelServ AngelMaster ozpack
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # 1. Compile Main Game Logic
-$(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp Source/Parasite/*.hpp Source/Package/*.hpp Source/Pawn/*.hpp Source/Renderer/*.hpp Source/Audio/*.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp Source/Parasite/*.hpp Source/Package/*.hpp Source/Pawn/*.hpp Source/Renderer/*.hpp Source/Audio/*.hpp Source/Menu/*.hpp Source/Master/*.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Main.cpp -o $@
 
 # 2. Compile Custom Engine code (statically linked)
@@ -147,8 +147,12 @@ OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encod
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp
+AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp Source/Master/MasterClient.hpp Source/Master/MasterProtocol.hpp Source/Master/MasterHttp.hpp
 	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
+
+# 7b. Build AngelMaster (standalone master server, no raylib)
+AngelMaster: $(BUILD_DIR)/Log.o Source/Master/Master.cpp Source/Master/MasterProtocol.hpp Source/Master/MasterHttp.hpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Log.o Source/Master/Master.cpp -o AngelMaster$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp Source/miniz/miniz.h $(BUILD_DIR)/miniz.o
@@ -180,13 +184,16 @@ test_ozone_parser: tests/OzoneParser.test.cpp Source/Server/OzoneParser.cpp
 test_join_uri: tests/JoinUri.test.cpp Source/JoinUri.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/JoinUri.test.cpp -o $@
 
+test_master: tests/Master.test.cpp Source/Master/MasterProtocol.hpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/Master.test.cpp -o $@
+
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
 
 test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ -lws2_32
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_network test_game_state
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -211,6 +218,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== JoinUri Tests ==="
 	-./test_join_uri
 	@echo ""
+	@echo "=== Master Protocol Tests ==="
+	-./test_master
+	@echo ""
 	@echo "=== Network Packet Tests ==="
 	-./test_network
 	@echo ""
@@ -218,4 +228,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_game_state
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_network test_game_state
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state

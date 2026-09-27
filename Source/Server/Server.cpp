@@ -9,6 +9,7 @@
 #include "GameState.hpp"
 #include "../Log.hpp"
 #include "../IniConfig.hpp"
+#include "../Master/MasterClient.hpp"
 
 #include <csignal>
 #include <cstring>
@@ -42,6 +43,15 @@ static std::chrono::steady_clock::time_point g_server_start_time;
 
 static GameState g_game_state;
 static net::NetworkDiscovery* g_discovery = nullptr; // set in main(); keeps LAN announce counts current
+
+// Master-server uplink (internet discovery). Empty lists = master disabled.
+static std::vector<std::string> g_master_udp;   // --master host[:port]
+static std::vector<std::string> g_master_http;  // --master-http http://host:port
+static std::string g_public_ip;                 // --public-ip (NAT)
+
+static std::string current_map_name() {
+    return g_world_list.empty() ? std::string("unknown") : g_world_list[0];
+}
 
 // Send a chat message to a single player (system notices / command replies)
 static void send_syschat(const net::NetworkPlayer& player, const std::string& text) {
@@ -677,9 +687,9 @@ static void handle_http_client(int cfd) {
         if (strcmp(path, "/status") == 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - g_server_start_time).count();
-            std::string json = "{\"ok\":true,\"server_name\":\"";
+            std::string json = "{\"ok\":true,\"server_name\":";
             json += json_escape(g_server_name);
-            json += "\",\"players\":";
+            json += ",\"players\":";
             json += std::to_string(g_game_server->player_count());
             json += ",\"max_players\":";
             json += std::to_string(net::MAX_PLAYERS);
@@ -687,7 +697,11 @@ static void handle_http_client(int cfd) {
             json += std::to_string(elapsed);
             json += ",\"worlds\":";
             json += std::to_string(g_game_state.world_count());
-            json += "}";
+            json += ",\"map\":";
+            json += json_escape(current_map_name());
+            json += ",\"gamever\":";
+            json += json_escape(master::GAMEVER_DEFAULT);
+            json += ",\"password\":false}";
             http_respond_json(cfd, json.c_str());
             close_sock(cfd);
             return;
@@ -1416,12 +1430,26 @@ int main(int argc, char** argv) {
             g_auth_token = argv[++i];
         else if (strcmp(argv[i], "--admin-token") == 0 && i + 1 < argc)
             g_admin_token = argv[++i];
+        else if (strcmp(argv[i], "--server-name") == 0 && i + 1 < argc)
+            g_server_name = argv[++i];
+        else if (strcmp(argv[i], "--master") == 0 && i + 1 < argc)
+            g_master_udp.push_back(argv[++i]);
+        else if (strcmp(argv[i], "--master-http") == 0 && i + 1 < argc)
+            g_master_http.push_back(argv[++i]);
+        else if (strcmp(argv[i], "--public-ip") == 0 && i + 1 < argc)
+            g_public_ip = argv[++i];
         else if (strcmp(argv[i], "--help") == 0) {
             printf("AngelServ -- OzWorld/OmegaTech dedicated server\n");
             printf("Usage: AngelServ [--port P] [--http-port P] [--dir GameData]"
                    " [--auth-token T] [--admin-token T]\n");
-            printf("  --auth-token  Require Bearer auth for the HTTP API (env: OZ_AUTH_TOKEN)\n");
-            printf("  --admin-token Enable admin COMMANDs (list/say/kick; env: OZ_ADMIN_TOKEN)\n");
+            printf("                  [--server-name NAME] [--master host[:port]]"
+                   " [--master-http URL] [--public-ip IP]\n");
+            printf("  --auth-token   Require Bearer auth for the HTTP API (env: OZ_AUTH_TOKEN)\n");
+            printf("  --admin-token  Enable admin COMMANDs (list/say/kick; env: OZ_ADMIN_TOKEN)\n");
+            printf("  --server-name  Display name announced to masters (default: Angels95 Server)\n");
+            printf("  --master       Master UDP heartbeat target, repeatable (default port 27900)\n");
+            printf("  --master-http  Master HTTP heartbeat URL, repeatable (plain http:// only)\n");
+            printf("  --public-ip    Public IP to announce when behind NAT (master can override)\n");
             return 0;
         }
     }
@@ -1473,6 +1501,20 @@ int main(int argc, char** argv) {
     discovery.start();
     g_discovery = &discovery;
 
+    // Internet discovery: announce to configured master servers.
+    master::MasterUplink master_uplink;
+    if (!g_master_udp.empty() || !g_master_http.empty()) {
+        master_uplink.SetMasters(g_master_udp, g_master_http, g_public_ip);
+        master_uplink.SetStatus(g_server_name, static_cast<uint16_t>(game_port),
+                                static_cast<uint16_t>(http_port), current_map_name(),
+                                0, net::MAX_PLAYERS, false);
+        master_uplink.Start();
+        OZ_INFO("Master uplink: %zu UDP / %zu HTTP target(s)",
+                g_master_udp.size(), g_master_http.size());
+    } else {
+        OZ_WARN("No --master/--master-http configured: server will not appear in internet lists");
+    }
+
     // Initialize game state with worlds
     g_game_state.init_worlds(g_gamedata_dir, g_world_list);
     {
@@ -1489,6 +1531,16 @@ int main(int argc, char** argv) {
     while (g_running) {
         game_server.update();
         discovery.update();
+
+        // Refresh the master heartbeat payload ~every 300ms.
+        static int master_status_ticks = 0;
+        if (++master_status_ticks >= 300) {
+            master_status_ticks = 0;
+            master_uplink.SetStatus(g_server_name, static_cast<uint16_t>(game_port),
+                                    static_cast<uint16_t>(http_port), current_map_name(),
+                                    static_cast<uint32_t>(g_game_state.player_count()),
+                                    net::MAX_PLAYERS, false);
+        }
 
         auto now = std::chrono::steady_clock::now();
         acc += std::chrono::duration<double>(now - last_frame).count();
@@ -1587,6 +1639,7 @@ int main(int argc, char** argv) {
     g_discovery = nullptr;
     discovery.stop();
     g_game_server->stop();   // fires on_player_leave for everyone
+    master_uplink.Stop();
     g_game_state.save_all_worlds();  // persist world + player state
     http_thread.join();
 

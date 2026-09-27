@@ -620,6 +620,10 @@ static void ClearScene() {
     pawns.ClearPlayerStarts();
     pawns.ClearPickups();
     pawns.ClearZones();
+    pawns.ClearLights();     // lights otherwise accumulate across loads
+    pawns.ClearPortals();
+    pawns.ClearEmitters();
+    pawns.ClearSkyZones();
     OmegaTechEditor.DrawModel = false;
 }
 
@@ -832,15 +836,19 @@ static const char* CsgPrefixName(int op) {
 }
 
 // Renderable texture paths are stored resolved (absolute) after loading; convert
-// back to a world-relative path so exports stay portable.
+// back to a portable, world- or repo-relative path.
 static std::string MakeWorldRelativePath(const std::string& p) {
     std::string s = p;
     for (auto& c : s) if (c == '\\') c = '/';
+    // Repo-relative is the most portable form (loader accepts GameData/ as-is)
+    size_t gd = s.find("GameData/");
+    if (gd != std::string::npos) return s.substr(gd);
+    // World-relative subdirs
     size_t oz = s.find("oztex/");
     if (oz != std::string::npos) return s.substr(oz);
-    size_t gd = s.find("GameData/Worlds/");
-    if (gd != std::string::npos) {
-        size_t w1 = s.find('/', gd + 15); // end of the world folder
+    size_t wt = s.find("Worlds/");
+    if (wt != std::string::npos) {
+        size_t w1 = s.find('/', wt + 7); // end of the world folder
         if (w1 != std::string::npos && w1 + 1 < s.size()) return s.substr(w1 + 1);
     }
     return s;
@@ -887,19 +895,22 @@ static void ExportToOzone(std::ostream& output) {
                << " " << c.x << " " << c.y << " " << c.z;
 
         if (r->typeId == (int)OzonePrimitiveType::BOX) {
-            // box x y z w h d rot
+            // box x y z w h d rot [texSlot]
             output << " " << w << " " << h << " " << d << " " << rotDeg;
+            if (r->texSlot > 0) output << " " << r->texSlot;
         } else if (r->typeId == (int)OzonePrimitiveType::CYLINDER) {
-            // cyl x y z rTop rBot h slices rot
+            // cyl x y z rTop rBot h slices rot [texSlot]
             float rad = ((w > d) ? w : d) * 0.5f;
             output << " " << rad << " " << rad << " " << h << " 16 " << rotDeg;
+            if (r->texSlot > 0) output << " " << r->texSlot;
         } else if (r->typeId == (int)OzonePrimitiveType::SPHERE) {
             // sph x y z r segments
             float rad = ((w > h) ? ((w > d) ? w : d) : ((h > d) ? h : d)) * 0.5f;
             output << " " << rad << " 16";
         } else if (r->typeId == (int)OzonePrimitiveType::PYRAMID) {
-            // pyr x y z w d h
+            // pyr x y z w d h [texSlot]
             output << " " << w << " " << d << " " << h;
+            if (r->texSlot > 0) output << " " << r->texSlot;
         } else { // PLANE — orientation is not stored by the loader yet
             output << " 0 1 0 0";
         }
@@ -2603,20 +2614,36 @@ int main(int argc, char **argv){
         if (g_editorPanels.actionApplyTextureToSel) {
             if (!g_editorPanels.activeTexturePath.empty() && g_sel.type != SelType::NONE) {
                 if (g_sel.type == SelType::BRUSH) {
-                    bool applied = false;
+                    // g_sel.index may be a renderable index or a collision-volume
+                    // index depending on which raycast produced it. Resolve to the
+                    // renderable (the export reads renderables, not collision vols).
+                    int rIdx = -1;
                     if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
-                        applied = OzoneLoader::Instance().ApplyRenderableTexture(
-                            g_sel.index, g_editorPanels.activeTexturePath.c_str());
-                    }
-                    if (!applied) {
-                        auto& vols = OzoneLoader::Instance().GetCollisionVolumesMutable();
-                        if (g_sel.index >= 0 && g_sel.index < (int)vols.size()) {
-                            vols[g_sel.index].texPath = g_editorPanels.activeTexturePath;
-                            vols[g_sel.index].texSlot = 1;
-                            EditorLog("Applied texture to brush collision idx=%d: %s",
-                                      g_sel.index, g_editorPanels.activeTexturePath.c_str());
+                        // Direct renderable hit — verify it matches the selection point
+                        OzoneRenderable* r = OzoneLoader::Instance().Get(g_sel.index);
+                        if (r && r->loaded) {
+                            BoundingBox b = GetMeshBoundingBox(r->model.meshes[0]);
+                            Vector3 mn = {r->position.x + b.min.x * r->scale,
+                                          r->position.y + b.min.y * r->scale,
+                                          r->position.z + b.min.z * r->scale};
+                            Vector3 mxn = {r->position.x + b.max.x * r->scale,
+                                           r->position.y + b.max.y * r->scale,
+                                           r->position.z + b.max.z * r->scale};
+                            const float eps = 0.75f;
+                            if (g_sel.pos.x >= mn.x - eps && g_sel.pos.x <= mxn.x + eps &&
+                                g_sel.pos.y >= mn.y - eps && g_sel.pos.y <= mxn.y + eps &&
+                                g_sel.pos.z >= mn.z - eps && g_sel.pos.z <= mxn.z + eps)
+                                rIdx = g_sel.index;
                         }
                     }
+                    if (rIdx < 0)
+                        rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(g_sel.index);
+                    if (rIdx < 0)
+                        rIdx = g_sel.index; // best effort
+                    bool applied = OzoneLoader::Instance().ApplyRenderableTexture(
+                        rIdx, g_editorPanels.activeTexturePath.c_str());
+                    EditorLog("Applied texture to brush renderable idx=%d (sel=%d): %s",
+                              rIdx, g_sel.index, applied ? "ok" : "FAILED");
                 } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
                     int mid = CachedModels[g_sel.index].ModelId;
                     if (ApplyTextureToModel(mid, g_editorPanels.activeTexturePath.c_str()))

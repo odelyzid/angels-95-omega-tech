@@ -19,8 +19,9 @@ Current release: **b56**.
 
 ## Features
 
-- **Dedicated server** — UDP multiplayer (`135`), HTTP map API, LAN discovery
-  (UDP `27100`); runs headless on Linux or Windows.
+- **Dedicated server** — UDP multiplayer, HTTP map API and `/status`, LAN
+  discovery (UDP `27100`) plus internet discovery via `AngelMaster` heartbeats;
+  runs headless on Linux or Windows.
 - **CSG worlds** — `OZONE` primitive brush format (`add`/`sub`/`intersect`,
   box/cyl/sph/pyr/pln), per-brush `texScale*`/`texOffset*`/`texPath` and
   `name=` zone labels; legacy text `WDL` worlds also load.
@@ -83,10 +84,29 @@ The dedicated server has **no raylib dependency**:
 | Flag | Default | Description |
 |---|---|---|
 | `--port` | `27015` | UDP game server port |
-| `--http-port` | `8080` | HTTP map API (`GET /map?list`, `GET /map?name=X`) |
+| `--http-port` | `8080` | HTTP map API (`GET /map?list`, `GET /map?name=X`) and `/status` |
 | `--dir` | `GameData` | Path to game data directory |
+| `--server-name` | `Angels95 Server` | Display name announced to masters |
+| `--master` | – | Master UDP heartbeat target `host[:port]`, repeatable |
+| `--master-http` | – | Master HTTP heartbeat URL, repeatable (plain `http://`) |
+| `--public-ip` | – | Public IP to announce when behind NAT |
 
 LAN discovery on UDP `27100`. Worlds are scanned from `GameData/Worlds/`.
+
+### Master server
+
+`AngelMaster` maintains the public server list for internet browsing:
+
+```
+./AngelMaster --port 27900 --http-port 27950
+```
+
+It accepts UDP heartbeats and `POST /api/heartbeat`, and serves
+`GET /api/servers?gamename=angels95` (JSON, CORS-enabled). Entries expire after
+90 s. Point game servers at it with `--master host:27900` and/or
+`--master-http http://host:27950`; clients add it to `[MasterServers]` in
+`System/Angels95.ini` and browse via **Multiplayer → Join → Source: Internet**.
+See [`Wiki/Master-Server.md`](Wiki/Master-Server.md) for the full protocol.
 
 ### Client
 
@@ -99,9 +119,9 @@ from a `System/` release folder:
 ./Angels95 --world-dir GameData/Worlds
 ```
 
-> Note: `System/Angels95.ini` and `System/OzServer.ini` are **templates written
-> by the build scripts and never read at runtime** — the client and server
-> accept no INI config. Server behavior is controlled entirely by CLI flags.
+> Note: `System/Angels95.ini` **is read at runtime** by the client (`[Settings]`,
+> `[MasterServers]`); `System/OzServer.ini` is a template never read at runtime.
+> The server is controlled entirely by CLI flags.
 
 ---
 
@@ -115,8 +135,9 @@ raylib 5.5 must be installed system-wide (`/usr/local/lib/libraylib.a` —
 ```bash
 make OTENGINE       # client -> Angels95
 make AngelServ      # server, no raylib
+make AngelMaster    # master server, no raylib
 make ozpack         # asset packer
-make -j$(nproc)     # all three
+make -j$(nproc)     # all four
 ```
 
 ### Windows
@@ -133,6 +154,7 @@ to create `.oz*` packages from `GameData/`.
 |---|---|---|
 | `Angels95` client | `make OTENGINE` | raylib 5.5 |
 | `AngelServ` server | `make AngelServ` | none (standalone sockets) |
+| `AngelMaster` master | `make AngelMaster` | none (standalone sockets + threads) |
 | `AngelEd` editor | `make -C AngelEd` | raylib + Win32 (Windows only) |
 | `OzPack` packer | `make ozpack` | none |
 
@@ -152,8 +174,8 @@ ozone_parser, network, game_state. Single suites: `make test_parser`, etc.
 
 ## Documentation & Repository Structure
 
-- `Source/` — client core, renderer, network, server, script, pawn, physics,
-  package, audio, video (`plmpeg`).
+- `Source/` — client core, renderer, network, server, master server
+  (`Source/Master/`), script, pawn, physics, package, audio, video (`plmpeg`).
 - `AngelEd/` — Win32 level editor.
 - `GameData/` — worlds, pawn defs, items, guns, textures, sounds.
 - `tests/` — standalone test executables.

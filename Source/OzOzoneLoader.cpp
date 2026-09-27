@@ -694,6 +694,25 @@ Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
 }
 
 // ---------------------------------------------------------------------------
+// Resolve a texture/heightmap path from an OZONE file against the world dir.
+// Accepts, in order: an existing path, a repo-relative GameData/ path, an
+// absolute path, and finally a world-relative path (oztex/...).
+// ---------------------------------------------------------------------------
+static std::string ResolveWorldAssetPath(const std::string& raw,
+                                         const std::string& gameDataWorldDir,
+                                         const std::string& worldDir) {
+    std::string s = StripQuotes(raw);
+    if (s.empty()) return s;
+    if (IsPathFile(s.c_str())) return s;
+    if (s.rfind("GameData/", 0) == 0 || s.rfind("GameData\\", 0) == 0) return s;
+    bool absolute = (s.size() > 1 && s[1] == ':') || s[0] == '/' || s[0] == '\\';
+    if (absolute) return s;
+    if (!gameDataWorldDir.empty()) return gameDataWorldDir + s;
+    if (!worldDir.empty()) return worldDir + s;
+    return s;
+}
+
+// ---------------------------------------------------------------------------
 // BuildFromPrimitive
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) {
@@ -787,13 +806,8 @@ bool OzoneLoader::LoadFile(const char* path) {
         // Keep the authored relative paths for round-trip export
         m_hmImageRel = imgPath;
         m_hmTexRel = texPath;
-        if (!gameDataWorldDir.empty()) {
-            imgPath = gameDataWorldDir + imgPath;
-            if (!texPath.empty()) texPath = gameDataWorldDir + texPath;
-        } else if (!worldDir.empty()) {
-            imgPath = worldDir + imgPath;
-            if (!texPath.empty()) texPath = worldDir + texPath;
-        }
+        imgPath = ResolveWorldAssetPath(imgPath, gameDataWorldDir, worldDir);
+        if (!texPath.empty()) texPath = ResolveWorldAssetPath(texPath, gameDataWorldDir, worldDir);
         r.model = BuildHeightmap(imgPath, texPath, prim.args);
         r.loaded = m_hmReady;
         r.csgOp = 0;
@@ -848,13 +862,9 @@ bool OzoneLoader::LoadFile(const char* path) {
                           prim.texOffsetU, prim.texOffsetV);
     }
     // Custom per-brush diffuse texture (texPath= attribute), resolved against
-    // the world directory unless already rooted at GameData/
+    // the world directory unless already rooted at GameData/ or absolute
     if (!prim.texPath.empty()) {
-        std::string tp = StripQuotes(prim.texPath);
-        if (!tp.empty() && tp.rfind("GameData/", 0) != 0) {
-            if (!gameDataWorldDir.empty()) tp = gameDataWorldDir + tp;
-            else if (!worldDir.empty()) tp = worldDir + tp;
-        }
+        std::string tp = ResolveWorldAssetPath(prim.texPath, gameDataWorldDir, worldDir);
         ApplyRenderableTexture((int)m_renderables.size() - 1, tp.c_str());
     }
     }

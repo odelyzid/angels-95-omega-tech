@@ -70,6 +70,12 @@ Write-Step "Building OzPack..."
 & mingw32-make ozpack 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OzPack build failed" }
 Write-Step "OzPack.exe built."
+
+# --- 3b. Build AngelMaster (master server) ---
+Write-Step "Building AngelMaster..."
+& mingw32-make AngelMaster 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "AngelMaster build failed" }
+Write-Step "AngelMaster.exe built."
 Pop-Location
 
 # --- 4. Build AngelEd (level editor) via Makefile ---
@@ -92,6 +98,7 @@ New-Item -ItemType Directory -Force -Path "$OUT_DIR\Cache" | Out-Null
 if (Test-Path "$PSScriptRoot\Angels95.exe")  { Move-Item -Force "$PSScriptRoot\Angels95.exe"  "$OUT_DIR\Angels95.exe" }  else { Fail "Angels95.exe not found" }
 if (Test-Path "$PSScriptRoot\AngelServ.exe") { Move-Item -Force "$PSScriptRoot\AngelServ.exe" "$OUT_DIR\AngelServ.exe" } else { Fail "AngelServ.exe not found" }
 if (Test-Path "$PSScriptRoot\OzPack.exe")    { Move-Item -Force "$PSScriptRoot\OzPack.exe"    "$OUT_DIR\OzPack.exe" }    else { Fail "OzPack.exe not found" }
+if (Test-Path "$PSScriptRoot\AngelMaster.exe") { Move-Item -Force "$PSScriptRoot\AngelMaster.exe" "$OUT_DIR\AngelMaster.exe" } else { Fail "AngelMaster.exe not found" }
 if (Test-Path "$PSScriptRoot\AngelEd\AngelEd.exe") { Move-Item -Force "$PSScriptRoot\AngelEd\AngelEd.exe" "$OUT_DIR\AngelEd.exe" } else { Fail "AngelEd.exe not found" }
 
 # Copy raylib DLL if present
@@ -174,7 +181,7 @@ if (Test-Path "$PSScriptRoot\GameData\Shaders") {
 # --- 7. Verify outputs ---
 Write-Step "Verifying outputs..."
 $missing = @()
-foreach ($exe in @("Angels95.exe", "AngelServ.exe", "AngelEd.exe", "OzPack.exe")) {
+foreach ($exe in @("Angels95.exe", "AngelServ.exe", "AngelEd.exe", "OzPack.exe", "AngelMaster.exe")) {
     if (-not (Test-Path "$OUT_DIR\$exe")) { $missing += $exe }
 }
 if ($missing.Count -gt 0) {
@@ -190,6 +197,7 @@ Write-Step "Build complete."
 Write-Host "System/ release in $OUT_DIR" -ForegroundColor Green
 Write-Host "  Angels95.exe  - Game client" -ForegroundColor Green
 Write-Host "  AngelServ.exe - Dedicated server" -ForegroundColor Green
+Write-Host "  AngelMaster.exe - Master server (internet discovery)" -ForegroundColor Green
 Write-Host "  AngelEd.exe - Level editor" -ForegroundColor Green
 Write-Host "  OzPack.exe    - Asset packer" -ForegroundColor Green
 Write-Host "  libraylib.dll - Raylib runtime (if available)" -ForegroundColor Green

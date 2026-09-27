@@ -8,15 +8,16 @@ PS1-styled multiplayer game on raylib 5.5 with a custom WDL/OZONE world format a
 ```bash
 make OTENGINE          # client -> Angels95
 make AngelServ         # server, no raylib dep
+make AngelMaster       # master server, no raylib dep
 make ozpack            # asset packer
-make -j$(nproc)        # all three
+make -j$(nproc)        # all four
 ```
 - raylib 5.5 must be installed system-wide (`/usr/local/lib/libraylib.a`), not vendored. `build.sh` installs it from source.
 
 ### Windows
 - **w64devkit:** `.\build-native-win.ps1` (requires `C:\raylib\w64devkit`, GCC 15.2.0). Do NOT use WinGet GCC 16.1.0 - broken POSIX/UCRT headers.
 - **MSYS2/MINGW64:** `.\build.ps1` (uses `mingw-w64-x86_64-raylib`; auto-builds raylib 5.5 to `~/raylib-5.5` if missing).
-- Both build all 4 targets and assemble `System/`. Flags: `-SkipData` (skip asset packaging), `-SkipClean`.
+- Both build all 5 targets and assemble `System/`. Flags: `-SkipData` (skip asset packaging), `-SkipClean`.
 - `build-data.ps1` drives `OzPack.exe` to create `.oz*` packages from `GameData/` subdirectories.
 
 ### Targets
@@ -25,6 +26,7 @@ make -j$(nproc)        # all three
 | `Angels95` (client) | `make OTENGINE` | raylib 5.5 |
 | `AngelServ` (server) | `make AngelServ` | None (standalone, raw sockets) |
 | `AngelEd` (editor) | `make -C AngelEd` | raylib 5.5 + Win32 (Makefile errors out on Linux) |
+| `AngelMaster` (master server) | `make AngelMaster` | None (standalone, raw sockets + pthreads) |
 | `OzPack` | `make ozpack` | None |
 
 ## Makefile notes (root)
@@ -37,33 +39,36 @@ make -j$(nproc)        # all three
 ```bash
 make test   # builds + runs ALL suites (continues past failures)
 ```
-Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_wdl_parser`, `test_ozone_parser`, `test_join_uri`, `test_network`, `test_game_state`.
+Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_wdl_parser`, `test_ozone_parser`, `test_join_uri`, `test_master`, `test_network`, `test_game_state`.
 
 - No test framework - standalone `tests/*.test.cpp` compiled directly. **Test executables land in repo root** (`./test_parser`, not `./tests/`).
 - Most suites use `SERVER_CXX` + `-DOMEGA_TEST_ENV` (no raylib). **Exceptions:** `test_entity_manager` and `test_pawn_system` link raylib (Vector3/BoundingBox types).
-- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_join_uri` / `make test_network` / `make test_game_state` etc.
+- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_wdl_parser` / `make test_ozone_parser` / `make test_join_uri` / `make test_master` / `make test_network` / `make test_game_state` etc.
 
 ## Runtime config (verified)
 - **Client:** reads/writes `System/Angels95.ini` for real (loaded via
   `LoadClientSettings()` before `InitWindow` so window size/VSync/MSAA apply at
   creation; saved on exit by a static dtor in `Main.cpp`). Keys live in the
   `[Settings]` section; parser is `Source/IniConfig.hpp`. The build scripts'
-  template ini is only a fallback.
+  template ini is only a fallback. `[MasterServers]` (keys `Master`, `Master1`..)
+  lists internet master URLs, read by `Source/Master/MasterList.hpp`.
 - **Server:** `System/OzServer.ini` is a template written by build scripts -
   never read at runtime. Server behavior is controlled entirely by CLI flags
-  (`--port`, `--http-port`, `--dir`).
+  (`--port`, `--http-port`, `--dir`, `--master`, `--master-http`, `--public-ip`,
+  `--server-name`).
 - `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`).
 
 ## Entrypoints
 - **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`, `--join <ip[:port]>`; also accepts an `angels95://join/<ip>:<port>` positional arg (web-portal deep link) and auto-joins/skips the menu. Registers the `angels95://` OS handler on launch (`Source/ProtocolHandler.hpp`, HKCU on Windows / user .desktop on Linux); URI parsing is `Source/JoinUri.hpp`.
-- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData), `--auth-token` (HTTP Bearer gate; env `OZ_AUTH_TOKEN`), `--admin-token` (enables COMMAND list/say/kick; env `OZ_ADMIN_TOKEN`). LAN discovery UDP 27100. Worlds seed NPCs/pickups from `World.ozone` entities (procedural ring only as fallback); server saves in `GameData/Saves/` (autosave 60s + shutdown).
+- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData), `--auth-token` (HTTP Bearer gate; env `OZ_AUTH_TOKEN`), `--admin-token` (enables COMMAND list/say/kick; env `OZ_ADMIN_TOKEN`), `--server-name`, `--master host[:port]` (repeatable), `--master-http URL` (repeatable), `--public-ip`. LAN discovery UDP 27100; internet heartbeat uplink to masters (30s, background thread). Worlds seed NPCs/pickups from `World.ozone` entities (procedural ring only as fallback); server saves in `GameData/Saves/` (autosave 60s + shutdown).
+- **Master server:** `Source/Master/Master.cpp` - `main(argc, argv)`. Flags: `--port` (27900 UDP heartbeats), `--http-port` (27950 JSON list), `--max-servers`, `--gamename`. Serves `GET /api/servers?gamename=angels95`, `GET /api/stats`, `POST /api/heartbeat`. Entries expire after 90s. Docs: `Wiki/Master-Server.md`.
 - **Editor:** `AngelEd/Source/Main.cpp` - `main(argc, argv)`. Win32 panels + raylib viewport.
 - **Core engine:** `Source/Core.hpp` (~2400 lines, single header) - init, splash, menu, world loading, render loop, shaders.
 
 ## Source layout (condensed)
 Full tree: `Wiki/Engine-Overview.md`. Key modules:
 - Rendering/loop: `Source/Main.cpp`, `Source/Core.hpp`, `Source/Renderer/` (LitLightning, EngineBillboard, TextSystem), `Source/raygui/`, `Source/rlights/`, `System/Shaders/`.
-- Networking: `Source/Network/Network.cpp/.hpp` (UDP, `#pragma pack(push,1)`), `Source/Client/Client.cpp`.
+- Networking: `Source/Network/Network.cpp/.hpp` (UDP, `#pragma pack(push,1)`), `Source/Client/Client.cpp`, `Source/Master/` (AngelMaster daemon, `MasterClient` uplink, `MasterProtocol`/`MasterHttp`/`MasterList` helpers), `Source/Menu/InternetBrowser.hpp` (client browser).
 - Server: `Source/Server/` (Server.cpp, GameState, WDLParser, OzoneParser).
 - Script/entities: `Source/Script/` (LightningScript parser/context; EntityRegistry scans `*.ozls` in GameData + packages; EntityManager).
 - Pawn/world: `Source/Pawn/` (OzPawnSystem, Items/Entities/Objects/Player), `Source/Physics/` (OzBsp, WorldChunk), `Source/OzOzoneLoader.*`.
@@ -113,5 +118,5 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 
 ## CI (.github/workflows/ci.yml)
 - Runs on every push/PR; tags matching `b*` also create a GitHub Release with zipped `System/`.
-- **Linux:** build raylib from source (cached) -> `make AngelServ` -> `make OTENGINE` -> `make ozpack` -> smoke test with `timeout 3 ./AngelServ`.
-- **Windows (MSYS2):** `pacman -S mingw-w64-x86_64-{gcc,make,raylib}` -> build all 4 targets -> assemble System/ -> run `build-data.ps1` -> upload artifact. Note: CI compiles AngelEd with inline raw `g++` commands, NOT the `AngelEd/Makefile` - the two can drift.
+- **Linux:** build raylib from source (cached) -> `make AngelServ` -> `make OTENGINE` -> `make ozpack` -> `make AngelMaster` -> smoke test with `timeout 3 ./AngelServ`.
+- **Windows (MSYS2):** `pacman -S mingw-w64-x86_64-{gcc,make,raylib}` -> build all 5 targets -> assemble System/ -> run `build-data.ps1` -> upload artifact. Note: CI compiles AngelEd with inline raw `g++` commands, NOT the `AngelEd/Makefile` - the two can drift.
