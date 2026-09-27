@@ -14,6 +14,7 @@ enum class EntityType : uint8_t {
     PICKUP,
     PROJECTILE,
     SKYZONE,
+    PAWN,
     UNKNOWN
 };
 
@@ -26,6 +27,7 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::PICKUP:     return "pickup";
         case EntityType::PROJECTILE: return "projectile";
         case EntityType::SKYZONE:    return "skyzone";
+        case EntityType::PAWN:       return "pawn";
         default:                     return "unknown";
     }
 }
@@ -38,6 +40,7 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "pickup")     return EntityType::PICKUP;
     if (n == "projectile") return EntityType::PROJECTILE;
     if (n == "skyzone")    return EntityType::SKYZONE;
+    if (n == "pawn")       return EntityType::PAWN;
     return EntityType::UNKNOWN;
 }
 

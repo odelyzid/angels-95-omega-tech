@@ -175,6 +175,45 @@ static int test_action_block_content() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_action_brace_normalization() {
+    TEST("brace-style actions strip trailing '{' and bare '}' lines");
+    // Replicates arena.ozls syntax exactly
+    std::string ozls = R"(entity "arena" : skyzone {
+    actions {
+        on_enter {
+            rtflag 0
+            if ($result == 0) {
+                wtflag 0 1
+                spawn_pawn "Walker" 10 2 -55
+                msg "The canyon rumbles!"
+            }
+        }
+        on_exit {
+            say "bye"
+        }
+    }
+})";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_brace.ozls");
+    CHECK(def.type == EntityType::SKYZONE);
+    CHECK(def.actions.size() == 2);
+    CHECK(def.actions[0].name == "on_enter");
+    // No line may carry a trailing '{' or be a bare '}' — the context would
+    // otherwise mis-evaluate the condition / warn on unknown opcode.
+    for (auto& line : def.actions[0].scriptLines) {
+        CHECK(line.back() != '{');
+        CHECK(line != "}");
+    }
+    // Condition line survived intact (minus the brace)
+    bool hasCond = false, hasSpawn = false;
+    for (auto& line : def.actions[0].scriptLines) {
+        if (line == "if ($result == 0)") hasCond = true;
+        if (line.find("spawn_pawn \"Walker\"") != std::string::npos) hasSpawn = true;
+    }
+    CHECK(hasCond);
+    CHECK(hasSpawn);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_parse_projectile() {
     TEST("parse projectile entity def");
     std::string ozls = R"(
@@ -214,8 +253,8 @@ static int test_parse_pawn() {
     )";
     EntityDef def = LightningScriptParser::Parse(ozls, "test_pawn.ozls");
     CHECK(def.name == "Skaarj");
-    // EntityType::PAWN removed — parser now warns but continues parsing body
-    CHECK(def.type == EntityType::UNKNOWN);
+    // b60: PAWN type re-introduced (pawn .ozls act as FSM hook carriers)
+    CHECK(def.type == EntityType::PAWN);
     CHECK_APROX(def.stats.floats["speed"], 3.0f, 0.001f);
     CHECK_APROX(def.stats.floats["aggro_range"], 12.0f, 0.001f);
     CHECK_APROX(def.stats.floats["max_health"], 150.0f, 0.001f);
@@ -486,6 +525,7 @@ int main() {
     failures += test_parse_with_variants();
     failures += test_parse_error_recovery();
     failures += test_action_block_content();
+    failures += test_action_brace_normalization();
     failures += test_parse_projectile();
     failures += test_parse_pawn();
     failures += test_parse_upgrade();

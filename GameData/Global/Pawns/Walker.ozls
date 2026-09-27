@@ -1,0 +1,10 @@
+// Walker — pawn FSM hook carrier.
+// The registry matches this def by name against PawnDefs/Walker.cfg (stats
+// stay in the .cfg; this file only carries script hooks for state changes).
+entity "Walker" : pawn {
+    actions {
+        on_death {
+            msg "The Walker collapses."
+        }
+    }
+}

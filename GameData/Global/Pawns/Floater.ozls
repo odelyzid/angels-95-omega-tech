@@ -1,0 +1,8 @@
+// Floater — pawn FSM hook carrier (stats live in PawnDefs/Floater.cfg).
+entity "Floater" : pawn {
+    actions {
+        on_death {
+            msg "The Floater drops from the air."
+        }
+    }
+}

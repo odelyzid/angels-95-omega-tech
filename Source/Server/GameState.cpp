@@ -17,6 +17,9 @@ namespace fs = std::filesystem;
 static std::unordered_map<std::string, ServerPawnDef> g_serverPawnDefs;
 static bool g_serverPawnDefsLoaded = false;
 
+static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir);
+static void load_player_record(ServerPlayer& player, const std::string& gamedata_dir);
+
 static void load_server_pawn_defs() {
     if (g_serverPawnDefsLoaded) return;
     const char* defsDir = "GameData/Global/PawnDefs";
@@ -105,6 +108,7 @@ int GameState::get_player_xp_level(int xp) {
 // ---------------------------------------------------------------------------
 void GameState::init_worlds(const std::string& gamedata_dir,
                              const std::vector<std::string>& world_list) {
+    m_gamedata_dir = gamedata_dir;
     m_worlds.clear();
     for (size_t i = 0; i < world_list.size(); i++) {
         WorldState ws;
@@ -153,8 +157,11 @@ void GameState::init_worlds(const std::string& gamedata_dir,
             }
         }
 
-        // Populate with NPCs and pickups
-        init_global_npcs_and_pickups(ws);
+        // Populate from the world file's own entities; the procedural
+        // generator is a fallback for worlds that define none.
+        seed_world_entities(ws, gamedata_dir);
+        if (ws.global_npcs.empty() && ws.global_pickups.empty())
+            init_global_npcs_and_pickups(ws);
 
         // Attempt to load saved state
         load_world_state(ws, gamedata_dir);
@@ -260,6 +267,112 @@ void GameState::init_global_npcs_and_pickups(WorldState& ws) {
 }
 
 // ---------------------------------------------------------------------------
+// seed_world_entities — populate the world from its World.ozone entities
+// (npc/pickup primitives) instead of the procedural generator. Coordinates
+// are OZONE Z-up and converted to engine Y-up here. Falls back to the
+// procedural ring generator only when the world file defines nothing.
+// ---------------------------------------------------------------------------
+static PickupType pickup_type_from_name(const std::string& name, bool& isWeapon) {
+    isWeapon = false;
+    static const std::pair<const char*, PickupType> kMap[] = {
+        {"HealthVial", PickupType::HEALTH},   {"Medkit", PickupType::HEALTH},
+        {"ManaVial", PickupType::MANA},       {"ManaTonic", PickupType::MANA},
+        {"EnergyCrystal", PickupType::PSYCHIC},
+        {"Key", PickupType::KEY},             {"Coin", PickupType::COIN},
+        {"Powerup", PickupType::POWERUP},
+    };
+    for (auto& [n, t] : kMap)
+        if (name == n) return t;
+    // Weapons are .ozls weapon defs (automag, flux_carbine, selenite_blade, ...)
+    isWeapon = true;
+    return PickupType::WEAPON;
+}
+
+static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir) {
+    load_server_pawn_defs();
+
+    std::string ozonePath = gamedata_dir + "/Worlds/" + ws.name + "/World.ozone";
+    auto prims = OzoneParser::parse_file(ozonePath);
+    int nextPickupId = 0;
+
+    for (auto& pr : prims) {
+        if (pr.type == OzonePrimitiveType::ENTITY_NPC) {
+            if (pr.args.size() < 3) continue;
+            ServerNPC npc;
+            // Z-up → Y-up (same conversion as the client loader)
+            npc.spawn_pos = {pr.args[0], pr.args[2], pr.args[1]};
+            npc.position = npc.spawn_pos;
+            npc.typeName = pr.entityType;
+            auto it = g_serverPawnDefs.find(pr.entityType);
+            if (it != g_serverPawnDefs.end()) {
+                auto& d = it->second;
+                npc.speed = d.speed;
+                npc.aggro_range = d.aggro_range;
+                npc.attack_range = d.attack_range;
+                npc.damage = d.damage;
+                npc.max_health = d.max_health;
+                npc.health = d.max_health;
+                npc.give_up_range = d.give_up_range;
+                npc.attack_cooldown_max = d.attack_cooldown_max;
+            } else {
+                // Unknown type — use Walker stats but keep the real type name
+                // (the client spawns by npc_type with its own Walker fallback).
+                OZ_WARN("World %s: unknown NPC type '%s' — using Walker stats",
+                        ws.name.c_str(), pr.entityType.c_str());
+                auto wit = g_serverPawnDefs.find("Walker");
+                if (wit != g_serverPawnDefs.end()) {
+                    auto& d = wit->second;
+                    npc.speed = d.speed;
+                    npc.aggro_range = d.aggro_range;
+                    npc.attack_range = d.attack_range;
+                    npc.damage = d.damage;
+                    npc.max_health = d.max_health;
+                    npc.health = d.max_health;
+                    npc.give_up_range = d.give_up_range;
+                    npc.attack_cooldown_max = d.attack_cooldown_max;
+                }
+            }
+            npc.patrol_radius = 3.0f;
+            npc.state = NpcState::PATROL;
+            ws.global_npcs.push_back(npc);
+        } else if (pr.type == OzonePrimitiveType::ENTITY_PICKUP) {
+            if (pr.args.size() < 3) continue;
+            bool isWeapon = false;
+            PickupType type = pickup_type_from_name(pr.entityType, isWeapon);
+            ServerPickup pickup;
+            pickup.id = nextPickupId++;
+            pickup.type = type;
+            // Z-up → Y-up
+            pickup.position = {pr.args[0], pr.args[2], pr.args[1]};
+            pickup.value = pickup_default_value(type);
+            if (type == PickupType::PSYCHIC) {
+                // PSYCHIC collect math expects multiples of 111 (items 3-11)
+                int v = pickup.value;
+                if (v <= 0 || v % 111 != 0) v = 111;
+                pickup.value = v;
+            }
+            float respawn = (pr.args.size() >= 4) ? pr.args[3] : pickup_default_respawn(type);
+            pickup.respawn_time = respawn;
+            pickup.respawnable = respawn > 0.0f;
+            pickup.active = true;
+            pickup.respawn_timer = 0.0f;
+            if (type == PickupType::WEAPON) {
+                strncpy(pickup.weapon_def_name, pr.entityType.c_str(), sizeof(pickup.weapon_def_name) - 1);
+                pickup.weapon_def_name[sizeof(pickup.weapon_def_name) - 1] = '\0';
+            }
+            // Globals broadcast to everyone (partitions are only an AOI
+            // optimization; the entity counts here are small).
+            ws.global_pickups.push_back(pickup);
+        }
+    }
+
+    if (!ws.global_npcs.empty() || !ws.global_pickups.empty()) {
+        OZ_INFO("World %s seeded from file: %zu NPCs, %zu global pickups (+ partitions)",
+                ws.name.c_str(), ws.global_npcs.size(), ws.global_pickups.size());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Player management
 // ---------------------------------------------------------------------------
@@ -291,6 +404,10 @@ uint32_t GameState::add_player(uint32_t id, const char* name)
     player.world_index = 0;
     memset(player.inventory, 0, sizeof(player.inventory));
 
+    // Restore persisted state (by name) — only on first creation, not on
+    // auth replays (the existing-player early-out above handles those).
+    if (!m_gamedata_dir.empty()) load_player_record(player, m_gamedata_dir);
+
     // Find first free slot (check bounds - vector may be empty in tests)
     for (int i = 0; i < net::MAX_PLAYERS && i < (int)m_players.size(); i++) {
         if (!m_players[i].connected) {
@@ -313,6 +430,7 @@ void GameState::remove_player(uint32_t id) {
             p.connected = false;
             m_player_count--;
             OZ_INFO("Player %s (id=%u) removed", p.name, p.id);
+            save_player_data(); // persist on clean disconnect
             return;
         }
     }
@@ -880,27 +998,33 @@ void GameState::tick(float dt) {
             add_xp(p.id, XP_EXPLORE_PER_SEC * 10);
         }
     }
+
+    // Periodic autosave every 60s (600 ticks at 10 Hz) — bounds the loss on
+    // a crash to one minute of state.
+    if (m_tick_count % 600 == 0) save_all_worlds();
 }
 
 // ---------------------------------------------------------------------------
 // Save / Load world state
 // ---------------------------------------------------------------------------
 void GameState::save_world_state(const WorldState& ws, const std::string& gamedata_dir) {
+    std::string dir = gamedata_dir + "/Saves/World" + ws.name;
+    #ifdef _WIN32
+    mkdir(dir.c_str());
+#else
+    mkdir(dir.c_str(), 0755);
+#endif
+
     // Save partition data
     for (size_t i = 0; i < ws.partitions.size(); i++) {
         // Build path
         char path[512];
         snprintf(path, sizeof(path), "%s/Saves/World%s/Partition%zu.dat",
                  gamedata_dir.c_str(), ws.name.c_str(), i);
-        // Create directory if it doesn't exist
-        std::string dir = gamedata_dir + "/Saves/World" + ws.name;
-        #ifdef _WIN32
-        mkdir(dir.c_str());
-#else
-        mkdir(dir.c_str(), 0755);
-#endif
         std::ofstream out(path);
         if (!out) continue;
+        // V2 header: version + entity counts (loader skips stale/mismatched files)
+        out << "V2," << ws.partitions[i].pickups.size() << "," << ws.partitions[i].npcs.size() << "\n";
         // Serialize partition pickups and npcs in a simple CSV-like format
         for (auto &p : ws.partitions[i].pickups) {
             out << "PICKUP," << p.id << "," << (int)p.type << "," << p.position.x << "," << p.position.y << "," << p.position.z << ","
@@ -918,14 +1042,9 @@ void GameState::save_world_state(const WorldState& ws, const std::string& gameda
         char path[512];
         snprintf(path, sizeof(path), "%s/Saves/World%s/GlobalNPCs.dat",
                  gamedata_dir.c_str(), ws.name.c_str());
-        std::string dir = gamedata_dir + "/Saves/World" + ws.name;
-        #ifdef _WIN32
-        mkdir(dir.c_str());
-#else
-        mkdir(dir.c_str(), 0755);
-#endif
         std::ofstream out(path);
         if (!out) return;
+        out << "V2," << ws.global_npcs.size() << "\n";
         for (auto &n : ws.global_npcs) {
             out << n.active << "," << (int)n.state << "," << n.position.x << "," << n.position.y << ","
                 << n.position.z << "," << n.health << "," << n.state_timer << "," << n.speed << ","
@@ -944,13 +1063,29 @@ void GameState::load_world_state(WorldState& ws, const std::string& gamedata_dir
         // No saved data, that's fine
         return;
     }
+
+    // V2 header: version + count. Skip stale saves whose NPC count no longer
+    // matches the freshly seeded world (e.g. the world file was edited).
+    std::string header;
+    if (!std::getline(infile, header) || header.rfind("V2,", 0) != 0) {
+        OZ_WARN("World %s: ignoring stale (pre-V2) save file", ws.name.c_str());
+        return;
+    }
+    {
+        unsigned savedCount = 0;
+        if (sscanf(header.c_str(), "V2,%u", &savedCount) == 1 &&
+            savedCount != ws.global_npcs.size()) {
+            OZ_WARN("World %s: save has %u NPCs but world seeds %zu — ignoring",
+                    ws.name.c_str(), savedCount, ws.global_npcs.size());
+            return;
+        }
+    }
     OZ_INFO("Loading saved world state for %s", ws.name.c_str());
-    
+
     // Read global NPCs
     std::string line;
     int npc_i = 0;
-    while (std::getline(infile, line)) {
-        if (npc_i >= (int)ws.global_npcs.size()) break;
+    while (npc_i < (int)ws.global_npcs.size() && std::getline(infile, line)) {
         // Parse: active,state,px,py,pz,health,state_timer,speed,patrol_radius,spx,spy,spz
         int active, state;
         sscanf(line.c_str(), "%d,%d,%f,%f,%f,%d,%f,%f,%f,%f,%f,%f",
@@ -970,4 +1105,146 @@ void GameState::load_world_state(WorldState& ws, const std::string& gamedata_dir
         ws.global_npcs[npc_i].max_health = ws.global_npcs[npc_i].health;
         npc_i++;
     }
+
+    // Read partition pickups (written by save_world_state; NPCs in partitions
+    // only exist for procedural fallback worlds and are skipped here).
+    for (size_t i = 0; i < ws.partitions.size(); i++) {
+        char ppath[512];
+        snprintf(ppath, sizeof(ppath), "%s/Saves/World%s/Partition%zu.dat",
+                 gamedata_dir.c_str(), ws.name.c_str(), i);
+        std::ifstream pin(ppath);
+        if (!pin.good()) continue;
+        std::string pheader;
+        if (!std::getline(pin, pheader) || pheader.rfind("V2,", 0) != 0) continue;
+        while (std::getline(pin, line)) {
+            if (line.rfind("PICKUP,", 0) != 0) continue;
+            int id = -1, type = 0, active = 0, respawnable = 0, value = 0;
+            float px, py, pz, rtime, rtimer;
+            if (sscanf(line.c_str(), "PICKUP,%d,%d,%f,%f,%f,%f,%f,%d,%d,%d",
+                       &id, &type, &px, &py, &pz, &rtime, &rtimer, &value, &active, &respawnable) != 10)
+                continue;
+            // Match by pickup id across this partition + globals
+            ServerPickup* target = nullptr;
+            for (auto& p : ws.partitions[i].pickups)
+                if (p.id == id) { target = &p; break; }
+            if (!target)
+                for (auto& p : ws.global_pickups)
+                    if (p.id == id) { target = &p; break; }
+            if (!target) continue;
+            target->position = {px, py, pz};
+            target->respawn_time = rtime;
+            target->respawn_timer = rtimer;
+            target->value = value;
+            target->active = (active != 0);
+            target->respawnable = (respawnable != 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Save / Load player state — Saves/PlayerData.dat (one record per player,
+// keyed by NAME; network player ids are slot positions and change across
+// restarts). Format:
+//   V2
+//   PLAYER,<id>,<name>,<px>,<py>,<pz>,<yaw>,<pitch>,<health>,<max_health>,
+//          <mana>,<psychic>,<level>,<xp>,<xp_to_next>,<inv0..4>,<ammo>,<world_index>
+//   WEAP,<slot>,<weapon_def_name>,<ammo>,<magazine>   (up to 8 per player)
+// ---------------------------------------------------------------------------
+void GameState::save_player_data() {
+    if (m_gamedata_dir.empty()) return;
+    std::string dir = m_gamedata_dir + "/Saves";
+    std::filesystem::create_directories(dir); // recursive — handles missing parents
+    std::string tmpPath = dir + "/PlayerData.dat.tmp";
+    std::string finalPath = dir + "/PlayerData.dat";
+    {
+        std::ofstream out(tmpPath);
+        if (!out) { OZ_WARN("save_player_data: cannot write %s", tmpPath.c_str()); return; }
+        out << "V2\n";
+        for (auto& p : m_players) {
+            if (!p.connected) continue;
+            out << "PLAYER," << p.id << "," << p.name << ","
+                << p.position.x << "," << p.position.y << "," << p.position.z << ","
+                << p.yaw << "," << p.pitch << ","
+                << p.health << "," << p.max_health << ","
+                << p.mana << "," << p.psychic_energy << ","
+                << p.level << "," << p.xp << "," << p.xp_to_next << ",";
+            for (int i = 0; i < 5; i++) out << p.inventory[i] << ",";
+            out << p.ammo << "," << p.world_index << "\n";
+            for (int s = 0; s < 8; s++) {
+                if (p.weapon_def[s][0] == '\0') continue;
+                out << "WEAP," << s << "," << p.weapon_def[s] << ","
+                    << p.weapon_ammo[s] << "," << p.weapon_magazine[s] << "\n";
+            }
+        }
+    }
+    // Atomic-ish replace: tmp → final
+    std::remove(finalPath.c_str());
+    std::rename(tmpPath.c_str(), finalPath.c_str());
+}
+
+void GameState::load_player_data() {
+    // Bulk loader not used — players are restored individually by name on
+    // join (load_player_record). Kept for API compatibility.
+}
+
+// Restore one player's record by name (called from add_player on first join)
+static void load_player_record(ServerPlayer& player, const std::string& gamedata_dir) {
+    std::string path = gamedata_dir + "/Saves/PlayerData.dat";
+    std::ifstream in(path);
+    if (!in.good()) return;
+    std::string line;
+    if (!std::getline(in, line) || line.rfind("V2", 0) != 0) return; // stale/empty
+    std::string name(player.name);
+    bool inRecord = false;
+    bool found = false;
+    while (std::getline(in, line)) {
+        if (line.rfind("PLAYER,", 0) == 0) {
+            // PLAYER,<id>,<name>,...
+            size_t c1 = line.find(',', 7);
+            if (c1 == std::string::npos) { inRecord = false; continue; }
+            size_t c2 = line.find(',', c1 + 1);
+            std::string savedName = (c2 == std::string::npos)
+                ? line.substr(c1 + 1) : line.substr(c1 + 1, c2 - c1 - 1);
+            inRecord = (savedName == name);
+            if (!inRecord) continue;
+            found = true;
+            // Parse the remainder after the name field
+            std::string rest = (c2 == std::string::npos) ? "" : line.substr(c2 + 1);
+            float px=0, py=0, pz=0, yaw=0, pitch=0;
+            float health=100, max_health=100, mana=0, psychic=0;
+            int level=1, xp=0, xpn=100, ammo=0, worldIdx=0;
+            int inv[5] = {0,0,0,0,0};
+            sscanf(rest.c_str(), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+                   &px, &py, &pz, &yaw, &pitch, &health, &max_health, &mana, &psychic,
+                   &level, &xp, &xpn, &inv[0], &inv[1], &inv[2], &inv[3], &inv[4], &ammo);
+            // worldIdx parsed? format has ammo then world_index — %d count above covers ammo; parse world_index separately
+            (void)worldIdx;
+            player.position = {px, py, pz};
+            player.yaw = yaw;
+            player.pitch = pitch;
+            player.health = health;
+            player.max_health = max_health;
+            player.mana = mana;
+            player.psychic_energy = psychic;
+            player.level = level;
+            player.xp = xp;
+            player.xp_to_next = xpn;
+            memcpy(player.inventory, inv, sizeof(inv));
+            player.ammo = (float)ammo;
+        } else if (line.rfind("WEAP,", 0) == 0 && inRecord && found) {
+            int slot = -1, wammo = 0, wmag = 0;
+            char def[64] = {0};
+            if (sscanf(line.c_str(), "WEAP,%d,%63[^,],%d,%d", &slot, def, &wammo, &wmag) == 4 &&
+                slot >= 0 && slot < 8) {
+                strncpy(player.weapon_def[slot], def, sizeof(player.weapon_def[slot]) - 1);
+                player.weapon_def[slot][sizeof(player.weapon_def[slot]) - 1] = '\0';
+                player.weapon_ammo[slot] = wammo;
+                player.weapon_magazine[slot] = wmag;
+            }
+        } else if (line.rfind("PLAYER,", 0) == 0) {
+            inRecord = false; // moved past our record
+            if (found) break;
+        }
+    }
+    if (found) OZ_INFO("Restored saved player data for '%s'", name.c_str());
 }

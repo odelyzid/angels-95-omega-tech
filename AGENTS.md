@@ -56,7 +56,7 @@ Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `
 
 ## Entrypoints
 - **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`.
-- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData). LAN discovery UDP 27100.
+- **Server:** `Source/Server/Server.cpp` - `main(argc, argv)`. Flags: `--port` (27015), `--http-port` (8080, HTTP map API), `--dir` (GameData), `--auth-token` (HTTP Bearer gate; env `OZ_AUTH_TOKEN`), `--admin-token` (enables COMMAND list/say/kick; env `OZ_ADMIN_TOKEN`). LAN discovery UDP 27100. Worlds seed NPCs/pickups from `World.ozone` entities (procedural ring only as fallback); server saves in `GameData/Saves/` (autosave 60s + shutdown).
 - **Editor:** `AngelEd/Source/Main.cpp` - `main(argc, argv)`. Win32 panels + raylib viewport.
 - **Core engine:** `Source/Core.hpp` (~2400 lines, single header) - init, splash, menu, world loading, render loop, shaders.
 

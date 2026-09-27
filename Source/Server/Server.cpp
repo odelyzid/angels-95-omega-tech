@@ -14,7 +14,9 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cmath>
+#include <unordered_map>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -33,12 +35,27 @@ static std::string g_gamedata_dir = "GameData";
 static int g_http_port = 8080;
 static std::mutex g_print_mutex;
 static std::vector<std::string> g_world_list;
-static std::string g_auth_token;
+static std::string g_auth_token;   // HTTP API token (--auth-token / OZ_AUTH_TOKEN)
+static std::string g_admin_token;  // admin COMMAND token (--admin-token / OZ_ADMIN_TOKEN)
 static std::string g_server_name = "Angels95 Server";
 static std::chrono::steady_clock::time_point g_server_start_time;
 
 static GameState g_game_state;
 static net::NetworkDiscovery* g_discovery = nullptr; // set in main(); keeps LAN announce counts current
+
+// Send a chat message to a single player (system notices / command replies)
+static void send_syschat(const net::NetworkPlayer& player, const std::string& text) {
+    net::ChatData cd{};
+    strncpy(cd.text, text.c_str(), sizeof(cd.text) - 1);
+    net::NetworkMessage msg{};
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::CHAT);
+    msg.size = sizeof(cd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    memcpy(msg.payload, &cd, sizeof(cd));
+    g_game_server->send_message(player, msg);
+}
 
 static void signal_handler(int) { g_running = false; }
 
@@ -555,6 +572,34 @@ static const char* get_query_param(const char* path, const char* key,
     return nullptr;
 }
 
+// Bearer-token check for the HTTP API. When no auth token is configured the
+// server runs in open dev mode (everything allowed).
+static bool http_bearer_ok(const char* req) {
+    if (g_auth_token.empty()) return true; // dev mode
+    // Scan header lines for "Authorization: Bearer <token>"
+    const char* p = req;
+    while ((p = strstr(p, "Authorization:")) != nullptr) {
+        const char* v = p + strlen("Authorization:");
+        while (*v == ' ') ++v;
+        if (strncmp(v, "Bearer ", 7) == 0 || strncmp(v, "bearer ", 7) == 0) {
+            const char* tok = v + 7;
+            size_t len = strcspn(tok, "\r\n");
+            if (len == g_auth_token.size() &&
+                strncmp(tok, g_auth_token.c_str(), len) == 0)
+                return true;
+        }
+        ++p;
+    }
+    return false;
+}
+
+static bool http_path_is_protected(const char* path) {
+    return strncmp(path, "/map", 4) == 0 ||
+           strcmp(path, "/worlds") == 0 ||
+           strcmp(path, "/status") == 0 ||
+           strcmp(path, "/players") == 0;
+}
+
 static void handle_http_client(int cfd) {
     char req[8192];
     ssize_t n = recv(TO_SOCK(cfd), sock_recvfrom_buf(req, sizeof(req) - 1), 0);
@@ -563,6 +608,15 @@ static void handle_http_client(int cfd) {
 
     char method[16] = {0}, path[1024] = {0};
     sscanf(req, "%15s %1023s", method, path);
+
+    // Auth gate (only when --auth-token/OZ_AUTH_TOKEN is set). /auth/login
+    // itself stays open — it is how clients obtain the token.
+    if (http_path_is_protected(path) && !http_bearer_ok(req)) {
+        http_response(cfd, 401, "Unauthorized",
+                      "{\"ok\":false,\"error\":\"unauthorized\"}", "application/json");
+        close_sock(cfd);
+        return;
+    }
 
     if (strcmp(method, "GET") == 0) {
         if (strcmp(path, "/map") == 0 || strncmp(path, "/map?", 5) == 0) {
@@ -679,16 +733,19 @@ static void handle_http_client(int cfd) {
             const char* body = std::strstr(req, "\r\n\r\n");
             if (!body) body = std::strstr(req, "\n\n");
             body = body ? body + (body[0] == '\r' ? 4 : 2) : "";
-            // Look for "token":"..." in body
+            // Find "token" (quoted or bare), then ':' — value may be quoted
+            // or bare (tolerant: some thin clients strip quotes).
             bool valid = false;
-            const char* t = std::strstr(body, "\"token\":\"");
+            const char* t = std::strstr(body, "token");
             if (t) {
-                t += 9;
-                const char* end = std::strchr(t, '"');
-                if (end) {
-                    std::string token(t, end - t);
-                    valid = (g_auth_token == token);
-                }
+                t += 5; // past "token"
+                while (*t == ' ' || *t == ':' || *t == '"') ++t;
+                size_t len = 0;
+                while (t[len] && t[len] != '"' && t[len] != '}' && t[len] != ',' &&
+                       t[len] != '\r' && t[len] != '\n') ++len;
+                if (len > 0 && len == g_auth_token.size() &&
+                    strncmp(t, g_auth_token.c_str(), len) == 0)
+                    valid = true;
             }
             if (!valid) {
                 http_respond_json(cfd, "{\"ok\":false,\"error\":\"invalid_token\"}");
@@ -696,7 +753,7 @@ static void handle_http_client(int cfd) {
                 return;
             }
         }
-        http_respond_json(cfd, "{\"ok\":true,\"token\":\"dev\"}");
+        http_respond_json(cfd, (std::string("{\"ok\":true,\"token\":\"") + g_auth_token + "\"}").c_str());
         close_sock(cfd);
         return;
     }
@@ -1045,7 +1102,16 @@ static void on_server_message(const net::NetworkMessage& msg,
             break;
         }
         case net::MessageType::FILE_TRANSFER: {
-            OZ_INFO("FILE_TRANSFER from player %u (size=%u) — not yet supported",
+            // Rejected by design (no chunked reassembly / trust model yet) —
+            // but tell the sender instead of silently dropping. Notice is
+            // rate-limited per sender so a peer can't amplify traffic.
+            static std::unordered_map<uint32_t, double> s_last_notice;
+            double now = time(nullptr);
+            if (now - s_last_notice[sender.id] > 10.0) {
+                s_last_notice[sender.id] = now;
+                send_syschat(sender, "[server] file transfer unsupported");
+            }
+            OZ_INFO("FILE_TRANSFER from player %u (size=%u) — rejected (unsupported)",
                     sender.id, msg.size);
             break;
         }
@@ -1198,8 +1264,76 @@ static void on_server_message(const net::NetworkMessage& msg,
             break;
         }
         case net::MessageType::COMMAND: {
-            OZ_WARN("COMMAND from player %u — admin commands not implemented (kick/ban in Tier 2)",
-                    sender.id);
+            if (msg.size < sizeof(net::CommandData)) break;
+            net::CommandData cd;
+            memcpy(&cd, msg.payload, sizeof(cd));
+            cd.cmd[sizeof(cd.cmd) - 1] = '\0';
+            cd.args[sizeof(cd.args) - 1] = '\0';
+
+            // Admin auth: args must start with "<admin_token> ". Fail-closed:
+            // no --admin-token configured → every command rejected.
+            if (g_admin_token.empty()) {
+                send_syschat(sender, "[server] admin commands disabled (no --admin-token)");
+                break;
+            }
+            size_t tokLen = g_admin_token.size();
+            if (strncmp(cd.args, g_admin_token.c_str(), tokLen) != 0 ||
+                (cd.args[tokLen] != ' ' && cd.args[tokLen] != '\0')) {
+                OZ_WARN("COMMAND from player %u — bad admin token", sender.id);
+                send_syschat(sender, "[server] authentication failed");
+                break;
+            }
+            std::string payload(cd.args + tokLen);
+            size_t argStart = payload.find_first_not_of(' ');
+            payload = (argStart == std::string::npos) ? "" : payload.substr(argStart);
+
+            std::string cmd = cd.cmd;
+            for (auto& c : cmd) c = (char)tolower((unsigned char)c);
+
+            if (cmd == "list") {
+                std::string reply = "[" + std::to_string(g_game_server->player_count()) + " online:";
+                for (const auto& p : g_game_server->players())
+                    if (p.connected) reply += " " + std::string(p.name) + "(id=" + std::to_string(p.id) + ")";
+                reply += "]";
+                send_syschat(sender, reply);
+            } else if (cmd == "say") {
+                if (payload.empty()) { send_syschat(sender, "[server] usage: say <message>"); break; }
+                std::string broadcast = "[server] " + payload;
+                net::ChatData bcd{};
+                strncpy(bcd.text, broadcast.c_str(), sizeof(bcd.text) - 1);
+                net::NetworkMessage bmsg{};
+                bmsg.magic = net::MAGIC;
+                bmsg.type = static_cast<uint32_t>(net::MessageType::CHAT);
+                bmsg.size = sizeof(bcd);
+                bmsg.sequence = 0;
+                bmsg.timestamp = static_cast<uint32_t>(time(nullptr));
+                memcpy(bmsg.payload, &bcd, sizeof(bcd));
+                g_game_server->broadcast_message(bmsg);
+            } else if (cmd == "kick") {
+                if (payload.empty()) { send_syschat(sender, "[server] usage: kick <player_id|name>"); break; }
+                uint32_t targetId = 0;
+                std::string targetName;
+                // Numeric id or name match
+                if (payload.find_first_not_of("0123456789") == std::string::npos) {
+                    targetId = (uint32_t)std::stoul(payload);
+                } else {
+                    targetName = payload;
+                    for (const auto& p : g_game_server->players()) {
+                        if (p.connected && payload == p.name) { targetId = p.id; break; }
+                    }
+                }
+                // Resolve the name before kicking (for the reply)
+                std::string kickedName;
+                for (const auto& p : g_game_server->players())
+                    if (p.connected && p.id == targetId) { kickedName = p.name; break; }
+                if (targetId != 0 && g_game_server->kick_player(targetId)) {
+                    send_syschat(sender, "[server] kicked " + (kickedName.empty() ? payload : kickedName));
+                } else {
+                    send_syschat(sender, "[server] player not found: " + payload);
+                }
+            } else {
+                send_syschat(sender, "[server] unknown command '" + cmd + "' (list|say|kick)");
+            }
             break;
         }
         case net::MessageType::GAME_STATE: {
@@ -1278,20 +1412,34 @@ int main(int argc, char** argv) {
             http_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--dir") == 0 && i + 1 < argc)
             g_gamedata_dir = argv[++i];
+        else if (strcmp(argv[i], "--auth-token") == 0 && i + 1 < argc)
+            g_auth_token = argv[++i];
+        else if (strcmp(argv[i], "--admin-token") == 0 && i + 1 < argc)
+            g_admin_token = argv[++i];
         else if (strcmp(argv[i], "--help") == 0) {
             printf("AngelServ -- OzWorld/OmegaTech dedicated server\n");
-            printf("Usage: AngelServ [--port P] [--http-port P] [--dir GameData]\n");
+            printf("Usage: AngelServ [--port P] [--http-port P] [--dir GameData]"
+                   " [--auth-token T] [--admin-token T]\n");
+            printf("  --auth-token  Require Bearer auth for the HTTP API (env: OZ_AUTH_TOKEN)\n");
+            printf("  --admin-token Enable admin COMMANDs (list/say/kick; env: OZ_ADMIN_TOKEN)\n");
             return 0;
         }
     }
+    // Env fallback (CLI wins)
+    if (g_auth_token.empty())  { const char* e = getenv("OZ_AUTH_TOKEN");  if (e) g_auth_token = e; }
+    if (g_admin_token.empty()) { const char* e = getenv("OZ_ADMIN_TOKEN"); if (e) g_admin_token = e; }
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    OZ_INFO("AngelServ build b56 starting");
+    OZ_INFO("AngelServ build b58 starting");
     OZ_INFO("Game port: UDP %d",  game_port);
     OZ_INFO("HTTP port: %d",     http_port);
     printf("Data dir:  %s\n",     g_gamedata_dir.c_str());
+    if (g_auth_token.empty())
+        OZ_WARN("HTTP API is OPEN (no --auth-token): /map /worlds /status /players are public");
+    if (g_admin_token.empty())
+        OZ_WARN("Admin COMMANDs disabled (no --admin-token)");
 
     // Scan worlds
     scan_worlds(g_gamedata_dir + "/Worlds");
@@ -1438,7 +1586,8 @@ int main(int argc, char** argv) {
     printf("Shutting down...\n");
     g_discovery = nullptr;
     discovery.stop();
-    g_game_server->stop();
+    g_game_server->stop();   // fires on_player_leave for everyone
+    g_game_state.save_all_worlds();  // persist world + player state
     http_thread.join();
 
     return 0;

@@ -169,6 +169,20 @@ EntityAction LightningScriptParser::ParseActionWithName(const std::string& name,
         size_t b = line.find_last_not_of(" \t\r\n");
         std::string trimmed = line.substr(a, b - a + 1);
         if (trimmed.empty() || trimmed[0] == '#') continue;
+
+        // Brace-style script normalization: strip trailing '{'/'}' block
+        // delimiters (only when not inside a string literal — an odd number
+        // of quotes means an unterminated string keeps the brace).
+        // Turns `if ($x == 0) {` into `if ($x == 0)` and drops bare `}` lines.
+        size_t quotes = std::count(trimmed.begin(), trimmed.end(), '"');
+        if (quotes % 2 == 0) {
+            while (!trimmed.empty() && (trimmed.back() == '{' || trimmed.back() == '}'))
+                trimmed.pop_back();
+            b = trimmed.find_last_not_of(" \t\r\n");
+            if (b == std::string::npos) continue; // line was only delimiters
+            trimmed = trimmed.substr(0, b + 1);
+        }
+
         action.scriptLines.push_back(trimmed);
     }
     // Advance parser state past the closing brace

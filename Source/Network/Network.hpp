@@ -255,6 +255,10 @@ public:
     bool send_message(const NetworkPlayer& player, const NetworkMessage& msg);
     bool broadcast_message(const NetworkMessage& msg);
 
+    // Force-disconnect a player by id (admin kick). Fires on_player_leave.
+    // Returns false if the id is unknown.
+    bool kick_player(uint32_t id);
+
     uint32_t player_count() const { return m_player_count; }
     const std::vector<NetworkPlayer>& players() const { return m_players; }
     bool is_running() const { return m_running; }

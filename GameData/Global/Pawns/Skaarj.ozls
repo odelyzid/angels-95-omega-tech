@@ -1,0 +1,8 @@
+// Skaarj — pawn FSM hook carrier (stats live in PawnDefs/Skaarj.cfg).
+entity "Skaarj" : pawn {
+    actions {
+        on_death {
+            msg "The Skaarj falls!"
+        }
+    }
+}

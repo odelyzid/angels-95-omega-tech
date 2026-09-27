@@ -1,0 +1,8 @@
+// Brute — pawn FSM hook carrier (stats live in PawnDefs/Brute.cfg).
+entity "Brute" : pawn {
+    actions {
+        on_death {
+            msg "The Brute is down."
+        }
+    }
+}

@@ -329,14 +329,21 @@ public:
     // Save/load
     void save_world_state(const WorldState& ws, const std::string& gamedata_dir);
     void load_world_state(WorldState& ws, const std::string& gamedata_dir);
+    // Player persistence (Saves/PlayerData.dat, keyed by player name).
+    // Uses the gamedata_dir captured in init_worlds.
     void save_player_data();
     void load_player_data();
+    void save_all_worlds() {
+        for (auto& w : m_worlds) save_world_state(w, m_gamedata_dir);
+        save_player_data();
+    }
 
 private:
     std::vector<ServerPlayer> m_players;
     int m_player_count = 0;
     uint32_t m_max_players = net::MAX_PLAYERS; // from world levelinfo (maxPlayers)
     bool m_friendly_fire = false;              // from world levelinfo (friendlyFire)
+    std::string m_gamedata_dir;                // captured by init_worlds for save/load
     uint32_t m_next_player_id = 1;
     uint32_t m_tick_count = 0;
     std::vector<WorldState> m_worlds;

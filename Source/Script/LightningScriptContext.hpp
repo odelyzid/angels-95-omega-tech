@@ -55,6 +55,12 @@ public:
     int  LineCount() const { return (int)m_lines.size(); }
     int  ProgramCounter() const { return m_pc; }
 
+    // Park the program counter at end-of-script so a freshly loaded instance
+    // executes nothing until its first RunAction/label jump (Spawn calls this;
+    // without it the first action body would auto-run via the Update leftover
+    // executor).
+    void MarkCompleted() { m_pc = (int)m_lines.size(); }
+
     // Jump label resolution
     void RegisterJumpLabel(const std::string& label, int line);
     int  FindJumpLabel(const std::string& label) const;
@@ -126,4 +132,8 @@ private:
 
     // Internal: evaluate a condition string (e.g. "$x > 5")
     bool EvalCondition(const std::string& cond);
+
+    // Internal: resolve a variable name (no leading '$') to a value.
+    // Order: float vars → int vars → toggle flags ("flag<idx>") → stat resolver → 0.
+    float ResolveVar(const std::string& vn) const;
 };

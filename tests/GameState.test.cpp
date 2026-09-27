@@ -243,6 +243,97 @@ static int test_player_position_flag() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_npc_death_and_revive() {
+    TEST("damage_npc sets DEAD; tick revives after 10s at spawn");
+    GameState gs;
+    WorldState ws = make_test_world(0);
+    ServerNPC npc;
+    npc.active = true;
+    npc.state = NpcState::CHASE;
+    npc.health = 100;
+    npc.max_health = 100;
+    npc.spawn_pos = {5, 0, 5};
+    npc.position = {20, 0, 20}; // dragged away from spawn while chasing
+    ws.global_npcs.push_back(npc);
+
+    gs.damage_npc(ws.global_npcs[0], 150, UINT32_MAX);
+    CHECK_EQ(ws.global_npcs[0].health, 0);
+    CHECK(!ws.global_npcs[0].active);
+    CHECK(ws.global_npcs[0].state == NpcState::DEAD);
+    // Re-killing a corpse does nothing (no double XP)
+    gs.damage_npc(ws.global_npcs[0], 50, UINT32_MAX);
+
+    // 10s of ticking revives the NPC
+    for (int i = 0; i < 11; i++) gs.tick_npcs(ws, 1.0f);
+    CHECK(ws.global_npcs[0].active);
+    CHECK(ws.global_npcs[0].state != NpcState::DEAD);
+    CHECK_EQ(ws.global_npcs[0].health, ws.global_npcs[0].max_health);
+    CHECK_APROX(ws.global_npcs[0].position.x, 5.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_player_save_load_roundtrip() {
+    TEST("save_player_data / load_player_record round-trip by name");
+    {
+        GameState gs;
+        gs.init_worlds("build_test_gamedata", {"nonexistent_world"}); // captures gamedata_dir
+        uint32_t id = gs.add_player(1, "HeroSave");
+        ServerPlayer* p = gs.get_player(id);
+        CHECK(p != nullptr);
+        p->position = {12, 34, 56};
+        p->health = 77;
+        p->max_health = 120;
+        p->mana = 44.0f;
+        p->level = 3;
+        p->xp = 250;
+        p->xp_to_next = 400;
+        p->inventory[0] = 5;
+        p->ammo = 33.0f;
+        strncpy(p->weapon_def[2], "flux_carbine", sizeof(p->weapon_def[2]) - 1);
+        p->weapon_ammo[2] = 7;
+        p->weapon_magazine[2] = 20;
+        gs.save_player_data();
+    }
+    // Fresh GameState + same-named player restores the stats
+    {
+        GameState gs2;
+        gs2.init_worlds("build_test_gamedata", {"nonexistent_world"});
+        uint32_t id = gs2.add_player(9, "HeroSave");
+        ServerPlayer* p = gs2.get_player(id);
+        CHECK(p != nullptr);
+        CHECK_APROX(p->position.x, 12.0f, 0.001f);
+        CHECK_APROX(p->position.z, 56.0f, 0.001f);
+        CHECK_EQ(p->health, 77);
+        CHECK_EQ(p->max_health, 120);
+        CHECK_APROX(p->mana, 44.0f, 0.001f);
+        CHECK_EQ(p->level, 3);
+        CHECK_EQ(p->xp, 250);
+        CHECK_EQ(p->inventory[0], 5);
+        CHECK_APROX(p->ammo, 33.0f, 0.001f);
+        CHECK(std::strcmp(p->weapon_def[2], "flux_carbine") == 0);
+        CHECK_EQ(p->weapon_ammo[2], 7);
+        CHECK_EQ(p->weapon_magazine[2], 20);
+    }
+    // Cleanup
+    std::remove("build_test_gamedata/Saves/PlayerData.dat");
+    PASS(); return 0; END_TEST();
+}
+
+static int test_world_seeding_from_file() {
+    TEST("init_worlds seeds NPCs/pickups from World.ozone (EngineTest)");
+    GameState gs;
+    gs.init_worlds("GameData", {"EngineTest"});
+    WorldState* ws = gs.get_world(0);
+    CHECK(ws != nullptr);
+    // EngineTest world file defines 6 npc + 6 pickup entities
+    CHECK_EQ(ws->global_npcs.size(), (size_t)6);
+    CHECK_EQ(ws->global_pickups.size(), (size_t)6);
+    // Type names come from the file; stats resolved from PawnDefs
+    CHECK(!ws->global_npcs[0].typeName.empty());
+    CHECK(ws->global_npcs[0].max_health > 0);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
@@ -260,6 +351,9 @@ int main() {
     failures += test_ammo_pickup_no_xp_granted();
     failures += test_add_player_idempotent();
     failures += test_player_position_flag();
+    failures += test_npc_death_and_revive();
+    failures += test_player_save_load_roundtrip();
+    failures += test_world_seeding_from_file();
 
     fprintf(stdout, "===============\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

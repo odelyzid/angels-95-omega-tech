@@ -218,6 +218,20 @@ bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
 }
 
 // ---------------------------------------------------------------------------
+// ApplyPawnDamage — damage + death transition (fires on_death script hook)
+// ---------------------------------------------------------------------------
+void PawnSystem::ApplyPawnDamage(Pawn& p, int damage) {
+    if (!p.active || p.state == PawnState::DEAD) return;
+    // Server-owned NPCs take damage via NPC_DAMAGE relay, not local hits
+    if (p.networkControlled) return;
+    p.health -= damage;
+    if (p.health <= 0) {
+        p.active = false;
+        TransitionState(p, PawnState::DEAD);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Player Start Nodes
 // ---------------------------------------------------------------------------
 void PawnSystem::AddPlayerStart(const PlayerStartNode& node) {
@@ -285,16 +299,12 @@ void PawnSystem::UpdateProjectiles(float dt) {
             if (!pawn.active || pawn.state == PawnState::DEAD) continue;
             float dist = Vector3Distance(p.position, pawn.position);
             if (dist < 1.5f) {
-                pawn.health -= (int)p.damage;
                 p.active = false;
                 Vector3 hitNormal = Vector3Normalize(Vector3Scale(p.velocity, -1.0f));
                 CombatFX::Instance().SpawnImpact(
                     {pawn.position.x, pawn.position.y + 0.5f, pawn.position.z},
                     hitNormal, Color{200, 30, 30, 255}, 10, 4.0f);
-                if (pawn.health <= 0) {
-                    pawn.active = false;
-                    pawn.state = PawnState::DEAD;
-                }
+                ApplyPawnDamage(pawn, (int)p.damage);
                 break;
             }
         }

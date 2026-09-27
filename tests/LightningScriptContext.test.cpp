@@ -454,6 +454,128 @@ static int test_stat_resolver() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_flag_var_read() {
+    TEST("$flagN resolves wtflag writes in conditions and assignments");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_flagvar");
+    CHECK(ctx.Load("wtflag 0 1\nif ($flag0 >= 1)\n$r = 1\nendif\n$c = $flag0\nif ($flag9 == 0)\n$z = 7\nendif"));
+    ctx.ExecuteNext(); // wtflag 0 1
+    ctx.ExecuteNext(); // if (1 >= 1) true
+    ctx.ExecuteNext(); // $r = 1
+    ctx.ExecuteNext(); // endif
+    ctx.ExecuteNext(); // $c = $flag0 → 1
+    ctx.ExecuteNext(); // if ($flag9 == 0) true
+    ctx.ExecuteNext(); // $z = 7
+    ctx.ExecuteNext(); // endif
+    CHECK_EQ(ctx.GetInt("r"), 1);
+    CHECK_EQ(ctx.GetInt("c"), 1);
+    CHECK_EQ(ctx.GetInt("z"), 7);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_rhs_arithmetic() {
+    TEST("RHS inline arithmetic ($x = $x - 1)");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_rhs");
+    CHECK(ctx.Load("$t = 10\n$t = $t - 4\n$y = $t * 2\n$z = $a + $b"));
+    ctx.ExecuteNext(); // $t = 10
+    ctx.ExecuteNext(); // $t = $t - 4 → 6 (was: assigned 0)
+    ctx.ExecuteNext(); // $y = $t * 2 → 12
+    ctx.ExecuteNext(); // $z = $a + $b → 0 (unset vars)
+    CHECK_EQ(ctx.GetInt("t"), 6);
+    CHECK_EQ(ctx.GetInt("y"), 12);
+    CHECK_EQ(ctx.GetInt("z"), 0);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_brace_condition() {
+    TEST("brace-style if condition is not always-true");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_brace");
+    // Replicates arena.ozls: trailing '{' on the condition, bare '}' closer
+    CHECK(ctx.Load("rtflag 0\nif ($result == 0) {\nwtflag 0 1\n$spawned += 1\n}\n$r2 = 5"));
+    ctx.ExecuteNext(); // rtflag 0 → result = 0
+    ctx.ExecuteNext(); // if (0 == 0) true → fall into body
+    ctx.ExecuteNext(); // wtflag 0 1
+    ctx.ExecuteNext(); // $spawned += 1
+    ctx.ExecuteNext(); // } (no-op)
+    ctx.ExecuteNext(); // $r2 = 5
+    CHECK_EQ(ctx.GetInt("spawned"), 1);
+
+    // False condition with braces must skip to after the closing brace
+    LightningScriptContext ctx2;
+    ctx2.SetDebugTag("test_brace2");
+    CHECK(ctx2.Load("wtflag 0 1\nrtflag 0\nif ($result == 0) {\n$spawned += 1\n}\n$done = 1"));
+    ctx2.ExecuteNext(); // wtflag 0 1
+    ctx2.ExecuteNext(); // rtflag 0 → result = 1
+    ctx2.ExecuteNext(); // if (1 == 0) FALSE → skip body (incl. '}') to $done
+    ctx2.ExecuteNext(); // $done = 1
+    CHECK_EQ(ctx2.GetInt("spawned"), 0);
+    CHECK_EQ(ctx2.GetInt("done"), 1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_toggle_flag_opcode() {
+    TEST("toggle_flag flips a flag 0→1→0");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_toggle");
+    CHECK(ctx.Load("toggle_flag 5\ntoggle_flag 5\ntoggle_flag 5"));
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetFlag(5), 1);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetFlag(5), 0);
+    ctx.ExecuteNext(); CHECK_EQ(ctx.GetFlag(5), 1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_jump_opcode() {
+    TEST("jump opcode aliases goto");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_jumpop");
+    CHECK(ctx.Load("$x = 0\njump skip\n$x = 99\nskip:\n$x += 1"));
+    int steps = 0;
+    while (ctx.HasMore() && steps < 10) { ctx.ExecuteNext(); steps++; }
+    CHECK_EQ(ctx.GetInt("x"), 1); // $x = 99 skipped
+    PASS(); return 0; END_TEST();
+}
+
+static int test_acidpool_scenario() {
+    TEST("acidpool damage loop ticks down correctly");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_acid");
+    // Replicates acidpool.ozls on_tick: gate + per-60-tick damage (braces + flags)
+    CHECK(ctx.Load("wtflag 0 1\nvar timer = 2\non_tick:\nif ($flag0 >= 1) {\n$timer = $timer - 1\nif ($timer <= 0) {\nplayerstat health -= 5\nvar timer = 2\n}\n}"));
+    ctx.ExecuteNext(); // wtflag 0 1
+    ctx.ExecuteNext(); // var timer = 2
+    // Tick 1: gate passes, timer 2→1, no damage yet
+    CHECK(ctx.RunAction("on_tick", 10) > 0);
+    CHECK_EQ(ctx.GetInt("timer"), 1);
+    CHECK(ctx.PopPlayerStatOps().empty());
+    // Tick 2: timer 1→0 → exactly one damage op queued, timer resets to 2
+    CHECK(ctx.RunAction("on_tick", 10) > 0);
+    auto ops = ctx.PopPlayerStatOps();
+    CHECK(ops.size() == 1);
+    CHECK(ops[0].name == "health");
+    CHECK(ops[0].op == 2); // -=
+    CHECK_APROX(ops[0].value, 5.0f, 0.001f);
+    CHECK_EQ(ctx.GetInt("timer"), 2);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_mark_completed() {
+    TEST("MarkCompleted parks fresh instance so nothing auto-runs");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_markdone");
+    CHECK(ctx.Load("on_use:\n$a = 1\non_tick:\n$b = 2"));
+    ctx.MarkCompleted();
+    CHECK(!ctx.HasMore());
+    CHECK_EQ(ctx.ProgramCounter(), ctx.LineCount());
+    // Triggered runs still work afterwards (assert effects — RunAction's
+    // return is steps-executed and legitimately 0 for a 1-line final action)
+    ctx.RunAction("on_tick", 10);
+    CHECK_EQ(ctx.GetInt("b"), 2);
+    CHECK_EQ(ctx.GetInt("a"), 0); // on_use body never ran
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptContext Tests:\n");
     int failures = 0;
@@ -491,6 +613,13 @@ int main() {
     failures += test_spawn_pickup_opcode();
     failures += test_float_compound();
     failures += test_stat_resolver();
+    failures += test_flag_var_read();
+    failures += test_rhs_arithmetic();
+    failures += test_brace_condition();
+    failures += test_toggle_flag_opcode();
+    failures += test_jump_opcode();
+    failures += test_acidpool_scenario();
+    failures += test_mark_completed();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

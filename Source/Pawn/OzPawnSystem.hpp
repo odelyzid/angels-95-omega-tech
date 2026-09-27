@@ -271,6 +271,10 @@ public:
     // Check if any pawn is attacking the player at given position
     bool IsPlayerAttacked(Vector3 playerPos, float& outDamage);
 
+    // Apply damage to a pawn and transition to DEAD (with on_death script
+    // hook) when its health drops to 0. Used by projectile hits and melee.
+    void ApplyPawnDamage(Pawn& p, int damage);
+
     // Feedback state for UI (last collected pickup info)
     struct PickupFeedback {
         bool collected = false;

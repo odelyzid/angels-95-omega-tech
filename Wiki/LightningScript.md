@@ -7,37 +7,39 @@ Files use the `.ozls` extension.
 ## Entity Definition Format (`.ozls`)
 
 ```
-entity <name> {
-    type = <weapon|armor|consumable|skystone|misc>
+entity "<name>" : <type> {
     mesh = "<path>"
     texture = "<path>"
     icon = "<path>"
 
     stats {
-        float <name> = <value>
-        int <name> = <value>
-        vec3 <name> = <x> <y> <z>
+        <name> = <value>
+        vec3 <name> = (<x>, <y>, <z>)
     }
 
     variants {
-        { float <name> = <value> }
+        "<variantName>" { mesh_override = "<path>"  texture_override = "<path>" }
     }
 
-    on_<action> {
-        <script lines>
+    actions {
+        on_<action> {
+            <script lines>
+        }
     }
 }
 ```
 
-### Fields
+### Types
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | string | Logical entity name |
-| `type` | enum | One of: `weapon`, `armor`, `consumable`, `skystone`, `misc` |
-| `mesh` | path | 3D model file path |
-| `texture` | path | Diffuse texture path |
-| `icon` | path | Hotbar icon path |
+| Type | Purpose |
+|---|---|
+| `weapon` | Ranged/melee weapon (hotbar, projectile dispatch) |
+| `armor` / `upgrade` | Equipment items |
+| `consumable` | Consumables (use via hotbar `on_use`) |
+| `pickup` | World pickup (item_id/respawn_time stats) |
+| `skyzone` | Zone volume with env/fog/skybox/zone actions |
+| `pawn` | NPC hook-carrier (FSM actions: on_patrol/on_chase/on_return/on_death) |
+| `projectile` | Reserved (no runtime consumer yet) |
 
 ### Stats Block
 
@@ -45,11 +47,9 @@ Defines runtime numeric properties:
 
 ```
 stats {
-    float damage = 25.0
-    float range = 8.0
-    float fire_rate = 0.5
-    int max_ammo = 30
-    vec3 color = 1.0 0.2 0.1
+    damage = 25.0
+    magazine = 12
+    vec3 color = (1.0, 0.2, 0.1)
 }
 ```
 
@@ -63,23 +63,10 @@ stats {
 | `magazine` | float | none | — | Ammo capacity per magazine (ranged only) |
 | `reload_time` | float | 2.0 | — | Seconds to complete a reload |
 | `projectile_speed` | float | 20 | — | Projectile travel speed in units/sec |
-| `projectile_lifetime` | float | 2.0 | — | Projectile lifespan in seconds |
+| `projectile_lifetime` | float | 2.0 | — | Projectile lifespan in seconds (legacy key `lifetime` also accepted) |
 | `projectile_count` | float | 1 | — | Number of projectiles per shot |
 | `spread` | float | 0 | — | Random spread angle in degrees |
 | `reach` | float | — | 3.0 | Melee attack range in units |
-| `recoil` | float | 2.0 | 1.0 | Camera recoil kick intensity |
-
-### Variants Block
-
-Defines alternate configurations (e.g., weapon levels):
-
-```
-variants {
-    { float damage = 10.0 }
-    { float damage = 20.0 }
-    { float damage = 30.0 }
-}
-```
 
 ### Action Blocks
 
@@ -95,9 +82,10 @@ Scripts attached to specific events:
 | `on_hit` | Melee swing connects with a target |
 | `on_reload` | Weapon reload triggered (auto or manual via R key) |
 | `on_collect` | Entity is picked up |
-| `on_zone_enter` | Player enters a skyzone entity |
-| `on_zone_exit` | Player exits a skyzone entity |
+| `on_enter` | Player enters a zone/skyzone volume |
+| `on_exit` | Player exits a zone/skyzone volume |
 | `on_tick` | Called every frame while active |
+| `on_patrol` / `on_chase` / `on_return` / `on_death` | Pawn FSM state transitions (requires a pawn-named `.ozls`, e.g. `Walker.ozls`) |
 
 ## Opcodes
 
@@ -111,38 +99,64 @@ Scripts attached to specific events:
 | `$ -=` | `$x -= 3` | Subtract and assign |
 | `$ *=` | `$x *= 2` | Multiply and assign |
 | `$ /=` | `$x /= 2` | Divide and assign |
+| RHS arithmetic | `$x = $x - 1` | Assignments support one binary op (`+ - * /`) with variables/numbers |
 
 Variables are referenced in conditions with `$` prefix (e.g., `$health > 0`).
+`$flag<idx>` (e.g. `$flag0`) reads the instance's toggle flags set by `wtflag`/`toggle_flag`.
 
 ### Control Flow
 
 | Opcode | Syntax | Description |
 |---|---|---|
-| `end` | `end` | Marks end of instruction block |
-| `jump` | `jump label_name` | Jump to a label |
+| `if` / `else` / `endif` | `if ($x == 0) ... endif` | Conditional execution (brace style `if (...) { ... }` also supported) |
+| `goto` / `jump` | `goto label_name` | Jump to a label |
+| `stop` / `end` | `stop` | Halt script execution |
 | `say` | `say "hello"` | Print to log |
 | `set_cooldown` | `set_cooldown 1.5` | Set cooldown timer in seconds |
+
+### Flags
+
+| Opcode | Syntax | Description |
+|---|---|---|
+| `wtflag` | `wtflag idx val` | Write toggle flag (0-63) |
+| `rtflag` | `rtflag idx` | Read flag value into `$result` |
+| `toggle_flag` | `toggle_flag idx` | Flip a toggle flag (0-63) |
+
+Hotbar/equipment instance flags are persisted in save games (`flags=` section). Zone-instance flags are session-only.
 
 ### World Interaction
 
 | Opcode | Syntax | Description |
 |---|---|---|
 | `set_fog` | `set_fog r g b density` | Set fog color and density |
+| `restore_fog` | `restore_fog` | Restore fog to world default |
+| `set_ambient` | `set_ambient r g b` | Set ambient light color |
+| `restore_ambient` | `restore_ambient` | Restore default ambient |
 | `set_skybox` | `set_skybox "name"` | Set skybox by name |
 | `restore_skybox` | `restore_skybox` | Restore default skybox |
 | `play_sound` | `play_sound "path"` | Queue sound playback |
-| `toggle_flag` | `toggle_flag idx` | Toggle a save flag (0-63) |
-| `rtflag` | `rtflag idx` | Read flag value into `$result` |
+| `msg` | `msg "text"` | On-screen text message |
+| `heal` / `damage` | `heal 25` | Immediate player health delta |
+| `playerstat` | `playerstat health -= 5` | Deferred write to a player stat |
+| `consume` | `consume` | Mark consumable as used (removes from hotbar) |
+| `spawn_pawn` | `spawn_pawn "Walker" x y z` | Spawn an NPC |
+| `spawn_pickup` | `spawn_pickup "Coin" x y z [respawn]` | Spawn a pickup |
 
-### Conditions
+## Conditions
 
-Used in `if` statements within action blocks:
+Used in `if` statements within action blocks (both styles work):
 
 ```
 if ($health <= 0) {
     say "Player defeated"
     end
 }
+```
+
+```
+if ($result == 0)
+    say "first time"
+endif
 ```
 
 Supported operators: `==`, `!=`, `>`, `<`, `>=`, `<=`
@@ -156,9 +170,9 @@ entity "automag" : weapon {
     stats {
         damage = 15
         fire_rate = 0.4
-        range = 50.0
         magazine = 12
         reload_time = 2.0
+        projectile_lifetime = 2.5
     }
     actions {
         on_fire {
@@ -177,55 +191,39 @@ entity "automag" : weapon {
 }
 ```
 
-## Example: Melee Weapon (selenite_blade)
+## Example: Zone with Damage Loop (acidpool)
 
 ```
-entity "selenite_blade" : weapon {
-    mesh = "selenite_blade_lvl1.obj"
-    texture = "selenite_blade_lvl1_texture.png"
-    icon = "selenite_blade_icon.png"
-    stats {
-        damage = 40
-        swing_speed = 0.8
-        reach = 3.0
-        stamina_cost = 15
-    }
+entity "acidpool" : skyzone {
     actions {
-        on_swing {
-            say "Slash! (40 damage)"
-            set_cooldown 0.8
+        on_enter {
+            wtflag 0 1
+            var timer = 60
+            play_sound "GameData/Global/Sounds/Hurt.mp3"
+            msg "Acid! The pooled run-off burns your boots!"
         }
-        on_hit {
-            say "Blade connects!"
+        on_tick {
+            if ($flag0 >= 1) {
+                $timer = $timer - 1
+                if ($timer <= 0) {
+                    playerstat health -= 5
+                    var timer = 60
+                }
+            }
         }
-    }
-}
-```
-
-## Example: Skyzone
-
-```
-entity StormSky {
-    type = skystone
-
-    on_zone_enter {
-        set_fog 0.3 0.3 0.4 0.8
-        set_skybox "Storm"
-        say "Entered storm zone"
-    }
-
-    on_zone_exit {
-        restore_skybox
-        say "Exited storm zone"
+        on_exit {
+            wtflag 0 0
+            msg "You scramble clear of the acid."
+        }
     }
 }
 ```
 
 ## Integration
 
-- Entity `.ozls` files are parsed by `LightningScriptParser` into `EntityDef` structs
+- Entity `.ozls` files are parsed by `LightningScriptParser` into `EntityDef` structs (recursively scanned from all of `GameData/` + packages)
 - `LightningEntityRegistry` stores all registered definitions
 - `LightningEntityManager` manages runtime instances with individual `LightningScriptContext` per instance
-- The manager ticks contexts in `Update()` (up to 10 instructions per frame)
-- Hotbar integration: slot selection triggers `on_use` action
-- Zone triggers: `PawnSystem` calls `TriggerZoneAction()` on zone entry/exit
+- Instances start idle — action bodies run only when triggered (spawn does not auto-execute)
+- Hotbar integration: slot selection triggers `on_equip`/`on_unequip`; use triggers `on_use`
+- Zone triggers: `PawnSystem` calls zone actions on entry/exit; pawn FSM transitions dispatch the matching `on_*` action

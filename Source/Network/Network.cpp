@@ -414,6 +414,20 @@ void NetworkServer::update() {
     }
 }
 
+bool NetworkServer::kick_player(uint32_t id) {
+    for (auto& p : m_players) {
+        if (p.connected && p.id == id) {
+            printf("Player %s kicked\n", p.name);
+            p.connected = false;
+            m_player_count--;
+            if (m_callbacks.on_player_leave)
+                m_callbacks.on_player_leave(p);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool NetworkServer::send_message(const NetworkPlayer& player,
                                  const NetworkMessage& msg) {
     struct sockaddr_in addr;

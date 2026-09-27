@@ -161,19 +161,28 @@ bool LightningScriptContext::ExecuteNext() {
         if (ve != std::string::npos) valueStr = valueStr.substr(0, ve + 1);
 
         auto getVal = [&](const std::string& s) -> float {
-            if (s.rfind("$", 0) == 0) {
-                std::string vn = s.substr(1);
-                auto it = m_floatVars.find(vn);
-                if (it != m_floatVars.end()) return it->second;
-                auto it2 = m_intVars.find(vn);
-                if (it2 != m_intVars.end()) return (float)it2->second;
-                if (m_statResolver) return m_statResolver(vn);
-                return 0;
-            }
+            if (s.rfind("$", 0) == 0) return ResolveVar(s.substr(1));
             try { return std::stof(s); } catch (...) { return 0; }
         };
 
-        float val = getVal(valueStr);
+        // Minimal expression support: "A op B" (single binary op, left-to-right,
+        // operands are variables or numbers). A lone token behaves as before.
+        auto evalExpr = [&](const std::string& expr) -> float {
+            std::istringstream es(expr);
+            std::string a, opTok, b;
+            if (!(es >> a)) return 0;
+            float lhs = getVal(a);
+            if (!(es >> opTok)) return lhs;
+            if (!(es >> b)) return lhs;
+            float rhs = getVal(b);
+            if (opTok == "+") return lhs + rhs;
+            if (opTok == "-") return lhs - rhs;
+            if (opTok == "*") return lhs * rhs;
+            if (opTok == "/") return (rhs != 0.0f) ? lhs / rhs : 0.0f;
+            return lhs; // unknown operator — plain var read
+        };
+
+        float val = evalExpr(valueStr);
 
         if (op == "=") {
             if (valueStr.find('.') != std::string::npos || m_floatVars.count(name))
@@ -205,6 +214,13 @@ bool LightningScriptContext::ExecuteNext() {
         if (cs != std::string::npos) cond = cond.substr(cs);
         size_t ce = cond.find_last_not_of(" \t\r\n");
         if (ce != std::string::npos) cond = cond.substr(0, ce + 1);
+        // Brace-style scripts keep the trailing '{' glued to the condition —
+        // strip it so `if ($x == 0) {` parses identically to `if ($x == 0)`.
+        while (!cond.empty() && (cond.back() == '{' || cond.back() == '}'))
+            cond.pop_back();
+        // Trim again after brace strip
+        ce = cond.find_last_not_of(" \t\r\n");
+        if (ce != std::string::npos) cond = cond.substr(0, ce + 1);
         // Strip matching parens around the whole condition
         while (cond.size() >= 2 && cond.front() == '(' && cond.back() == ')')
             cond = cond.substr(1, cond.size() - 2);
@@ -213,13 +229,27 @@ bool LightningScriptContext::ExecuteNext() {
         if (cs != std::string::npos) cond = cond.substr(cs);
 
         if (!EvalCondition(cond)) {
-            // Skip if-body; stop before else or at endif
+            // Skip if-body; stop before else or at endif.
+            // Brace-style scripts close blocks with '}' instead of 'endif' —
+            // a '}'-led line decrements depth the same way (so a false
+            // condition resumes AFTER its closing brace, not at script end).
+            // '{'-led lines are no-ops; '} else {' lands in the else body.
             int depth = 1;
             m_pc++;
             bool foundElse = false;
             while (m_pc < (int)m_lines.size() && depth > 0) {
                 const std::string& sl = m_lines[m_pc];
-                if (sl.rfind("if", 0) == 0 && sl.size() > 2 && std::isblank(sl[2])) depth++;
+                size_t fs = sl.find_first_not_of(" \t");
+                if (fs != std::string::npos && sl[fs] == '}') {
+                    if (sl.find("else", fs) != std::string::npos && depth == 1) {
+                        foundElse = true; break; // '} else {' → run the else body
+                    }
+                    depth--;                     // block closer — like endif
+                }
+                else if (fs != std::string::npos && sl[fs] == '{') {
+                    // block opener on its own line — no depth change
+                }
+                else if (sl.rfind("if", 0) == 0 && sl.size() > 2 && std::isblank(sl[2])) depth++;
                 else if (sl.rfind("endif", 0) == 0) depth--;
                 else if (sl.rfind("else", 0) == 0 && depth == 1) { foundElse = true; break; }
                 if (depth > 0) m_pc++;
@@ -238,12 +268,17 @@ bool LightningScriptContext::ExecuteNext() {
         return true;
 
     } else if (opcode == "else") {
-        // Skip to endif
+        // Skip to endif ('}'-led lines close blocks like endif; '{' no-op)
         int depth = 1;
         m_pc++;
         while (m_pc < (int)m_lines.size() && depth > 0) {
             const std::string& sl = m_lines[m_pc];
-            if (sl.rfind("if", 0) == 0 && sl.size() > 2 && std::isblank(sl[2])) depth++;
+            size_t fs = sl.find_first_not_of(" \t");
+            if (fs != std::string::npos && sl[fs] == '}') depth--;
+            else if (fs != std::string::npos && sl[fs] == '{') {
+                // block opener on its own line — no depth change
+            }
+            else if (sl.rfind("if", 0) == 0 && sl.size() > 2 && std::isblank(sl[2])) depth++;
             else if (sl.rfind("endif", 0) == 0) depth--;
             if (depth > 0) m_pc++;
         }
@@ -253,7 +288,7 @@ bool LightningScriptContext::ExecuteNext() {
     } else if (opcode == "endif") {
         m_pc++;
 
-    } else if (opcode == "goto") {
+    } else if (opcode == "goto" || opcode == "jump") {
         std::string label;
         ls >> label;
         auto it = m_jumpLabels.find(label);
@@ -279,6 +314,12 @@ bool LightningScriptContext::ExecuteNext() {
         int idx, val;
         ls >> idx >> val;
         if (idx >= 0 && idx < MAX_FLAGS) m_flags[idx] = val;
+        m_pc++;
+
+    } else if (opcode == "toggle_flag") {
+        int idx;
+        ls >> idx;
+        if (idx >= 0 && idx < MAX_FLAGS) m_flags[idx] = m_flags[idx] ? 0 : 1;
         m_pc++;
 
     } else if (opcode == "rtflag") {
@@ -400,14 +441,7 @@ bool LightningScriptContext::ExecuteNext() {
         if (!name.empty() && name[0] == '$') name.erase(0, 1);
         float value = 0.0f;
         if (valueStr.rfind("$", 0) == 0) {
-            std::string vn = valueStr.substr(1);
-            auto it = m_floatVars.find(vn);
-            if (it != m_floatVars.end()) value = it->second;
-            else {
-                auto it2 = m_intVars.find(vn);
-                if (it2 != m_intVars.end()) value = (float)it2->second;
-                else if (m_statResolver) value = m_statResolver(vn);
-            }
+            value = ResolveVar(valueStr.substr(1));
         } else {
             try { value = std::stof(valueStr); } catch (...) { value = 0.0f; }
         }
@@ -441,6 +475,10 @@ bool LightningScriptContext::ExecuteNext() {
         SetFloat("__pickup_y", y);
         SetFloat("__pickup_z", z);
         SetFloat("__pickup_respawn", respawn);
+        m_pc++;
+
+    } else if (opcode == "}" || opcode == "{") {
+        // Bare block delimiter (brace-style scripts) — no-op
         m_pc++;
 
     } else {
@@ -483,6 +521,29 @@ int LightningScriptContext::GetFlag(int idx) const {
 }
 
 // ---------------------------------------------------------------------------
+// ResolveVar — shared $-name resolution for assignments, playerstat and
+// conditions. Order: float vars → int vars → toggle flags → stat resolver → 0.
+// "flag<idx>" (digits only) reads the per-instance toggle flags, so
+// `wtflag 0 1` + `if ($flag0 >= 1)` round-trip within one instance.
+// ---------------------------------------------------------------------------
+float LightningScriptContext::ResolveVar(const std::string& vn) const {
+    auto it = m_floatVars.find(vn);
+    if (it != m_floatVars.end()) return it->second;
+    auto it2 = m_intVars.find(vn);
+    if (it2 != m_intVars.end()) return (float)it2->second;
+    if (vn.rfind("flag", 0) == 0) {
+        std::string num = vn.substr(4);
+        if (!num.empty() && std::all_of(num.begin(), num.end(),
+                [](unsigned char c) { return std::isdigit(c); })) {
+            int idx = std::stoi(num);
+            if (idx >= 0 && idx < MAX_FLAGS) return (float)m_flags[idx];
+        }
+    }
+    if (m_statResolver) return m_statResolver(vn);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // EvalCondition — simple condition parser
 // Supports: $var == val, $var > val, $var < val, $var >= val, $var <= val, $var != val
 // ---------------------------------------------------------------------------
@@ -518,15 +579,7 @@ bool LightningScriptContext::EvalCondition(const std::string& cond) {
 
     // Resolve variable references
     auto resolve = [&](const std::string& s) -> float {
-        if (s.rfind("$", 0) == 0) {
-            std::string vn = s.substr(1);
-            auto it = m_floatVars.find(vn);
-            if (it != m_floatVars.end()) return it->second;
-            auto it2 = m_intVars.find(vn);
-            if (it2 != m_intVars.end()) return (float)it2->second;
-            if (m_statResolver) return m_statResolver(vn);
-            return 0;
-        }
+        if (s.rfind("$", 0) == 0) return ResolveVar(s.substr(1));
         try { return std::stof(s); } catch (...) { return 0; }
     };
 

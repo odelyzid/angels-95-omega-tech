@@ -73,11 +73,11 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 | **[2]** Entity replication | NPC/pickup identity is index-triples, no stable net IDs | `Source/Network/Network.hpp:127-136` |
 | **[2]** Game modes | `levelinfo` maxPlayers/friendlyFire are enforced (b58); gameType/timeLimit/scoreLimit still cosmetic; no scoreboards/timers | `Source/Server/GameState.cpp` |
 | **[2]** Respawn | Server NPC death/respawn implemented (b58: DEAD state + 10s revive); no player death/respawn flow server-side | `Source/Server/GameState.cpp` |
-| **[2]** Admin | No kick/ban/RCON; `COMMAND` unhandled | `Source/Server/Server.cpp:1129-1133` |
+| **[2]** Admin | `COMMAND` implemented (b61): list/say/kick via `--admin-token`/`OZ_ADMIN_TOKEN`; ban list deferred (kicked clients can re-handshake — UDP identity is ip:port) | `Source/Server/Server.cpp` |
 | **[x] Ping** | Real RTT implemented (PING/PONG sequence-paired round-trip) | `Source/Network/Network.cpp` |
 | **[x] Join UX** | LAN server browser in the menu (Scan LAN); join/host ports functional from UI | `Source/Menu/TitleMenu.hpp`; `Source/Network/Network.cpp` |
 | **[2]** Reconnect | None — dropped client must restart | `Source/Network/Network.cpp:608-611` |
-| **[2]** Game stats | `save_player_data()`/`load_player_data()` declared but unimplemented | `Source/Server/GameState.hpp:332-333` |
+| **[x] Game stats** | Player persistence implemented (b61): `Saves/PlayerData.dat` keyed by name, saved on disconnect + 60s autosave + shutdown; world state V2 saves (GlobalNPCs.dat + Partition*.dat) | `Source/Server/GameState.cpp` |
 
 ### Engine core & persistence
 
@@ -161,13 +161,15 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 ### Tier 2 — multiplayer completeness
 
-- [ ] Server-authoritative death/respawn + timers; scoreboard UI
-- [ ] `levelinfo` → real game modes (DM timers, score limits, friendly fire)
-- [ ] Kick/ban + server console (implement `COMMAND`)
-- [ ] Player roster + LAN browser UI; honor the join port field
+- [ ] Server-authoritative death/respawn + timers; scoreboard UI (NPC respawn done b58; player flow open)
+- [ ] `levelinfo` → real game modes (DM timers, score limits; maxPlayers/friendlyFire enforced b58)
+- [x] Kick/ban + server console (`COMMAND` implemented b61: list/say/kick behind --admin-token; ban list still open)
+- [x] Player roster + LAN browser UI; honor the join port field (b57)
+- [x] Server world population from world files + server saves (b61: seed_world_entities, PlayerData.dat, V2 world saves, autosave)
 - [ ] Stable entity replication IDs (replace index-triples)
 - [ ] ACK/retry for critical messages (weapon fire, pickup collect)
 - [ ] Client prediction + reconciliation for own player
+- [ ] FILE_TRANSFER: rejected by design (b61 notice + rate limit); implement chunked transfer or drop the packet type
 
 ### Tier 3 — presentation
 
@@ -199,8 +201,11 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
   closed by Tier 0 ownership checks.
 - "INI config is supported": the **client** now reads/writes
   `System/Angels95.ini` (window/VSync/MSAA/gfx/audio), but the **server** still
-  accepts CLI flags only (`--port`, `--http-port`, `--dir`); `System/OzServer.ini`
+  accepts CLI flags only (`--port`, `--http-port`, `--dir`, `--auth-token`,
+  `--admin-token`; env `OZ_AUTH_TOKEN`/`OZ_ADMIN_TOKEN`); `System/OzServer.ini`
   remains a build-time template.
+- "HTTP API is open": it still is unless `--auth-token` is set (b61 adds the
+  Bearer gate); the token is not a security boundary on unencrypted LAN.
 
 ---
 

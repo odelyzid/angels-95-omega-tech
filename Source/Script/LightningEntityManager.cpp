@@ -44,10 +44,13 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
 
 #ifndef OMEGA_TEST_ENV
-        // Forward range check against PawnSystem NPCs (single-player)
+        // Forward range check against PawnSystem NPCs; apply damage directly
+        // in single-player (the server does it in networked play via
+        // NPC_DAMAGE). MP fires both paths, but server NPCs are
+        // networkControlled locally — ApplyPawnDamage skips those.
         const auto& pawns = PawnSystem::Instance().GetPawns();
         for (const auto& pawn : pawns) {
-            if (!pawn.active) continue;
+            if (!pawn.active || pawn.state == PawnState::DEAD) continue;
             Vector3 toPawn = Vector3Subtract(pawn.position, origin);
             float t = Vector3DotProduct(toPawn, direction);
             if (t < 0 || t > reach) continue;
@@ -55,6 +58,8 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             float d = Vector3Distance(closest, pawn.position);
             if (d < 2.0f) {
                 ent->ctx.RunAction("on_hit", 30);
+                Pawn* target = PawnSystem::Instance().Get((int)pawn.id);
+                if (target) PawnSystem::Instance().ApplyPawnDamage(*target, (int)projectileDamage);
                 break;
             }
         }
@@ -64,7 +69,8 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
 
     // ---- RANGED ----
     float projectileSpeed = readStat("projectile_speed", 20.0f);
-    float lifetime = readStat("lifetime", 2.0f);
+    // Documented key is projectile_lifetime; legacy defs may use lifetime
+    float lifetime = readStat("projectile_lifetime", readStat("lifetime", 2.0f));
     int projectileCount = (int)readStat("projectile_count", 1.0f);
     float spreadDeg = readStat("spread", 0.0f);
     float fireRate = readStat("fire_rate", 0.25f);
@@ -374,6 +380,13 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
             scriptText += line + "\n";
     }
     inst.ctx.Load(scriptText);
+    // Instances start idle: park the pc at end-of-script so the first action
+    // body does NOT auto-run via the Update leftover executor (consumables
+    // would apply on_use at pickup time). Actions run only when triggered.
+    inst.ctx.MarkCompleted();
+    // Resolve player/selected-weapon stats in this instance's scripts ($health,
+    // $ammo, ...) — same resolver the player entity's context gets in Init().
+    inst.ctx.SetStatResolver([this](const std::string& name) { return ResolveScriptStat(name); });
     char tag[128];
     snprintf(tag, sizeof(tag), "%s:%d", def->name.c_str(), (int)m_instances.size());
     inst.ctx.SetDebugTag(tag);
@@ -876,6 +889,24 @@ std::string LightningEntityManager::SerializeState() const {
         if (idx >= 0 && idx < (int)m_instances.size() && m_instances[idx].def)
             result += m_instances[idx].def->name;
     }
+    // Per-instance script toggle flags (sparse — only nonzero entries).
+    // Token: <kind><slot>.<flagIdx>=<val> with kind h=hotbar, e=equip, p=player.
+    result += "|flags=";
+    bool firstTok = true;
+    auto dumpFlags = [&](const std::string& kind, int slot, int idx) {
+        if (idx < 0 || idx >= (int)m_instances.size()) return;
+        const auto& ctx = m_instances[idx].ctx;
+        for (int f = 0; f < LightningScriptContext::MAX_FLAGS; f++) {
+            int v = ctx.GetFlag(f);
+            if (v == 0) continue;
+            if (!firstTok) result += ",";
+            firstTok = false;
+            result += kind + std::to_string(slot) + "." + std::to_string(f) + "=" + std::to_string(v);
+        }
+    };
+    for (int s = 0; s < HOTBAR_SIZE; s++) dumpFlags("h", s, m_hotbar[s]);
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) dumpFlags("e", s, m_equipment[s]);
+    if (m_playerEntityIndex >= 0) dumpFlags("p", 0, m_playerEntityIndex);
     result += "|";
     return result;
 }
@@ -913,5 +944,44 @@ bool LightningEntityManager::DeserializeState(const std::string& data) {
 
     parseSection("hotbar:", m_hotbar, HOTBAR_SIZE);
     parseSection("equip:", m_equipment, EQUIP_SLOT_COUNT);
+
+    // Restore per-instance script toggle flags (see SerializeState).
+    // Applied AFTER the spawns above — DeserializeState re-Spawns each def,
+    // which fresh-loads the contexts and would wipe any earlier flag writes.
+    {
+        size_t p = data.find("flags=");
+        if (p != std::string::npos) {
+            p += 5;
+            size_t end = data.find('|', p);
+            if (end == std::string::npos) end = data.size();
+            std::string section = data.substr(p, end - p);
+            size_t start = 0;
+            while (start < section.size()) {
+                size_t comma = section.find(',', start);
+                std::string tok = (comma == std::string::npos)
+                    ? section.substr(start)
+                    : section.substr(start, comma - start);
+                if (!tok.empty()) {
+                    // <kind><slot>.<flagIdx>=<val>
+                    size_t dot = tok.find('.');
+                    size_t eq = tok.find('=', dot);
+                    if (dot != std::string::npos && eq != std::string::npos) {
+                        char kind = tok[0];
+                        int slot = atoi(tok.substr(1, dot - 1).c_str());
+                        int flagIdx = atoi(tok.substr(dot + 1, eq - dot - 1).c_str());
+                        int val = atoi(tok.substr(eq + 1).c_str());
+                        int idx = -1;
+                        if (kind == 'h' && slot >= 0 && slot < HOTBAR_SIZE) idx = m_hotbar[slot];
+                        else if (kind == 'e' && slot >= 0 && slot < EQUIP_SLOT_COUNT) idx = m_equipment[slot];
+                        else if (kind == 'p') idx = m_playerEntityIndex;
+                        if (idx >= 0 && idx < (int)m_instances.size())
+                            m_instances[idx].ctx.SetFlag(flagIdx, val);
+                    }
+                }
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+    }
     return true;
 }
