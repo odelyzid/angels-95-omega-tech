@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
 #include <unordered_map>
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -141,6 +142,34 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                         auto sit = edef->stats.vec3s.find("scroll_speed");
                         if (sit != edef->stats.vec3s.end()) {
                             skyNode.scrollSpeed = {sit->second[0], sit->second[1], sit->second[2]};
+                        }
+                    } else if (!worldDir.empty()) {
+                        // Registry lookup failed (name collided with another world's
+                        // def). Read the skybox path straight from this world's own
+                        // .ozls files so the correct texture still applies.
+                        namespace fs = std::filesystem;
+                        std::error_code ec;
+                        for (auto& entry : fs::directory_iterator(worldDir, ec)) {
+                            if (ec || !entry.is_regular_file()) continue;
+                            std::string ext = entry.path().extension().string();
+                            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                            if (ext != ".ozls") continue;
+                            std::ifstream in(entry.path());
+                            if (!in.is_open()) continue;
+                            std::string line;
+                            while (std::getline(in, line)) {
+                                size_t sky = line.find("skybox");
+                                if (sky == std::string::npos) continue;
+                                size_t q1 = line.find('"', sky);
+                                size_t q2 = (q1 == std::string::npos)
+                                    ? std::string::npos : line.find('"', q1 + 1);
+                                if (q2 == std::string::npos) continue;
+                                skyNode.skyboxPath = line.substr(q1 + 1, q2 - q1 - 1);
+                                OZ_INFO("OZONE sky zone '%s': skybox from world file '%s'",
+                                        node.name.c_str(), skyNode.skyboxPath.c_str());
+                                break;
+                            }
+                            if (!skyNode.skyboxPath.empty()) break;
                         }
                     }
                     pawns.AddSkyZone(skyNode);

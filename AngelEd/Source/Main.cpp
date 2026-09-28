@@ -2446,6 +2446,20 @@ int main(int argc, char **argv){
                 }
                 bx+=lw+2;
             }
+            // Skybox visibility toggle
+            {
+                int lw = 42;
+                bool on = OTEditor.ShowSkybox;
+                Color lc = on ? (Color){70,90,120,255} : (Color){45,45,50,255};
+                DrawRectangle(bx, 2, lw, tbH-4, lc);
+                DrawText("Sky", bx+6, 7, 12, on ? WHITE : LIGHTGRAY);
+                if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)lw, (float)tbH-4}) &&
+                    IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    OTEditor.ShowSkybox = !OTEditor.ShowSkybox;
+                    EditorLog("Viewport skybox %s", OTEditor.ShowSkybox ? "shown" : "hidden");
+                }
+                bx += lw + 2;
+            }
             bx+=6;
             tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);
             tBtn("PolyTexInfo","Pickup",6);

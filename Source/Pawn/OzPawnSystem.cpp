@@ -662,6 +662,20 @@ void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
         }
     }
 
+    // Lazily (re)load the skybox texture whenever the active zone's path changes.
+    // The loader stores only skyboxPath; skyboxTex was never populated, which
+    // made scripted/selected skyboxes render as the world default (or nothing).
+    if (m_activeSkyZoneIndex >= 0) {
+        auto& n = m_skyZones[m_activeSkyZoneIndex];
+        if (!n.skyboxPath.empty() && n.skyboxTex.id == 0) {
+            n.skyboxTex = LoadTextureWithFallback(n.skyboxPath.c_str());
+            if (n.skyboxTex.id > 0)
+                OZ_INFO("SkyZone: loaded skybox '%s'", n.skyboxPath.c_str());
+            else
+                OZ_WARN("SkyZone: skybox '%s' not found", n.skyboxPath.c_str());
+        }
+    }
+
     bool wasInSky = (prevActive >= 0);
     bool inSky = (m_activeSkyZoneIndex >= 0);
 
