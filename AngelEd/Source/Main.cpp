@@ -1768,6 +1768,78 @@ int main(int argc, char **argv){
 
         BeginMode3D(OTEditor.MainCamera);
 
+        // -------------------------------------------------------------------
+        // Skybox cube (viewport backdrop) — toggled by the toolbar "Sky" button.
+        // Mirrors the client: top/bottom use the cap texture, sides reuse it
+        // unless a dedicated side skybox is authored.
+        // -------------------------------------------------------------------
+        if (OTEditor.ShowSkybox) {
+            static Model s_skyFaces[6];
+            static bool s_skyFacesReady = false;
+            static Texture2D s_skyTex = {0};
+            static std::string s_skyPath;
+
+            if (!s_skyFacesReady) {
+                const float skySize = 2000.0f;
+                for (int i = 0; i < 6; i++) {
+                    Mesh plane = GenMeshPlane(skySize, skySize, 1, 1);
+                    float* tc = (float*)plane.texcoords;
+                    int vc = plane.vertexCount;
+                    if (tc) {
+                        switch (i) {
+                            case 0: for (int v = 0; v < vc; v++) tc[v*2+1] = 1.0f - tc[v*2+1]; break;
+                            case 2: for (int v = 0; v < vc; v++) tc[v*2]   = 1.0f - tc[v*2];   break;
+                            case 5: for (int v = 0; v < vc; v++) tc[v*2]   = 1.0f - tc[v*2];   break;
+                        }
+                    }
+                    s_skyFaces[i] = LoadModelFromMesh(plane);
+                }
+                s_skyFacesReady = true;
+            }
+
+            // Resolve the texture for the current document: the world's
+            // Models/Skybox.png first, then the levelinfo skybox path.
+            std::string want;
+            fs::path worldSky = g_documentPath.parent_path() / "Models" / "Skybox.png";
+            if (!g_documentPath.empty() && fs::exists(worldSky))
+                want = worldSky.string();
+            else {
+                LevelMetadata meta = GetLevelMetadata();
+                if (!meta.skyboxTexturePath.empty()) want = meta.skyboxTexturePath;
+            }
+            if (want != s_skyPath) {
+                if (s_skyTex.id > 0) { UnloadTexture(s_skyTex); s_skyTex = {0}; }
+                if (!want.empty()) s_skyTex = LoadTextureWithFallback(want.c_str());
+                s_skyPath = want;
+            }
+
+            if (s_skyTex.id > 0) {
+                Vector3 cp = OTEditor.MainCamera.position;
+                rlDisableDepthMask();
+                rlDisableBackfaceCulling();
+                auto drawFace = [&](int idx, float x, float y, float z, float rotY, float rotX, Texture2D tex) {
+                    rlPushMatrix();
+                    rlTranslatef(x, y, z);
+                    if (rotX != 0.0f) rlRotatef(rotX, 1, 0, 0);
+                    if (rotY != 0.0f) rlRotatef(rotY, 0, 1, 0);
+                    s_skyFaces[idx].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+                    DrawModel(s_skyFaces[idx], {0,0,0}, 1.0f, WHITE);
+                    rlPopMatrix();
+                };
+                drawFace(0, cp.x, cp.y + 1000.0f, cp.z,   0.0f, 180.0f, s_skyTex);  // top
+                drawFace(1, cp.x, cp.y - 1000.0f, cp.z,   0.0f,   0.0f, s_skyTex);  // bottom
+                drawFace(2, cp.x + 1000.0f, cp.y, cp.z,  90.0f,   0.0f, s_skyTex);  // +X
+                drawFace(3, cp.x - 1000.0f, cp.y, cp.z, -90.0f,   0.0f, s_skyTex);  // -X
+                drawFace(4, cp.x, cp.y, cp.z + 1000.0f, 180.0f,   0.0f, s_skyTex);  // +Z
+                drawFace(5, cp.x, cp.y, cp.z - 1000.0f,   0.0f,   0.0f, s_skyTex);  // -Z
+                if (OTEditor.ViewMode == LightingMode::WIREFRAME)
+                    rlDisableBackfaceCulling();
+                else
+                    rlEnableBackfaceCulling();
+                rlEnableDepthMask();
+            }
+        }
+
         DrawGrid(1000, 10.0f);
 
         CWDLProcess();
@@ -2366,6 +2438,20 @@ int main(int argc, char **argv){
                     }
                 }
                 bx+=lw+2;
+            }
+            // Skybox visibility toggle
+            {
+                int lw = 42;
+                bool on = OTEditor.ShowSkybox;
+                Color lc = on ? (Color){70,90,120,255} : (Color){45,45,50,255};
+                DrawRectangle(bx, 2, lw, tbH-4, lc);
+                DrawText("Sky", bx+6, 7, 12, on ? WHITE : LIGHTGRAY);
+                if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)lw, (float)tbH-4}) &&
+                    IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    OTEditor.ShowSkybox = !OTEditor.ShowSkybox;
+                    EditorLog("Viewport skybox %s", OTEditor.ShowSkybox ? "shown" : "hidden");
+                }
+                bx += lw + 2;
             }
             bx+=6;
             tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);

@@ -31,6 +31,7 @@ class Editor{
         // Window flag
         bool ShowEnvPanel = false;
         bool ShowWireframe = false;
+        bool ShowSkybox = true;   // viewport skybox visibility (toolbar "Sky")
         // Shaders for lighting modes
         Shader LitFogShader = {0};
         Shader UnlitShader = {0};
