@@ -117,6 +117,6 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 - Still missing: undo/redo. Docs: `Wiki/Editor-Usage.md`.
 
 ## CI (.github/workflows/ci.yml)
-- Runs on every push/PR; tags matching `b*` also create a GitHub Release with zipped `System/`.
+- Runs on every push/PR; tags matching `b*` also create a GitHub Release. Release assets: `System-<tag>.zip` (full Windows bundle) plus per-binary downloads `AngelServ`/`AngelMaster`/`OzPack`/`Angels95` (`*-<tag>-{linux-x86_64,windows-x86_64.exe}`) and `AngelEd-<tag>-windows-x86_64.exe` (editor is Windows-only). `AngelServ`/`AngelMaster`/`OzPack` are self-contained; `Angels95`/`AngelEd` need the zip's DLLs+GameData.
 - **Linux:** build raylib from source (cached) -> `make AngelServ` -> `make OTENGINE` -> `make ozpack` -> `make AngelMaster` -> smoke test with `timeout 3 ./AngelServ`.
 - **Windows (MSYS2):** `pacman -S mingw-w64-x86_64-{gcc,make,raylib}` -> build all 5 targets -> assemble System/ -> run `build-data.ps1` -> upload artifact. Note: CI compiles AngelEd with inline raw `g++` commands, NOT the `AngelEd/Makefile` - the two can drift.

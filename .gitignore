@@ -2,7 +2,14 @@
 *.o
 *.so
 Angels95
+AngelServ
+AngelMaster
+OzPack
+AngelEd
 oz_server
+
+# CI release staging (populated on runners only)
+release/
 
 # IDE
 .idea/

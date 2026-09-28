@@ -114,19 +114,28 @@ Tests are standalone `.test.cpp` files compiled directly into executables (no te
 GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 ### Linux Job
-1. Build raylib from source (cached by version)
-2. `make AngelServ OTENGINE ozpack`
+1. Build raylib from source, install to `/usr/local`
+2. `make AngelServ OTENGINE ozpack AngelMaster`
 3. Smoke test: `timeout 3 ./AngelServ --dir GameData --port 27015 --http-port 8080`
-4. Upload binaries
+4. Upload binaries as artifacts
 
 ### Windows Job (MSYS2)
 1. Install `mingw-w64-x86_64-{gcc,make,raylib}`
-2. Build all 4 targets
+2. Build all 5 targets (incl. `AngelEd`)
 3. Assemble `System/` release
 4. Run `build-data.ps1`
 5. Upload artifact
 
-Tags matching `b*` trigger a GitHub Release with zipped `System/`.
+Tags matching `b*` trigger a GitHub Release. The release contains:
+- `System-<tag>.zip` — full Windows bundle (client, editor, servers, raylib/GLFW DLLs, GameData, INI templates)
+- **Per-binary assets** (directly downloadable, no build needed):
+  - `AngelServ-<tag>-{linux-x86_64,windows-x86_64.exe}` — dedicated server
+  - `AngelMaster-<tag>-{linux-x86_64,windows-x86_64.exe}` — master server
+  - `OzPack-<tag>-{linux-x86_64,windows-x86_64.exe}` — asset packer
+  - `Angels95-<tag>-{linux-x86_64,windows-x86_64.exe}` — client (Windows copy needs the zip's DLLs)
+  - `AngelEd-<tag>-windows-x86_64.exe` — editor (**Windows only**, Win32 native panels)
+
+`AngelServ`/`AngelMaster`/`OzPack` are self-contained; `Angels95`/`AngelEd` need the `System-<tag>.zip` contents (raylib/GLFW DLLs + GameData).
 
 ## Running
 

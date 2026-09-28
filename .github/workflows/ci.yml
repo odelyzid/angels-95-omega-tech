@@ -81,6 +81,50 @@ jobs:
           name: OzPack-linux
           path: OzPack
 
+      - name: Upload master server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: AngelMaster-linux
+          path: AngelMaster
+
+      # --- Tagged release: attach each Linux binary as a directly downloadable asset ---
+      - name: Stage release assets (Linux)
+        if: startsWith(github.ref, 'refs/tags/b')
+        run: |
+          tag="${{ github.ref_name }}"
+          mkdir -p release
+          cp AngelServ   "release/AngelServ-${tag}-linux-x86_64"
+          cp AngelMaster "release/AngelMaster-${tag}-linux-x86_64"
+          cp Angels95    "release/Angels95-${tag}-linux-x86_64"
+          cp OzPack      "release/OzPack-${tag}-linux-x86_64"
+          chmod +x release/*
+          ls -la release
+
+      - name: Attach Linux binaries to release
+        if: startsWith(github.ref, 'refs/tags/b')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Angels95 Build ${{ github.ref_name }}
+          body: |
+            ## Angels95 ${{ github.ref_name }}
+
+            ### Downloads
+            **Standalone (run directly, no other files needed):**
+            - `AngelServ-<tag>-<platform>` - dedicated game server
+            - `AngelMaster-<tag>-<platform>` - master/listing server
+            - `OzPack-<tag>-<platform>` - asset packer CLI
+
+            **Requires the full `System-<tag>.zip` (ships raylib/GLFW DLLs, GameData, INI templates, run scripts):**
+            - `Angels95-<tag>-windows-x86_64.exe` - game client
+            - `AngelEd-<tag>-windows-x86_64.exe` - editor (Windows only; Win32 native panels)
+
+            Platform notes:
+            - Linux binaries are dynamically linked against the distro's glibc; run on a modern x86_64 Linux.
+            - `AngelEd` is Windows-only (Win32 API); there is no Linux build.
+            - For servers, see `System/angels95-serv.service` for VPS systemd units
+              and `System/OzServer.ini` for config (`--bind 0.0.0.0` to accept remote clients).
+          files: release/*
+
   windows:
     runs-on: windows-latest
     defaults:
@@ -265,9 +309,25 @@ jobs:
           $tag = "${{ github.ref_name }}"
           Compress-Archive -Path System -DestinationPath "System-$tag.zip"
 
+      - name: Stage individual Windows binaries (tagged release only)
+        if: startsWith(github.ref, 'refs/tags/b')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          # Each binary as its own directly downloadable release asset
+          Copy-Item "System\Angels95.exe"     "release\Angels95-$tag-windows-x86_64.exe"
+          Copy-Item "System\AngelServ.exe"    "release\AngelServ-$tag-windows-x86_64.exe"
+          Copy-Item "System\AngelMaster.exe"  "release\AngelMaster-$tag-windows-x86_64.exe"
+          Copy-Item "System\AngelEd.exe"      "release\AngelEd-$tag-windows-x86_64.exe"
+          Copy-Item "System\OzPack.exe"       "release\OzPack-$tag-windows-x86_64.exe"
+          Get-ChildItem release | Select-Object Name, Length
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/b')
         uses: softprops/action-gh-release@v2
         with:
           name: Angels95 Build ${{ github.ref_name }}
-          files: System-${{ github.ref_name }}.zip
+          files: |
+            System-${{ github.ref_name }}.zip
+            release/*.exe
