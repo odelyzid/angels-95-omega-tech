@@ -2038,14 +2038,18 @@ void DrawWorld()
     // -----------------------------------------------------------------------
     {
         Texture2D capTex = {0};
-        if (inSkyZone) {
+        // Precedence: the level skybox (levelinfo / set_skybox / world default)
+        // is authoritative; a zone's authored skybox is only used when the level
+        // defines none. Previously the zone texture always won, so a saved
+        // levelinfo skybox appeared to be ignored inside sky zones.
+        if (WDLModels.Skybox.id > 0 && OmegaTechData.SkyboxEnabled) {
+            capTex = WDLModels.Skybox;
+        } else if (inSkyZone) {
             SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
             if (sky && sky->skyboxTex.id > 0)
                 capTex = sky->skyboxTex;
             else if (WDLModels.Skybox.id > 0)
                 capTex = WDLModels.Skybox;
-        } else if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
-            capTex = WDLModels.Skybox;
         }
         // Sides use an authored side texture when available; otherwise reuse the
         // cap texture so the sky renders all around (previously they drew a flat
@@ -2492,29 +2496,24 @@ if (inSkyZone)
             lem.ClearPendingFog();
         }
 
-        // Apply pending Skybox changes from script contexts
-        // Loads into active SkyZoneNode's skyboxTex (or WDLModels.Skybox fallback)
-        {
-            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
-            std::string path;
-            if (sky && !sky->skyboxPath.empty()) {
-                path = sky->skyboxPath;
-                sky->skyboxPath.clear();
-            } else if (lem.HasPendingSkybox()) {
-                path = lem.PendingSkybox();
-                lem.ClearPendingSkybox();
-            }
+        // Apply pending Skybox changes from script contexts.
+        // Only an explicit script request (set_skybox) overrides the levelinfo
+        // skybox; the zone's authored skyboxPath is kept for inside-zone
+        // rendering by the sky pass and must NOT clobber the global level skybox
+        // every frame (that made a saved levelinfo skybox appear ignored).
+        if (lem.HasPendingSkybox()) {
+            std::string path = lem.PendingSkybox();
+            lem.ClearPendingSkybox();
             if (!path.empty()) {
                 OZ_INFO("LightningScript: loading skybox '%s'", path.c_str());
                 Texture2D newSky = LoadTextureWithFallback(path.c_str());
                 if (newSky.id > 0) {
-                    // Load into zone's dedicated texture slot
+                    SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
                     if (sky) {
                         if (sky->skyboxTex.id > 0)
                             UnloadTexture(sky->skyboxTex);
                         sky->skyboxTex = newSky;
                     }
-                    // Also set global fallback so 2D path works if leaving the zone
                     if (WDLModels.Skybox.id > 0)
                         UnloadTexture(WDLModels.Skybox);
                     WDLModels.Skybox = newSky;

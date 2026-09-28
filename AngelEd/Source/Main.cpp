@@ -745,7 +745,44 @@ static bool LoadWorldDocument(const fs::path& path) {
                    [](unsigned char c) { return (char)std::tolower(c); });
     if (extension == ".ozone") {
         EditorLog("OZONE format: %s", path.string().c_str());
-        return OzoneLoader::Instance().LoadFile(path.string().c_str());
+        bool ok = OzoneLoader::Instance().LoadFile(path.string().c_str());
+        // The OZONE loader does not populate the editor's level metadata, so a
+        // saved levelinfo skybox/particles would be invisible in the viewport.
+        // Parse them here into GetLevelMetadata()/SetLevelMetadata().
+        auto prims = OzoneParser::parse_file(path.string().c_str());
+        for (auto& pr : prims) {
+            if (pr.type == OzonePrimitiveType::ENTITY_LEVELINFO) {
+                LevelMetadata meta = GetLevelMetadata();
+                auto arg = [&](int i) -> float {
+                    return (i >= 0 && i < (int)pr.args.size()) ? pr.args[i] : 0.0f;
+                };
+                meta.gameType = (GameType)(int)arg(0);
+                meta.maxPlayers = (int)arg(1);
+                meta.respawnTime = arg(2);
+                meta.timeLimitEnabled = arg(3) != 0.0f;
+                meta.timeLimitMinutes = arg(4);
+                meta.scoreLimit = (int)arg(5);
+                meta.friendlyFire = arg(6) != 0.0f;
+                meta.skyboxTexturePath = pr.entityType;
+                SetLevelMetadata(meta);
+                EditorLog("OZONE levelinfo: skybox='%s'", meta.skyboxTexturePath.c_str());
+            } else if (pr.type == OzonePrimitiveType::ENTITY_PARTICLES) {
+                LevelMetadata meta = GetLevelMetadata();
+                auto arg = [&](int i) -> float {
+                    return (i >= 0 && i < (int)pr.args.size()) ? pr.args[i] : 0.0f;
+                };
+                meta.particleType = (ParticleType)(int)arg(0);
+                meta.particleDensity = arg(1);
+                meta.particleSpeed = arg(2);
+                meta.particleColorR = (int)arg(3);
+                meta.particleColorG = (int)arg(4);
+                meta.particleColorB = (int)arg(5);
+                meta.particleWindX = arg(6);
+                meta.particleWindZ = arg(7);
+                SetLevelMetadata(meta);
+            }
+        }
+        return ok;
     }
     if (extension != ".wdl") return false;
 
