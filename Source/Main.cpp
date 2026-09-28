@@ -14,6 +14,8 @@
 #include <cstring>
 #include <algorithm>
 #include <vector>
+#include <unordered_map>
+#include <cstdint>
 #include <filesystem>
 namespace fs = std::filesystem;
 
@@ -1369,9 +1371,27 @@ int main(int argc, char** argv){
                 LightningEntityManager::Instance().SetPlayerXP(g_client.get_xp());
                 LightningEntityManager::Instance().SetPlayerXPToNext(g_client.get_xp_to_next());
 
+                // Map each server NPC (world+partition+index) to the local pawn
+                // spawned for it. The previous code assumed pawn id == npc
+                // index+1, which breaks as soon as LoadWorld() calls DespawnAll()
+                // (map switch): Get() then misses, so it spawned a brand-new pawn
+                // AND script entity every single frame -> unbounded growth and
+                // ~0 FPS. Entries are dropped when their pawn disappears.
+                static std::unordered_map<uint64_t, int> s_npcPawnId;
                 const auto& npcs = g_client.npcs();
                 for (size_t i = 0; i < npcs.size(); i++) {
-                    Pawn* p = PawnSystem::Instance().Get(static_cast<int>(i + 1));
+                    const uint64_t key =
+                        ((uint64_t)(uint32_t)npcs[i].world_index     << 42) |
+                        ((uint64_t)(uint32_t)npcs[i].npc_index       << 21) |
+                         (uint64_t)(uint32_t)npcs[i].partition_index;
+
+                    Pawn* p = nullptr;
+                    auto it = s_npcPawnId.find(key);
+                    if (it != s_npcPawnId.end()) {
+                        p = PawnSystem::Instance().Get(it->second);
+                        if (!p) s_npcPawnId.erase(it); // despawned/reloaded -> respawn once
+                    }
+
                     if (p) {
                         p->position = { npcs[i].position.x, npcs[i].position.y, npcs[i].position.z };
                         p->active = npcs[i].active;
@@ -1382,6 +1402,7 @@ int main(int argc, char** argv){
                         if (pawnId < 0)
                             pawnId = PawnSystem::Instance().Spawn({ npcs[i].position.x, npcs[i].position.y, npcs[i].position.z }, "Walker");
                         if (pawnId >= 0) {
+                            s_npcPawnId[key] = pawnId;
                             Pawn* np = PawnSystem::Instance().Get(pawnId);
                             if (np) {
                                 np->networkControlled = true;
