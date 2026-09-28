@@ -1,5 +1,6 @@
 ﻿#include "Data.hpp"
 #include "Log.hpp"
+#include "JoinUri.hpp"
 #include "Package/OzAssetMapper.hpp"
 #include "Audio/DspReverb.hpp"
 #include "OzOzoneLoader.hpp"
@@ -1037,10 +1038,25 @@ void PlayHomeScreen()
 
     if (menu.ShouldJoinServer())
     {
-        SetServerJoinIP = menu.GetJoinIP();
+        // Validate the typed/selected host so raygui textbox corruption can't
+        // send a garbage address (e.g. a single stray char) into connect().
+        std::string host;
         int port = menu.GetJoinPort();
-        if (port > 0 && port <= 65535) SetServerJoinPort = port;
-        SetServerJoinFlag = true;
+        if (JoinUri::ParseHostPort(menu.GetJoinIP(), host, port, port > 0 ? port : 27015) &&
+            !host.empty())
+        {
+            // SetServerJoinIP is consumed after PlayHomeScreen() returns, so it
+            // must outlive the local menu (GetJoinIP() dangles once menu dies).
+            static std::string s_menuJoinHost;
+            s_menuJoinHost = host;
+            SetServerJoinIP = s_menuJoinHost.c_str();
+            SetServerJoinPort = port;
+            SetServerJoinFlag = true;
+        }
+        else
+        {
+            OZ_WARN("Join: invalid address '%s' — not connecting", menu.GetJoinIP());
+        }
     }
 
     if (menu.ShouldStartServer())

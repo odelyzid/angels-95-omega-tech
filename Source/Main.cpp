@@ -909,9 +909,18 @@ int main(int argc, char** argv){
     });
 
     if (SetServerJoinFlag && SetServerJoinIP) {
-        g_network_enabled = g_client.connect(SetServerJoinIP, SetServerJoinPort);
-        if (g_network_enabled) {
-            OZ_INFO("Network: connected to %s:%d", SetServerJoinIP, SetServerJoinPort);
+        // Final guard: never hand a malformed host to connect() (defends against
+        // a corrupted menu textbox producing e.g. a one-character address).
+        std::string host;
+        int port = SetServerJoinPort;
+        if (JoinUri::ParseHostPort(SetServerJoinIP, host, port, SetServerJoinPort) && !host.empty()) {
+            g_network_enabled = g_client.connect(host.c_str(), (uint16_t)port);
+            if (g_network_enabled)
+                OZ_INFO("Network: connected to %s:%d", host.c_str(), port);
+            else
+                OZ_WARN("Network: connect to %s:%d failed", host.c_str(), port);
+        } else {
+            OZ_WARN("Network: refusing invalid join address '%s'", SetServerJoinIP);
         }
         SetServerJoinFlag = false;
     }

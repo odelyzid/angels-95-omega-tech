@@ -251,6 +251,13 @@ private:
     int m_teamColor = 0, m_gameTypeFilter = 0, m_settingsSubPage = 0;
     char m_joinIPBuffer[64] = "127.0.0.1";
     char m_hostPortBuffer[16] = "27015";
+    // raygui textboxes share one global cursor index; forcing editMode=true
+    // every frame left it stale/out-of-range and corrupted the buffer (garbage
+    // hosts like "z"). Track focus per box and toggle on the return value.
+    bool m_joinIpEditing = false;
+    bool m_joinPortEditing = false;
+    bool m_hostPortEditing = false;
+    bool m_charNameEditing = false;
     std::string m_selectedServerWorld;
     int m_multiplayerSubPage = 0; // 0=Join, 1=Host
 
@@ -569,6 +576,9 @@ private:
                     if (CheckCollisionPointRec(mp, r)) {
                         PlaySound(OmegaTechSoundData.UIClick);
                         m_multiplayerSubPage = idx;
+                        // Leaving a page must drop textbox focus so a hidden
+                        // box can't keep editing with a stale cursor index.
+                        m_joinIpEditing = m_joinPortEditing = m_hostPortEditing = false;
                     }
                 };
                 checkBtn(0, {bx, by, 140, 32});
@@ -921,7 +931,11 @@ private:
         DrawPageHeader(area, "Character Configuration");
         float x = area.x + 16, y = area.y + 42;
         DrawText("Name:", (int)x, (int)y, 14, WHITE);
-        GuiTextBox({x + 60, y - 2, 200, 22}, m_charName, sizeof(m_charName), true);
+        Rectangle nameRect = {x + 60, y - 2, 200, 22};
+        // GuiTextBox returns true on focus enter/exit; toggling here keeps the
+        // shared cursor index valid and lets exactly one box consume key input.
+        if (GuiTextBox(nameRect, m_charName, sizeof(m_charName), m_charNameEditing))
+            m_charNameEditing = !m_charNameEditing;
         y += 34;
 
         DrawText("Team Color:", (int)x, (int)(y + 4), 14, WHITE);
@@ -969,14 +983,24 @@ private:
         if (m_multiplayerSubPage == 0) {
             DrawText("Join a Game Server", (int)(sx + 8), y, 14, WHITE); y += 24;
             DrawText("Server IP:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
-            GuiTextBox({sx + 80, (float)y, 150, 22}, m_joinIPBuffer, sizeof(m_joinIPBuffer), true);
+            // raygui textboxes must only be in edit mode while focused; forcing
+            // editMode=true every frame corrupts the buffer (shared cursor index
+            // desync), which produced garbage hosts like "z".
+            Rectangle ipRect = {sx + 80, (float)y, 150, 22};
             DrawText("Port:", (int)(sx + 240), y + 4, 12, LIGHTGRAY);
-            GuiTextBox({sx + 276, (float)y, 70, 22}, m_hostPortBuffer, sizeof(m_hostPortBuffer), true);
+            Rectangle portRect = {sx + 276, (float)y, 70, 22};
+            if (GuiTextBox(ipRect, m_joinIPBuffer, sizeof(m_joinIPBuffer), m_joinIpEditing))
+                m_joinIpEditing = !m_joinIpEditing;
+            if (GuiTextBox(portRect, m_hostPortBuffer, sizeof(m_hostPortBuffer), m_joinPortEditing))
+                m_joinPortEditing = !m_joinPortEditing;
             y += 30;
             if (GuiButton({sx + 8, (float)y, 140, 24}, "Connect")) {
                 PlaySound(OmegaTechSoundData.UIClick);
+                // Commit the typed/selected values (authoritative join target)
                 std::strncpy(m_joinIP, m_joinIPBuffer, sizeof(m_joinIP) - 1);
                 m_joinIP[sizeof(m_joinIP) - 1] = '\0';
+                m_joinIpEditing = false;
+                m_joinPortEditing = false;
                 m_joinServer = true;
                 m_exit = true;
             }
@@ -1055,6 +1079,9 @@ private:
                                 PlaySound(OmegaTechSoundData.UIClick);
                                 snprintf(m_joinIPBuffer, sizeof(m_joinIPBuffer), "%s", s.ip.c_str());
                                 snprintf(m_hostPortBuffer, sizeof(m_hostPortBuffer), "%u", (unsigned)s.port);
+                                // Keep the authoritative join target in sync with
+                                // the clicked row (m_joinIP is what GetJoinIP reads).
+                                snprintf(m_joinIP, sizeof(m_joinIP), "%s", s.ip.c_str());
                             }
                             ry += rowH;
                         }
@@ -1086,6 +1113,8 @@ private:
                                 PlaySound(OmegaTechSoundData.UIClick);
                                 snprintf(m_joinIPBuffer, sizeof(m_joinIPBuffer), "%s", s.ip.c_str());
                                 snprintf(m_hostPortBuffer, sizeof(m_hostPortBuffer), "%u", (unsigned)s.port);
+                                // Keep the authoritative join target in sync (GetJoinIP reads m_joinIP)
+                                snprintf(m_joinIP, sizeof(m_joinIP), "%s", s.ip.c_str());
                             }
                             ry += rowH;
                         }
@@ -1122,10 +1151,13 @@ private:
             }
             y += 30;
             DrawText("Port:", (int)(sx + 8), y + 4, 12, LIGHTGRAY);
-            GuiTextBox({sx + 80, (float)y, 80, 22}, m_hostPortBuffer, sizeof(m_hostPortBuffer), true);
+            Rectangle hostPortRect = {sx + 80, (float)y, 80, 22};
+            if (GuiTextBox(hostPortRect, m_hostPortBuffer, sizeof(m_hostPortBuffer), m_hostPortEditing))
+                m_hostPortEditing = !m_hostPortEditing;
             y += 34;
             if (GuiButton({sx + 8, (float)y, 140, 24}, "Start Server")) {
                 PlaySound(OmegaTechSoundData.UIClick);
+                m_hostPortEditing = false;
                 if (!m_selectedServerWorld.empty()) {
                     m_selectedWorld = m_selectedServerWorld;
                     m_startServer = true;

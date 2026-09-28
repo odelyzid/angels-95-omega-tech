@@ -166,20 +166,16 @@ inline Texture2D LoadTextureWithFallback(const char* path) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
         std::string ext = normalized.substr(normalized.rfind('.'));
-        // DDS cannot be decoded from memory by raylib — cache bytes to a file
-        // and use the file-based loader (which has a native DDS path).
-        if (ext == ".dds") {
-            std::string cachePath = PackageAssetLoader::Instance().CacheModelFile(path);
-            if (!cachePath.empty() && IsPathFile(cachePath.c_str()))
-                return LoadTexture(cachePath.c_str());
-            return Texture2D{0};
-        }
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        // Raylib's LoadImageFromMemory (which LoadTextureFromImage uses) needs
+        // the extension *with* its leading dot, e.g. ".dds"/".png". Passing
+        // "dds"/"png" without the dot tripped "IMAGE: Data format not supported"
+        // and broke packaged DDS textures (the old workaround wrote them to
+        // System/Cache just to use the file-based loader).
         const char* fmt = nullptr;
-        if (ext == ".png") fmt = "png";
-        else if (ext == ".jpg" || ext == ".jpeg") fmt = "jpg";
-        else if (ext == ".bmp") fmt = "bmp";
-        else if (ext == ".tga") fmt = "tga";
-        else if (ext == ".gif") fmt = "gif";
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+            ext == ".bmp" || ext == ".tga" || ext == ".gif" || ext == ".dds")
+            fmt = ext.c_str();
         if (fmt) {
             Image img = LoadImageFromMemory(fmt, data, (int)sz);
             Texture2D tex = LoadTextureFromImage(img);
@@ -199,7 +195,9 @@ inline Sound LoadSoundWithFallback(const char* path) {
     if (data) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
-        std::string ext = normalized.substr(normalized.rfind('.') + 1);
+        // Raylib memory loaders expect the extension including its dot.
+        std::string ext = normalized.substr(normalized.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         Wave w = LoadWaveFromMemory(ext.c_str(), data, (int)sz);
         Sound s = LoadSoundFromWave(w);
         UnloadWave(w);
@@ -217,7 +215,8 @@ inline Music LoadMusicWithFallback(const char* path) {
     if (data) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
-        std::string ext = normalized.substr(normalized.rfind('.') + 1);
+        std::string ext = normalized.substr(normalized.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         return LoadMusicStreamFromMemory(ext.c_str(), data, (int)sz);
     }
     return Music{0};
@@ -243,7 +242,8 @@ inline Font LoadFontWithFallback(const char* path) {
     if (data) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
-        std::string ext = normalized.substr(normalized.rfind('.') + 1);
+        std::string ext = normalized.substr(normalized.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         return LoadFontFromMemory(ext.c_str(), data, (int)sz, 32, 0, 0);
     }
     return Font{0};
@@ -276,18 +276,13 @@ inline Image LoadImageWithFallback(const char* path) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
         std::string ext = normalized.substr(normalized.rfind('.'));
-        // DDS needs the file-based loader (raylib has no in-memory DDS path)
-        if (ext == ".dds") {
-            std::string cachePath = PackageAssetLoader::Instance().CacheModelFile(path);
-            if (!cachePath.empty() && IsPathFile(cachePath.c_str()))
-                return LoadImage(cachePath.c_str());
-            return Image{0};
-        }
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        // Extension (including the leading dot) is required by raylib's
+        // LoadImageFromMemory; ".dds" decodes from memory too.
         const char* fmt = nullptr;
-        if (ext == ".png") fmt = "png";
-        else if (ext == ".jpg" || ext == ".jpeg") fmt = "jpg";
-        else if (ext == ".bmp") fmt = "bmp";
-        else if (ext == ".tga") fmt = "tga";
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+            ext == ".bmp" || ext == ".tga" || ext == ".gif" || ext == ".dds")
+            fmt = ext.c_str();
         if (fmt)
             return LoadImageFromMemory(fmt, data, (int)sz);
     }
