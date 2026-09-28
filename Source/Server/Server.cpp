@@ -48,6 +48,7 @@ static net::NetworkDiscovery* g_discovery = nullptr; // set in main(); keeps LAN
 static std::vector<std::string> g_master_udp;   // --master host[:port]
 static std::vector<std::string> g_master_http;  // --master-http http://host:port
 static std::string g_public_ip;                 // --public-ip (NAT)
+static std::string g_bind_ip;                   // --bind (default = all interfaces)
 
 static std::string current_map_name() {
     return g_world_list.empty() ? std::string("unknown") : g_world_list[0];
@@ -523,7 +524,11 @@ static int http_listen(int port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY; // 0.0.0.0 — all interfaces
+    // g_bind_ip is the already-resolved literal IPv4 ("" = all interfaces)
+    if (g_bind_ip.empty() || g_bind_ip == "0.0.0.0")
+        addr.sin_addr.s_addr = INADDR_ANY; // 0.0.0.0 — all interfaces
+    else
+        inet_pton(AF_INET, g_bind_ip.c_str(), &addr.sin_addr);
     addr.sin_port = htons(port);
     if (bind(TO_SOCK(fd), (struct sockaddr*)&addr, sizeof(addr)) < 0) { close_sock(fd); return -1; }
     if (listen(TO_SOCK(fd), 8) < 0) { close_sock(fd); return -1; }
@@ -1419,6 +1424,59 @@ int main(int argc, char** argv) {
     int game_port = 27015;
     int http_port = 8080;
 
+    // Optional persisted config (useful on a VPS so the systemd unit stays short):
+    //   System/OzServer.ini  [Server] port/http-port/dir/bind/server-name
+    //                        [Auth]  auth-token/admin-token/public-ip
+    //                        [MasterServers] Master, Master1.. (UDP or http:// URLs)
+    // CLI flags and environment variables override these.
+    {
+        IniConfig cfg;
+        if (cfg.Load("System/OzServer.ini")) {
+            game_port = cfg.GetInt("Server", "port", game_port);
+            http_port = cfg.GetInt("Server", "http-port", http_port);
+            std::string d = cfg.Get("Server", "dir", "");
+            if (!d.empty()) g_gamedata_dir = d;
+            std::string b = cfg.Get("Server", "bind", "");
+            if (!b.empty()) g_bind_ip = b;
+            std::string sn = cfg.Get("Server", "server-name", "");
+            if (!sn.empty()) g_server_name = sn;
+            std::string at = cfg.Get("Auth", "auth-token", "");
+            if (!at.empty()) g_auth_token = at;
+            std::string ad = cfg.Get("Auth", "admin-token", "");
+            if (!ad.empty()) g_admin_token = ad;
+            std::string pi = cfg.Get("Auth", "public-ip", "");
+            if (!pi.empty()) g_public_ip = pi;
+
+            const char* S = "MasterServers";
+            auto push = [](const std::string& v, std::vector<std::string>& udp,
+                           std::vector<std::string>& http) {
+                size_t start = 0;
+                while (start <= v.size()) {
+                    size_t comma = v.find(',', start);
+                    std::string tok = (comma == std::string::npos)
+                        ? v.substr(start) : v.substr(start, comma - start);
+                    size_t a = tok.find_first_not_of(" \t");
+                    size_t b = tok.find_last_not_of(" \t");
+                    if (a != std::string::npos) tok = tok.substr(a, b - a + 1);
+                    if (!tok.empty()) {
+                        if (tok.rfind("http://", 0) == 0 || tok.rfind("https://", 0) == 0)
+                            http.push_back(tok);
+                        else
+                            udp.push_back(tok);
+                    }
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+            };
+            push(cfg.Get(S, "Master"), g_master_udp, g_master_http);
+            for (int i = 1; i <= 32; ++i) {
+                char key[16];
+                snprintf(key, sizeof(key), "Master%d", i);
+                push(cfg.Get(S, key), g_master_udp, g_master_http);
+            }
+        }
+    }
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)
             game_port = atoi(argv[++i]);
@@ -1426,6 +1484,8 @@ int main(int argc, char** argv) {
             http_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--dir") == 0 && i + 1 < argc)
             g_gamedata_dir = argv[++i];
+        else if (strcmp(argv[i], "--bind") == 0 && i + 1 < argc)
+            g_bind_ip = argv[++i];
         else if (strcmp(argv[i], "--auth-token") == 0 && i + 1 < argc)
             g_auth_token = argv[++i];
         else if (strcmp(argv[i], "--admin-token") == 0 && i + 1 < argc)
@@ -1441,21 +1501,33 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--help") == 0) {
             printf("AngelServ -- OzWorld/OmegaTech dedicated server\n");
             printf("Usage: AngelServ [--port P] [--http-port P] [--dir GameData]"
-                   " [--auth-token T] [--admin-token T]\n");
+                   " [--bind IP|HOST] [--auth-token T] [--admin-token T]\n");
             printf("                  [--server-name NAME] [--master host[:port]]"
                    " [--master-http URL] [--public-ip IP]\n");
+            printf("  --bind         Interface for UDP+HTTP (default 0.0.0.0 = all).\n");
             printf("  --auth-token   Require Bearer auth for the HTTP API (env: OZ_AUTH_TOKEN)\n");
             printf("  --admin-token  Enable admin COMMANDs (list/say/kick; env: OZ_ADMIN_TOKEN)\n");
             printf("  --server-name  Display name announced to masters (default: Angels95 Server)\n");
             printf("  --master       Master UDP heartbeat target, repeatable (default port 27900)\n");
             printf("  --master-http  Master HTTP heartbeat URL, repeatable (plain http:// only)\n");
             printf("  --public-ip    Public IP to announce when behind NAT (master can override)\n");
+            printf("  Config file:   System/OzServer.ini ([Server]/[Auth]/[MasterServers]; CLI overrides)\n");
             return 0;
         }
     }
-    // Env fallback (CLI wins)
+    // Env fallback (CLI/config win)
     if (g_auth_token.empty())  { const char* e = getenv("OZ_AUTH_TOKEN");  if (e) g_auth_token = e; }
     if (g_admin_token.empty()) { const char* e = getenv("OZ_ADMIN_TOKEN"); if (e) g_admin_token = e; }
+
+    // Resolve --bind (literal IPv4, hostname, or 0.0.0.0). Empty → all interfaces.
+    std::string resolved_bind;
+    if (!g_bind_ip.empty() && g_bind_ip != "0.0.0.0") {
+        resolved_bind = master::ResolveBindAddress(g_bind_ip);
+        if (resolved_bind.empty()) {
+            OZ_WARN("Cannot resolve --bind '%s' — falling back to 0.0.0.0", g_bind_ip.c_str());
+        }
+    }
+    g_bind_ip = resolved_bind; // "" = all interfaces; literal IPv4 otherwise
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);

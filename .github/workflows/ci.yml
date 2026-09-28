@@ -181,10 +181,9 @@ jobs:
           Fullscreen=0
           VSync=1
           
-          [Audio]
-          MasterVolume=1.0
-          MusicVolume=0.7
-          SFXVolume=1.0
+          [Settings]
+          audio_volume=100.000000
+          mute=False
           
           [Game]
           ServerIP=127.0.0.1

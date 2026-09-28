@@ -188,10 +188,10 @@ test_master: tests/Master.test.cpp Source/Master/MasterProtocol.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/Master.test.cpp -o $@
 
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ -lws2_32
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ $(SERVER_LIBS)
 
 test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ -lws2_32
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(SERVER_LIBS)
 
 test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state
 	@echo "=== LightningScriptParser Tests ==="

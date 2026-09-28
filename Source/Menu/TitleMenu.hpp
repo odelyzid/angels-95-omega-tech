@@ -887,9 +887,10 @@ private:
             }
             case 1: {
                 DrawText("Audio Settings", (int)(sx + 8), y, 14, WHITE); y += 24;
-                float vol = GetMasterVolume();
-                vol = GuiSlider({sx+8, (float)y, 200, 20}, "Volume", NULL, vol, 0.0f, 1.0f);
-                SetMasterVolume(vol);
+                // Drive the persisted AudioSlider (0..100) so the value survives
+                // SaveClientSettings() on exit.
+                float vol = GuiSlider({sx+8, (float)y, 200, 20}, "Volume", NULL, AudioSlider, 0.0f, 100.0f);
+                if (vol != AudioSlider) { AudioSlider = vol; ApplyMasterVolume(); }
                 break;
             }
             case 2: {

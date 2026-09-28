@@ -20,6 +20,22 @@
 #include <vector>
 #include <algorithm>
 
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>
+#endif
+
 namespace master {
 
 constexpr const char* GAMENAME          = "angels95";
@@ -331,6 +347,29 @@ inline bool ParseServerListJson(const std::string& json,
         out.push_back(std::move(e));
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// ResolveBindAddress — accepts a literal IPv4 ("0.0.0.0", "1.2.3.4") or a
+// hostname (e.g. a VPS/DuckDNS FQDN) and returns a literal IPv4 string.
+// Returns "" when the name cannot be resolved.
+// ---------------------------------------------------------------------------
+inline std::string ResolveBindAddress(const std::string& bind) {
+    if (bind.empty()) return "";
+    struct in_addr a4;
+    if (inet_pton(AF_INET, bind.c_str(), &a4) == 1) return bind;
+    struct addrinfo hints, *res = nullptr;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(bind.c_str(), nullptr, &hints, &res) == 0 && res) {
+        char buf[64] = {0};
+        struct sockaddr_in* sin = (struct sockaddr_in*)res->ai_addr;
+        inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf));
+        freeaddrinfo(res);
+        return buf;
+    }
+    return "";
 }
 
 } // namespace master

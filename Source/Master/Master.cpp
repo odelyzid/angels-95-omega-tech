@@ -43,6 +43,7 @@
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
+    #include <netdb.h>
     #include <unistd.h>
     #include <fcntl.h>
     #include <errno.h>
@@ -63,6 +64,9 @@ static std::unordered_map<std::string, ServerEntry> g_servers;   // key: ip:port
 static std::unordered_map<std::string, long long> g_last_accept_ms; // key: source ip
 static int g_max_servers = MAX_SERVERS;
 static std::string g_gamename = GAMENAME;
+// Bind address for the UDP heartbeat + HTTP API. Default loopback; a VPS build
+// must pass --bind 0.0.0.0 to accept heartbeats/queries from the internet.
+static std::string g_bind_ip = "127.0.0.1";
 
 static long long now_ms() {
     using namespace std::chrono;
@@ -93,6 +97,28 @@ static bool init_winsock() {
     return true;
 }
 
+// LAN/private ranges: a self-reported public_ip is only trusted when the
+// heartbeat itself arrived from a non-private source (anti-spoof).
+static bool is_valid_ipv4(const std::string& ip) {
+    struct in_addr a4;
+    return inet_pton(AF_INET, ip.c_str(), &a4) == 1;
+}
+
+static bool is_private_ipv4(const std::string& ip) {
+    unsigned a = 0, b = 0, c = 0, d = 0;
+    if (sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return false;
+    if (a == 10) return true;                       // 10.0.0.0/8
+    if (a == 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a == 192 && b == 168) return true;          // 192.168.0.0/16
+    if (a == 127) return true;                      // loopback
+    if (a == 169 && b == 254) return true;          // link-local
+    return false;
+}
+
+static std::string resolve_bind_address(const std::string& bind_ip) {
+    return ResolveBindAddress(bind_ip);
+}
+
 // ---------------------------------------------------------------------------
 // Registration (shared by UDP + HTTP heartbeat paths)
 // ---------------------------------------------------------------------------
@@ -104,7 +130,15 @@ static std::string heartbeat_key(const std::string& ip, uint16_t port) {
 static bool apply_heartbeat(const Heartbeat& hb, const std::string& source_ip,
                             bool from_http) {
     if (hb.port == 0) return false;
-    std::string ip = hb.public_ip.empty() ? source_ip : hb.public_ip;
+    // Prefer a self-reported public_ip when it is valid AND plausible: only
+    // trust it when the heartbeat itself came from a non-private source, so a
+    // spoofed public_ip from a LAN client cannot hijack a listing. Otherwise
+    // use the address the packet actually arrived from.
+    std::string ip = source_ip;
+    if (!hb.public_ip.empty() && is_valid_ipv4(hb.public_ip) &&
+        !is_private_ipv4(source_ip)) {
+        ip = hb.public_ip;
+    }
     if (ip.empty()) return false;
 
     // Rate limit per source IP (1.5s). The public_ip field is client-supplied
@@ -181,7 +215,7 @@ static int http_listen(int port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = INADDR_ANY;   // API is public; gate via firewall/token if needed
     addr.sin_port = htons((u_short)port);
     if (bind(MSOCK(fd), (struct sockaddr*)&addr, sizeof(addr)) < 0) { MCLOSE(fd); return -1; }
     if (listen(MSOCK(fd), 16) < 0) { MCLOSE(fd); return -1; }
@@ -320,20 +354,31 @@ int main(int argc, char** argv) {
     int http_port = DEFAULT_HTTP_PORT;
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)           udp_port = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) http_port = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--max-servers") == 0 && i + 1 < argc) g_max_servers = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--gamename") == 0 && i + 1 < argc)  g_gamename = argv[++i];
-        else if (strcmp(argv[i], "--help") == 0) {
-            printf("AngelMaster -- Angels95 / OmegaTech master server\n");
-            printf("Usage: AngelMaster [--port 27900] [--http-port 27950] [--max-servers 4096]\n");
-            printf("  --port         UDP heartbeat listener (default 27900)\n");
-            printf("  --http-port    HTTP list/API port (default 27950)\n");
-            printf("  --max-servers  Maximum tracked game servers (default 4096)\n");
-            return 0;
-        }
+    if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)           udp_port = atoi(argv[++i]);
+    else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) http_port = atoi(argv[++i]);
+    else if (strcmp(argv[i], "--max-servers") == 0 && i + 1 < argc) g_max_servers = atoi(argv[++i]);
+    else if (strcmp(argv[i], "--gamename") == 0 && i + 1 < argc) g_gamename = argv[++i];
+    else if (strcmp(argv[i], "--bind") == 0 && i + 1 < argc) g_bind_ip = argv[++i];
+    else if (strcmp(argv[i], "--help") == 0) {
+        printf("AngelMaster -- Angels95 master server\n");
+        printf("Usage: AngelMaster [--port P] [--http-port P] [--max-servers N]"
+               " [--gamename NAME] [--bind IP|HOST|0.0.0.0]\n");
+        printf("  --bind  Interface to bind UDP+HTTP to (default 127.0.0.1).\n");
+        printf("          Use 0.0.0.0 on a VPS to accept remote heartbeats/queries.\n");
+        return 0;
+    }
     }
     if (g_max_servers <= 0) g_max_servers = MAX_SERVERS;
+
+    // Resolve --bind (literal IP or hostname such as a DuckDNS/VPS FQDN)
+    std::string resolved_bind;
+    if (!g_bind_ip.empty() && g_bind_ip != "0.0.0.0") {
+        resolved_bind = resolve_bind_address(g_bind_ip);
+        if (resolved_bind.empty()) {
+            fprintf(stderr, "AngelMaster: cannot resolve --bind '%s' (falling back to 0.0.0.0)\n",
+                    g_bind_ip.c_str());
+        }
+    }
 
     if (!init_winsock()) { fprintf(stderr, "AngelMaster: winsock init failed\n"); return 1; }
     signal(SIGINT, signal_handler);
@@ -355,7 +400,10 @@ int main(int argc, char** argv) {
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
+        if (resolved_bind.empty())
+            addr.sin_addr.s_addr = INADDR_ANY;             // 0.0.0.0
+        else
+            inet_pton(AF_INET, resolved_bind.c_str(), &addr.sin_addr);
         addr.sin_port = htons((u_short)udp_port);
         if (bind(MSOCK(ufd), (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             fprintf(stderr, "AngelMaster: UDP bind failed on %d\n", udp_port);

@@ -167,7 +167,16 @@ bool VSYNCToggle = false;
 bool MXAAToggle = false;
 
 bool MuteToggle = false;
-float AudioSlider = 100.0f;
+float AudioSlider = 100.0f; // persisted as 0..100 in [Settings] audio_volume
+
+// raylib/miniaudio expects the master volume as a linear 0..1 factor; values
+// above 1.0 amplify and clip (miniaudio does NOT clamp). AudioSlider is stored
+// 0..100, so convert here and let Mute always win. Single source of truth for
+// applying the persisted volume.
+static inline void ApplyMasterVolume() {
+    float v = AudioSlider < 0.0f ? 0.0f : (AudioSlider > 100.0f ? 100.0f : AudioSlider);
+    SetMasterVolume(MuteToggle ? 0.0f : v / 100.0f);
+}
 
 void ShowMenuSetiings(){
     Rectangle LayoutRecs[15] = {
@@ -215,9 +224,6 @@ void ShowMenuSetiings(){
     else {
         ClearWindowState(FLAG_MSAA_4X_HINT);
     }
-    SetMasterVolume(AudioSlider);
-    if (MuteToggle){
-        SetMasterVolume(0);
-    }
+    ApplyMasterVolume();
     
 }

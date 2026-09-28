@@ -204,13 +204,15 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 - "Dedicated server standalone works": it does for world/NPC simulation, but
   player damage is client-authoritative for world hazards (`PLAYER_HURT`) — now
   closed by Tier 0 ownership checks.
-- "INI config is supported": the **client** now reads/writes
-  `System/Angels95.ini` (window/VSync/MSAA/gfx/audio), but the **server** still
-  accepts CLI flags only (`--port`, `--http-port`, `--dir`, `--auth-token`,
-  `--admin-token`; env `OZ_AUTH_TOKEN`/`OZ_ADMIN_TOKEN`); `System/OzServer.ini`
-  remains a build-time template.
+- "INI config is supported": the **client** reads/writes
+  `System/Angels95.ini` (window/VSync/MSAA/gfx/audio), and the **server** now
+  reads `System/OzServer.ini` (`[Server]`/`[Auth]`/`[MasterServers]`) with CLI
+  flags + env `OZ_AUTH_TOKEN`/`OZ_ADMIN_TOKEN` overriding it.
 - "HTTP API is open": it still is unless `--auth-token` is set (b61 adds the
   Bearer gate); the token is not a security boundary on unencrypted LAN.
+- "Linux server build": AngelServ/AngelMaster are standalone and POSIX-clean
+  (MasterClient now includes its own socket headers); `--bind` on both controls
+  the listening interface for VPS hosting. See `System/angels95-serv.service`.
 
 ---
 

@@ -10,6 +10,43 @@
 #include "MasterHttp.hpp"
 #include "../Log.hpp"
 
+// Platform socket headers (Windows: winsock2; POSIX: sys/socket). On Windows the
+// PCH pulls in windows.h, whose CloseWindow/etc. clash with raylib — rename them
+// first on that platform.
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifndef _WINDOWS_
+        #define CloseWindow __WIN32_CloseWindow
+        #define ShowCursor  __WIN32_ShowCursor
+        #define Rectangle   GDI_Rectangle
+        #define DrawText    GDI_DrawText
+        #include <windows.h>
+        #undef CloseWindow
+        #undef ShowCursor
+        #undef Rectangle
+        #undef DrawText
+    #endif
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #ifndef MSOCK
+        #define MSOCK(fd) ((SOCKET)(intptr_t)(fd))
+    #endif
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>
+    #include <unistd.h>
+    #ifndef MSOCK
+        #define MSOCK(fd) (fd)
+    #endif
+#endif
+
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -139,7 +176,7 @@ private:
             snprintf(ps, sizeof(ps), "%u", (unsigned)port);
             if (getaddrinfo(host.c_str(), ps, &hints, &res) != 0 || !res) continue;
             for (struct addrinfo* ai = res; ai; ai = ai->ai_next) {
-                if (sendto((SOCKET)(intptr_t)fd, line.c_str(), (int)line.size(), 0,
+                if (sendto(MSOCK(fd), line.c_str(), (int)line.size(), 0,
                            ai->ai_addr, (socklen_t)ai->ai_addrlen) > 0) {
                     OZ_INFO("Master uplink: UDP heartbeat -> %s:%u", host.c_str(), (unsigned)port);
                     break;

@@ -816,7 +816,7 @@ int main(int argc, char** argv){
     } else {
         CloseAudioDevice();
     }
-    if (!MuteToggle) SetMasterVolume(AudioSlider);
+    ApplyMasterVolume();
 
     OmegaTechInit();
 #ifdef _WIN32

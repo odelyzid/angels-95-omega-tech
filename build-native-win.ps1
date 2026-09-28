@@ -115,10 +115,9 @@ Height=720
 Fullscreen=0
 VSync=1
 
-[Audio]
-MasterVolume=1.0
-MusicVolume=0.7
-SFXVolume=1.0
+[Settings]
+audio_volume=100.000000
+mute=False
 
 [Game]
 ServerIP=127.0.0.1
@@ -139,16 +138,28 @@ Width=1600
 Height=900
 "@ | Set-Content "$OUT_DIR\AngelEd.ini" -Encoding UTF8
 
- # Create OzServer.ini
+ # Create OzServer.ini (AngelServ reads [Server]/[Auth]/[MasterServers])
 @"
+; AngelServ config. CLI flags and env vars override these values.
 [Server]
-Port=27015
-HttpPort=8080
-MaxPlayers=16
-WorldDir=GameData
+port=27015
+http-port=8080
+dir=GameData
+; bind an interface/address (0.0.0.0 or blank = all interfaces)
+bind=0.0.0.0
+server-name=Angels95 Server
 
-[Game]
-ServerName=Angels95 Server
+[Auth]
+; HTTP API Bearer token (also env OZ_AUTH_TOKEN). Blank = open (dev only)
+auth-token=
+; Enables admin COMMANDs list/say/kick (also env OZ_ADMIN_TOKEN)
+admin-token=
+; Public IP to announce when behind NAT (masters can override)
+public-ip=
+
+[MasterServers]
+; UDP heartbeat targets (host[:port], default 27900) and/or http:// URLs
+; Master=your-master.example.com:27900
 "@ | Set-Content "$OUT_DIR\OzServer.ini" -Encoding UTF8
 
 # Create run scripts
