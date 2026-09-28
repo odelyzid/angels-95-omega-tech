@@ -1797,19 +1797,26 @@ int main(int argc, char **argv){
                 s_skyFacesReady = true;
             }
 
-            // Resolve the texture for the current document: the world's
-            // Models/Skybox.png first, then the levelinfo skybox path.
+            // Resolve the skybox texture: an explicitly-applied levelinfo skybox
+            // path takes priority; otherwise fall back to the world's
+            // Models/Skybox.png default.
             std::string want;
-            fs::path worldSky = g_documentPath.parent_path() / "Models" / "Skybox.png";
-            if (!g_documentPath.empty() && fs::exists(worldSky))
-                want = worldSky.string();
-            else {
+            {
                 LevelMetadata meta = GetLevelMetadata();
-                if (!meta.skyboxTexturePath.empty()) want = meta.skyboxTexturePath;
+                if (!meta.skyboxTexturePath.empty())
+                    want = meta.skyboxTexturePath;
+            }
+            if (want.empty() && !g_documentPath.empty()) {
+                fs::path worldSky = g_documentPath.parent_path() / "Models" / "Skybox.png";
+                if (fs::exists(worldSky)) want = worldSky.string();
             }
             if (want != s_skyPath) {
                 if (s_skyTex.id > 0) { UnloadTexture(s_skyTex); s_skyTex = {0}; }
-                if (!want.empty()) s_skyTex = LoadTextureWithFallback(want.c_str());
+                if (!want.empty()) {
+                    s_skyTex = LoadTextureWithFallback(want.c_str());
+                    if (s_skyTex.id == 0)
+                        EditorLog("Skybox: could not load '%s'", want.c_str());
+                }
                 s_skyPath = want;
             }
 
@@ -2438,20 +2445,6 @@ int main(int argc, char **argv){
                     }
                 }
                 bx+=lw+2;
-            }
-            // Skybox visibility toggle
-            {
-                int lw = 42;
-                bool on = OTEditor.ShowSkybox;
-                Color lc = on ? (Color){70,90,120,255} : (Color){45,45,50,255};
-                DrawRectangle(bx, 2, lw, tbH-4, lc);
-                DrawText("Sky", bx+6, 7, 12, on ? WHITE : LIGHTGRAY);
-                if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)lw, (float)tbH-4}) &&
-                    IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    OTEditor.ShowSkybox = !OTEditor.ShowSkybox;
-                    EditorLog("Viewport skybox %s", OTEditor.ShowSkybox ? "shown" : "hidden");
-                }
-                bx += lw + 2;
             }
             bx+=6;
             tBtn("AddVolume","Zone",5); tBtn("ModeCamera","Node",7);
