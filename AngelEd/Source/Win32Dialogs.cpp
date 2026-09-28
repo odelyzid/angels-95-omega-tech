@@ -356,7 +356,8 @@ void ShowTextureManager(bool show) {
 
 void ScanTextureBrowserFiles() {
     g_textureFiles.clear();
-    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg" };
+    // .dds included so the Global/sky skybox library is selectable
+    const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg", ".dds" };
 
     // Scan filesystem under GameData/
     fs::path base = fs::current_path() / "GameData";
@@ -396,9 +397,15 @@ void ScanTextureBrowserFiles() {
         }
     }
 
-    // Deduplicate by keeping the first (filesystem) entry
-    std::sort(g_textureFiles.begin(), g_textureFiles.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+    // Deduplicate by display name, preferring real files over package entries
+    // (a package copy like "Models/Skybox.png" would otherwise shadow the world's
+    // actual file and be unusable as an editable source).
+    auto isPkg = [](const ResourceEntry& e) { return !IsPathFile(e.path.c_str()); };
+    std::stable_sort(g_textureFiles.begin(), g_textureFiles.end(),
+        [&](const ResourceEntry& a, const ResourceEntry& b) {
+            if (a.name != b.name) return a.name < b.name;
+            return (isPkg(a) ? 1 : 0) < (isPkg(b) ? 1 : 0);
+        });
     auto last = std::unique(g_textureFiles.begin(), g_textureFiles.end(),
         [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
     g_textureFiles.erase(last, g_textureFiles.end());
@@ -688,7 +695,28 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         }
         // Reload all thumbnails
         for (auto& tex : g_textureFiles) {
-            Image img = LoadImageWithFallback(tex.path.c_str());
+            // Determine extension (dds needs the texture loader, not the image one)
+            std::string ext = tex.path.substr(tex.path.rfind('.'));
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+            Image img = {0};
+            if (ext == ".dds") {
+                // raylib loads DDS via LoadTexture; resolve package entries by
+                // caching the bytes to a real file first
+                std::string filePath = IsPathFile(tex.path.c_str())
+                    ? tex.path
+                    : PackageAssetLoader::Instance().CacheModelFile(tex.path.c_str());
+                if (!filePath.empty() && IsPathFile(filePath.c_str())) {
+                    Texture2D t = LoadTexture(filePath.c_str());
+                    if (t.id > 0) {
+                        img = LoadImageFromTexture(t);
+                        UnloadTexture(t);
+                    }
+                }
+            } else {
+                img = LoadImageWithFallback(tex.path.c_str());
+            }
+
             if (img.data) {
                 ImageResize(&img, TEX_THUMB_SIZE, TEX_THUMB_SIZE);
                 ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);

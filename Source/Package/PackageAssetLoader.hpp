@@ -166,13 +166,20 @@ inline Texture2D LoadTextureWithFallback(const char* path) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
         std::string ext = normalized.substr(normalized.rfind('.'));
+        // DDS cannot be decoded from memory by raylib — cache bytes to a file
+        // and use the file-based loader (which has a native DDS path).
+        if (ext == ".dds") {
+            std::string cachePath = PackageAssetLoader::Instance().CacheModelFile(path);
+            if (!cachePath.empty() && IsPathFile(cachePath.c_str()))
+                return LoadTexture(cachePath.c_str());
+            return Texture2D{0};
+        }
         const char* fmt = nullptr;
         if (ext == ".png") fmt = "png";
         else if (ext == ".jpg" || ext == ".jpeg") fmt = "jpg";
         else if (ext == ".bmp") fmt = "bmp";
         else if (ext == ".tga") fmt = "tga";
         else if (ext == ".gif") fmt = "gif";
-        else if (ext == ".dds") fmt = "dds";
         if (fmt) {
             Image img = LoadImageFromMemory(fmt, data, (int)sz);
             Texture2D tex = LoadTextureFromImage(img);
@@ -269,6 +276,13 @@ inline Image LoadImageWithFallback(const char* path) {
         std::string normalized = path;
         for (auto& c : normalized) if (c == '\\') c = '/';
         std::string ext = normalized.substr(normalized.rfind('.'));
+        // DDS needs the file-based loader (raylib has no in-memory DDS path)
+        if (ext == ".dds") {
+            std::string cachePath = PackageAssetLoader::Instance().CacheModelFile(path);
+            if (!cachePath.empty() && IsPathFile(cachePath.c_str()))
+                return LoadImage(cachePath.c_str());
+            return Image{0};
+        }
         const char* fmt = nullptr;
         if (ext == ".png") fmt = "png";
         else if (ext == ".jpg" || ext == ".jpeg") fmt = "jpg";

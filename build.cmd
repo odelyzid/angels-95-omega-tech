@@ -74,6 +74,17 @@ if errorlevel 1 (
 )
 echo OzPack.exe built.
 
+REM --- 3b. Build AngelMaster (master server) ---
+echo.
+echo === Building AngelMaster ===
+cd /d "%ROOT%"
+mingw32-make AngelMaster
+if errorlevel 1 (
+    echo ERROR: AngelMaster build failed
+    exit /b 1
+)
+echo AngelMaster.exe built.
+
 REM --- 4. Build AngelEd (level editor) via Makefile ---
 echo.
 echo === Building AngelEd ===
@@ -98,10 +109,12 @@ REM Move EXEs from build locations into System/ (fail if any missing)
 if not exist "%ROOT%Angels95.exe"  echo ERROR: Angels95.exe missing & exit /b 1
 if not exist "%ROOT%AngelServ.exe" echo ERROR: AngelServ.exe missing & exit /b 1
 if not exist "%ROOT%OzPack.exe"    echo ERROR: OzPack.exe missing & exit /b 1
+if not exist "%ROOT%AngelMaster.exe" echo ERROR: AngelMaster.exe missing & exit /b 1
 if not exist "%ROOT%AngelEd\AngelEd.exe" echo ERROR: AngelEd.exe missing & exit /b 1
 move /y "%ROOT%Angels95.exe"  "%OUT_DIR%\Angels95.exe"  >nul
 move /y "%ROOT%AngelServ.exe" "%OUT_DIR%\AngelServ.exe" >nul
 move /y "%ROOT%OzPack.exe"    "%OUT_DIR%\OzPack.exe"    >nul
+move /y "%ROOT%AngelMaster.exe" "%OUT_DIR%\AngelMaster.exe" >nul
 move /y "%ROOT%AngelEd\AngelEd.exe" "%OUT_DIR%\AngelEd.exe" >nul
 
 REM Copy raylib DLL
@@ -126,6 +139,9 @@ echo. >> "%OUT_DIR%\Angels95.ini"
 echo [Game] >> "%OUT_DIR%\Angels95.ini"
 echo ServerIP=127.0.0.1 >> "%OUT_DIR%\Angels95.ini"
 echo ServerPort=27015 >> "%OUT_DIR%\Angels95.ini"
+echo. >> "%OUT_DIR%\Angels95.ini"
+echo [MasterServers] >> "%OUT_DIR%\Angels95.ini"
+echo Master=http://127.0.0.1:27950 >> "%OUT_DIR%\Angels95.ini"
 
 echo [Editor] > "%OUT_DIR%\AngelEd.ini"
 echo GridSize=1.0 >> "%OUT_DIR%\AngelEd.ini"
@@ -177,11 +193,12 @@ if not exist "%OUT_DIR%\Angels95.exe"  set MISSING=%MISSING% Angels95.exe
 if not exist "%OUT_DIR%\AngelServ.exe" set MISSING=%MISSING% AngelServ.exe
 if not exist "%OUT_DIR%\AngelEd.exe"   set MISSING=%MISSING% AngelEd.exe
 if not exist "%OUT_DIR%\OzPack.exe"    set MISSING=%MISSING% OzPack.exe
+if not exist "%OUT_DIR%\AngelMaster.exe" set MISSING=%MISSING% AngelMaster.exe
 
 if defined MISSING (
     echo WARNING: Missing EXEs:%MISSING%
 ) else (
-    echo All 4 executables present.
+    echo All 5 executables present.
 )
 
 dir /b "%OUT_DIR%\Data\*.oz*" 2>nul | findstr /r "." >nul
@@ -197,6 +214,7 @@ echo === Build complete ===
 echo System/ release in %OUT_DIR%
 echo   Angels95.exe   - Game client
 echo   AngelServ.exe  - Dedicated server
+echo   AngelMaster.exe - Master server (internet discovery)
 echo   AngelEd.exe    - Level editor
 echo   OzPack.exe     - Asset packer
 echo   Data/*.oz*     - Packaged assets

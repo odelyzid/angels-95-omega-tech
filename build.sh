@@ -53,5 +53,9 @@ make -j"$(nproc)" OTENGINE
 echo "==> Building AngelServ..."
 make -j"$(nproc)" AngelServ
 
+# --- Master server ---
+echo "==> Building AngelMaster..."
+make -j"$(nproc)" AngelMaster
+
 echo ""
-echo "Done. Run ./Angels95 to launch, or ./AngelServ to start the server."
+echo "Done. Run ./Angels95 to launch, ./AngelServ to start the server, or ./AngelMaster to host the master server."

@@ -137,6 +137,24 @@ if (Test-Path $engineDir) {
     Run-OzPack "OZTX" $engineDir "$OUT_TEX\engine_icons.oztex"
 }
 
+# --- Skybox library (Global/sky: *.dds used by levelinfo skybox paths) ---
+$skyDir = "$GAMEDATA\Global\sky"
+if (Test-Path $skyDir) {
+    Run-OzPack "OZTX" $skyDir "$OUT_TEX\sky.oztex"
+}
+
+# --- Pawn sprites/screams (Global/Pawn: <Name>.png / .mp3) ---
+$pawnDir = "$GAMEDATA\Global\Pawn"
+if (Test-Path $pawnDir) {
+    Run-OzPack "OZTX" $pawnDir "$OUT_TEX\pawn.oztex"
+}
+
+# --- Title/menu art + music ---
+$titleDir = "$GAMEDATA\Global\Title"
+if (Test-Path $titleDir) {
+    Run-OzPack "OZTX" $titleDir "$OUT_TEX\title.oztex"
+}
+
 Write-Step "=== Packaging Worlds ==="
 
 # --- Worlds (oztex and ozone) ---

@@ -71,5 +71,7 @@ npc Walker -40 30 0
 npc Walker -50 0 0
 zone sky -120 -120 -30 120 120 80 1 name=zone_sky_0
 zone water -8 -8 0 8 8 2 1 name=zone_water_0
+levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/cloud_pilgrimage_02.dds
+particles 4 50 1 200 200 200 0 0
 
 # End of OZONE export

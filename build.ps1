@@ -152,6 +152,9 @@ SFXVolume=1.0
 [Game]
 ServerIP=127.0.0.1
 ServerPort=27015
+
+[MasterServers]
+Master=http://127.0.0.1:27950
 "@ | Set-Content "$OUT_DIR\Angels95.ini" -Encoding UTF8
 }
 

@@ -457,12 +457,15 @@ auto LoadWorld()
             else getStream(OmegaTechSoundData.NESound3);
         }
 
-        if (IsPathFile(TextFormat("%sModels/Skybox.png", assetPrefix.c_str())))
+        // World skybox: filesystem first, then packages (resolves "Skybox.png"
+        // inside the world's .ozone container in packaged builds)
         {
             if (WDLModels.Skybox.id > 0)
                 UnloadTexture(WDLModels.Skybox);
-            WDLModels.Skybox = LoadTexture(TextFormat("%sModels/Skybox.png", assetPrefix.c_str()));
-            OmegaTechData.SkyboxEnabled = true;
+            WDLModels.Skybox = LoadTextureWithFallback(TextFormat("%sModels/Skybox.png", assetPrefix.c_str()));
+            OmegaTechData.SkyboxEnabled = (WDLModels.Skybox.id > 0);
+            if (OmegaTechData.SkyboxEnabled)
+                OZ_INFO("World skybox: loaded %sModels/Skybox.png", assetPrefix.c_str());
         }
 
         if (IsPathFile(TextFormat("%sScripts/Launch.ps", assetPrefix.c_str())))
@@ -2044,7 +2047,11 @@ void DrawWorld()
         } else if (OmegaTechData.SkyboxEnabled && WDLModels.Skybox.id > 0) {
             capTex = WDLModels.Skybox;
         }
+        // Sides use an authored side texture when available; otherwise reuse the
+        // cap texture so the sky renders all around (previously they drew a flat
+        // color and appeared black).
         Texture2D sideTex = g_skySideTex;
+        if (sideTex.id == 0) sideTex = capTex;
 
         if (capTex.id > 0 || sideTex.id > 0) {
             Vector3 camPos = OmegaTechData.MainCamera.position;
