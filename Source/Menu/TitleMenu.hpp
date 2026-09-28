@@ -223,7 +223,12 @@ public:
     bool ShouldLoadGame() const { return m_loadGame; }
     bool ShouldJoinServer() const { return m_joinServer; }
     bool ShouldStartServer() const { return m_startServer; }
-    const char* GetSelectedWorld() const { return m_selectedWorld.c_str(); }
+    // nullptr when nothing is selected: callers use this as a truthiness guard
+    // before copying, and std::string::c_str() is never null (an empty string
+    // used to look "selected", wiping g_world_to_load on a plain server join).
+    const char* GetSelectedWorld() const {
+        return m_selectedWorld.empty() ? nullptr : m_selectedWorld.c_str();
+    }
     const char* GetJoinIP() const { return m_joinIP; }
     int GetJoinPort() const { return std::atoi(m_hostPortBuffer); }
 

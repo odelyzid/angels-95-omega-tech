@@ -845,7 +845,10 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
 static void send_join_world_list(const net::NetworkPlayer& player) {
     constexpr size_t kMaxPayload = net::MAX_MESSAGE_SIZE;
     std::string active_world = g_world_list.empty() ? std::string() : g_world_list[0];
-    std::string world_list = "{\"type\":\"world_list\",\"active_world\":\"" + json_escape(active_world) + "\",\"worlds\":[";
+    // json_escape() already emits the surrounding JSON quotes, so do NOT add
+    // another pair here (that produced "active_world":""Name"" and broke the
+    // client's scene parse, leaving it on its default world).
+    std::string world_list = "{\"type\":\"world_list\",\"active_world\":" + json_escape(active_world) + ",\"worlds\":[";
     for (size_t i = 0; i < g_world_list.size(); ++i) {
         std::string entry = json_escape(g_world_list[i]);
         if (world_list.size() + entry.size() + 2 > kMaxPayload) break; // room for ",]"

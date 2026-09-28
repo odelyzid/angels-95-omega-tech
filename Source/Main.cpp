@@ -24,6 +24,48 @@ static struct ClientSettingsOnExit {
     ~ClientSettingsOnExit() { SaveClientSettings(); }
 } g_saveClientSettings;
 
+// The engine addresses every content path relative to the install root (the
+// folder that holds GameData/ and System/). Launching System/Angels95.exe
+// directly (double-click, shell shortcut, fullscreen launcher) leaves cwd
+// inside System/, so the world OZONE, skybox and packages were never found
+// even though network pawns from the server still spawned. Relocate to the
+// root before anything reads a path.
+static bool IsInstallRoot(const fs::path& p) {
+    std::error_code ec;
+    return fs::exists(p / "GameData", ec) ||
+           fs::exists(p / "System" / "Data", ec) ||
+           fs::exists(p / "System" / "Angels95.ini", ec);
+}
+
+static void RelocateToInstallRoot() {
+    std::error_code ec;
+    fs::path cwd = fs::current_path(ec);
+    if (cwd.empty() || IsInstallRoot(cwd)) return;
+
+    fs::path exeDir = fs::path(ProtocolHandler::ExecutablePath()).parent_path();
+    std::vector<fs::path> candidates;
+    if (!exeDir.empty()) {
+        candidates.push_back(exeDir);
+        candidates.push_back(exeDir.parent_path());
+    }
+    if (!cwd.parent_path().empty()) candidates.push_back(cwd.parent_path());
+
+    // Prefer a root that actually ships loose GameData; package-only installs
+    // (System/Data without GameData) are the fallback.
+    for (bool requireGameData : {true, false}) {
+        for (const auto& c : candidates) {
+            if (c.empty()) continue;
+            std::error_code existsEc;
+            if (requireGameData && !fs::exists(c / "GameData", existsEc)) continue;
+            if (!IsInstallRoot(c)) continue;
+            fs::current_path(c, ec);
+            std::fprintf(stderr, "[INFO] Working directory relocated to install root: %s\n",
+                         c.string().c_str());
+            return;
+        }
+    }
+}
+
 #ifdef _WIN32
 // ---------------------------------------------------------------------------
 // Native Win32 menu bar — replaces the old raygui F2 menu
@@ -766,6 +808,8 @@ static void DrawInventoryOverlay() {
 }
 
 int main(int argc, char** argv){
+    RelocateToInstallRoot();
+
     // CLI args
     for (int i = 1; i < argc; i++) {
         const char* arg = argv[i];
@@ -898,6 +942,9 @@ int main(int argc, char** argv){
         size_t kpos = sceneJson.find(key);
         if (kpos == std::string::npos) return;
         size_t start = kpos + key.size();
+        // Tolerate servers that emitted a second pair of quotes around the
+        // value ("active_world":""Name"") before this was fixed.
+        while (start < sceneJson.size() && sceneJson[start] == '"') ++start;
         size_t end = sceneJson.find('"', start);
         if (end == std::string::npos) return;
         std::string activeWorld = sceneJson.substr(start, end - start);

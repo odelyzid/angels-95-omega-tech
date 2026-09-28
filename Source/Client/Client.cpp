@@ -212,6 +212,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             // msg.size is attacker-controlled; never read past the payload buf.
             size_t n = std::min<size_t>(msg.size, net::MAX_MESSAGE_SIZE);
             m_pending_scene.assign(reinterpret_cast<const char*>(msg.payload), n);
+            OZ_INFO("Client: SCENE_UPDATE received (%zu bytes)", n);
             if (m_on_scene_received) m_on_scene_received(m_pending_scene);
             break;
         }
