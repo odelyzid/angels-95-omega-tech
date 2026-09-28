@@ -73,13 +73,14 @@ public:
 
 private:
     static std::string ServersUrl(const std::string& base) {
-        size_t scheme = base.find("://");
-        size_t slash = (scheme == std::string::npos) ? base.find('/') : base.find('/', scheme + 3);
-        if (slash == std::string::npos)
-            return base + "/api/servers?gamename=" + std::string(GAMENAME);
-        if (slash + 1 >= base.size())
-            return base + "api/servers?gamename=" + std::string(GAMENAME);
-        return base; // explicit endpoint supplied
+        // Explicit endpoint supplied (already points at /api/servers)
+        if (base.find("/api/servers") != std::string::npos) return base;
+
+        // Otherwise append the endpoint to the base, handling trailing slashes
+        // and path prefixes such as "https://host/master".
+        std::string b = base;
+        while (!b.empty() && b.back() == '/') b.pop_back();
+        return b + "/api/servers?gamename=" + std::string(GAMENAME);
     }
 
     void Worker() {

@@ -167,8 +167,22 @@ public:
         // LAN/internet browsers: pump while the Multiplayer pane is open.
         bool multiOpen = false;
         for (auto& p : m_panes) if (p.type == PANE_MULTIPLAYER) { multiOpen = true; break; }
-        if (multiOpen) { LanUpdate(); m_internet.Update(); }
-        else { if (m_lanScanning) LanStop(); m_internet.Cancel(); }
+        if (multiOpen) {
+            LanUpdate();
+            m_internet.Update();
+            // First time the browser is shown with Internet selected, fetch it.
+            if (m_serverSource == 1 && !m_internetAutoScanned) {
+                m_internetAutoScanned = true;
+                if (!m_internet.HasResult() && !m_internet.IsScanning()) {
+                    m_internet.SetMasters(m_masterUrls);
+                    m_internet.Refresh();
+                }
+            }
+        } else {
+            if (m_lanScanning) LanStop();
+            m_internet.Cancel();
+            m_internetAutoScanned = false;
+        }
 
         m_sw = GetScreenWidth();
         m_sh = GetScreenHeight();
@@ -249,6 +263,7 @@ private:
 
     // Internet server browser (Join tab)
     int m_serverSource = 0;   // 0 = LAN, 1 = Internet
+    bool m_internetAutoScanned = false;
     master::InternetBrowser m_internet;
     std::vector<std::string> m_masterUrls;
     int m_onlineHover = -1;
@@ -974,8 +989,15 @@ private:
                 m_serverSource = 0;
             }
             if (GuiButton({sx + 130, (float)y, 82, 22}, "Internet")) {
-                if (m_serverSource != 1) PlaySound(OmegaTechSoundData.UIClick);
-                m_serverSource = 1;
+                if (m_serverSource != 1) {
+                    PlaySound(OmegaTechSoundData.UIClick);
+                    m_serverSource = 1;
+                    // Auto-fetch the master list the first time Internet is opened
+                    if (!m_internet.HasResult() && !m_internet.IsScanning()) {
+                        m_internet.SetMasters(m_masterUrls);
+                        m_internet.Refresh();
+                    }
+                }
             }
             y += 30;
 

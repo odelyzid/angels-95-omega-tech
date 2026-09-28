@@ -102,26 +102,31 @@ comma-separated list and numbered keys are supported:
 
 ```ini
 [MasterServers]
-Master=http://master.tribewarez.com:27950,http://127.0.0.1:27950
+Master=https://angels95.tribewarez.com/master,http://127.0.0.1:27950
 Master1=http://backup.example.net:27950
 ```
 
-- If the section is missing/empty, the client falls back to
-  `http://127.0.0.1:27950` (useful for local testing).
-- Only plain `http://` is supported — there is no TLS dependency. `https://`
-  entries are ignored.
+- If the section is missing/empty, the client falls back to the official public
+  master `https://angels95.tribewarez.com/master`.
+- `http://` and `https://` are both supported. TLS needs no vendored crypto:
+  Windows uses WinHTTP (Schannel), Linux/macOS shell out to `curl`.
 - When hosting from the menu (Host Game → Start Server), the client forwards
   these addresses to the launched `AngelServ` as `--master` / `--master-http`.
 
 ### Using the browser
 
 1. Open **Multiplayer → Join Game**.
-2. Set **Source** to `Internet` and click **Scan Internet**.
+2. Set **Source** to `Internet` — the master list is fetched automatically on
+   first open (**Scan Internet** re-fetches on demand).
 3. The list is populated from every reachable master; each row shows
    `name ip:port (players/max) map RTT`. RTT is the real round trip to the game
    server's `/status` endpoint.
 4. Click a row to fill IP/port, then **Connect**. The join path is identical to
    LAN/direct connect.
+
+> Official master: `https://angels95.tribewarez.com/master` — game servers
+> announce with `--master-http https://angels95.tribewarez.com/master/api/heartbeat`
+> (or `--master <host>:27900` for the UDP path).
 
 ---
 

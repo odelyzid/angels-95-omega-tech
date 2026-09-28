@@ -3,7 +3,10 @@
 
 // Master-server address discovery for the client. Reads
 // System/Angels95.ini [MasterServers] (Master=comma,list and/or Master1,
-// Master2, ...) and falls back to a localhost default for development.
+// Master2, ...) and falls back to the official TribeWarez master.
+//
+// The official master is HTTPS: https://angels95.tribewarez.com/master
+// (TLS is handled by WinHTTP on Windows / curl on Linux — see MasterHttp.hpp).
 
 #include "MasterProtocol.hpp"
 #include "../IniConfig.hpp"
@@ -14,7 +17,9 @@
 namespace master {
 
 inline std::vector<std::string> DefaultMasterUrls() {
-    return { "http://127.0.0.1:27950" };
+    // Official public master list (https). Add your own via
+    // System/Angels95.ini [MasterServers] Master=/Master1=... to override.
+    return { "https://angels95.tribewarez.com/master" };
 }
 
 inline void AppendCommaSeparated(const std::string& list, std::vector<std::string>& out) {

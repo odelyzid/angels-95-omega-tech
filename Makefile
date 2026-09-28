@@ -18,10 +18,10 @@ else
     RAYLIB_DIR :=
     RAYLIB_INC :=
   endif
-  LDFLAGS := $(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
+  LDFLAGS := $(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp -lm
   RPATH :=
   EXE := .exe
-  SERVER_LIBS := -lm -lws2_32
+  SERVER_LIBS := -lm -lws2_32 -lwinhttp
 endif
 
 # Windows resource files (icon embedding) only apply to Windows builds;

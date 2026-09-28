@@ -50,8 +50,11 @@ Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `
   `LoadClientSettings()` before `InitWindow` so window size/VSync/MSAA apply at
   creation; saved on exit by a static dtor in `Main.cpp`). Keys live in the
   `[Settings]` section; parser is `Source/IniConfig.hpp`. The build scripts'
-  template ini is only a fallback. `[MasterServers]` (keys `Master`, `Master1`..)
-  lists internet master URLs, read by `Source/Master/MasterList.hpp`.
+template ini is only a fallback. `[MasterServers]` (keys `Master`, `Master1`..)
+lists internet master URLs (http:// or https://), read by
+`Source/Master/MasterList.hpp`. Default when unset:
+`https://angels95.tribewarez.com/master`. TLS uses WinHTTP (Windows) / `curl`
+(Linux) — see `Source/Master/MasterHttp.hpp`; Windows links `-lwinhttp`.
 - **Server:** `System/OzServer.ini` is a template written by build scripts -
   never read at runtime. Server behavior is controlled entirely by CLI flags
   (`--port`, `--http-port`, `--dir`, `--master`, `--master-http`, `--public-ip`,

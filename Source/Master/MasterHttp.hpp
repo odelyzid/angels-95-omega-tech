@@ -21,6 +21,9 @@
     #endif
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <windows.h>
+    #include <winhttp.h>
+    #pragma comment(lib, "winhttp.lib")
     typedef int socklen_t;
     #define MHTTP_SOCK(fd) ((SOCKET)(intptr_t)(fd))
     #define MHTTP_CLOSE(fd) closesocket(MHTTP_SOCK(fd))
@@ -43,14 +46,19 @@ struct ParsedUrl {
     std::string host;
     uint16_t    port = 80;
     std::string path = "/";
+    bool        https = false;
 };
 
 inline bool ParseHttpUrl(const std::string& url, ParsedUrl& out) {
     std::string s = url;
-    if (s.compare(0, 7, "http://") == 0) {
+    if (s.compare(0, 8, "https://") == 0) {
+        out.https = true;
+        out.port = 443;
+        s = s.substr(8);
+    } else if (s.compare(0, 7, "http://") == 0) {
+        out.https = false;
+        out.port = 80;
         s = s.substr(7);
-    } else if (s.compare(0, 8, "https://") == 0) {
-        return false; // TLS unsupported
     }
     size_t slash = s.find('/');
     std::string hostport = (slash == std::string::npos) ? s : s.substr(0, slash);
@@ -63,7 +71,7 @@ inline bool ParseHttpUrl(const std::string& url, ParsedUrl& out) {
         out.port = (uint16_t)p;
     } else {
         out.host = hostport;
-        out.port = 80;
+        // keep the scheme default (80 / 443)
     }
     return !out.host.empty();
 }
@@ -178,6 +186,96 @@ inline bool mhttp_recv_all(int fd, std::string& out, long long deadline, size_t 
     return !out.empty();
 }
 
+// ---------------------------------------------------------------------------
+// HTTPS transport (TLS). No crypto dependency is vendored:
+//   Windows: WinHTTP (Schannel)
+//   POSIX:   the `curl` binary via popen (present on virtually all systems)
+// Plain HTTP continues to use the raw-socket path below.
+// ---------------------------------------------------------------------------
+inline bool HttpsRequest(const std::string& method, const ParsedUrl& u,
+                         const std::string& body, const std::string& content_type,
+                         int timeout_ms, std::string& out_body, int* out_status) {
+    std::string url = "https://" + u.host + ":" + std::to_string(u.port) + u.path;
+
+#ifdef _WIN32
+    // --- WinHTTP (Schannel TLS) ---
+    std::wstring wurl(url.begin(), url.end());
+    HINTERNET hSession = WinHttpOpen(L"Angels95-Master/1.0",
+                                     WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return false;
+    WinHttpSetTimeouts(hSession, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
+
+    HINTERNET hConnect = WinHttpConnect(hSession, std::wstring(u.host.begin(), u.host.end()).c_str(),
+                                        u.port, 0);
+    bool ok = false;
+    if (hConnect) {
+        std::wstring wmethod(method.begin(), method.end());
+        std::wstring wpath(u.path.begin(), u.path.end());
+        HINTERNET hRequest = WinHttpOpenRequest(hConnect, wmethod.c_str(), wpath.c_str(),
+                                                nullptr, WINHTTP_NO_REFERER,
+                                                WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                WINHTTP_FLAG_SECURE);
+        if (hRequest) {
+            std::wstring headers;
+            if (!body.empty()) {
+                std::wstring wct(content_type.empty() ? L"text/plain" : std::wstring(content_type.begin(), content_type.end()));
+                headers = L"Content-Type: " + wct + L"\r\n";
+            }
+            BOOL sent = WinHttpSendRequest(hRequest,
+                headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
+                headers.empty() ? 0 : (DWORD)-1L,
+                body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(),
+                (DWORD)body.size(), (DWORD)body.size(), 0);
+            if (sent && WinHttpReceiveResponse(hRequest, nullptr)) {
+                if (out_status) {
+                    DWORD code = 0, len = sizeof(code);
+                    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                        WINHTTP_HEADER_NAME_BY_INDEX, &code, &len, WINHTTP_NO_HEADER_INDEX);
+                    *out_status = (int)code;
+                }
+                out_body.clear();
+                DWORD avail = 0;
+                while (WinHttpQueryDataAvailable(hRequest, &avail) && avail > 0) {
+                    std::string chunk(avail, '\0');
+                    DWORD read = 0;
+                    if (!WinHttpReadData(hRequest, &chunk[0], avail, &read) || read == 0) break;
+                    out_body.append(chunk.data(), read);
+                    if (out_body.size() > 2 * 1024 * 1024) break;
+                }
+                ok = true;
+            }
+            WinHttpCloseHandle(hRequest);
+        }
+        WinHttpCloseHandle(hConnect);
+    }
+    WinHttpCloseHandle(hSession);
+    return ok;
+#else
+    // --- POSIX: shell out to curl ---
+    if (u.host.empty()) return false;
+    std::string cmd = "curl -sS -k --max-time " + std::to_string(timeout_ms / 1000 + 1) +
+                      " -X " + method;
+    if (!body.empty()) {
+        // Single-quote the body; escape embedded single quotes
+        std::string esc;
+        for (char c : body) { if (c == '\'') esc += "'\\''"; else esc.push_back(c); }
+        cmd += " --data-raw '" + esc + "'";
+        if (!content_type.empty()) cmd += " -H 'Content-Type: " + content_type + "'";
+    }
+    cmd += " '" + url + "' 2>/dev/null";
+    FILE* p = popen(cmd.c_str(), "r");
+    if (!p) return false;
+    out_body.clear();
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), p)) > 0) out_body.append(buf, n);
+    int rc = pclose(p);
+    if (out_status) *out_status = (rc == 0 && !out_body.empty()) ? 200 : 0;
+    return rc == 0 && !out_body.empty();
+#endif
+}
+
 // Returns true on a complete HTTP response (even 4xx/5xx). out_status gets the
 // status code, out_body the response body.
 inline bool HttpRequest(const std::string& method, const std::string& url,
@@ -185,6 +283,9 @@ inline bool HttpRequest(const std::string& method, const std::string& url,
                         int timeout_ms, std::string& out_body, int* out_status = nullptr) {
     ParsedUrl u;
     if (!ParseHttpUrl(url, u)) return false;
+    if (u.https)
+        return HttpsRequest(method, u, body, content_type, timeout_ms, out_body, out_status);
+
     int fd = mhttp_connect(u, timeout_ms);
     if (fd < 0) return false;
 
