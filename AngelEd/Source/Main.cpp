@@ -8,11 +8,14 @@
 #include "Editor.hpp"
 #include "raylib.h"
 #include "rlgl.h"
+#include "raymath.h"
+#include <cmath>
 #include "Win32Dialogs.hpp"
 #include "EditorIcons.hpp"
 #include "../../Source/IniConfig.hpp"
 #include "../../Source/OzOzoneLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
+#include "../../Source/Anim/OzAnimFormat.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Server/WDLParser.hpp"
 #include "../../Source/Server/OzoneParser.hpp"
@@ -22,6 +25,7 @@
 #include <GL/gl.h>
 #endif
 #include <algorithm>
+#include <memory>
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
@@ -75,7 +79,7 @@ GameModels WDLModels;
 // ---------------------------------------------------------------------------
 // Entity selection system (hover + click + right-click context menu)
 // ---------------------------------------------------------------------------
-enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN, PORTAL };
+enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN, PORTAL, MESH, PARTICLE, PATHNODE, WINDZONE };
 struct EditorSelection {
     SelType type = SelType::NONE;
     int index = -1;
@@ -258,6 +262,86 @@ static RayCollision RaycastTestPortals(Ray ray, EditorSelection& out) {
     return best;
 }
 
+static RayCollision RaycastTestMeshObjects(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& objs = PawnSystem::Instance().GetMeshObjects();
+    for (auto& n : objs) {
+        BoundingBox box;
+        Vector3 center = n.position;
+        if (n.mesh && n.mesh->Valid()) {
+            const BoundingBox& mb = n.mesh->Bounds();
+            box.min = {n.position.x + mb.min.x * n.scale,
+                       n.position.y + mb.min.y * n.scale,
+                       n.position.z + mb.min.z * n.scale};
+            box.max = {n.position.x + mb.max.x * n.scale,
+                       n.position.y + mb.max.y * n.scale,
+                       n.position.z + mb.max.z * n.scale};
+            center = {(box.min.x + box.max.x) * 0.5f,
+                      (box.min.y + box.max.y) * 0.5f,
+                      (box.min.z + box.max.z) * 0.5f};
+        } else {
+            box.min = {n.position.x - 1.0f, n.position.y - 1.0f, n.position.z - 1.0f};
+            box.max = {n.position.x + 1.0f, n.position.y + 1.0f, n.position.z + 1.0f};
+        }
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::MESH, (int)n.id,
+                    n.skeletal ? "Mesh.Skeletal" : "Mesh.Static",
+                    center, n.scale, n.yaw };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestParticleEmitters(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetParticleEmitters();
+    for (auto& e : list) {
+        float r = e.radius + 0.5f;
+        BoundingBox box = {{e.position.x - r, e.position.y - r, e.position.z - r},
+                           {e.position.x + r, e.position.y + r, e.position.z + r}};
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PARTICLE, (int)e.id, "ParticleEmitter", e.position, 1.0f, e.yaw };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPathNodes(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetPathNodes();
+    for (auto& n : list) {
+        float r = n.radius + 0.4f;
+        BoundingBox box = {{n.position.x - r, n.position.y - r, n.position.z - r},
+                           {n.position.x + r, n.position.y + r, n.position.z + r}};
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PATHNODE, (int)n.id, n.name, n.position, 1.0f, 0.0f };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestWindZones(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetWindZones();
+    for (auto& z : list) {
+        RayCollision hit = GetRayCollisionBox(ray, z.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            Vector3 center = {(z.bounds.min.x + z.bounds.max.x) * 0.5f,
+                              (z.bounds.min.y + z.bounds.max.y) * 0.5f,
+                              (z.bounds.min.z + z.bounds.max.z) * 0.5f};
+            out = { SelType::WINDZONE, (int)z.id, "WindZone", center, 1.0f, 0.0f };
+        }
+    }
+    return best;
+}
+
 static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
 #ifdef DEBUG_EDITOR_TRACE
@@ -295,6 +379,10 @@ static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     testWithSel(RaycastTestZones(ray, tmp), tmp, 1.2f);
     testWithSel(RaycastTestStarts(ray, tmp), tmp);
     testWithSel(RaycastTestPortals(ray, tmp), tmp);
+    testWithSel(RaycastTestMeshObjects(ray, tmp), tmp);
+    testWithSel(RaycastTestParticleEmitters(ray, tmp), tmp);
+    testWithSel(RaycastTestPathNodes(ray, tmp), tmp);
+    testWithSel(RaycastTestWindZones(ray, tmp), tmp, 1.2f);
 
     out = bestSel;
     return best.hit;
@@ -403,6 +491,14 @@ static void DeleteSelectedEntity() {
         PawnSystem::Instance().RemovePortal(g_sel.index);
         RefreshPortalList();
         RefreshLevelList();
+    } else if (g_sel.type == SelType::MESH) {
+        PawnSystem::Instance().RemoveMeshObject(g_sel.index);
+    } else if (g_sel.type == SelType::PARTICLE) {
+        PawnSystem::Instance().RemoveParticleEmitter(g_sel.index);
+    } else if (g_sel.type == SelType::PATHNODE) {
+        PawnSystem::Instance().RemovePathNode(g_sel.index);
+    } else if (g_sel.type == SelType::WINDZONE) {
+        PawnSystem::Instance().RemoveWindZone(g_sel.index);
     } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
         int mid = CachedModels[g_sel.index].ModelId;
         wstring line = L"Model" + to_wstring(mid) + L":" +
@@ -482,6 +578,46 @@ static void DuplicateSelectedEntity() {
             clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
             PawnSystem::Instance().AddPortal(clone);
             RefreshLevelList();
+        }
+    } else if (g_sel.type == SelType::MESH) {
+        MeshObjectNode* src = PawnSystem::Instance().GetMeshObject(g_sel.index);
+        if (src) {
+            MeshObjectNode clone = *src;
+            clone.id = 0;
+            clone.mesh.reset(); // force re-resolve through MeshCache
+            clone.position.x += offset.x;
+            clone.position.z += offset.z;
+            PawnSystem::Instance().AddMeshObject(clone);
+        }
+    } else if (g_sel.type == SelType::PARTICLE) {
+        ParticleEmitterNode* src = PawnSystem::Instance().GetParticleEmitter(g_sel.index);
+        if (src) {
+            ParticleEmitterNode clone = *src;
+            clone.id = 0;
+            clone.position.x += offset.x;
+            clone.position.z += offset.z;
+            PawnSystem::Instance().AddParticleEmitter(clone);
+        }
+    } else if (g_sel.type == SelType::PATHNODE) {
+        PathNode* src = PawnSystem::Instance().GetPathNode(g_sel.index);
+        if (src) {
+            static int s_pathDupCounter = 1000;
+            PathNode clone = *src;
+            clone.id = 0;
+            clone.name = "path_" + std::to_string(s_pathDupCounter++); // names must stay unique
+            clone.position.x += offset.x;
+            clone.position.z += offset.z;
+            clone.next.clear(); // duplicates start unlinked
+            PawnSystem::Instance().AddPathNode(clone);
+        }
+    } else if (g_sel.type == SelType::WINDZONE) {
+        WindZoneNode* src = PawnSystem::Instance().GetWindZone(g_sel.index);
+        if (src) {
+            WindZoneNode clone = *src;
+            clone.id = 0;
+            clone.bounds.min.x += offset.x; clone.bounds.min.z += offset.z;
+            clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
+            PawnSystem::Instance().AddWindZone(clone);
         }
     } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
         int mid = CachedModels[g_sel.index].ModelId;
@@ -584,6 +720,7 @@ static void ToggleNodePanel()   { ShowNodePanel(!g_editorPanels.showNodePanel); 
 static void ToggleEnvPanel()    { ShowEnvPanel(!g_editorPanels.showEnvPanel); g_placeMode = PlaceMode::ENV; }
 static void ToggleHeightmapEditor() { ShowHeightmapEditor(!g_editorPanels.showHeightmapEditor); }
 static void ToggleWorldGraph() { ShowWorldGraph(!g_editorPanels.showWorldGraph); }
+static void ToggleAnimPanel()   { ShowAnimPanel(!g_editorPanels.showAnimPanel); }
 static void ToggleCollision()   { CollisionToggle = !CollisionToggle; }
 static void ResetCamera()       { OTEditor.MainCamera.position = {0, 10, 0}; OTEditor.MainCamera.target = {0, 0, 0}; OTEditor.MainCamera.up = {0, 1, 0}; }
 static void CamUp()             { OTEditor.MainCamera.position.y += 2; }
@@ -623,6 +760,10 @@ static void ClearScene() {
     pawns.ClearLights();     // lights otherwise accumulate across loads
     pawns.ClearPortals();
     pawns.ClearEmitters();
+    pawns.ClearParticleEmitters();
+    pawns.ClearPathNodes();
+    pawns.ClearWindZones();
+    pawns.ClearMeshObjects();
     pawns.ClearSkyZones();
     OmegaTechEditor.DrawModel = false;
 }
@@ -1074,6 +1215,68 @@ static void ExportToOzone(std::ostream& output) {
         output << "emitter " << et << " " << p.x << " " << p.y << " " << p.z << "\n";
     }
 
+    // GameEngine.Mesh.Static / GameEngine.Mesh.Skeletal placed objects
+    for (auto& m : pawns.GetMeshObjects()) {
+        if (m.meshPath.empty()) continue;
+        Vector3 p = zup(m.position);
+        output << (m.skeletal ? "Mesh.Skeletal " : "Mesh.Static ")
+               << m.meshPath << " " << p.x << " " << p.y << " " << p.z << " " << m.yaw;
+        if (m.scale != 1.0f) output << " scale=" << m.scale;
+        if (!m.texturePath.empty()) output << " tex=" << m.texturePath;
+        if (m.skeletal && !m.animClip.empty()) output << " anim=" << m.animClip;
+        if (m.skeletal && !m.animFile.empty()) output << " animfile=" << m.animFile;
+        if (m.animSpeed != 1.0f) output << " speed=" << m.animSpeed;
+        if (m.windAffected) output << " wind=1";
+        output << "\n";
+    }
+
+    // GameEngine.ParticleEmitter nodes
+    for (auto& e : pawns.GetParticleEmitters()) {
+        if (!e.active) continue;
+        Vector3 p = zup(e.position);
+        Vector3 d = zup(e.direction);
+        output << "ParticleEmitter " << (e.type.empty() ? "fire" : e.type)
+               << " " << p.x << " " << p.y << " " << p.z
+               << " " << e.rate << " " << e.lifetime << " " << e.speed << " " << e.spread
+               << " " << e.sizeStart << " " << e.sizeEnd
+               << " " << (int)e.colorStart.r << " " << (int)e.colorStart.g << " " << (int)e.colorStart.b
+               << " " << (int)e.colorEnd.r << " " << (int)e.colorEnd.g << " " << (int)e.colorEnd.b
+               << " " << e.gravity << " " << e.radius
+               << " " << d.x << " " << d.y << " " << d.z
+               << " " << e.yaw;
+        if (!e.texturePath.empty()) output << " tex=" << e.texturePath;
+        output << "\n";
+    }
+
+    // GameEngine.PathNode waypoints
+    for (auto& pn : pawns.GetPathNodes()) {
+        Vector3 p = zup(pn.position);
+        output << "PathNode " << (pn.name.empty() ? "path" : pn.name)
+               << " " << p.x << " " << p.y << " " << p.z;
+        if (pn.radius != 1.0f) output << " radius=" << pn.radius;
+        if (!pn.next.empty()) {
+            output << " next=";
+            for (size_t i = 0; i < pn.next.size(); i++) {
+                if (i) output << ",";
+                output << pn.next[i];
+            }
+        }
+        if (pn.loop) output << " loop";
+        output << "\n";
+    }
+
+    // WindZone regions
+    for (auto& wz : pawns.GetWindZones()) {
+        Vector3 mn = zup(wz.bounds.min);
+        Vector3 mx = zup(wz.bounds.max);
+        Vector3 d = zup(wz.direction);
+        output << "WindZone "
+               << std::min(mn.x, mx.x) << " " << std::min(mn.y, mx.y) << " " << std::min(mn.z, mx.z)
+               << " " << std::max(mn.x, mx.x) << " " << std::max(mn.y, mx.y) << " " << std::max(mn.z, mx.z)
+               << " " << d.x << " " << d.y << " " << d.z
+               << " " << wz.strength << " " << wz.frequency << "\n";
+    }
+
     // Level metadata
     {
         LevelMetadata meta = GetLevelMetadata();
@@ -1326,6 +1529,109 @@ static void CreateEditorMenuBar() {
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// Animation tool helpers
+// ---------------------------------------------------------------------------
+static void EnsureMeshNodeLoaded(MeshObjectNode* n) {
+    if (!n || n->mesh) return;
+    if (!n->animFile.empty())
+        n->mesh = oz::MeshCache::Instance().GetAnimated(n->meshPath, n->texturePath, n->animFile, n->baseDir, true);
+    else if (n->skeletal)
+        n->mesh = oz::MeshCache::Instance().GetSkeletal(n->meshPath, n->texturePath, n->baseDir, true);
+    else
+        n->mesh = oz::MeshCache::Instance().GetStatic(n->meshPath, n->texturePath, n->baseDir, true);
+}
+
+static oz::AnimatedMesh* AnimTarget() {
+    MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+    if (!n || !n->mesh) return nullptr;
+    return dynamic_cast<oz::AnimatedMesh*>(n->mesh.get());
+}
+
+static float AnimDuration() {
+    oz::AnimatedMesh* am = AnimTarget();
+    if (!am) return 0.0f;
+    const ozanim::Clip* c = am->GetAnimation().FindClip(g_editorPanels.animClipName);
+    return c ? c->Duration() : 0.0f;
+}
+
+// World position of a mesh vertex (local = base + offset, then node TRS).
+static Vector3 MeshVertexWorld(const MeshObjectNode& n, const oz::AnimatedMesh& am,
+                               const std::vector<float>& offs, int vi) {
+    const std::vector<float>& base = am.BasePositions();
+    size_t i = (size_t)vi * 3;
+    Vector3 local = {
+        base[i + 0] + (i + 0 < offs.size() ? offs[i + 0] : 0.0f),
+        base[i + 1] + (i + 1 < offs.size() ? offs[i + 1] : 0.0f),
+        base[i + 2] + (i + 2 < offs.size() ? offs[i + 2] : 0.0f)
+    };
+    Vector3 s = Vector3Scale(local, n.scale);
+    Vector3 r = Vector3RotateByAxisAngle(s, {0.0f, 1.0f, 0.0f}, n.yaw * DEG2RAD);
+    return Vector3Add(n.position, r);
+}
+
+// Nearest vertex to the mouse within maxPx screen pixels (-1 if none).
+static int PickVertex(const MeshObjectNode& n, const oz::AnimatedMesh& am,
+                      const std::vector<float>& offs, Camera3D& cam, Vector2 mouse, float maxPx) {
+    int best = -1; float bestD = maxPx;
+    int vc = am.TotalVertexCount();
+    int sw = GetScreenWidth(), sh = GetScreenHeight();
+    for (int vi = 0; vi < vc; vi++) {
+        Vector2 sp = GetWorldToScreen(MeshVertexWorld(n, am, offs, vi), cam);
+        if (sp.x < -50 || sp.y < -50 || sp.x > sw + 50 || sp.y > sh + 50) continue;
+        float d = sqrtf((sp.x - mouse.x) * (sp.x - mouse.x) + (sp.y - mouse.y) * (sp.y - mouse.y));
+        if (d < bestD) { bestD = d; best = vi; }
+    }
+    return best;
+}
+
+// Full undo/redo for the animation tool: each snapshot captures the live vertex
+// edit pose (if editing) AND the whole clip set, so vertex moves, key add/delete
+// and clip create/delete are all covered.
+struct AnimSnapshot {
+    std::vector<float> pose;
+    bool hasPose = false;
+    ozanim::Animation clips;
+};
+static std::vector<AnimSnapshot> g_animUndo;
+static std::vector<AnimSnapshot> g_animRedo;
+
+static AnimSnapshot AnimCapture() {
+    AnimSnapshot s;
+    MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+    if (n && n->editPose) { s.pose = *n->editPose; s.hasPose = true; }
+    if (oz::AnimatedMesh* am = AnimTarget()) s.clips = am->GetAnimation();
+    return s;
+}
+
+static void AnimSnapshotPush() {
+    g_animRedo.clear();
+    g_animUndo.push_back(AnimCapture());
+    if (g_animUndo.size() > 32) g_animUndo.erase(g_animUndo.begin());
+}
+
+static void AnimRestore(const AnimSnapshot& s) {
+    if (oz::AnimatedMesh* am = AnimTarget()) am->SetAnimation(s.clips);
+    MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+    if (n && n->editPose && s.hasPose) *n->editPose = s.pose;
+}
+
+static void AnimUndo() {
+    if (g_animUndo.empty()) return;
+    g_animRedo.push_back(AnimCapture());
+    AnimSnapshot s = g_animUndo.back();
+    g_animUndo.pop_back();
+    AnimRestore(s);
+}
+
+static void AnimRedo() {
+    if (g_animRedo.empty()) return;
+    g_animUndo.push_back(AnimCapture());
+    AnimSnapshot s = g_animRedo.back();
+    g_animRedo.pop_back();
+    AnimRestore(s);
+}
+
 int main(int argc, char **argv){
     // Auto-detect repo root: if cwd ends with /System, go up one level
     {
@@ -1453,6 +1759,12 @@ int main(int argc, char **argv){
         }
     }
 
+    // The editor windows (and their Actor Hierarchy tree) were created before
+    // the PawnDefs were registered, so rebuild the Pawn Manager tree now that
+    // every registry is populated — otherwise EnemyPawn is empty and nothing
+    // can be spawned from it.
+    RefreshPawnManager();
+
     if (argc > 1 && argv[1]) {
         LoadWorldDocument(g_documentPath);
     } else {
@@ -1536,8 +1848,33 @@ int main(int argc, char **argv){
             }
         }
 
-        // Left-click: select entity (red highlight)
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !OmegaTechEditor.DrawModel) {
+        // Vertex-edit picking (Phase C): click nearest vertex, Shift adds.
+        if (g_editorPanels.animEditVerts && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            Vector2 mp = GetMousePosition();
+            if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
+                MeshObjectNode* vn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+                oz::AnimatedMesh* vam = AnimTarget();
+                if (vn && vn->editPose && vam) {
+                    int vi = PickVertex(*vn, *vam, *vn->editPose, OTEditor.MainCamera, mp, 12.0f);
+                    bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                    if (vi >= 0) {
+                        if (shift) {
+                            if (std::find(g_editorPanels.animSelVerts.begin(), g_editorPanels.animSelVerts.end(), vi)
+                                == g_editorPanels.animSelVerts.end())
+                                g_editorPanels.animSelVerts.push_back(vi);
+                        } else {
+                            g_editorPanels.animSelVerts.clear();
+                            g_editorPanels.animSelVerts.push_back(vi);
+                        }
+                    } else if (!shift) {
+                        g_editorPanels.animSelVerts.clear();
+                    }
+                }
+            }
+        }
+        // Left-click: select entity (red highlight) — suppressed while editing verts
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !OmegaTechEditor.DrawModel &&
+            !g_editorPanels.animEditVerts) {
             Vector2 mp = GetMousePosition();
             if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f)
                 EditorPickEntity();
@@ -1603,12 +1940,12 @@ int main(int argc, char **argv){
             }
         }
 
-        // Right-click: drag resizes placement ghost; click picks entity + native context menu
+        // Right-click: drag resizes placement ghost; click picks entity + native
+        // context menu. It must NEVER commit a placement (that added duplicate
+        // entities when right-clicking to delete/duplicate) — commit is Enter only.
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             g_rbDown = true;
             g_rbDownPos = GetMousePosition();
-            if (LastClickTime != 0) DoubleClick = true;
-            else LastClickTime = 1;
         }
         // Only apply drag threshold when in placement mode (DrawModel);
         // otherwise any right-click is a context menu click regardless of tiny movement.
@@ -1916,6 +2253,16 @@ int main(int argc, char **argv){
             PawnSystem::Instance().DrawEntities(OTEditor.MainCamera, bbShader);
         }
 
+        // Vertex-edit overlay (Phase C): highlight selected vertices.
+        if (g_editorPanels.animEditVerts) {
+            MeshObjectNode* vn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+            oz::AnimatedMesh* vam = AnimTarget();
+            if (vn && vn->editPose && vam) {
+                for (int vi : g_editorPanels.animSelVerts)
+                    DrawSphere(MeshVertexWorld(*vn, *vam, *vn->editPose, vi), 0.06f, RED);
+            }
+        }
+
         // Zone volume wireframes
         {
             auto& zones = PawnSystem::Instance().GetZones();
@@ -1929,6 +2276,43 @@ int main(int argc, char **argv){
                     default:                    wireColor = (Color){50, 120, 200, 80};   break;
                 }
                 DrawBoundingBox(z.bounds, wireColor);
+            }
+        }
+
+        // GameEngine.PathNode markers + link lines (editor visualization)
+        {
+            auto& paths = PawnSystem::Instance().GetPathNodes();
+            Color pathCol = (Color){120, 220, 255, 255};
+            for (auto& pn : paths) {
+                DrawCubeWires(pn.position, 0.6f, 0.6f, 0.6f, pathCol);
+                DrawSphere(pn.position, 0.15f, pathCol);
+                if (g_sel.type == SelType::PATHNODE && (int)pn.id == g_sel.index)
+                    DrawSphereWires(pn.position, pn.radius, 8, 8, (Color){255, 180, 60, 120});
+                for (auto& linkName : pn.next) {
+                    PathNode* dst = PawnSystem::Instance().FindPathNodeByName(linkName);
+                    if (dst) DrawLine3D(pn.position, dst->position, pathCol);
+                }
+                if (pn.loop)
+                    DrawLine3D(pn.position,
+                               {pn.position.x, pn.position.y + 1.5f, pn.position.z},
+                               (Color){255, 220, 80, 255});
+            }
+        }
+
+        // WindZone boxes + direction arrows (editor visualization)
+        {
+            auto& winds = PawnSystem::Instance().GetWindZones();
+            Color windCol = (Color){120, 255, 180, 100};
+            for (auto& wz : winds) {
+                DrawBoundingBox(wz.bounds, windCol);
+                Vector3 c = {(wz.bounds.min.x + wz.bounds.max.x) * 0.5f,
+                             (wz.bounds.min.y + wz.bounds.max.y) * 0.5f,
+                             (wz.bounds.min.z + wz.bounds.max.z) * 0.5f};
+                Vector3 tip = {c.x + wz.direction.x * 3.0f,
+                               c.y + wz.direction.y * 3.0f,
+                               c.z + wz.direction.z * 3.0f};
+                DrawLine3D(c, tip, (Color){120, 255, 180, 255});
+                DrawSphere(tip, 0.15f, (Color){120, 255, 180, 255});
             }
         }
 
@@ -1960,6 +2344,24 @@ int main(int argc, char **argv){
                 } else if (EMID > 0) {
                     LoadedModel* lm = WDLModels.GetModelByWDLId(EMID);
                     if (lm) DrawModelEx(lm->model, {px,py,pz},{0,pr,0},pr,{ps,ps,ps},WHITE);
+                } else if (EMID == 0) {
+                    // User-selected model from the Model Browser — ghost preview.
+                    int bidx = g_editorPanels.selectedModel;
+                    if (bidx >= 0 && bidx < (int)g_editorPanels.modelEntries.size()) {
+                        static Model s_browsePreview = {0};
+                        static std::string s_browsePreviewPath;
+                        const std::string& path = g_editorPanels.modelEntries[bidx].path;
+                        if (s_browsePreviewPath != path) {
+                            if (s_browsePreview.meshes) UnloadModel(s_browsePreview);
+                            s_browsePreview = {0};
+                            s_browsePreviewPath = path;
+                            s_browsePreview = LoadModelWithFallback(path.c_str());
+                        }
+                        if (s_browsePreview.meshes)
+                            DrawModelEx(s_browsePreview, {px,py,pz},{0,1,0},pr,{ps,ps,ps},WHITE);
+                        else
+                            DrawCubeWires({px,py,pz}, ps, ps, ps, ORANGE);
+                    }
                 } else if (EMID == -1) {
                     DrawBoundingBox((BoundingBox){{px,py,pz},{OmegaTechEditor.W,OmegaTechEditor.H,OmegaTechEditor.L}}, ORANGE);
                     DrawCubeWires({OmegaTechEditor.W,OmegaTechEditor.H,OmegaTechEditor.L}, ps, ps, ps, PINK);
@@ -1977,9 +2379,15 @@ int main(int argc, char **argv){
                     g_pickupPreviewName = OmegaTechEditor.ActivePickupName;
                     const EntityDef* edef = LightningEntityRegistry::Instance().Find(OmegaTechEditor.ActivePickupName);
                     if (edef && !edef->mesh.empty()) {
-                        g_pickupPreviewModel = LoadModelWithFallback(edef->mesh.c_str());
-                        if (g_pickupPreviewModel.meshes && !edef->texture.empty()) {
-                            Texture2D tex = LoadTextureWithFallback(edef->texture.c_str());
+                        // Resolve relative mesh/texture paths beside the .ozls.
+                        std::string baseDir;
+                        size_t slash = edef->sourcePath.find_last_of("/\\");
+                        if (slash != std::string::npos) baseDir = edef->sourcePath.substr(0, slash + 1);
+                        std::string meshRes = oz::ResolveMeshAsset(baseDir, edef->mesh);
+                        std::string texRes = oz::ResolveMeshAsset(baseDir, edef->texture);
+                        g_pickupPreviewModel = LoadModelWithFallback(meshRes.c_str());
+                        if (g_pickupPreviewModel.meshes && !texRes.empty()) {
+                            Texture2D tex = LoadTextureWithFallback(texRes.c_str());
                             if (tex.id > 0)
                                 g_pickupPreviewModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
                         }
@@ -2068,8 +2476,62 @@ int main(int argc, char **argv){
             // NOTE: scale-down is B, not G — G cycles the CSG op in MODEL mode.
             if (IsKeyDown(KEY_B)) OmegaTechEditor.S -= 0.5f;
 
+            // Vertex-edit transform (Phase C): the movement/rotate keys deform
+            // the selected vertices instead of moving the mesh node.
+            if (g_editorPanels.animEditVerts) {
+                MeshObjectNode* vn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+                oz::AnimatedMesh* vam = AnimTarget();
+                if (!g_editorPanels.animPrevValid) {
+                    g_editorPanels.animPrevX = OmegaTechEditor.X;
+                    g_editorPanels.animPrevY = OmegaTechEditor.Y;
+                    g_editorPanels.animPrevZ = OmegaTechEditor.Z;
+                    g_editorPanels.animPrevR = OmegaTechEditor.R;
+                    g_editorPanels.animPrevValid = true;
+                }
+                float vdx = OmegaTechEditor.X - g_editorPanels.animPrevX;
+                float vdy = OmegaTechEditor.Y - g_editorPanels.animPrevY;
+                float vdz = OmegaTechEditor.Z - g_editorPanels.animPrevZ;
+                float vdr = OmegaTechEditor.R - g_editorPanels.animPrevR;
+                if (vn && vn->editPose && vam && !g_editorPanels.animSelVerts.empty() &&
+                    (vdx != 0.0f || vdy != 0.0f || vdz != 0.0f || vdr != 0.0f)) {
+                    AnimSnapshotPush();
+                    std::vector<float>& offs = *vn->editPose;
+                    const std::vector<float>& base = vam->BasePositions();
+                    Vector3 cen = {0, 0, 0};
+                    for (int vi : g_editorPanels.animSelVerts) {
+                        cen.x += base[vi * 3 + 0] + offs[vi * 3 + 0];
+                        cen.y += base[vi * 3 + 1] + offs[vi * 3 + 1];
+                        cen.z += base[vi * 3 + 2] + offs[vi * 3 + 2];
+                    }
+                    float inv = 1.0f / (float)g_editorPanels.animSelVerts.size();
+                    cen.x *= inv; cen.y *= inv; cen.z *= inv;
+                    float yawRad = vdr * DEG2RAD;
+                    for (int vi : g_editorPanels.animSelVerts) {
+                        Vector3 local = {base[vi * 3 + 0] + offs[vi * 3 + 0],
+                                         base[vi * 3 + 1] + offs[vi * 3 + 1],
+                                         base[vi * 3 + 2] + offs[vi * 3 + 2]};
+                        local.x += vdx; local.y += vdy; local.z += vdz;
+                        if (yawRad != 0.0f) {
+                            Vector3 rel = {local.x - cen.x, local.y - cen.y, local.z - cen.z};
+                            rel = Vector3RotateByAxisAngle(rel, {0, 1, 0}, yawRad);
+                            local = {cen.x + rel.x, cen.y + rel.y, cen.z + rel.z};
+                        }
+                        offs[vi * 3 + 0] = local.x - base[vi * 3 + 0];
+                        offs[vi * 3 + 1] = local.y - base[vi * 3 + 1];
+                        offs[vi * 3 + 2] = local.z - base[vi * 3 + 2];
+                    }
+                }
+                // Park the gizmo so the node itself doesn't move while editing.
+                OmegaTechEditor.X = g_editorPanels.animPrevX;
+                OmegaTechEditor.Y = g_editorPanels.animPrevY;
+                OmegaTechEditor.Z = g_editorPanels.animPrevZ;
+                OmegaTechEditor.R = g_editorPanels.animPrevR;
+            } else {
+                g_editorPanels.animPrevValid = false;
+            }
+
             // Sync gizmo position back to selected entity (for manipulation)
-            if (g_sel.type != SelType::NONE) {
+            if (g_sel.type != SelType::NONE && !g_editorPanels.animEditVerts) {
                 Vector3 newPos = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
                 int idx = g_sel.index;
                 if (g_sel.type == SelType::NPC) {
@@ -2145,6 +2607,30 @@ int main(int argc, char **argv){
                                       to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
                                       to_wstring(OmegaTechEditor.R) + L":";
                     } else {
+                        if (EMID == 0) {
+                            // Model Browser selection → GameEngine.Mesh.* entity.
+                            int bidx = g_editorPanels.selectedModel;
+                            if (bidx >= 0 && bidx < (int)g_editorPanels.modelEntries.size()) {
+                                const std::string& path = g_editorPanels.modelEntries[bidx].path;
+                                std::string ext;
+                                size_t dot = path.rfind('.');
+                                if (dot != std::string::npos) {
+                                    ext = path.substr(dot);
+                                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                                }
+                                MeshObjectNode node;
+                                node.meshPath = path;
+                                node.skeletal = (ext == ".glb" || ext == ".gltf" || ext == ".iqm");
+                                node.position = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                                node.yaw = OmegaTechEditor.R;
+                                node.scale = OmegaTechEditor.S;
+                                PawnSystem::Instance().AddMeshObject(node);
+                                EditorLog("Placed Mesh.%s '%s'",
+                                          node.skeletal ? "Skeletal" : "Static", path.c_str());
+                            } else {
+                                EditorLog("Place model: select a model in the Model Browser first");
+                            }
+                        }
                         if (EMID == -1) {
                             WDLCommand += L"AdvCollision:" +
                                 to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
@@ -2333,6 +2819,21 @@ int main(int argc, char **argv){
                 auto& portals = PawnSystem::Instance().GetPortals();
                 if (sel.index >= 0 && sel.index < (int)portals.size())
                     return portals[sel.index].bounds;
+            } else if (sel.type == SelType::MESH) {
+                MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(sel.index);
+                if (n) {
+                    if (n->mesh && n->mesh->Valid()) {
+                        const BoundingBox& mb = n->mesh->Bounds();
+                        return {{n->position.x + mb.min.x * n->scale,
+                                 n->position.y + mb.min.y * n->scale,
+                                 n->position.z + mb.min.z * n->scale},
+                                {n->position.x + mb.max.x * n->scale,
+                                 n->position.y + mb.max.y * n->scale,
+                                 n->position.z + mb.max.z * n->scale}};
+                    }
+                    return {{n->position.x - 1, n->position.y - 1, n->position.z - 1},
+                            {n->position.x + 1, n->position.y + 1, n->position.z + 1}};
+                }
             } else if (sel.type == SelType::MODEL && sel.index >= 0 && sel.index < CachedModelCounter) {
                 int mid = CachedModels[sel.index].ModelId;
                 LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
@@ -2407,7 +2908,7 @@ int main(int argc, char **argv){
                     else if(cmd==2) ToggleTextureMgr(); else if(cmd==3) TogglePawnMgr();
                     else if(cmd==4) ToggleScriptMgr(); else if(cmd==5) ToggleEnvPanel();
                     else if(cmd==6) TogglePickupPanel(); else if(cmd==7) ToggleNodePanel();
-                    else if(cmd==8) ToggleHeightmapEditor();
+                    else if(cmd==8) ToggleHeightmapEditor(); else if(cmd==9) ToggleAnimPanel();
                     else if(cmd==10) { FileNew(); } else if(cmd==11) { FileOpen(); }
                     else if(cmd==12) { FileSaveAs(); }
                 }
@@ -2415,6 +2916,7 @@ int main(int argc, char **argv){
             };
 
             tBtn(nullptr,"New",10); tBtn(nullptr,"Open",11); tBtn(nullptr,"Save",12);
+            tBtn(nullptr,"Anim",9);
             // Play button
             {
                 const char* lbl = "Play";
@@ -2735,9 +3237,353 @@ int main(int argc, char **argv){
                                      g_editorPanels.propPortalSpawn[2]};
                     p.bidirectional = g_editorPanels.propPortalBidir;
                 }
+            } else if (tgtType == SelType::MESH) {
+                MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(tgtIdx);
+                if (m) {
+                    m->position = {px, py, pz};
+                    m->yaw = prot;
+                    if (g_editorPanels.propScale > 0.001f) m->scale = g_editorPanels.propScale;
+                    bool pathChanged = (g_editorPanels.propMeshPath != m->meshPath) ||
+                                       (g_editorPanels.propMeshTex != m->texturePath);
+                    if (!g_editorPanels.propMeshPath.empty())
+                        m->meshPath = g_editorPanels.propMeshPath;
+                    m->texturePath = g_editorPanels.propMeshTex;
+                    bool animChanged = (g_editorPanels.propMeshAnimFile != m->animFile);
+                    m->animFile = g_editorPanels.propMeshAnimFile;
+                    if (g_editorPanels.propMeshAnimSpeed > 0.0f)
+                        m->animSpeed = g_editorPanels.propMeshAnimSpeed;
+                    // Embedded clip name only matters when there's no external clip.
+                    if (m->animFile.empty() && m->skeletal)
+                        m->animClip = g_editorPanels.propAnimClip;
+                    if (!m->animFile.empty()) m->skeletal = true;
+                    m->windAffected = g_editorPanels.propMeshWind;
+                    if (pathChanged || animChanged) m->mesh.reset(); // re-resolve
+                }
+            } else if (tgtType == SelType::PARTICLE) {
+                ParticleEmitterNode* e = PawnSystem::Instance().GetParticleEmitter(tgtIdx);
+                if (e) {
+                    e->position = {px, py, pz};
+                    e->yaw = prot;
+                    if (!g_editorPanels.propEmitterType.empty()) e->type = g_editorPanels.propEmitterType;
+                    e->texturePath = g_editorPanels.propEmitterTex;
+                    if (g_editorPanels.propEmitterRate >= 0.0f) e->rate = g_editorPanels.propEmitterRate;
+                    if (g_editorPanels.propEmitterLife > 0.0f) e->lifetime = g_editorPanels.propEmitterLife;
+                    if (g_editorPanels.propEmitterSpeed >= 0.0f) e->speed = g_editorPanels.propEmitterSpeed;
+                    if (g_editorPanels.propEmitterSize > 0.0f) e->sizeStart = g_editorPanels.propEmitterSize;
+                    e->spread = g_editorPanels.propEmitterSpread;
+                    e->colorStart.r = (unsigned char)g_editorPanels.propEmitterR;
+                    e->colorStart.g = (unsigned char)g_editorPanels.propEmitterG;
+                    e->colorStart.b = (unsigned char)g_editorPanels.propEmitterB;
+                }
+            } else if (tgtType == SelType::PATHNODE) {
+                PathNode* pn = PawnSystem::Instance().GetPathNode(tgtIdx);
+                if (pn) {
+                    pn->position = {px, py, pz};
+                    if (g_editorPanels.propPathRadius > 0.0f) pn->radius = g_editorPanels.propPathRadius;
+                    // Rename — retarget any links that referenced the old name
+                    std::string newName = g_editorPanels.propPathName;
+                    if (!newName.empty() && newName != pn->name) {
+                        std::string oldName = pn->name;
+                        pn->name = newName;
+                        for (auto& other : PawnSystem::Instance().GetPathNodes())
+                            for (auto& link : other.next)
+                                if (link == oldName) link = newName;
+                    }
+                    // Parse comma-separated successor list
+                    pn->next.clear();
+                    std::string ns = g_editorPanels.propPathNext;
+                    size_t start = 0;
+                    while (start <= ns.size()) {
+                        size_t comma = ns.find(',', start);
+                        std::string part = ns.substr(
+                            start, comma == std::string::npos ? std::string::npos : comma - start);
+                        while (!part.empty() && (part.front() == ' ' || part.front() == '\t')) part.erase(part.begin());
+                        while (!part.empty() && (part.back() == ' ' || part.back() == '\t')) part.pop_back();
+                        if (!part.empty()) pn->next.push_back(part);
+                        if (comma == std::string::npos) break;
+                        start = comma + 1;
+                    }
+                    pn->loop = g_editorPanels.propPathLoop;
+                }
+            } else if (tgtType == SelType::WINDZONE) {
+                WindZoneNode* z = PawnSystem::Instance().GetWindZone(tgtIdx);
+                if (z) {
+                    float sx = g_editorPanels.propWindSizeX;
+                    float sy = g_editorPanels.propWindSizeY;
+                    float sz = g_editorPanels.propWindSizeZ;
+                    if (sx < 0.01f) sx = 1.0f;
+                    if (sy < 0.01f) sy = 1.0f;
+                    if (sz < 0.01f) sz = 1.0f;
+                    z->bounds.min = {px - sx * 0.5f, py - sy * 0.5f, pz - sz * 0.5f};
+                    z->bounds.max = {px + sx * 0.5f, py + sy * 0.5f, pz + sz * 0.5f};
+                    z->direction = {g_editorPanels.propWindDirX,
+                                    g_editorPanels.propWindDirY,
+                                    g_editorPanels.propWindDirZ};
+                    if (g_editorPanels.propWindStrength >= 0.0f)
+                        z->strength = g_editorPanels.propWindStrength;
+                    if (g_editorPanels.propWindFrequency > 0.0f)
+                        z->frequency = g_editorPanels.propWindFrequency;
+                }
             }
             EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), tgtIdx);
             g_editorPanels.actionApplyProperties = false;
+        }
+        // "Reload Mesh" — drop the cached asset so it re-resolves next draw
+        if (g_editorPanels.actionReloadMesh) {
+            if (MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(g_sel.index)) {
+                if (g_sel.type == SelType::MESH) m->mesh.reset();
+            }
+            g_editorPanels.actionReloadMesh = false;
+        }
+
+        // ---- Animation tool (Phase B) --------------------------------------
+        // Track the selected mesh as the animation target.
+        {
+            int selMesh = (g_sel.type == SelType::MESH) ? g_sel.index : -1;
+            if (selMesh != g_editorPanels.animTargetMesh) {
+                // Release the previous target so it resumes normal playback.
+                if (MeshObjectNode* old = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh)) {
+                    old->animPaused = false;
+                    old->editPose.reset();
+                }
+                g_editorPanels.animTargetMesh = selMesh;
+                g_editorPanels.animPlaying = false;
+                g_editorPanels.animEditVerts = false;
+                g_editorPanels.animSelVerts.clear();
+                g_editorPanels.animTime = 0.0f;
+                EnsureMeshNodeLoaded(PawnSystem::Instance().GetMeshObject(selMesh));
+                RefreshAnimPanel();
+            }
+        }
+        // Convert a static mesh into a vertex-keyframe animated one.
+        if (g_editorPanels.actionConvertToAnimated) {
+            g_editorPanels.actionConvertToAnimated = false;
+            MeshObjectNode* n = (g_sel.type == SelType::MESH)
+                ? PawnSystem::Instance().GetMeshObject(g_sel.index) : nullptr;
+            if (n && n->animFile.empty()) {
+                std::string file = n->meshPath;
+                size_t slash = file.find_last_of("/\\");
+                if (slash != std::string::npos) file = file.substr(slash + 1);
+                size_t dot = file.rfind('.');
+                if (dot != std::string::npos) file = file.substr(0, dot);
+                if (file.empty()) file = "anim";
+                std::string path = "GameData/Global/Anims/" + file + ".ozanim";
+                std::error_code ec;
+                fs::create_directories("GameData/Global/Anims", ec);
+                if (!fs::exists(path)) {
+                    ozanim::Animation a;
+                    ozanim::Clip c; c.name = "Idle"; c.fps = 30.0f; c.loop = true;
+                    a.clips.push_back(c);
+                    std::ofstream out(path);
+                    if (out.is_open()) out << ozanim::Serialize(a);
+                }
+                n->animFile = path;
+                n->skeletal = true;
+                n->animTime = 0.0f;
+                n->animPaused = true;
+                n->mesh.reset();
+                EnsureMeshNodeLoaded(n);
+                g_editorPanels.animTargetMesh = (int)n->id;
+                g_editorPanels.animClipName = "Idle";
+                ShowAnimPanel(true);
+                RefreshAnimPanel();
+                EditorLog("Converted '%s' to animated -> %s", n->meshPath.c_str(), path.c_str());
+            } else {
+                EditorLog("Convert: select a GameEngine.Mesh with no anim file");
+            }
+        }
+        // New / delete clip
+        if (g_editorPanels.actionAnimNewClip) {
+            g_editorPanels.actionAnimNewClip = false;
+            if (oz::AnimatedMesh* am = AnimTarget()) {
+                static int s_clipN = 1;
+                AnimSnapshotPush();
+                ozanim::Clip c;
+                c.name = "Clip" + std::to_string(s_clipN++);
+                c.fps = g_editorPanels.animFps;
+                c.loop = g_editorPanels.animLoop;
+                am->MutableAnimation().clips.push_back(c);
+                g_editorPanels.animClipName = c.name;
+                g_editorPanels.animTime = 0.0f;
+                g_editorPanels.actionAnimSave = true;
+            }
+        }
+        if (g_editorPanels.actionAnimDeleteClip) {
+            g_editorPanels.actionAnimDeleteClip = false;
+            if (oz::AnimatedMesh* am = AnimTarget()) {
+                auto& clips = am->MutableAnimation().clips;
+                int idx = am->FindClip(g_editorPanels.animClipName);
+                if (idx >= 0 && idx < (int)clips.size()) {
+                    AnimSnapshotPush();
+                    clips.erase(clips.begin() + idx);
+                    g_editorPanels.animClipName = clips.empty() ? "" : clips.front().name;
+                    g_editorPanels.animTime = 0.0f;
+                    g_editorPanels.actionAnimSave = true;
+                }
+            }
+        }
+        // Add / delete a key at the current time (Phase C adds vertex offsets).
+        if (g_editorPanels.actionAnimAddKey) {
+            g_editorPanels.actionAnimAddKey = false;
+            MeshObjectNode* kn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+            if (oz::AnimatedMesh* am = AnimTarget()) {
+                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
+                    AnimSnapshotPush();
+                    float t = g_editorPanels.animTime;
+                    ozanim::Keyframe* kf = nullptr;
+                    for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
+                    if (!kf) {
+                        ozanim::Keyframe k; k.time = t;
+                        c->keys.push_back(k);
+                        std::sort(c->keys.begin(), c->keys.end(),
+                                  [](const ozanim::Keyframe& a, const ozanim::Keyframe& b) { return a.time < b.time; });
+                        for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
+                    }
+                    if (kf) {
+                        int vc = am->TotalVertexCount();
+                        // Source offsets: live edit pose if editing, else the clip sample.
+                        std::vector<float> sampled;
+                        std::vector<float>* offs = nullptr;
+                        if (kn && kn->editPose) offs = kn->editPose.get();
+                        else { c->SampleOffsets(t, vc, sampled); offs = &sampled; }
+
+                        std::vector<int> verts;
+                        if (g_editorPanels.animEditVerts && !g_editorPanels.animSelVerts.empty())
+                            verts = g_editorPanels.animSelVerts;
+                        else for (int i = 0; i < vc; i++) verts.push_back(i);
+
+                        for (int vi : verts) {
+                            if (vi < 0 || vi >= vc) continue;
+                            float dx = (*offs)[vi * 3 + 0];
+                            float dy = (*offs)[vi * 3 + 1];
+                            float dz = (*offs)[vi * 3 + 2];
+                            kf->offsets.erase(std::remove_if(kf->offsets.begin(), kf->offsets.end(),
+                                [vi](const ozanim::VertexOffset& o) { return o.index == vi; }),
+                                kf->offsets.end());
+                            if (fabsf(dx) > 1e-5f || fabsf(dy) > 1e-5f || fabsf(dz) > 1e-5f)
+                                kf->offsets.push_back({vi, dx, dy, dz});
+                        }
+                        std::sort(kf->offsets.begin(), kf->offsets.end(),
+                                  [](const ozanim::VertexOffset& a, const ozanim::VertexOffset& b) { return a.index < b.index; });
+                    }
+                    g_editorPanels.actionAnimSave = true;
+                }
+            }
+        }
+        if (g_editorPanels.actionAnimDeleteKey) {
+            g_editorPanels.actionAnimDeleteKey = false;
+            if (oz::AnimatedMesh* am = AnimTarget()) {
+                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
+                    AnimSnapshotPush();
+                    int best = -1; float bd = 1e9f;
+                    for (int i = 0; i < (int)c->keys.size(); i++) {
+                        float d = fabsf(c->keys[i].time - g_editorPanels.animTime);
+                        if (d < bd) { bd = d; best = i; }
+                    }
+                    if (best >= 0 && bd < 0.05f) c->keys.erase(c->keys.begin() + best);
+                    g_editorPanels.actionAnimSave = true;
+                }
+            }
+        }
+        // FPS / loop edited in the panel → update the current clip.
+        if (g_editorPanels.actionAnimApplyClipMeta) {
+            g_editorPanels.actionAnimApplyClipMeta = false;
+            if (oz::AnimatedMesh* am = AnimTarget()) {
+                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
+                    if (g_editorPanels.animFps > 0.0f) c->fps = g_editorPanels.animFps;
+                    c->loop = g_editorPanels.animLoop;
+                    g_editorPanels.actionAnimSave = true;
+                }
+            }
+        }
+        // Save the clip file back to disk.
+        if (g_editorPanels.actionAnimSave) {
+            g_editorPanels.actionAnimSave = false;
+            MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+            if (oz::AnimatedMesh* am = AnimTarget(); am && n && !n->animFile.empty()) {
+                std::error_code ec;
+                fs::path p(n->animFile);
+                if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
+                std::ofstream out(n->animFile);
+                if (out.is_open()) out << ozanim::Serialize(am->GetAnimation());
+                EditorLog("Saved anim '%s'", n->animFile.c_str());
+            }
+            g_editorPanels.actionAnimRefresh = true;
+        }
+        // Scrub / playback: drive the target node's animTime.
+        {
+            MeshObjectNode* tn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+            if (tn && !tn->animFile.empty()) {
+                if (g_editorPanels.actionAnimScrub) {
+                    g_editorPanels.actionAnimScrub = false;
+                    float dur = AnimDuration();
+                    g_editorPanels.animTime = (dur > 0.0f)
+                        ? (g_editorPanels.animTimeSlider / 1000.0f) * dur : 0.0f;
+                    tn->animTime = g_editorPanels.animTime;
+                    g_editorPanels.animPlaying = false;
+                }
+                tn->animPaused = !g_editorPanels.animPlaying;
+                if (g_editorPanels.animPlaying) g_editorPanels.animTime = tn->animTime;
+            }
+        }
+        // Enter/exit vertex-edit mode.
+        if (g_editorPanels.actionAnimToggleEdit) {
+            g_editorPanels.actionAnimToggleEdit = false;
+            MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+            oz::AnimatedMesh* am = AnimTarget();
+            if (n && am) {
+                if (!g_editorPanels.animEditVerts) {
+                    std::vector<float> offs((size_t)am->TotalVertexCount() * 3, 0.0f);
+                    if (const ozanim::Clip* c = am->GetAnimation().FindClip(g_editorPanels.animClipName))
+                        c->SampleOffsets(g_editorPanels.animTime, am->TotalVertexCount(), offs);
+                    n->editPose = std::make_shared<std::vector<float>>(std::move(offs));
+                    n->animPaused = true;
+                    g_editorPanels.animEditVerts = true;
+                    g_editorPanels.animSelVerts.clear();
+                    g_animUndo.clear();
+                    g_animRedo.clear();
+                    g_editorPanels.animPrevValid = false;
+                } else {
+                    n->editPose.reset();
+                    g_editorPanels.animEditVerts = false;
+                    g_editorPanels.animSelVerts.clear();
+                }
+            }
+            g_editorPanels.actionAnimRefresh = true;
+        }
+        if (g_editorPanels.actionAnimSelectAll) {
+            g_editorPanels.actionAnimSelectAll = false;
+            if (g_editorPanels.animEditVerts) {
+                if (oz::AnimatedMesh* am = AnimTarget()) {
+                    g_editorPanels.animSelVerts.clear();
+                    for (int i = 0; i < am->TotalVertexCount(); i++)
+                        g_editorPanels.animSelVerts.push_back(i);
+                }
+            }
+        }
+        if (g_editorPanels.actionAnimClearSel) {
+            g_editorPanels.actionAnimClearSel = false;
+            g_editorPanels.animSelVerts.clear();
+        }
+        if (g_editorPanels.actionAnimUndo) {
+            g_editorPanels.actionAnimUndo = false;
+            AnimUndo();
+            g_editorPanels.actionAnimRefresh = true;
+        }
+        if (g_editorPanels.actionAnimRedo) {
+            g_editorPanels.actionAnimRedo = false;
+            AnimRedo();
+            g_editorPanels.actionAnimRefresh = true;
+        }
+        // Ctrl+Z / Ctrl+Y while the anim tool is active.
+        if (g_editorPanels.animEditVerts &&
+            (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))) {
+            if (IsKeyPressed(KEY_Z)) g_editorPanels.actionAnimUndo = true;
+            if (IsKeyPressed(KEY_Y)) g_editorPanels.actionAnimRedo = true;
+        }
+        if (g_editorPanels.actionAnimRefresh) {
+            g_editorPanels.actionAnimRefresh = false;
+            RefreshAnimPanel();
         }
 
         // Apply active texture to selected entity (from context menu)
@@ -2883,6 +3729,12 @@ int main(int argc, char **argv){
         }
 #endif
 
+        // Keep the camera aim point available to Win32 panels, which spawn
+        // entities synchronously (see Win32Dialogs SpawnSelectedPawnTreeItem).
+        g_editorPanels.spawnPos[0] = OTEditor.MainCamera.target.x;
+        g_editorPanels.spawnPos[1] = OTEditor.MainCamera.target.y;
+        g_editorPanels.spawnPos[2] = OTEditor.MainCamera.target.z;
+
         // Handle action flags from Win32 dialogs
         if (g_editorPanels.actionPickupType >= 0) {
             g_placeMode = PlaceMode::PICKUP;
@@ -2915,16 +3767,104 @@ int main(int argc, char **argv){
             g_editorPanels.actionNodeType = -1;
         }
         if (!g_editorPanels.actionSpawnPickup.empty()) {
-            // Pawn Manager weapon/item leaf → weapon pickup placement
-            // (world files carry weapons as `pickup <defName>`)
-            g_placeMode = PlaceMode::PICKUP;
-            OmegaTechEditor.ActivePickupName = g_editorPanels.actionSpawnPickup;
-            OmegaTechEditor.DrawModel = true;
-            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-            OmegaTechEditor.R = 1;
+            // Pawn Manager weapon/item leaf → spawn the pickup immediately at the
+            // camera aim point (the Pickups panel still offers ghosted placement).
+            PickupNode node;
+            node.position = OTEditor.MainCamera.target;
+            node.typeName = g_editorPanels.actionSpawnPickup;
+            PawnSystem::Instance().AddPickup(node);
+            EditorLog("Spawned pickup '%s' at camera target",
+                      g_editorPanels.actionSpawnPickup.c_str());
             g_editorPanels.actionSpawnPickup.clear();
+        }
+        if (!g_editorPanels.actionSpawnMesh.empty()) {
+            // GameEngine.Mesh placement — uses the model selected in the Model
+            // Browser, spawned at the camera target as an OZONE Mesh.* entity.
+            int idx = g_editorPanels.selectedModel;
+            if (idx >= 0 && idx < (int)g_editorPanels.modelEntries.size()) {
+                MeshObjectNode node;
+                node.meshPath = g_editorPanels.modelEntries[idx].path;
+                node.skeletal = (g_editorPanels.actionSpawnMesh == "skeletal");
+                node.position = OTEditor.MainCamera.target;
+                node.yaw = 0.0f;
+                node.scale = 1.0f;
+                PawnSystem::Instance().AddMeshObject(node);
+                EditorLog("Placed %s '%s'",
+                          node.skeletal ? "Mesh.Skeletal" : "Mesh.Static",
+                          node.meshPath.c_str());
+            } else {
+                EditorLog("Mesh placement: select a model in the Model Browser first");
+            }
+            g_editorPanels.actionSpawnMesh.clear();
+        }
+        if (g_editorPanels.actionSpawnParticleEmitter) {
+            ParticleEmitterNode node;
+            node.type = "fire";
+            node.position = OTEditor.MainCamera.target;
+            node.direction = {0, 1, 0};
+            node.rate = 30.0f;
+            node.lifetime = 0.9f;
+            node.speed = 2.0f;
+            node.spread = 0.5f;
+            node.sizeStart = 0.5f;
+            node.sizeEnd = 0.0f;
+            node.colorStart = {255, 170, 60, 255};
+            node.colorEnd = {80, 20, 10, 0};
+            node.radius = 0.2f;
+            PawnSystem::Instance().AddParticleEmitter(node);
+            EditorLog("Placed ParticleEmitter at camera target");
+            g_editorPanels.actionSpawnParticleEmitter = false;
+        }
+        if (g_editorPanels.actionSpawnPathNode) {
+            static int s_pathCounter = 0;
+            PathNode node;
+            node.name = "path_" + std::to_string(s_pathCounter++);
+            node.position = OTEditor.MainCamera.target;
+            node.radius = 1.0f;
+            PawnSystem::Instance().AddPathNode(node);
+            EditorLog("Placed PathNode '%s' at camera target", node.name.c_str());
+            g_editorPanels.actionSpawnPathNode = false;
+        }
+        if (g_editorPanels.actionSpawnWindZone) {
+            WindZoneNode zone;
+            Vector3 c = OTEditor.MainCamera.target;
+            zone.bounds.min = {c.x - 5.0f, c.y - 5.0f, c.z - 5.0f};
+            zone.bounds.max = {c.x + 5.0f, c.y + 5.0f, c.z + 5.0f};
+            zone.direction = {1.0f, 0.0f, 0.0f};
+            zone.strength = 1.0f;
+            zone.frequency = 1.0f;
+            PawnSystem::Instance().AddWindZone(zone);
+            EditorLog("Placed WindZone at camera target");
+            g_editorPanels.actionSpawnWindZone = false;
+        }
+        if (g_editorPanels.actionSpawnPlayerStart) {
+            PlayerStartNode node;
+            node.position = OTEditor.MainCamera.target;
+            node.yaw = 0.0f;
+            PawnSystem::Instance().AddPlayerStart(node);
+            EditorLog("Placed PlayerStartNode at camera target");
+            g_editorPanels.actionSpawnPlayerStart = false;
+        }
+        if (!g_editorPanels.actionSpawnEmitter.empty()) {
+            EmitterNode node;
+            node.type = (g_editorPanels.actionSpawnEmitter == "music")
+                ? EmitterType::MUSIC : EmitterType::SOUND;
+            node.position = OTEditor.MainCamera.target;
+            PawnSystem::Instance().AddEmitter(node);
+            EditorLog("Placed %s EmitterNode at camera target",
+                      g_editorPanels.actionSpawnEmitter.c_str());
+            g_editorPanels.actionSpawnEmitter.clear();
+        }
+        if (g_editorPanels.actionSpawnZone >= 0) {
+            ZoneVolumeNode node;
+            Vector3 c = OTEditor.MainCamera.target;
+            node.bounds.min = {c.x - 4.0f, c.y - 2.0f, c.z - 4.0f};
+            node.bounds.max = {c.x + 4.0f, c.y + 2.0f, c.z + 4.0f};
+            node.zoneType = (ZoneType)g_editorPanels.actionSpawnZone;
+            PawnSystem::Instance().AddZone(node);
+            EditorLog("Placed ZoneVolumeNode (type=%d) at camera target",
+                      g_editorPanels.actionSpawnZone);
+            g_editorPanels.actionSpawnZone = -1;
         }
         if (g_editorPanels.actionPlaceModel >= 0) {
             g_placeMode = PlaceMode::MODEL;
@@ -3046,8 +3986,10 @@ int main(int argc, char **argv){
         }
 
         if (!g_editorPanels.actionSpawnPawn.empty()) {
-            Vector3 pos = OTEditor.MainCamera.position;
+            Vector3 pos = OTEditor.MainCamera.target; // in front of the camera
             PawnSystem::Instance().Spawn(pos, g_editorPanels.actionSpawnPawn.c_str());
+            EditorLog("Spawned pawn '%s' at camera target",
+                      g_editorPanels.actionSpawnPawn.c_str());
             g_editorPanels.actionSpawnPawn.clear();
         }
 
@@ -3159,8 +4101,8 @@ int main(int argc, char **argv){
             OmegaTechEditor.CSGOperation = (OmegaTechEditor.CSGOperation + 1) % 5;
         }
 
-        // Heightmap editor toggle (H key)
-        if (IsKeyPressed(KEY_H)) ToggleHeightmapEditor();
+        // Heightmap editor toggle (H key) — suppressed in vertex-edit mode (H moves verts)
+        if (IsKeyPressed(KEY_H) && !g_editorPanels.animEditVerts) ToggleHeightmapEditor();
 
         // Panel keyboard shortcuts (F5-F12 replace old top menu bar)
         if (IsKeyPressed(KEY_F5))  ToggleModelBrowser();

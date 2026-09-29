@@ -108,6 +108,39 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 - **FSM is `PawnState`: IDLE, PATROL, CHASE, RETURN, DEAD** (no ATTACK state - check `Source/Pawn/OzPawnSystem.hpp:25`). State transitions fire `.ozls` script actions `on_patrol`/`on_chase`/`on_return`/`on_death` — **only if a pawn-named `.ozls` def exists in the registry** (e.g. `Walker.ozls`); without one, `scriptInstanceIndex` stays -1 and hooks never fire. Projectile kills call `TransitionState(DEAD)`.
 - NPCs attack only via melee range check (+ projectiles) - no ranged NPC fire. Scream plays on IDLE→CHASE (4s per-pawn cooldown).
 - Multiplayer: server-owned NPCs carry `npc_type` in `NpcStateUpdateData` and spawn with `networkControlled=true` (local FSM + contact damage skipped; server applies damage via `PLAYER_HURT`).
+- Animated pawns: `.cfg` keys `mesh_type` (`static`/`skeletal`) + `anim_idle/patrol/chase/return/death` + `anim_speed`. A skeletal pawn uses `oz::SkeletalMesh` (GLB/GLTF/IQM only — not OBJ) and maps `PawnState` to a clip. Yaw tracks movement for skeletal pawns; static/billboard pawns still face the camera.
+
+## Mesh / entity taxonomy
+- `Source/Renderer/Mesh/` — `oz::Mesh` base, `oz::StaticMesh`, `oz::SkeletalMesh` (clips + stateless `ApplyPose`), and the internal `oz::MeshCache` (owned by `PawnSystem`; intentionally leaked so GL unloads never run after `CloseWindow`). Names are namespaced because raylib also defines `::Mesh`/`::Model`/`::Transform`.
+- Model+clips are shared per asset; **per-instance playback state** (`animClip`/`animTime`) lives on the `Pawn`/`MeshObjectNode` — apply pose then draw immediately.
+- `.ozls` `EntityType` tokens: `Mesh.Static`, `Mesh.Skeletal`, `ParticleEmitter`, `WindZone`. `LightningScriptParser` has first-class body keys `mesh_type`, `anim_idle/patrol/chase/return/death`, `anim_speed` (top-level; unknown keys are silently dropped).
+- OZONE entities: `Mesh.Static <path> x y z yaw [scale=] [tex=]` and `Mesh.Skeletal <path> x y z yaw [scale=] [tex=] [anim=Clip] [speed=]`. Parsed in `OzoneParser`, loaded into `PawnSystem::m_meshObjects` by `OzOzoneLoader::LoadOzoneEntity`, drawn by `DrawEntities`, exported by `AngelEd` `ExportToOzone`. Client-only (not networked). AngelEd also has a `GameEngine.Mesh` tree branch (places the Model Browser selection) plus `SelType::MESH` selection, properties panel (path/texture/clip/scale/pos/yaw + Reload), delete/duplicate.
+- PS1 look: model textures get `TEXTURE_FILTER_POINT` in `oz::Mesh::Load`.
+
+## Particles (GameEngine.ParticleEmitter)
+- Emitter node defs are boxed in `PawnSystem` (`m_particleEmitters`, `AddParticleEmitter`/`GetParticleEmitters`/`ClearParticleEmitters`). OZONE line: `ParticleEmitter <type> x y z [rate life speed spread sizeStart sizeEnd r g b rEnd gEnd bEnd gravity radius dirX dirY dirZ yaw] [tex=path]`.
+- Simulation + rendering live in `Source/Particle/OzParticleSimulationManager.*` (pool of 4096, generated soft default texture, optional per-emitter `tex=`). **Isolation contract:** it is ticked once per frame in `Core.hpp` *after* the weapon/NPC/projectile sim loop and only reads emitter defs — it never calls gameplay code, so particles can't interrupt weapon mechanics or NPC ticks. Client-only/cosmetic (not networked).
+- AngelEd: `GameEngine.ParticleEmitter` tree leaf places a default fire emitter; `SelType::PARTICLE` select/delete/duplicate + properties (type/tex/rate/life/speed/size/spread/color) + `ExportToOzone`.
+
+## Path nodes (GameEngine.PathNode)
+- OZONE line: `PathNode <name> x y z [radius=R] [next=a,b,c] [loop]`. Links are **by node name** (not index), so the graph survives editor reordering.
+- Client: nodes boxed in `PawnSystem` (`m_pathNodes`, `AddPathNode`/`GetPathNodes`/`FindPathNodeByName`/`ClearPathNodes`), loaded by `OzOzoneLoader::LoadOzoneEntity`. Client-side nodes are for editor placement/visualization + round-trip only (the client never runs path AI).
+- Server: `ServerPathNode` + `WorldState::path_nodes`, seeded in `seed_world_entities`; `GameState::tick_npcs` PATROL follows the graph (server-authoritative — NPC positions are already networked, so no protocol change). `ServerNPC::path_target` holds the current waypoint index; when a world has no path nodes it falls back to the legacy circular patrol. `RemovePathNode` also strips links referencing the removed name.
+- AngelEd: `GameEngine.PathNode` tree leaf places one at the camera; `SelType::PATHNODE` select/delete/duplicate + properties (name/radius/next-list/loop); links and selected-node radius drawn as 3D overlays; `ExportToOzone`.
+
+## Wind zones (WindZone)
+- OZONE line: `WindZone minX minY minZ maxX maxY maxZ dirX dirY dirZ strength [freq]`. Client-only/cosmetic; not networked.
+- `WindZoneNode` boxed in `PawnSystem` (`m_windZones`); loaded by `OzOzoneLoader::LoadOzoneEntity`; `PawnSystem::SampleWind(worldPos)` returns the combined wind at a point as `(dirX, dirZ, strength, frequency)`.
+- Foliage opt-in: `wind=1` on a `Mesh.Static`/`Mesh.Skeletal` OZONE line sets `MeshObjectNode::windAffected`; the editor MESH properties panel exposes a `Wind Affected` checkbox.
+- Rendering: `GameData/Shaders/Lights/Wind.vs` (a copy of `Lighting.vs` plus height-weighted sine sway, pairs with `LitFog.fs`) loaded into `OmegaTechData.WindShader`; `oz::SetWindUniforms` uploads `windParams/windTime/windBaseY/windHeight` per draw. `PawnSystem::DrawEntities(camera, litShader, windShader)` uses the wind shader **only** for wind-affected meshes — everything else keeps `Lighting.vs` untouched. Missing `Wind.vs` falls back to `Lighting.vs` (no sway).
+- AngelEd: `WindZone` tree leaf places one at the camera; `SelType::WINDZONE` select/delete/duplicate + properties (size/direction/strength/frequency); boxes + direction arrows drawn as 3D overlays; `ExportToOzone`.
+
+## Vertex-keyframe animation (Mesh.Skeletal `animfile=`)
+- Authored **vertex-keyframe/morph** animation (not bone skeletal). Text `.ozanim` format (`Source/Anim/OzAnimFormat.*`, raylib-free): `ozanim 1` / `clip "Name" fps 30 loop 1` / `key <t>` / sparse `v <index> dx dy dz` offsets added to the model's base vertices. Vertex indices are GLOBAL across the model.
+- Runtime: `oz::AnimatedMesh` (`Source/Renderer/Mesh/AnimatedMesh.*`) samples the clip and CPU-uploads positions via `UpdateMeshBuffer(mesh, 0, ...)` (apply-pose-then-draw; never `UploadMesh` on a loaded mesh). `oz::MeshCache::GetAnimated(mesh, tex, animFile, ...)` (cache key includes the anim file); falls back to StaticMesh.
+- `MeshObjectNode` fields `animFile`, `animSpeed`, `animPaused`, `editPose` (editor-only live pose). OZONE: `Mesh.Skeletal <path> x y z yaw [scale=] [tex=] [animfile=Global/Anims/x.ozanim] [speed=] [wind=1]`. `speed=` / `animfile=` parsed in `OzoneParser`, applied in `OzOzoneLoader`, exported in `AngelEd` `ExportToOzone`. WDL cannot carry these (OZONE only).
+- Editor: toolbar **Anim** opens the Animation panel — clip list, New/Delete, FPS/loop, Play/Pause/Stop, timeline scrub; **Convert to Animated** (Mesh properties / Entity Properties) writes a default clip under `GameData/Global/Anims/`; **Edit Verts** enables vertex picking (click / Shift-add / Sel All), keyboard deform (U/J/H/K/Y/I move, O/L rotate; Ctrl+Z/Y undo/redo, tool-scoped) and **Add Key/Del Key** capture sparse offsets. `SelType::MESH` selection highlight + selection raycast are wired.
+- Packaging: `build-data.ps1` packs `GameData/Global/Anims` → `System/Data/anims.ozpak` (`OZPK`). Playback is client-cosmetic (not networked).
 
 ## Weapons (b54+)
 - Data-driven `.ozls` entities of type `weapon`: ranged (ProjectileNode; speed/spread/damage/lifetime; `magazine`/`reload_time` stats) or melee (`reach` stat, `on_swing`/`on_hit` actions).

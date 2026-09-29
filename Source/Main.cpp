@@ -9,7 +9,9 @@
 #include "Script/LightningEntityDef.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Renderer/CombatFX.hpp"
+#include "Renderer/Mesh/MeshCache.hpp"
 #include <cmath>
+#include <memory>
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -289,28 +291,90 @@ static Color unpack_color(uint32_t packed) {
 // Remote player rendering — drawn inside DrawWorld()'s BeginMode3D pass
 // (called from Core.hpp). TODO: Move into Render/
 // ---------------------------------------------------------------------------
+// Shared remote-player mesh, loaded lazily through the internal MeshCache.
+// Uses the "Player" entity def's mesh/texture when declared (skeletal when the
+// def says so), else the GameData/Global/Player convention; when nothing loads
+// the caller keeps the primitive capsule placeholder.
+static std::shared_ptr<oz::Mesh> RemotePlayerMesh() {
+    static std::shared_ptr<oz::Mesh> mesh;
+    static bool tried = false;
+    static bool skeletal = false;
+    if (!tried) {
+        tried = true;
+        std::string meshPath, texPath;
+        if (const EntityDef* def = LightningEntityRegistry::Instance().Find("Player")) {
+            meshPath = def->mesh;
+            texPath = def->texture;
+            skeletal = (def->meshType == "skeletal");
+        }
+        const std::string baseDir = "GameData/Global/Player/";
+        if (meshPath.empty()) meshPath = baseDir + "Player.obj";
+        if (texPath.empty()) texPath = baseDir + "Player_texture.png";
+        mesh = skeletal
+            ? oz::MeshCache::Instance().GetSkeletal(meshPath, texPath, baseDir, true)
+            : oz::MeshCache::Instance().GetStatic(meshPath, texPath, baseDir, true);
+        if (mesh && mesh->Valid())
+            OZ_INFO("Remote players: using mesh '%s'", meshPath.c_str());
+        else
+            OZ_WARN("Remote players: no model '%s' — using placeholder capsule", meshPath.c_str());
+    }
+    return mesh;
+}
+
+// Per-remote-player animation state (playback lives outside the shared mesh).
+struct RemoteAnimState {
+    net::NetVec3 last{0, 0, 0};
+    bool hasLast = false;
+    float time = 0.0f;
+    int clip = -1;
+};
+
 void DrawRemotePlayers3D() {
     if (!g_network_enabled || !g_client.is_connected()) return;
+    auto mesh = RemotePlayerMesh();
+    auto* skel = dynamic_cast<oz::SkeletalMesh*>(mesh.get());
+    const bool animated = skel && skel->ClipCount() > 0;
+    const EntityDef* pdef = LightningEntityRegistry::Instance().Find("Player");
+    const float dt = GetFrameTime();
+
+    static std::unordered_map<uint32_t, RemoteAnimState> anim;
     const auto& players = g_client.remote_players();
     for (const auto& rp : players) {
         if (!rp.active) continue;
         Vector3 pos = {rp.position.x, rp.position.y, rp.position.z};
-        float height = 8.0f;
-        float radius = 1.5f;
         Color col = unpack_color(rp.color_packed);
 
-        // Body (cylinder)
-        DrawCylinder(pos, radius, radius, height, 8, col);
-        // Head (sphere on top)
-        Vector3 head_pos = {pos.x, pos.y + height + 1.0f, pos.z};
-        DrawSphere(head_pos, 1.2f, col);
-        // Direction indicator (small cone)
-        Vector3 dir_end = {
-            pos.x + sinf(rp.yaw) * 3.0f,
-            pos.y + height * 0.5f,
-            pos.z + cosf(rp.yaw) * 3.0f
-        };
-        DrawLine3D({pos.x, pos.y + height * 0.5f, pos.z}, dir_end, YELLOW);
+        if (mesh && mesh->Valid()) {
+            if (animated) {
+                RemoteAnimState& a = anim[rp.player_id];
+                float dx = rp.position.x - a.last.x;
+                float dz = rp.position.z - a.last.z;
+                bool moving = a.hasLast && (dx * dx + dz * dz) > 0.0004f;
+                int wanted = moving
+                    ? skel->FindClip(pdef ? pdef->animChase : "")
+                    : skel->FindClip(pdef ? pdef->animIdle : "");
+                if (wanted < 0) wanted = 0;
+                if (wanted != a.clip) { a.clip = wanted; a.time = 0.0f; }
+                a.time += dt;
+                a.last = rp.position;
+                a.hasLast = true;
+                skel->ApplyPose(a.clip, a.time);
+            }
+            oz::MeshTransform mt;
+            mt.position = pos;
+            mt.yaw = rp.yaw * RAD2DEG;
+            mt.scale = {1.0f, 1.0f, 1.0f};
+            mesh->Draw(mt, {0});
+        } else {
+            const float height = 8.0f, radius = 1.5f;
+            DrawCylinder(pos, radius, radius, height, 8, col);
+            DrawSphere({pos.x, pos.y + height + 1.0f, pos.z}, 1.2f, col);
+        }
+
+        // Facing indicator — kept in both paths so players stay distinguishable.
+        DrawLine3D({pos.x, pos.y + 4.0f, pos.z},
+                   {pos.x + sinf(rp.yaw) * 3.0f, pos.y + 4.0f, pos.z + cosf(rp.yaw) * 3.0f},
+                   col);
     }
 }
 

@@ -351,7 +351,9 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::PlayerUpdateData pud;
             memcpy(&pud, msg.payload, sizeof(pud));
-            if (pud.player_id == 0) break; // skip own messages
+            // NOTE: no player_id==0 self-filter here — the server never relays a
+            // client's own update back to it, and server ids start at 0, so that
+            // check only made the first player invisible to everyone else.
 
             bool found = false;
             for (auto& rp : m_remote_players) {

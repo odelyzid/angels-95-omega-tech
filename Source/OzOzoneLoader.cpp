@@ -180,6 +180,101 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
             if (prim.args.size() >= 3)
                 pawns.Spawn({prim.args[0], prim.args[2], prim.args[1]}, prim.entityType.c_str());
             return true;
+        case OzonePrimitiveType::ENTITY_MESH_STATIC:
+        case OzonePrimitiveType::ENTITY_MESH_SKELETAL: {
+            // Mesh.Static|Skeletal <meshPath> x y z yaw [scale=N] [tex=path] [anim=Clip] [speed=N]
+            if (prim.args.size() >= 4) {
+                MeshObjectNode node;
+                node.meshPath = StripQuotes(prim.meshPath);
+                node.texturePath = StripQuotes(prim.texPath);
+                node.position = {prim.args[0], prim.args[2], prim.args[1]}; // Z-up -> Y-up
+                node.yaw = prim.args[3];
+                node.scale = prim.args.size() >= 5 ? prim.args[4] : 1.0f;
+                node.skeletal = (prim.type == OzonePrimitiveType::ENTITY_MESH_SKELETAL);
+                node.windAffected = prim.meshWind;
+                node.animClip = StripQuotes(prim.animClip);
+                node.animFile = StripQuotes(prim.animFile);
+                node.animSpeed = prim.animSpeed;
+                node.baseDir = worldDir.empty() ? std::string() : (worldDir + "/");
+                pawns.AddMeshObject(node);
+            }
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_WIND_ZONE: {
+            // WindZone minX minY minZ maxX maxY maxZ dirX dirY dirZ strength [freq]
+            if (prim.args.size() >= 10) {
+                auto arg = [&](int i, float def) -> float {
+                    return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : def;
+                };
+                WindZoneNode z;
+                z.bounds.min = {std::min(prim.args[0], prim.args[3]),
+                                std::min(prim.args[2], prim.args[5]),
+                                std::min(prim.args[1], prim.args[4])};
+                z.bounds.max = {std::max(prim.args[0], prim.args[3]),
+                                std::max(prim.args[2], prim.args[5]),
+                                std::max(prim.args[1], prim.args[4])};
+                z.direction = {arg(6, 1.0f), arg(8, 0.0f), arg(7, 0.0f)}; // Z-up -> Y-up
+                z.strength = arg(9, 1.0f);
+                z.frequency = arg(10, 1.0f);
+                pawns.AddWindZone(z);
+            }
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_PATH_NODE: {
+            // PathNode <name> x y z [radius=R] [next=a,b,c] [loop]
+            if (prim.args.size() >= 3) {
+                PathNode node;
+                node.name = prim.entityType.empty()
+                    ? ("path_" + std::to_string((int)prim.args[0]) + "_" +
+                       std::to_string((int)prim.args[2]))
+                    : prim.entityType;
+                node.position = {prim.args[0], prim.args[2], prim.args[1]}; // Z-up -> Y-up
+                if (prim.args.size() >= 4) node.radius = prim.args[3];
+                node.loop = prim.pathLoop;
+                std::string names = StripQuotes(prim.entitySubType);
+                size_t start = 0;
+                while (start <= names.size()) {
+                    size_t comma = names.find(',', start);
+                    std::string part = names.substr(
+                        start, comma == std::string::npos ? std::string::npos : comma - start);
+                    if (!part.empty()) node.next.push_back(part);
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+                pawns.AddPathNode(node);
+            }
+            return true;
+        }
+        case OzonePrimitiveType::ENTITY_PARTICLE_EMITTER: {
+            // ParticleEmitter <type> x y z [rate life speed spread sizeStart sizeEnd
+            //   r g b rEnd gEnd bEnd gravity radius dirX dirY dirZ yaw] [tex=path]
+            if (prim.args.size() >= 3) {
+                auto arg = [&](int i, float def) -> float {
+                    return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : def;
+                };
+                ParticleEmitterNode node;
+                node.type = prim.entityType.empty() ? "fire" : prim.entityType;
+                node.position = {prim.args[0], prim.args[2], prim.args[1]}; // Z-up -> Y-up
+                node.rate = arg(3, 20.0f);
+                node.lifetime = arg(4, 1.0f);
+                node.speed = arg(5, 2.0f);
+                node.spread = arg(6, 0.4f);
+                node.sizeStart = arg(7, 0.4f);
+                node.sizeEnd = arg(8, 0.0f);
+                node.colorStart = (Color){(unsigned char)arg(9, 255), (unsigned char)arg(10, 180),
+                                          (unsigned char)arg(11, 80), 255};
+                node.colorEnd = (Color){(unsigned char)arg(12, 60), (unsigned char)arg(13, 20),
+                                        (unsigned char)arg(14, 10), 0};
+                node.gravity = arg(15, 0.0f);
+                node.radius = arg(16, 0.0f);
+                float dx = arg(17, 0.0f), dy = arg(18, 1.0f), dz = arg(19, 0.0f);
+                node.direction = {dx, dz, dy}; // Z-up -> Y-up
+                node.yaw = arg(20, 0.0f);
+                node.texturePath = StripQuotes(prim.texPath);
+                pawns.AddParticleEmitter(node);
+            }
+            return true;
+        }
         case OzonePrimitiveType::ENTITY_EMITTER:
             // emitter sound|music x y z  (Z-up conversion like the other entities)
             if (prim.args.size() >= 3) {

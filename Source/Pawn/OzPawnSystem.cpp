@@ -3,6 +3,8 @@
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Renderer/CombatFX.hpp"
+#include "../Renderer/WindShader.hpp"
+#include "../Particle/OzParticleSimulationManager.hpp"
 #include "../Script/LightningEntityManager.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
 #include "PlayerMovement.hpp"
@@ -136,6 +138,7 @@ void PawnSystem::Despawn(int id) {
 #endif
             if (m_pawns[i].sprite.id != 0) UnloadTexture(m_pawns[i].sprite);
             if (m_pawns[i].scream.frameCount != 0) UnloadSound(m_pawns[i].scream);
+            m_pawns[i].mesh.reset();
             m_pawns[i].active = false;
             m_freeIds.push_back((int)i);
             return;
@@ -754,8 +757,39 @@ void PawnSystem::Update(Vector3 playerPos, float dt) {
 // DrawAll - draw pawn billboards
 // ---------------------------------------------------------------------------
 void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
+    const float dt = GetFrameTime();
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
+
+        // Prefer a real 3D model when the pawn def provides one (billboard as
+        // fallback keeps old sprite-only defs working). Static props still face
+        // the viewer; skeletal pawns track their movement yaw.
+        PawnDef* def = FindDef(p.defName.c_str());
+        if (def) {
+            if (!p.mesh) p.mesh = EnsurePawnMesh(*def);
+            if (p.mesh && p.mesh->Valid()) {
+                auto* skel = dynamic_cast<oz::SkeletalMesh*>(p.mesh.get());
+                const bool animated = skel && skel->ClipCount() > 0;
+
+                if (animated) {
+                    SyncPawnAnim(p, def, dt);
+                    if (p.animClip >= 0) skel->ApplyPose(p.animClip, p.animTime);
+                    float vx = p.velocity.x, vz = p.velocity.z;
+                    if (vx * vx + vz * vz > 0.0001f)
+                        p.yaw = atan2f(vx, vz) * RAD2DEG;
+                }
+
+                oz::MeshTransform t;
+                t.position = p.position;
+                t.yaw = animated
+                    ? p.yaw
+                    : atan2f(camera.position.x - p.position.x,
+                             camera.position.z - p.position.z) * RAD2DEG;
+                t.scale = {1.0f, 1.0f, 1.0f};
+                p.mesh->Draw(t, litShader);
+                continue;
+            }
+        }
 
         if (p.sprite.id != 0) {
             if (litShader.id > 0) {
@@ -790,61 +824,322 @@ void PawnSystem::ClearEmitters() {
 }
 
 // ---------------------------------------------------------------------------
-// ClearWeaponPickupCache — unload all cached weapon pickup models
+// Mesh object nodes (GameEngine.Mesh.Static / GameEngine.Mesh.Skeletal props)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddMeshObject(const MeshObjectNode& node) {
+    MeshObjectNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    // baseDir is only a fallback for relative paths; leave empty for the
+    // GameData-rooted / absolute / package paths the browser and OZONE supply.
+    m_meshObjects.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveMeshObject(int id) {
+    auto it = std::remove_if(m_meshObjects.begin(), m_meshObjects.end(),
+        [id](const MeshObjectNode& n) { return n.id == (uint32_t)id; });
+    m_meshObjects.erase(it, m_meshObjects.end());
+}
+
+void PawnSystem::ClearMeshObjects() {
+    m_meshObjects.clear();
+}
+
+MeshObjectNode* PawnSystem::GetMeshObject(int id) {
+    for (auto& n : m_meshObjects)
+        if (n.id == (uint32_t)id) return &n;
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Particle emitter nodes (GameEngine.ParticleEmitter)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddParticleEmitter(const ParticleEmitterNode& node) {
+    ParticleEmitterNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_particleEmitters.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveParticleEmitter(int id) {
+    auto it = std::remove_if(m_particleEmitters.begin(), m_particleEmitters.end(),
+        [id](const ParticleEmitterNode& n) { return n.id == (uint32_t)id; });
+    m_particleEmitters.erase(it, m_particleEmitters.end());
+}
+
+void PawnSystem::ClearParticleEmitters() {
+    m_particleEmitters.clear();
+}
+
+ParticleEmitterNode* PawnSystem::GetParticleEmitter(int id) {
+    for (auto& n : m_particleEmitters)
+        if (n.id == (uint32_t)id) return &n;
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Path node waypoints (GameEngine.PathNode)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddPathNode(const PathNode& node) {
+    PathNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_pathNodes.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemovePathNode(int id) {
+    // Drop the node, then strip any links that referenced it by name.
+    std::string removedName;
+    for (auto& n : m_pathNodes)
+        if (n.id == (uint32_t)id) { removedName = n.name; break; }
+    auto it = std::remove_if(m_pathNodes.begin(), m_pathNodes.end(),
+        [id](const PathNode& n) { return n.id == (uint32_t)id; });
+    m_pathNodes.erase(it, m_pathNodes.end());
+    if (!removedName.empty()) {
+        for (auto& n : m_pathNodes) {
+            n.next.erase(std::remove(n.next.begin(), n.next.end(), removedName), n.next.end());
+        }
+    }
+}
+
+void PawnSystem::ClearPathNodes() {
+    m_pathNodes.clear();
+}
+
+PathNode* PawnSystem::GetPathNode(int id) {
+    for (auto& n : m_pathNodes)
+        if (n.id == (uint32_t)id) return &n;
+    return nullptr;
+}
+
+PathNode* PawnSystem::FindPathNodeByName(const std::string& name) {
+    for (auto& n : m_pathNodes)
+        if (n.name == name) return &n;
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Wind zones (foliage sway)
+// ---------------------------------------------------------------------------
+int PawnSystem::AddWindZone(const WindZoneNode& node) {
+    WindZoneNode n = node;
+    if (n.id == 0) n.id = m_nextEntityId++;
+    m_windZones.push_back(n);
+    return (int)n.id;
+}
+
+void PawnSystem::RemoveWindZone(int id) {
+    auto it = std::remove_if(m_windZones.begin(), m_windZones.end(),
+        [id](const WindZoneNode& n) { return n.id == (uint32_t)id; });
+    m_windZones.erase(it, m_windZones.end());
+}
+
+void PawnSystem::ClearWindZones() {
+    m_windZones.clear();
+}
+
+WindZoneNode* PawnSystem::GetWindZone(int id) {
+    for (auto& n : m_windZones)
+        if (n.id == (uint32_t)id) return &n;
+    return nullptr;
+}
+
+Vector4 PawnSystem::SampleWind(Vector3 worldPos) const {
+    Vector3 dir = {0, 0, 0};
+    float strength = 0.0f;
+    float freq = 1.0f;
+    for (const auto& z : m_windZones) {
+        if (!z.active) continue;
+        if (worldPos.x < z.bounds.min.x || worldPos.x > z.bounds.max.x ||
+            worldPos.y < z.bounds.min.y || worldPos.y > z.bounds.max.y ||
+            worldPos.z < z.bounds.min.z || worldPos.z > z.bounds.max.z) continue;
+        dir.x += z.direction.x * z.strength;
+        dir.z += z.direction.z * z.strength;
+        strength += z.strength;
+        freq = z.frequency;
+    }
+    if (strength <= 0.0f) return {0, 0, 0, 0};
+    float len = sqrtf(dir.x * dir.x + dir.z * dir.z);
+    if (len > 1e-4f) { dir.x /= len; dir.z /= len; }
+    return {dir.x, dir.z, strength, freq};
+}
+
+// ---------------------------------------------------------------------------
+// ClearWeaponPickupCache — release every cached render mesh asset
 // ---------------------------------------------------------------------------
 void PawnSystem::ClearWeaponPickupCache() {
-    for (auto& [name, entry] : m_weaponPickupCache) {
-        if (entry.model.meshCount > 0) UnloadModel(entry.model);
-        if (entry.texture.id > 0) UnloadTexture(entry.texture);
+    for (auto& p : m_pawns) p.mesh.reset();
+    for (auto& n : m_meshObjects) n.mesh.reset();
+    oz::MeshCache::Instance().Clear();
+}
+
+// Resolve a model/texture path declared by a .ozls/.cfg entity (delegates to
+// the shared oz::Mesh resolver so all taxonomy assets resolve identically).
+static std::string ResolveDefAsset(const std::string& baseDir, const std::string& rel) {
+    return oz::ResolveMeshAsset(baseDir, rel);
+}
+
+// Directory (with trailing separator) of a def's source file, so paths declared
+// relative to the .ozls (e.g. mesh = "automag_lvl1.obj") resolve beside it.
+static std::string DefAssetDir(const std::string& sourcePath) {
+    size_t slash = sourcePath.find_last_of("/\\");
+    if (slash == std::string::npos) return "";
+    return sourcePath.substr(0, slash + 1);
+}
+
+// Load (once, via the internal MeshCache) the shared mesh for a pawn definition,
+// honoring the def's mesh_type ("skeletal" -> animated, otherwise static).
+std::shared_ptr<oz::Mesh> PawnSystem::EnsurePawnMesh(PawnDef& def) {
+    if (def.model_path.empty()) return nullptr;
+    std::string meshPath = ResolveDefAsset(def.baseDir, def.model_path);
+    std::string texPath  = ResolveDefAsset(def.baseDir, def.model_texture);
+    const bool pointFilter = true; // PS1 look
+    if (def.mesh_type == "skeletal")
+        return oz::MeshCache::Instance().GetSkeletal(meshPath, texPath, def.baseDir, pointFilter);
+    return oz::MeshCache::Instance().GetStatic(meshPath, texPath, def.baseDir, pointFilter);
+}
+
+// Map the pawn FSM state to its animation clip and advance playback time.
+void PawnSystem::SyncPawnAnim(Pawn& p, PawnDef* def, float dt) {
+    if (!def || !p.mesh) return;
+    auto* skel = dynamic_cast<oz::SkeletalMesh*>(p.mesh.get());
+    if (!skel || skel->ClipCount() <= 0) return;
+
+    const std::string* clipName = nullptr;
+    switch (p.state) {
+        case PawnState::IDLE:   clipName = &def->anim_idle;   break;
+        case PawnState::PATROL: clipName = &def->anim_patrol; break;
+        case PawnState::CHASE:  clipName = &def->anim_chase;  break;
+        case PawnState::RETURN: clipName = &def->anim_return; break;
+        case PawnState::DEAD:   clipName = &def->anim_death;  break;
     }
-    m_weaponPickupCache.clear();
+    int wanted = (clipName && !clipName->empty()) ? skel->FindClip(*clipName) : -1;
+    if (wanted < 0) wanted = 0; // first clip as fallback
+    if (wanted != p.animClip) {
+        p.animClip = wanted;
+        p.animTime = 0.0f;
+    }
+    p.animTime += dt * (def->anim_speed > 0.0f ? def->anim_speed : 1.0f);
 }
 
 // ---------------------------------------------------------------------------
 // DrawEntities - draw player starts, pickups, zones, emitters as billboards
 // ---------------------------------------------------------------------------
-void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
+void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windShader) {
     // Player start billboards
     for (auto& n : m_playerStarts) {
         EngineBillboard::Draw(camera, "PlayerStart",
             {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f, litShader);
     }
 
-    // Pickup billboards with bobbing
+    // Pickups with bobbing: render the entity's 3D model when it declares one
+    // (top-level mesh/texture or stats strings), otherwise the billboard icon.
     for (auto& n : m_pickups) {
         if (!n.active) continue;
         const EntityDef* edef = LightningEntityRegistry::Instance().Find(n.typeName);
-        if (edef && edef->type == EntityType::WEAPON) {
-            float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
-            Vector3 pos = {n.position.x, n.position.y + 0.5f + bob, n.position.z};
-            auto meshIt = edef->stats.strings.find("mesh");
-            auto texIt = edef->stats.strings.find("texture");
-            if (meshIt != edef->stats.strings.end() && texIt != edef->stats.strings.end()) {
-                // Use cached model+texture per weapon type
-                auto cacheIt = m_weaponPickupCache.find(n.typeName);
-                if (cacheIt == m_weaponPickupCache.end()) {
-                    // First encounter — load and cache
-                    std::string meshPath = "GameData/Global/gun/" + n.typeName + "/" + meshIt->second;
-                    std::string texPath = "GameData/Global/gun/" + n.typeName + "/" + texIt->second;
-                    WeaponPickupCache entry;
-                    entry.model = LoadModel(meshPath.c_str());
-                    if (entry.model.meshCount > 0) {
-                        entry.texture = LoadTexture(texPath.c_str());
-                        if (entry.texture.id > 0)
-                            entry.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = entry.texture;
-                        if (litShader.id > 0)
-                            entry.model.materials[0].shader = litShader;
-                    }
-                    cacheIt = m_weaponPickupCache.emplace(n.typeName, entry).first;
-                }
-                if (cacheIt->second.model.meshCount > 0) {
-                    float yaw = atan2f(camera.position.x - pos.x, camera.position.z - pos.z) * RAD2DEG;
-                    DrawModelEx(cacheIt->second.model, pos, {0, 1, 0}, yaw, {1.5f, 1.5f, 1.5f}, WHITE);
-                }
+        float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
+        Vector3 pos = {n.position.x, n.position.y + 0.5f + bob, n.position.z};
+
+        std::shared_ptr<oz::Mesh> mesh;
+        bool animated = false;
+        if (edef) {
+            std::string meshPath = edef->mesh;
+            std::string texPath = edef->texture;
+            if (meshPath.empty()) {
+                auto m = edef->stats.strings.find("mesh");
+                if (m != edef->stats.strings.end()) meshPath = m->second;
             }
+            if (texPath.empty()) {
+                auto t = edef->stats.strings.find("texture");
+                if (t != edef->stats.strings.end()) texPath = t->second;
+            }
+            if (!meshPath.empty()) {
+                std::string baseDir = DefAssetDir(edef->sourcePath);
+                mesh = (edef->meshType == "skeletal")
+                    ? oz::MeshCache::Instance().GetSkeletal(meshPath, texPath, baseDir, true)
+                    : oz::MeshCache::Instance().GetStatic(meshPath, texPath, baseDir, true);
+                auto* skel = dynamic_cast<oz::SkeletalMesh*>(mesh.get());
+                animated = skel && skel->ClipCount() > 0;
+            }
+        }
+
+        if (mesh && mesh->Valid()) {
+            float yaw = atan2f(camera.position.x - pos.x, camera.position.z - pos.z) * RAD2DEG;
+            if (animated) {
+                auto* skel = static_cast<oz::SkeletalMesh*>(mesh.get());
+                int clip = !edef->animIdle.empty() ? skel->FindClip(edef->animIdle) : 0;
+                if (clip < 0) clip = 0;
+                skel->ApplyPose(clip, (float)GetTime());
+            }
+            oz::MeshTransform t;
+            t.position = pos;
+            t.yaw = yaw;
+            t.scale = {1.5f, 1.5f, 1.5f};
+            mesh->Draw(t, litShader);
         } else {
             EngineBillboard::DrawPickup(camera, n.typeName.c_str(), n.position, 0.8f, litShader);
         }
+    }
+
+    // Placed static/skeletal map-object meshes (GameEngine.Mesh.*)
+    for (auto& n : m_meshObjects) {
+        if (!n.mesh) {
+            if (!n.animFile.empty())
+                n.mesh = oz::MeshCache::Instance().GetAnimated(
+                    n.meshPath, n.texturePath, n.animFile, n.baseDir, true);
+            else if (n.skeletal)
+                n.mesh = oz::MeshCache::Instance().GetSkeletal(
+                    n.meshPath, n.texturePath, n.baseDir, true);
+            else
+                n.mesh = oz::MeshCache::Instance().GetStatic(
+                    n.meshPath, n.texturePath, n.baseDir, true);
+        }
+        if (!n.mesh || !n.mesh->Valid()) continue;
+
+        if (!n.animFile.empty()) {
+            // External vertex-keyframe clip (apply-pose-then-draw).
+            auto* am = dynamic_cast<oz::AnimatedMesh*>(n.mesh.get());
+            if (am && am->ClipCount() > 0) {
+                // Editor live-edit pose takes precedence over clip sampling.
+                if (n.editPose && n.editPose->size() == (size_t)am->TotalVertexCount() * 3) {
+                    am->UploadOffsets(*n.editPose);
+                } else {
+                    int clip = !n.animClip.empty() ? am->FindClip(n.animClip) : 0;
+                    if (clip < 0) clip = 0;
+                    if (!n.animPaused)
+                        n.animTime += GetFrameTime() * (n.animSpeed > 0.0f ? n.animSpeed : 1.0f);
+                    am->ApplyVertexPose(clip, n.animTime);
+                }
+            }
+        } else if (n.skeletal) {
+            auto* skel = dynamic_cast<oz::SkeletalMesh*>(n.mesh.get());
+            if (skel && skel->ClipCount() > 0) {
+                int clip = !n.animClip.empty() ? skel->FindClip(n.animClip) : 0;
+                if (clip < 0) clip = 0;
+                n.animTime += GetFrameTime() * (n.animSpeed > 0.0f ? n.animSpeed : 1.0f);
+                skel->ApplyPose(clip, n.animTime);
+            }
+        }
+        // Wind-swayed foliage uses the wind shader; upload the zone sample so
+        // the height-weighted displacement reflects the enclosing WindZone(s).
+        Shader shader = litShader;
+        if (n.windAffected && windShader.id > 0) {
+            shader = windShader;
+            Vector4 wind = SampleWind(n.position);
+            if (wind.z > 0.0f) {
+                const BoundingBox& b = n.mesh->Bounds();
+                oz::SetWindUniforms(shader, wind, (float)GetTime(), b.min.y,
+                                    b.max.y - b.min.y);
+            } else {
+                oz::SetWindUniforms(shader, {0, 0, 0, 0}, 0.0f, 0.0f, 1.0f);
+            }
+        }
+
+        oz::MeshTransform t;
+        t.position = n.position;
+        t.yaw = n.yaw;
+        t.scale = {n.scale, n.scale, n.scale};
+        n.mesh->Draw(t, shader);
     }
 
     // Zone billboards at center of bounding box
@@ -910,6 +1205,10 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader) {
         }
         EngineBillboard::Draw(camera, "Portal", center, 1.2f, litShader);
     }
+
+    // GameEngine.ParticleEmitter — particles live in (and are drawn by) the
+    // isolated simulation manager; the emitter nodes themselves are boxed here.
+    OzParticleSimulationManager::Instance().Draw(camera);
 }
 
 // ---------------------------------------------------------------------------
@@ -937,8 +1236,13 @@ void PawnSystem::TickChase(Pawn& p, const Vector3& playerPos, float dt) {
     if (dist > 0.1f) {
         dir.x /= dist;
         dir.z /= dist;
-        p.position.x += dir.x * p.speed * dt;
-        p.position.z += dir.z * p.speed * dt;
+        p.velocity.x = dir.x * p.speed;
+        p.velocity.z = dir.z * p.speed;
+        p.position.x += p.velocity.x * dt;
+        p.position.z += p.velocity.z * dt;
+    } else {
+        p.velocity.x = 0.0f;
+        p.velocity.z = 0.0f;
     }
 
     // Return to patrol if player out of aggro range
@@ -951,12 +1255,16 @@ void PawnSystem::TickReturn(Pawn& p, float dt) {
     Vector3 dir = {p.spawnPosition.x - p.position.x, 0, p.spawnPosition.z - p.position.z};
     float dist = sqrtf(dir.x * dir.x + dir.z * dir.z);
     if (dist < 1.0f) {
+        p.velocity.x = 0.0f;
+        p.velocity.z = 0.0f;
         TransitionState(p, PawnState::PATROL);
     } else if (dist > 0.1f) {
         dir.x /= dist;
         dir.z /= dist;
-        p.position.x += dir.x * p.speed * dt;
-        p.position.z += dir.z * p.speed * dt;
+        p.velocity.x = dir.x * p.speed;
+        p.velocity.z = dir.z * p.speed;
+        p.position.x += p.velocity.x * dt;
+        p.position.z += p.velocity.z * dt;
     }
 }
 

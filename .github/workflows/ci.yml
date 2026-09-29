@@ -189,6 +189,12 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Physics/OzBsp.cpp -o OzBsp.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Physics/WorldChunk.cpp -o WorldChunk.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/LitLightning.cpp -o LitLightning.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/Mesh.cpp -o Mesh.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/SkeletalMesh.cpp -o SkeletalMesh.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/MeshCache.cpp -o MeshCache.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Anim/OzAnimFormat.cpp -o OzAnimFormat.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/AnimatedMesh.cpp -o AnimatedMesh.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Particle/OzParticleSimulationManager.cpp -o OzParticleSimulationManager.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/rlights/rlights.cpp -o rlights.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptParser.cpp -o LightningScriptParser.o
@@ -197,7 +203,7 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

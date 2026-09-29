@@ -46,7 +46,8 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
-          LitLightning.o rlights.o)
+          LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
+          OzParticleSimulationManager.o rlights.o)
 
 .PHONY: all clean test
 all: OTENGINE AngelServ AngelMaster ozpack
@@ -98,6 +99,27 @@ $(BUILD_DIR)/OzPawnSystem.o: Source/Pawn/OzPawnSystem.cpp Source/Pawn/OzPawnSyst
 $(BUILD_DIR)/LitLightning.o: Source/Renderer/LitLightning.cpp Source/Renderer/LitLightning.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Renderer/LitLightning.cpp -o $@
 
+# 5d-mesh. Compile the oz::Mesh taxonomy render primitives
+$(BUILD_DIR)/Mesh.o: Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/Mesh.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/Mesh.cpp -o $@
+
+$(BUILD_DIR)/SkeletalMesh.o: Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/SkeletalMesh.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/SkeletalMesh.cpp -o $@
+
+$(BUILD_DIR)/MeshCache.o: Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/MeshCache.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/MeshCache.cpp -o $@
+
+# 5d-anim. Vertex-keyframe (morph) animation format + runtime mesh
+$(BUILD_DIR)/OzAnimFormat.o: Source/Anim/OzAnimFormat.cpp Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Anim/OzAnimFormat.cpp -o $@
+
+$(BUILD_DIR)/AnimatedMesh.o: Source/Renderer/Mesh/AnimatedMesh.cpp Source/Renderer/Mesh/AnimatedMesh.hpp Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/AnimatedMesh.cpp -o $@
+
+# 5d-particle. Isolated ParticleEmitter simulation
+$(BUILD_DIR)/OzParticleSimulationManager.o: Source/Particle/OzParticleSimulationManager.cpp Source/Particle/OzParticleSimulationManager.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Particle/OzParticleSimulationManager.cpp -o $@
+
 $(BUILD_DIR)/rlights.o: Source/rlights/rlights.cpp Source/rlights/rlights.h | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/rlights/rlights.cpp -o $@
 
@@ -140,7 +162,7 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o rlights.o)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)
@@ -172,7 +194,7 @@ test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEnt
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
-test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp
+test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
 test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
@@ -193,7 +215,10 @@ test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(SERVER_LIBS)
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state
+test_ozanim: tests/OzAnim.test.cpp Source/Anim/OzAnimFormat.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -226,6 +251,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo ""
 	@echo "=== GameState Tests ==="
 	-./test_game_state
+	@echo ""
+	@echo "=== OzAnim Tests ==="
+	-./test_ozanim
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim

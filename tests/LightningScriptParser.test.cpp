@@ -515,6 +515,66 @@ static int test_parse_both_stats_types() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_parse_mesh_skeletal() {
+    TEST("parse Mesh.Skeletal entity with first-class anim keys");
+    std::string ozls = R"(
+        entity "Walker" : Mesh.Skeletal {
+            mesh = "GameData/Pawns/Walker.glb"
+            texture = "GameData/Pawns/Walker.png"
+            mesh_type = "skeletal"
+            anim_idle = "Idle"
+            anim_patrol = "Walk"
+            anim_chase = "Run"
+            anim_return = "Walk"
+            anim_death = "Die"
+            anim_speed = 1.25
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_mesh_skeletal.ozls");
+    CHECK(def.name == "Walker");
+    CHECK(def.type == EntityType::MESH_SKELETAL);
+    CHECK(def.mesh == "GameData/Pawns/Walker.glb");
+    CHECK(def.meshType == "skeletal");
+    CHECK(def.animIdle == "Idle");
+    CHECK(def.animPatrol == "Walk");
+    CHECK(def.animChase == "Run");
+    CHECK(def.animReturn == "Walk");
+    CHECK(def.animDeath == "Die");
+    CHECK_APROX(def.animSpeed, 1.25f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_parse_mesh_static_and_quoted_clip() {
+    TEST("parse Mesh.Static + quoted animation clip name");
+    std::string ozls = R"(
+        entity "AncientMachine" : Mesh.Static {
+            mesh = "AncientMachine.obj"
+            mesh_type = "static"
+            anim_idle = "Idle Loop"
+            anim_speed = 2.0
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_mesh_static.ozls");
+    CHECK(def.type == EntityType::MESH_STATIC);
+    CHECK(def.meshType == "static");
+    CHECK(def.animIdle == "Idle Loop");
+    CHECK_APROX(def.animSpeed, 2.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_parse_wind_zone() {
+    TEST("parse WindZone entity type");
+    std::string ozls = R"(
+        entity "Courtyard" : WindZone {
+            mesh_type = "static"
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_windzone.ozls");
+    CHECK(def.name == "Courtyard");
+    CHECK(def.type == EntityType::WIND_ZONE);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptParser Tests:\n");
     int failures = 0;
@@ -541,6 +601,9 @@ int main() {
     failures += test_parse_empty_string();
     failures += test_parse_set_skybox();
     failures += test_parse_both_stats_types();
+    failures += test_parse_mesh_skeletal();
+    failures += test_parse_mesh_static_and_quoted_clip();
+    failures += test_parse_wind_zone();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

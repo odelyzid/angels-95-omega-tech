@@ -40,6 +40,16 @@ struct EditorPanelState {
     int actionPlaceModel = -1;
     bool actionRefreshBrowser = false;
     std::string actionSpawnPawn;
+    std::string actionSpawnMesh;    // "static" | "skeletal" — GameEngine.Mesh placement
+    bool actionSpawnParticleEmitter = false; // place a default ParticleEmitter at camera
+    bool actionSpawnPathNode = false;        // place a GameEngine.PathNode at camera
+    bool actionSpawnWindZone = false;        // place a WindZone at camera
+    bool actionSpawnPlayerStart = false;     // place a PlayerStartNode at camera
+    std::string actionSpawnEmitter;          // "sound" | "music" — place an EmitterNode
+    int actionSpawnZone = -1;                // ZoneType index — place a ZoneVolumeNode
+    // Camera aim point, refreshed every frame by Main.cpp, so Win32 panels can
+    // spawn entities synchronously without waiting on the main-loop action flags.
+    float spawnPos[3] = {0.0f, 0.0f, 0.0f};
     std::string actionTexturePath;
     int actionTextureTarget = -1;
     std::string actionPreviewSoundPath;
@@ -139,6 +149,69 @@ struct EditorPanelState {
     float propPortalSpawn[3] = {0,0,0};
     bool  propPortalBidir = true;
 
+    // GameEngine.Mesh object editing
+    std::string propMeshPath;       // model path
+    std::string propMeshTex;        // texture path
+    std::string propAnimClip;       // skeletal clip name
+    std::string propMeshAnimFile;   // external .ozanim clip path
+    float propMeshAnimSpeed = 1.0f; // playback speed
+    bool actionReloadMesh = false;  // force asset reload
+
+    // GameEngine.ParticleEmitter editing
+    std::string propEmitterType;    // fire/sparks/smoke/...
+    std::string propEmitterTex;     // billboard texture path
+    float propEmitterRate = 20.0f;
+    float propEmitterLife = 1.0f;
+    float propEmitterSpeed = 2.0f;
+    float propEmitterSize = 0.4f;
+    float propEmitterSpread = 0.4f;
+    int propEmitterR = 255, propEmitterG = 180, propEmitterB = 80;
+
+    // GameEngine.PathNode editing
+    std::string propPathName;
+    float propPathRadius = 1.0f;
+    std::string propPathNext;    // comma-separated successor names
+    bool propPathLoop = false;
+
+    // GameEngine.Mesh wind-affection flag
+    bool propMeshWind = false;
+    // WindZone editing
+    float propWindDirX = 1.0f, propWindDirY = 0.0f, propWindDirZ = 0.0f;
+    float propWindStrength = 1.0f;
+    float propWindFrequency = 1.0f;
+    float propWindSizeX = 10.0f, propWindSizeY = 10.0f, propWindSizeZ = 10.0f;
+
+    // Animation / vertex-keyframe tool
+    bool showAnimPanel = false;
+    int animTargetMesh = -1;        // MeshObjectNode id (set by Main.cpp from selection)
+    std::string animClipName;       // selected clip name
+    float animTime = 0.0f;          // scrub time (seconds)
+    float animFps = 30.0f;
+    bool animLoop = true;
+    bool animPlaying = false;
+    int animTimeSlider = 0;         // 0..1000 (drives animTime)
+    std::string animStatus;         // read-only status line
+    bool actionAnimNewClip = false;
+    bool actionAnimDeleteClip = false;
+    bool actionAnimSave = false;
+    bool actionConvertToAnimated = false;
+    bool actionAnimRefresh = false;
+    bool actionAnimScrub = false;       // timeline dragged
+    bool actionAnimAddKey = false;      // Phase C
+    bool actionAnimDeleteKey = false;   // Phase C
+    bool actionAnimApplyClipMeta = false; // fps/loop edited in the panel
+    // Vertex definition tool (Phase C)
+    bool animEditVerts = false;         // vertex-edit mode active
+    std::vector<int> animSelVerts;      // selected global vertex indices
+    // Undo/redo snapshot stacks live in Main.cpp (they hold ozanim::Animation).
+    float animPrevX = 0, animPrevY = 0, animPrevZ = 0, animPrevR = 0;
+    bool animPrevValid = false;
+    bool actionAnimToggleEdit = false;
+    bool actionAnimUndo = false;
+    bool actionAnimRedo = false;
+    bool actionAnimSelectAll = false;
+    bool actionAnimClearSel = false;
+
 #ifdef _WIN32
     // Window handles (Windows only)
     void* hSoundMgr = nullptr;
@@ -156,6 +229,7 @@ struct EditorPanelState {
     void* hPropsPanel = nullptr;
     void* hStatsSidebar = nullptr;
     void* hLevelList = nullptr;
+    void* hAnimPanel = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -164,7 +238,7 @@ struct EditorPanelState {
     struct WinPos { int x, y, w, h; };
     WinPos soundMgrPos   = {50, 50, 400, 280};
     WinPos textureMgrPos = {480, 50, 520, 480};
-    WinPos pawnMgrPos    = {50, 360, 360, 200};
+    WinPos pawnMgrPos    = {50, 300, 400, 300};
     WinPos scriptMgrPos  = {440, 340, 560, 450};
     WinPos modelBrwPos   = {100, 80, 540, 500};
     WinPos envPanelPos   = {60, 60, 440, 560};
@@ -176,6 +250,7 @@ struct EditorPanelState {
     WinPos worldGraphPos = {540, 100, 600, 400};
     WinPos propsPanelPos = {300, 120, 470, 560};
     WinPos levelListPos = {200, 120, 560, 420};
+    WinPos animPanelPos  = {430, 180, 380, 390};
 #endif
 };
 
@@ -294,6 +369,10 @@ PawnTreeNode BuildPawnTree();
 #ifdef _WIN32
 // --- Windows-only functions ---
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd);
+
+// Rebuild the Pawn Manager "Actor Hierarchy" tree from the current registries.
+// Call after PawnDefs/.ozls defs are loaded (windows are created before then).
+void RefreshPawnManager();
 void DestroyAllEditorWindows();
 void ShowSoundManager(bool show);
 void ShowTextureManager(bool show);
@@ -307,6 +386,8 @@ void ShowHeightmapEditor(bool show);
 void ShowLightProps(bool show);
 void ShowWorldGraph(bool show);
 void ShowPropertiesPanel(bool show);
+void ShowAnimPanel(bool show);
+void RefreshAnimPanel();
 void ShowLevelList(bool show);
 void RefreshLevelList();
 void RefreshWorldGraph();
@@ -326,12 +407,15 @@ int GetStatsSidebarWidth();
 #else
 // Stub implementations for non-Windows
 inline void CreateAllEditorWindows(void*, void*) {}
+inline void RefreshPawnManager() {}
 inline void DestroyAllEditorWindows() {}
 inline void ShowSoundManager(bool) {}
 inline void ShowTextureManager(bool) {}
 inline void ShowPawnManager(bool) {}
 inline void ShowScriptManager(bool) {}
 inline void ShowModelBrowser(bool) {}
+inline void ShowAnimPanel(bool) {}
+inline void RefreshAnimPanel() {}
 inline void ShowEnvPanel(bool) {}
 inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}

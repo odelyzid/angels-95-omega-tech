@@ -8,6 +8,7 @@
 #include "Package/PackageAssetLoader.hpp"
 #include "Master/MasterList.hpp"
 #include "Renderer/EngineBillboard.hpp"
+#include "Particle/OzParticleSimulationManager.hpp"
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityManager.hpp"
 
@@ -89,6 +90,7 @@ public:
     Shader SobelShader;
     Shader JitterShader;
     Shader Lights;
+    Shader WindShader;   // Lighting.vs + wind displacement (foliage)
     Light GameLights[MAX_LIGHTS];
 
     ParticleSystem RainParticles;
@@ -568,7 +570,11 @@ auto LoadWorld()
         PawnSystem::Instance().ClearZones();
         PawnSystem::Instance().ClearPortals();
         PawnSystem::Instance().ClearEmitters();
+        PawnSystem::Instance().ClearParticleEmitters();
+        PawnSystem::Instance().ClearPathNodes();
+        PawnSystem::Instance().ClearWindZones();
         PawnSystem::Instance().DespawnAll();
+        OzParticleSimulationManager::Instance().Clear();
         // Reset level metadata so stale settings never leak across worlds
         PawnSystem::Instance().GetWorldInfo() = WorldInfo{};
         ParticlesEnabled = false;
@@ -828,8 +834,10 @@ void OmegaTechInit()
                 if (ext != ".cfg") continue;
                 std::ifstream f(entry.path());
                 if (!f.is_open()) continue;
-                std::string name, sp, sc;
+                std::string name, sp, sc, modelPath, modelTex;
+                std::string meshType, animIdle, animPatrol, animChase, animReturn, animDeath;
                 float speed = 1.5f, aggroRange = 6.0f, attackRange = 1.5f, damage = 10.0f;
+                float animSpeed = 1.0f;
                 int maxHealth = 100;
                 std::string line;
                 while (std::getline(f, line)) {
@@ -851,6 +859,15 @@ void OmegaTechInit()
                     else if (key == "maxHealth") maxHealth = std::stoi(val);
                     else if (key == "sprite_path") sp = val;
                     else if (key == "scream_path") sc = val;
+                    else if (key == "model_path") modelPath = val;
+                    else if (key == "model_texture") modelTex = val;
+                    else if (key == "mesh_type") meshType = val;
+                    else if (key == "anim_idle") animIdle = val;
+                    else if (key == "anim_patrol") animPatrol = val;
+                    else if (key == "anim_chase") animChase = val;
+                    else if (key == "anim_return") animReturn = val;
+                    else if (key == "anim_death") animDeath = val;
+                    else if (key == "anim_speed") animSpeed = std::stof(val);
                 }
                 if (!name.empty()) {
                     PawnDef def;
@@ -862,6 +879,17 @@ void OmegaTechInit()
                     def.maxHealth = maxHealth;
                     def.sprite_path = sp;
                     def.scream_path = sc;
+                    def.model_path = modelPath;
+                    def.model_texture = modelTex;
+                    def.mesh_type = meshType;
+                    def.anim_idle = animIdle;
+                    def.anim_patrol = animPatrol;
+                    def.anim_chase = animChase;
+                    def.anim_return = animReturn;
+                    def.anim_death = animDeath;
+                    def.anim_speed = animSpeed;
+                    def.baseDir = entry.path().parent_path().string();
+                    if (!def.baseDir.empty()) def.baseDir += "/";
                     ps.RegisterDef(def);
                     loaded++;
                 }
@@ -888,10 +916,15 @@ void OmegaTechInit()
     OmegaTechData.ToonShader = LoadShaderWithFallback(0, "GameData/Shaders/Toon.fs");
     OmegaTechData.JitterShader = LoadShaderWithFallback(0, "GameData/Shaders/Jitter.fs");
     OmegaTechData.Lights = LoadShaderWithFallback("GameData/Shaders/Lights/Lighting.vs", "GameData/Shaders/Lights/LitFog.fs");
-    OZ_INFO("Shaders loaded (Pixel=%d, Line=%d, Sobel=%d, Toon=%d, Jitter=%d, Lights=%d)",
+    OmegaTechData.WindShader = LoadShaderWithFallback("GameData/Shaders/Lights/Wind.vs", "GameData/Shaders/Lights/LitFog.fs");
+    if (OmegaTechData.WindShader.id == 0) {
+        OmegaTechData.WindShader = OmegaTechData.Lights; // graceful fallback: no sway
+        OZ_WARN("Wind.vs shader not found — foliage wind disabled");
+    }
+    OZ_INFO("Shaders loaded (Pixel=%d, Line=%d, Sobel=%d, Toon=%d, Jitter=%d, Lights=%d, Wind=%d)",
             OmegaTechData.PixelShader.id, OmegaTechData.LineShader.id,
             OmegaTechData.SobelShader.id, OmegaTechData.ToonShader.id,
-            OmegaTechData.JitterShader.id, OmegaTechData.Lights.id);
+            OmegaTechData.JitterShader.id, OmegaTechData.Lights.id, OmegaTechData.WindShader.id);
     OzoneLoader::Instance().SetLitFogShader(OmegaTechData.Lights);
 
     // Initialize all lights to disabled
@@ -2437,10 +2470,14 @@ if (inSkyZone)
         if (steps >= 4 && s_sim_accumulator >= kSimTick)
             s_sim_accumulator = 0.0; // drift guard: discard excess catch-up
 
+        // GameEngine.ParticleEmitter — simulated in isolation *after* the
+        // weapon/NPC/projectile ticks so particles cannot re-enter gameplay.
+        OzParticleSimulationManager::Instance().Update(GetFrameTime());
+
         // Draw pawns / entity billboards exactly once per frame (kept out of
         // the sim steps so a catch-up frame doesn't re-draw the scene).
         PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
-        PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights);
+        PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights, OmegaTechData.WindShader);
         DrawLightFlares(OmegaTechData.MainCamera);
     }
     if (ObjectCollision)

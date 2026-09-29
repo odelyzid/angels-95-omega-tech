@@ -249,6 +249,27 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
         } else if (tok == "music") {
             Expect(s, "=");
             def.music = ReadToken(s);
+        } else if (tok == "mesh_type") {
+            Expect(s, "=");
+            def.meshType = ReadToken(s);
+        } else if (tok == "anim_idle") {
+            Expect(s, "=");
+            def.animIdle = ReadToken(s);
+        } else if (tok == "anim_patrol") {
+            Expect(s, "=");
+            def.animPatrol = ReadToken(s);
+        } else if (tok == "anim_chase") {
+            Expect(s, "=");
+            def.animChase = ReadToken(s);
+        } else if (tok == "anim_return") {
+            Expect(s, "=");
+            def.animReturn = ReadToken(s);
+        } else if (tok == "anim_death") {
+            Expect(s, "=");
+            def.animDeath = ReadToken(s);
+        } else if (tok == "anim_speed") {
+            Expect(s, "=");
+            def.animSpeed = ReadNumber(s);
         } else if (tok == "stats") {
             def.stats = ParseStatBlock(s);
         } else if (tok == "actions") {

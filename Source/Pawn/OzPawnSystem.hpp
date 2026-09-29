@@ -1,9 +1,11 @@
 ﻿#pragma once
 #include "raylib.h"
 #include "../Renderer/LitLightning.hpp"
+#include "../Renderer/Mesh/MeshCache.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -99,6 +101,20 @@ struct PawnDef {
     int maxHealth = 100;
     std::string sprite_path;    // texture path (convention: GameData/Global/Pawn/<name>.png)
     std::string scream_path;    // sound path (convention: GameData/Global/Pawn/<name>.wav)
+    // Optional 3D model — when set (and loadable) the pawn renders as a real
+    // model instead of a 2D billboard. Paths may be GameData-rooted or relative
+    // to the .cfg that defined them.
+    std::string model_path;
+    std::string model_texture;  // optional diffuse map for model_path
+    std::string baseDir;        // directory of the defining .cfg (path resolution)
+    // Mesh taxonomy / animation (GameEngine.Mesh.Skeletal).
+    std::string mesh_type;      // "" | "static" | "skeletal"
+    std::string anim_idle;
+    std::string anim_patrol;
+    std::string anim_chase;
+    std::string anim_return;
+    std::string anim_death;
+    float anim_speed = 1.0f;
 };
 
 // A single spawned pawn instance.
@@ -129,6 +145,56 @@ struct Pawn {
     std::string defName;    // name of the pawn definition (e.g., "Walker", "Skaarj")
     int scriptInstanceIndex = -1; // LightningEntityManager instance index, -1 = none
     bool networkControlled = false; // true = AI/position owned by the server; local FSM skipped
+
+    // Shared render mesh (GameEngine.Mesh.Static/Skeletal) + per-instance anim state.
+    std::shared_ptr<oz::Mesh> mesh;
+    int animClip = -1;
+    float animTime = 0.0f;
+};
+
+// Placed map-object mesh (GameEngine.Mesh.Static / GameEngine.Mesh.Skeletal).
+// Distinct from pawns: these are world props/objects, not AI actors.
+struct MeshObjectNode {
+    uint32_t id = 0;
+    std::string meshPath;
+    std::string texturePath;
+    std::string baseDir;
+    Vector3 position{0, 0, 0};
+    float yaw = 0.0f;
+    float scale = 1.0f;
+    bool skeletal = false;
+    bool windAffected = false;  // foliage: swayed by enclosing WindZones
+    std::string animClip;       // clip name (skeletal only)
+    std::string animFile;       // external .ozanim vertex-keyframe clip (skeletal)
+    float animSpeed = 1.0f;     // playback speed multiplier
+    float animTime = 0.0f;
+    bool animPaused = false;    // editor scrub: keep animTime fixed while drawing
+    // Editor-only live vertex pose (dense offsets, vertexCount*3). When set,
+    // DrawEntities uploads this instead of sampling the clip. Null at runtime.
+    std::shared_ptr<std::vector<float>> editPose;
+    std::shared_ptr<oz::Mesh> mesh; // resolved asset (owned by MeshCache)
+};
+
+// WindZone — a region that sways wind-affected foliage meshes. Cosmetic /
+// client-only; sampled per mesh at draw time.
+struct WindZoneNode {
+    uint32_t id = 0;
+    BoundingBox bounds;
+    Vector3 direction{1, 0, 0};  // wind direction (XZ used for sway)
+    float strength = 1.0f;       // sway amplitude
+    float frequency = 1.0f;      // gust frequency
+    bool active = true;
+};
+
+// GameEngine.PathNode — NPC waypoint. Client-side copy is used for editor
+// placement/visualization and round-trip; the server owns path-following AI.
+struct PathNode {
+    uint32_t id = 0;
+    std::string name;
+    Vector3 position{0, 0, 0};
+    std::vector<std::string> next; // successor node names
+    bool loop = false;
+    float radius = 1.0f;
 };
 
 // Player start node - position and orientation for player spawn
@@ -173,6 +239,29 @@ struct EmitterNode {
     uint32_t id = 0;
     Vector3 position{0, 0, 0};
     EmitterType type = EmitterType::SOUND;
+};
+
+// GameEngine.ParticleEmitter — 3D particle source definition (boxed here; the
+// simulation runs in the isolated OzParticleSimulationManager).
+struct ParticleEmitterNode {
+    uint32_t id = 0;
+    std::string type = "fire";      // logical kind (fire/sparks/smoke/dust...)
+    Vector3 position{0, 0, 0};
+    Vector3 direction{0, 1, 0};     // base emission direction (unit-ish)
+    float yaw = 0.0f;               // orientation, degrees around +Y
+    float rate = 20.0f;             // particles per second
+    float lifetime = 1.0f;          // seconds
+    float speed = 2.0f;             // initial speed
+    float spread = 0.4f;            // emission cone randomness (0..1+)
+    float sizeStart = 0.4f;
+    float sizeEnd = 0.0f;
+    Color colorStart{255, 180, 80, 255};
+    Color colorEnd{60, 20, 10, 0};
+    float gravity = 0.0f;
+    float radius = 0.0f;            // spawn volume radius (0 = point)
+    std::string texturePath;        // optional billboard texture (EFX)
+    bool billboard = true;
+    bool active = true;
 };
 
 // Zone volume node - AABB volumes with behavior flags
@@ -351,9 +440,45 @@ public:
     std::vector<EmitterNode>& GetEmitters() { return m_emitters; }
     const std::vector<EmitterNode>& GetEmitters() const { return m_emitters; }
 
-    // Draw entities (billboards for player starts, pickups, zones, emitters)
-    void DrawEntities(Camera3D& camera, Shader litShader = {0});
+    // GameEngine.ParticleEmitter nodes (simulated by OzParticleSimulationManager)
+    int AddParticleEmitter(const ParticleEmitterNode& node);
+    void RemoveParticleEmitter(int id);
+    void ClearParticleEmitters();
+    std::vector<ParticleEmitterNode>& GetParticleEmitters() { return m_particleEmitters; }
+    const std::vector<ParticleEmitterNode>& GetParticleEmitters() const { return m_particleEmitters; }
+    ParticleEmitterNode* GetParticleEmitter(int id);
+
+    // GameEngine.PathNode waypoints (NPC patrol graph)
+    int AddPathNode(const PathNode& node);
+    void RemovePathNode(int id);
+    void ClearPathNodes();
+    std::vector<PathNode>& GetPathNodes() { return m_pathNodes; }
+    const std::vector<PathNode>& GetPathNodes() const { return m_pathNodes; }
+    PathNode* GetPathNode(int id);
+    PathNode* FindPathNodeByName(const std::string& name);
+
+    // WindZone regions (foliage sway)
+    int AddWindZone(const WindZoneNode& node);
+    void RemoveWindZone(int id);
+    void ClearWindZones();
+    std::vector<WindZoneNode>& GetWindZones() { return m_windZones; }
+    const std::vector<WindZoneNode>& GetWindZones() const { return m_windZones; }
+    WindZoneNode* GetWindZone(int id);
+    // Combined wind at a world point: (dirX, dirZ, strength, frequency).
+    Vector4 SampleWind(Vector3 worldPos) const;
+
+    // Draw entities (billboards for player starts, pickups, zones, emitters).
+    // windShader is the Wind.vs variant used for wind-affected foliage meshes.
+    void DrawEntities(Camera3D& camera, Shader litShader = {0}, Shader windShader = {0});
     void ClearWeaponPickupCache();
+
+    // Placed static/skeletal map-object meshes (GameEngine.Mesh.*)
+    int AddMeshObject(const MeshObjectNode& node);
+    void RemoveMeshObject(int id);
+    void ClearMeshObjects();
+    std::vector<MeshObjectNode>& GetMeshObjects() { return m_meshObjects; }
+    const std::vector<MeshObjectNode>& GetMeshObjects() const { return m_meshObjects; }
+    MeshObjectNode* GetMeshObject(int id);
 
     // Sky zone node management
     int AddSkyZone(const SkyZoneNode& node);
@@ -406,6 +531,10 @@ private:
     std::vector<ZoneVolumeNode> m_zones;
     std::vector<ZonePortal> m_portals;
     std::vector<EmitterNode> m_emitters;
+    std::vector<ParticleEmitterNode> m_particleEmitters;
+    std::vector<PathNode> m_pathNodes;
+    std::vector<WindZoneNode> m_windZones;
+    std::vector<MeshObjectNode> m_meshObjects;
     uint32_t m_nextEntityId = 1;
     uint32_t m_nextLightId = 1;
 
@@ -413,12 +542,10 @@ private:
     std::vector<SkyZoneNode> m_skyZones;
     int m_activeSkyZoneIndex = -1;
 
-    // Weapon pickup model cache (keyed by typeName)
-    struct WeaponPickupCache {
-        Model model{0};
-        Texture2D texture{0};
-    };
-    std::unordered_map<std::string, WeaponPickupCache> m_weaponPickupCache;
+    // Resolve a pawn def's shared render mesh through the internal MeshCache.
+    std::shared_ptr<oz::Mesh> EnsurePawnMesh(PawnDef& def);
+    // Map the pawn FSM state to the def's animation clip and advance its time.
+    void SyncPawnAnim(Pawn& p, PawnDef* def, float dt);
 
     // Portal visual: shared double-sided quad + EFX shimmer texture (lazy loaded)
     Model m_portalQuadModel{0};

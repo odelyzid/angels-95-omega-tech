@@ -334,6 +334,34 @@ static int test_world_seeding_from_file() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_npc_follows_path_nodes() {
+    TEST("NPC PATROL follows the PathNode graph");
+    GameState gs;
+    WorldState ws = make_test_world(0);
+    ServerPathNode a;
+    a.name = "A"; a.position = {0, 0, 0}; a.radius = 1.0f; a.next = {"B"};
+    ServerPathNode b;
+    b.name = "B"; b.position = {10, 0, 0}; b.radius = 1.0f; b.next = {"A"};
+    ws.path_nodes.push_back(a);
+    ws.path_nodes.push_back(b);
+
+    ServerNPC npc;
+    npc.active = true;
+    npc.state = NpcState::PATROL;
+    npc.position = {0, 0, 0};
+    npc.spawn_pos = {0, 0, 0};
+    npc.speed = 10.0f;
+    npc.aggro_range = 0.0f;
+    npc.path_target = 0; // start at node A
+    ws.global_npcs.push_back(npc);
+
+    gs.tick_npcs(ws, 0.1f); // at A -> advance to linked node B
+    gs.tick_npcs(ws, 0.1f); // move toward B
+    CHECK(ws.global_npcs[0].path_target == 1);
+    CHECK(ws.global_npcs[0].position.x > 0.0f);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
@@ -352,6 +380,7 @@ int main() {
     failures += test_add_player_idempotent();
     failures += test_player_position_flag();
     failures += test_npc_death_and_revive();
+    failures += test_npc_follows_path_nodes();
     failures += test_player_save_load_roundtrip();
     failures += test_world_seeding_from_file();
 

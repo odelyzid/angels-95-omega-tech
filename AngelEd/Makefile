@@ -97,12 +97,32 @@ $(BUILD_DIR)/WorldChunk.o: ../Source/Physics/WorldChunk.cpp ../Source/Physics/Wo
 $(BUILD_DIR)/LitLightning.o: ../Source/Renderer/LitLightning.cpp ../Source/Renderer/LitLightning.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/LitLightning.cpp -o $@
 
+$(BUILD_DIR)/Mesh.o: ../Source/Renderer/Mesh/Mesh.cpp ../Source/Renderer/Mesh/Mesh.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/Mesh.cpp -o $@
+
+$(BUILD_DIR)/SkeletalMesh.o: ../Source/Renderer/Mesh/SkeletalMesh.cpp ../Source/Renderer/Mesh/SkeletalMesh.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/SkeletalMesh.cpp -o $@
+
+$(BUILD_DIR)/MeshCache.o: ../Source/Renderer/Mesh/MeshCache.cpp ../Source/Renderer/Mesh/MeshCache.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/MeshCache.cpp -o $@
+
+$(BUILD_DIR)/OzAnimFormat.o: ../Source/Anim/OzAnimFormat.cpp ../Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Anim/OzAnimFormat.cpp -o $@
+
+$(BUILD_DIR)/AnimatedMesh.o: ../Source/Renderer/Mesh/AnimatedMesh.cpp ../Source/Renderer/Mesh/AnimatedMesh.hpp ../Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/AnimatedMesh.cpp -o $@
+
+$(BUILD_DIR)/OzParticleSimulationManager.o: ../Source/Particle/OzParticleSimulationManager.cpp ../Source/Particle/OzParticleSimulationManager.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Particle/OzParticleSimulationManager.cpp -o $@
+
 $(BUILD_DIR)/rlights.o: ../Source/rlights/rlights.cpp ../Source/rlights/rlights.h | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/rlights/rlights.cpp -o $@
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/WDLParser.o $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
-             $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o
+             $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \
+             $(BUILD_DIR)/MeshCache.o $(BUILD_DIR)/AnimatedMesh.o $(BUILD_DIR)/OzAnimFormat.o \
+             $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o
 
 # 5c. Editor Windows resource
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)

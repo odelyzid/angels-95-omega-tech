@@ -195,6 +195,58 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                     catch (...) { break; }
                 }
             }
+        } else if (type_name == "Mesh.Static" || type_name == "Mesh.Skeletal") {
+            prim.type = (type_name == "Mesh.Skeletal")
+                ? OzonePrimitiveType::ENTITY_MESH_SKELETAL
+                : OzonePrimitiveType::ENTITY_MESH_STATIC;
+            // Mesh.Static   <meshPath> x y z yaw [scale=N] [tex=path]
+            // Mesh.Skeletal <meshPath> x y z yaw [scale=N] [tex=path] [anim=Clip] [speed=N]
+            if (ls >> prim.meshPath) {
+                std::string s;
+                while (ls >> s) {
+                    if (s.rfind("scale=", 0) == 0) { prim.args.push_back(std::stof(s.substr(6))); continue; }
+                    if (s.rfind("tex=", 0) == 0) { prim.texPath = s.substr(4); continue; }
+                    if (s.rfind("animfile=", 0) == 0) { prim.animFile = s.substr(9); continue; }
+                    if (s.rfind("anim=", 0) == 0) { prim.animClip = s.substr(5); continue; }
+                    if (s.rfind("speed=", 0) == 0) { prim.animSpeed = std::stof(s.substr(6)); continue; }
+                    if (s == "wind" || s.rfind("wind=", 0) == 0) { prim.meshWind = true; continue; }
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
+        } else if (type_name == "WindZone") {
+            prim.type = OzonePrimitiveType::ENTITY_WIND_ZONE;
+            // WindZone minX minY minZ maxX maxY maxZ dirX dirY dirZ strength [freq]
+            std::string s;
+            while (ls >> s) {
+                try { prim.args.push_back(std::stof(s)); }
+                catch (...) { break; }
+            }
+        } else if (type_name == "ParticleEmitter") {
+            prim.type = OzonePrimitiveType::ENTITY_PARTICLE_EMITTER;
+            // ParticleEmitter <type> x y z [rate life speed spread sizeStart sizeEnd
+            //   r g b rEnd gEnd bEnd gravity radius dirX dirY dirZ yaw] [tex=path]
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    if (s.rfind("tex=", 0) == 0) { prim.texPath = s.substr(4); continue; }
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
+        } else if (type_name == "PathNode") {
+            prim.type = OzonePrimitiveType::ENTITY_PATH_NODE;
+            // PathNode <name> x y z [radius=R] [next=a,b,c] [loop]
+            if (ls >> prim.entityType) {
+                std::string s;
+                while (ls >> s) {
+                    if (s.rfind("radius=", 0) == 0) { prim.args.push_back(std::stof(s.substr(7))); continue; }
+                    if (s.rfind("next=", 0) == 0) { prim.entitySubType = s.substr(5); continue; }
+                    if (s == "loop") { prim.pathLoop = true; continue; }
+                    try { prim.args.push_back(std::stof(s)); }
+                    catch (...) { break; }
+                }
+            }
         } else if (type_name == "levelinfo") {
             prim.type = OzonePrimitiveType::ENTITY_LEVELINFO;
             // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes

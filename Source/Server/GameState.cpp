@@ -335,6 +335,18 @@ static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir)
             npc.patrol_radius = 3.0f;
             npc.state = NpcState::PATROL;
             ws.global_npcs.push_back(npc);
+        } else if (pr.type == OzonePrimitiveType::ENTITY_PATH_NODE) {
+            if (pr.args.size() < 3) continue;
+            ServerPathNode pn;
+            pn.name = pr.entityType;
+            pn.position = {pr.args[0], pr.args[2], pr.args[1]}; // Z-up -> Y-up
+            if (pr.args.size() >= 4) pn.radius = pr.args[3];
+            pn.loop = pr.pathLoop;
+            std::stringstream ss(pr.entitySubType);
+            std::string part;
+            while (std::getline(ss, part, ','))
+                if (!part.empty()) pn.next.push_back(part);
+            ws.path_nodes.push_back(pn);
         } else if (pr.type == OzonePrimitiveType::ENTITY_PICKUP) {
             if (pr.args.size() < 3) continue;
             bool isWeapon = false;
@@ -604,8 +616,45 @@ void GameState::tick_npcs(WorldState& ws, float dt) {
                     npc.state_timer = 0;
                     break;
                 }
-                // Circular patrol around spawn
-                {
+                // GameEngine.PathNode: follow the waypoint graph when the world
+                // defines one, otherwise fall back to the legacy circular patrol.
+                if (!ws.path_nodes.empty()) {
+                    int n = (int)ws.path_nodes.size();
+                    if (npc.path_target < 0 || npc.path_target >= n) {
+                        // Pick the nearest node as the starting waypoint
+                        float best = std::numeric_limits<float>::max();
+                        int best_i = 0;
+                        for (int i = 0; i < n; i++) {
+                            float ddx = ws.path_nodes[i].position.x - npc.position.x;
+                            float ddz = ws.path_nodes[i].position.z - npc.position.z;
+                            float d = ddx * ddx + ddz * ddz;
+                            if (d < best) { best = d; best_i = i; }
+                        }
+                        npc.path_target = best_i;
+                    }
+                    ServerPathNode& target = ws.path_nodes[npc.path_target];
+                    float ddx = target.position.x - npc.position.x;
+                    float ddz = target.position.z - npc.position.z;
+                    float dist = std::sqrt(ddx * ddx + ddz * ddz);
+                    if (dist <= target.radius) {
+                        // Advance to a linked successor (by name), else loop/hold
+                        int next_i = -1;
+                        for (const auto& linkName : target.next) {
+                            for (int i = 0; i < n; i++) {
+                                if (ws.path_nodes[i].name == linkName) { next_i = i; break; }
+                            }
+                            if (next_i >= 0) break;
+                        }
+                        if (next_i < 0 && target.loop && n > 0) next_i = 0;
+                        if (next_i >= 0) npc.path_target = next_i; // else hold at node
+                    } else if (dist > 0.0001f) {
+                        float speed_factor = npc.speed * dt;
+                        npc.position.x += ddx / dist * speed_factor;
+                        npc.position.z += ddz / dist * speed_factor;
+                        npc.yaw = std::atan2(ddz, ddx) * 180.0f / 3.14159265f;
+                    }
+                } else {
+                    // Circular patrol around spawn
                     float dx = npc.position.x - npc.spawn_pos.x;
                     float dz = npc.position.z - npc.spawn_pos.z;
                     float dist_to_spawn = std::sqrt(dx * dx + dz * dz);
@@ -687,6 +736,7 @@ void GameState::tick_npcs(WorldState& ws, float dt) {
                     npc.health = npc.max_health;
                     npc.position = npc.spawn_pos;
                     npc.death_timer = 0.0f;
+                    npc.path_target = -1; // re-acquire the nearest waypoint
                     npc.active = true; // back in the world; broadcast loop picks it up again
                 }
                 break;

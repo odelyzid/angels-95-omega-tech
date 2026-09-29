@@ -61,6 +61,7 @@ static const wchar_t* CLASS_WORLDGRAPH = L"OzWorldGraph";
 static const wchar_t* CLASS_PROPSPANEL = L"OzPropsPanel";
 static const wchar_t* CLASS_STATSSIDEBAR = L"OzStatsSidebar";
 static const wchar_t* CLASS_LEVELLIST = L"OzLevelList";
+static const wchar_t* CLASS_ANIMPANEL  = L"OzAnimPanel";
 static const int STATS_SIDEBAR_W = 200;
 
 // Zone properties (read by editor rendering loop)
@@ -940,6 +941,23 @@ void ShowPawnManager(bool show) {
         ShowWindow((HWND)g_editorPanels.hPawnMgr, show ? SW_SHOW : SW_HIDE);
 }
 
+void RefreshPawnManager() {
+    if (g_editorPanels.hPawnMgr)
+        SendMessage((HWND)g_editorPanels.hPawnMgr, WM_USER + 50, 0, 0);
+}
+
+// Split a tree item's "typeTag|defName" lParam into its two parts WITHOUT
+// mutating the stored buffer (mutating it broke every spawn after the first).
+static void SplitTreeParam(const char* paramStr, std::string& typeTag, std::string& defName) {
+    typeTag.clear();
+    defName.clear();
+    if (!paramStr) return;
+    const char* pipe = strchr(paramStr, '|');
+    if (!pipe) { typeTag = paramStr; return; }
+    typeTag.assign(paramStr, pipe - paramStr);
+    defName = pipe + 1;
+}
+
 void PawnManagerAddPawn(const char*, const char*) {
     // Legacy no-op — defs managed by PawnSystem
 }
@@ -1065,22 +1083,133 @@ PawnTreeNode BuildPawnTree() {
     }
     volBranch.children.push_back(zoneBranch);
 
+    // GameEngine.Mesh branch — places the model currently selected in the
+    // Model Browser as a Mesh.Static / Mesh.Skeletal world object.
+    PawnTreeNode meshBranch;
+    meshBranch.label = "GameEngine.Mesh";
+    meshBranch.isExpanded = false;
+    meshBranch.typeTag = "category";
+    {
+        PawnTreeNode s;
+        s.label = "Mesh.Static";
+        s.defName = "Mesh.Static";
+        s.typeTag = "mesh_static";
+        meshBranch.children.push_back(s);
+        PawnTreeNode k;
+        k.label = "Mesh.Skeletal";
+        k.defName = "Mesh.Skeletal";
+        k.typeTag = "mesh_skeletal";
+        meshBranch.children.push_back(k);
+    }
+    volBranch.children.push_back(meshBranch);
+
+    // GameEngine.ParticleEmitter — local 3D particles (fire/sparks/smoke)
+    PawnTreeNode particleLeaf;
+    particleLeaf.label = "ParticleEmitter";
+    particleLeaf.defName = "ParticleEmitter";
+    particleLeaf.typeTag = "particle";
+    volBranch.children.push_back(particleLeaf);
+
+    // GameEngine.PathNode — NPC patrol waypoint
+    PawnTreeNode pathLeaf;
+    pathLeaf.label = "PathNode";
+    pathLeaf.defName = "PathNode";
+    pathLeaf.typeTag = "pathnode";
+    volBranch.children.push_back(pathLeaf);
+
+    // WindZone — foliage sway region
+    PawnTreeNode windLeaf;
+    windLeaf.label = "WindZone";
+    windLeaf.defName = "WindZone";
+    windLeaf.typeTag = "windzone";
+    volBranch.children.push_back(windLeaf);
+
     pawnBranch.children.push_back(volBranch);
     root.children.push_back(pawnBranch);
     return root;
+}
+
+// Spawn the currently selected Actor-Hierarchy leaf DIRECTLY into PawnSystem.
+// Done synchronously inside the panel's window proc (rather than via main-loop
+// action flags) so it works regardless of frame/flag timing. Returns false when
+// nothing could be spawned (e.g. a category is selected, or no model chosen).
+static bool SpawnSelectedPawnTreeItem(HWND hTree) {
+    TVITEMW item;
+    item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
+    item.mask = TVIF_PARAM;
+    if (!item.hItem || !SendMessage(hTree, TVM_GETITEMW, 0, (LPARAM)&item))
+        return false;
+
+    std::string typeTag, defName;
+    SplitTreeParam((const char*)item.lParam, typeTag, defName);
+    if (defName.empty()) return false;
+
+    auto& ps = PawnSystem::Instance();
+    Vector3 pos = { g_editorPanels.spawnPos[0], g_editorPanels.spawnPos[1], g_editorPanels.spawnPos[2] };
+
+    if (typeTag == "enemy") {
+        ps.Spawn(pos, defName.c_str());
+    } else if (typeTag == "pickup") {
+        PickupNode n; n.position = pos; n.typeName = defName; ps.AddPickup(n);
+    } else if (typeTag == "playerstart") {
+        PlayerStartNode n; n.position = pos; n.yaw = 0.0f; ps.AddPlayerStart(n);
+    } else if (typeTag == "emitter") {
+        EmitterNode n;
+        n.type = (defName == "MusicEmitter") ? EmitterType::MUSIC : EmitterType::SOUND;
+        n.position = pos; ps.AddEmitter(n);
+    } else if (typeTag == "zone") {
+        ZoneVolumeNode n;
+        n.bounds.min = {pos.x - 4.0f, pos.y - 2.0f, pos.z - 4.0f};
+        n.bounds.max = {pos.x + 4.0f, pos.y + 2.0f, pos.z + 4.0f};
+        if      (defName == "ZONE_LADDER")         n.zoneType = ZoneType::ZONE_LADDER;
+        else if (defName == "ZONE_SKY")            n.zoneType = ZoneType::ZONE_SKY;
+        else if (defName == "ZONE_REVERB")         n.zoneType = ZoneType::ZONE_REVERB;
+        else if (defName == "ZONE_GAMEPLAY_SOUND") n.zoneType = ZoneType::ZONE_GAMEPLAY_SOUND;
+        else                                        n.zoneType = ZoneType::ZONE_WATER;
+        ps.AddZone(n);
+    } else if (typeTag == "mesh_static" || typeTag == "mesh_skeletal") {
+        int idx = g_editorPanels.selectedModel;
+        if (idx < 0 || idx >= (int)g_editorPanels.modelEntries.size()) return false;
+        MeshObjectNode n;
+        n.meshPath = g_editorPanels.modelEntries[idx].path;
+        n.skeletal = (typeTag == "mesh_skeletal");
+        n.position = pos; n.yaw = 0.0f; n.scale = 1.0f;
+        ps.AddMeshObject(n);
+    } else if (typeTag == "particle") {
+        ParticleEmitterNode n;
+        n.type = "fire"; n.position = pos; n.direction = {0, 1, 0};
+        n.rate = 30.0f; n.lifetime = 0.9f; n.speed = 2.0f; n.spread = 0.5f;
+        n.sizeStart = 0.5f; n.sizeEnd = 0.0f;
+        n.colorStart = {255, 170, 60, 255}; n.colorEnd = {80, 20, 10, 0}; n.radius = 0.2f;
+        ps.AddParticleEmitter(n);
+    } else if (typeTag == "pathnode") {
+        static int s_pathCounter = 0;
+        PathNode n; n.name = "path_" + std::to_string(s_pathCounter++);
+        n.position = pos; n.radius = 1.0f;
+        ps.AddPathNode(n);
+    } else if (typeTag == "windzone") {
+        WindZoneNode n;
+        n.bounds.min = {pos.x - 5.0f, pos.y - 5.0f, pos.z - 5.0f};
+        n.bounds.max = {pos.x + 5.0f, pos.y + 5.0f, pos.z + 5.0f};
+        n.direction = {1, 0, 0}; n.strength = 1.0f; n.frequency = 1.0f;
+        ps.AddWindZone(n);
+    } else {
+        ps.Spawn(pos, defName.c_str());
+    }
+    return true;
 }
 
 static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hTree;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Actor Hierarchy (right-click to spawn):", 10, 10, 350, 20, 1);
+        CreateLabel(hwnd, L"Actor Hierarchy (select a leaf, then Spawn Selected):", 10, 10, 360, 20, 1);
         hTree = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, L"",
             WS_CHILD | WS_VISIBLE | WS_BORDER | TVS_HASLINES | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
-            10, 35, 360, 120, hwnd, (HMENU)(INT_PTR)ID_PAWN_TREE, g_hInst, nullptr);
-        CreateButton(hwnd, L"Spawn Selected", 10, 165, 100, 28, ID_PAWN_SPAWN);
-        CreateButton(hwnd, L"Refresh", 120, 165, 80, 28, ID_PAWN_REFRESH);
-        CreateButton(hwnd, L"Close", 210, 165, 160, 28, ID_PAWN_CLOSE);
+            10, 35, 370, 185, hwnd, (HMENU)(INT_PTR)ID_PAWN_TREE, g_hInst, nullptr);
+        CreateButton(hwnd, L"Spawn Selected", 10, 228, 110, 28, ID_PAWN_SPAWN);
+        CreateButton(hwnd, L"Refresh", 128, 228, 80, 28, ID_PAWN_REFRESH);
+        CreateButton(hwnd, L"Close", 216, 228, 80, 28, ID_PAWN_CLOSE);
         SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
     }
@@ -1091,24 +1220,20 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_NOTIFY: {
         NMHDR* nm = (NMHDR*)l;
         if (nm->idFrom == ID_PAWN_TREE && nm->code == NM_DBLCLK) {
-            // Double-click on leaf — show info
+            // Informational only — spawning is done via the "Spawn Selected"
+            // button so a context-menu right-click never adds duplicates.
             TVITEMW item;
             item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
             item.mask = TVIF_PARAM;
             if (item.hItem && SendMessage(hTree, TVM_GETITEMW, 0, (LPARAM)&item)) {
-                char* paramStr = (char*)item.lParam;
-                if (paramStr) {
-                    char* pipe = strchr(paramStr, '|');
-                    if (pipe) {
-                        *pipe = '\0';
-                        const char* typeTag = paramStr;
-                        const char* defName = pipe + 1;
-                        if (strlen(defName) > 0) {
-                            char msgBuf[256];
-                            snprintf(msgBuf, sizeof(msgBuf), "Type: %s\nDefinition: %s", typeTag, defName);
-                            MessageBoxA(hwnd, msgBuf, "Entity Info", MB_OK);
-                        }
-                    }
+                std::string typeTag, defName;
+                SplitTreeParam((const char*)item.lParam, typeTag, defName);
+                if (!defName.empty()) {
+                    char msgBuf[256];
+                    snprintf(msgBuf, sizeof(msgBuf),
+                             "Type: %s\nDefinition: %s\n\nUse \"Spawn Selected\" to place it.",
+                             typeTag.c_str(), defName.c_str());
+                    MessageBoxA(hwnd, msgBuf, "Entity Info", MB_OK);
                 }
             }
         }
@@ -1120,29 +1245,9 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         else if (id == ID_PAWN_REFRESH) {
             SendMessage(hwnd, WM_USER + 50, 0, 0);
         } else if (id == ID_PAWN_SPAWN) {
-            // Spawn selected leaf node into world.
-            // lParam = "typeTag|defName" — pickups (items/weapons) route to
-            // pickup placement; everything else spawns as an NPC pawn.
-            TVITEMW item;
-            item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
-            item.mask = TVIF_PARAM;
-            if (item.hItem && SendMessage(hTree, TVM_GETITEMW, 0, (LPARAM)&item)) {
-                char* paramStr = (char*)item.lParam;
-                if (paramStr) {
-                    char* pipe = strchr(paramStr, '|');
-                    if (pipe) {
-                        *pipe = '\0';
-                        const char* typeTag = paramStr;
-                        const char* defName = pipe + 1;
-                        if (strlen(defName) > 0) {
-                            if (strcmp(typeTag, "pickup") == 0)
-                                g_editorPanels.actionSpawnPickup = defName;
-                            else
-                                g_editorPanels.actionSpawnPawn = defName;
-                        }
-                    }
-                }
-            }
+            if (!SpawnSelectedPawnTreeItem(hTree))
+                MessageBoxA(hwnd, "Select a leaf (and, for meshes, a model in the\n"
+                                  "Model Browser) before spawning.", "Spawn", MB_OK | MB_ICONINFORMATION);
         }
         break;
     }
@@ -1911,9 +2016,10 @@ PortalEditValues GetPortalEditValues() {
     return out;
 }
 
-// Skybox texture picker for the Zone Properties Fog tab. Prefers a
-// repo-relative GameData/ path so saved worlds stay portable.
-static bool ChooseSkyboxFile(std::string& outPath) {
+// Generic image picker. Prefers a repo-relative GameData/ path so saved worlds
+// stay portable. Used by the entity/model properties texture fields and the
+// Zone Properties skybox.
+static bool ChooseImageFile(std::string& outPath) {
     wchar_t path[MAX_PATH] = {};
     OPENFILENAMEW dialog = {};
     dialog.lStructSize = sizeof(dialog);
@@ -1923,6 +2029,34 @@ static bool ChooseSkyboxFile(std::string& outPath) {
     dialog.lpstrFilter = L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0All Files (*.*)\0*.*\0\0";
     dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
     if (!GetOpenFileNameW(&dialog)) return false;
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return false;
+    std::vector<char> utf8((size_t)size);
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), size, nullptr, nullptr);
+    outPath.assign(utf8.data());
+
+    std::string s = outPath;
+    for (auto& c : s) if (c == '\\') c = '/';
+    size_t gd = s.find("GameData/");
+    if (gd != std::string::npos) outPath = s.substr(gd);
+    return true;
+}
+
+// Skybox texture picker for the Zone Properties Fog tab.
+static bool ChooseSkyboxFile(std::string& outPath) { return ChooseImageFile(outPath); }
+
+// `.ozanim` vertex-keyframe picker (normalized to a GameData-relative path).
+static bool ChooseAnimFile(std::string& outPath) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW d = {};
+    d.lStructSize = sizeof(d);
+    d.hwndOwner = g_hRaylibWnd;
+    d.lpstrFile = path;
+    d.nMaxFile = MAX_PATH;
+    d.lpstrFilter = L"OzAnim (*.ozanim)\0*.ozanim\0All Files (*.*)\0*.*\0\0";
+    d.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
+    if (!GetOpenFileNameW(&d)) return false;
 
     int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
     if (size <= 1) return false;
@@ -3291,6 +3425,42 @@ static const int ID_PP_PSPAWNY  = 425;
 static const int ID_PP_PSPAWNZ  = 426;
 static const int ID_PP_PBIDIR   = 427;
 static const int ID_PP_PORTALBROWSE = 428; // browse target world
+static const int ID_PP_SCALE    = 429;    // GameEngine.Mesh uniform scale
+static const int ID_PP_MESHPATH = 430;    // GameEngine.Mesh model path
+static const int ID_PP_MESHTEX  = 431;    // GameEngine.Mesh texture path
+static const int ID_PP_ANIMCLIP = 432;    // GameEngine.Mesh.Skeletal clip
+static const int ID_PP_MESHRELOAD = 433;  // force mesh reload button
+static const int ID_PP_EMITTER_TYPE   = 434;
+static const int ID_PP_EMITTER_TEX    = 435;
+static const int ID_PP_EMITTER_RATE   = 436;
+static const int ID_PP_EMITTER_LIFE   = 437;
+static const int ID_PP_EMITTER_SPEED  = 438;
+static const int ID_PP_EMITTER_SIZE   = 439;
+static const int ID_PP_EMITTER_SPREAD = 440;
+static const int ID_PP_EMITTER_R      = 441;
+static const int ID_PP_EMITTER_G      = 442;
+static const int ID_PP_EMITTER_B      = 443;
+static const int ID_PP_PATHNAME       = 444;
+static const int ID_PP_PATHRADIUS     = 445;
+static const int ID_PP_PATHNEXT       = 446;
+static const int ID_PP_PATHLOOP       = 447;
+static const int ID_PP_MESHWIND       = 448;
+static const int ID_PP_WIND_SX        = 449;
+static const int ID_PP_WIND_SY        = 450;
+static const int ID_PP_WIND_SZ        = 451;
+static const int ID_PP_WIND_DIRX      = 452;
+static const int ID_PP_WIND_DIRY      = 453;
+static const int ID_PP_WIND_DIRZ      = 454;
+static const int ID_PP_WIND_STRENGTH  = 455;
+static const int ID_PP_WIND_FREQ      = 456;
+static const int ID_PP_MESHTEX_BROWSE   = 457;
+static const int ID_PP_MESHTEX_ACTIVE   = 458;
+static const int ID_PP_EMITTERTEX_BROWSE = 459;
+static const int ID_PP_EMITTERTEX_ACTIVE = 460;
+static const int ID_PP_MESHANIMFILE       = 461;
+static const int ID_PP_MESHANIMFILE_BROWSE = 462;
+static const int ID_PP_MESHANIMSPEED      = 463;
+static const int ID_PP_CONVERT_ANIMATED   = 464;
 
 // Build a read-only def summary (stats + actions + PawnDef block). Shared by the
 // Script Manager detail pane and the Properties panel def section.
@@ -3499,6 +3669,68 @@ static void PopulatePropertiesPanel(HWND hwnd) {
             SendMessage(hCheck, BM_SETCHECK, g_editorPanels.propPortalBidir ? BST_CHECKED : BST_UNCHECKED, 0);
         }
         y += rowH;
+    } else if (selType == 9) { // GameEngine.Mesh.Static / Mesh.Skeletal
+        addSection("Mesh");
+        addTextField(L"Mesh Path:", ID_PP_MESHPATH, g_editorPanels.propMeshPath);
+        addTextField(L"Texture:", ID_PP_MESHTEX, g_editorPanels.propMeshTex);
+        // Pick a texture from the Texture Manager ("Use Active Tex") or the OS
+        // file dialog ("Browse...") instead of typing/copying a path.
+        CreateButton(hwnd, L"Browse Tex...", x, y, 90, 22, ID_PP_MESHTEX_BROWSE);
+        CreateButton(hwnd, L"Use Active Tex", x + 96, y, 110, 22, ID_PP_MESHTEX_ACTIVE);
+        y += rowH;
+        addTextField(L"Anim Clip:", ID_PP_ANIMCLIP, g_editorPanels.propAnimClip);
+        addTextField(L"Anim File:", ID_PP_MESHANIMFILE, g_editorPanels.propMeshAnimFile);
+        CreateButton(hwnd, L"Browse Anim...", x, y, 110, 22, ID_PP_MESHANIMFILE_BROWSE);
+        CreateButton(hwnd, L"Convert to Animated", x + 116, y, 150, 22, ID_PP_CONVERT_ANIMATED);
+        y += rowH;
+        addField(L"Anim Speed:", ID_PP_MESHANIMSPEED, g_editorPanels.propMeshAnimSpeed);
+        addField(L"Scale:", ID_PP_SCALE, g_editorPanels.propScale);
+        {
+            HWND hCheck = CreateWindowEx(0, L"BUTTON", L"Wind Affected",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                x, y, 200, 22, hwnd, (HMENU)(INT_PTR)ID_PP_MESHWIND, g_hInst, nullptr);
+            SendMessage(hCheck, BM_SETCHECK, g_editorPanels.propMeshWind ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+        y += rowH;
+        CreateButton(hwnd, L"Reload Mesh", x, y, 110, 24, ID_PP_MESHRELOAD);
+        y += 30;
+    } else if (selType == 10) { // GameEngine.ParticleEmitter
+        addSection("Particle Emitter");
+        addTextField(L"Type:", ID_PP_EMITTER_TYPE, g_editorPanels.propEmitterType);
+        addTextField(L"Texture:", ID_PP_EMITTER_TEX, g_editorPanels.propEmitterTex);
+        CreateButton(hwnd, L"Browse Tex...", x, y, 90, 22, ID_PP_EMITTERTEX_BROWSE);
+        CreateButton(hwnd, L"Use Active Tex", x + 96, y, 110, 22, ID_PP_EMITTERTEX_ACTIVE);
+        y += rowH;
+        addField(L"Rate:", ID_PP_EMITTER_RATE, g_editorPanels.propEmitterRate);
+        addField(L"Lifetime:", ID_PP_EMITTER_LIFE, g_editorPanels.propEmitterLife);
+        addField(L"Speed:", ID_PP_EMITTER_SPEED, g_editorPanels.propEmitterSpeed);
+        addField(L"Size:", ID_PP_EMITTER_SIZE, g_editorPanels.propEmitterSize);
+        addField(L"Spread:", ID_PP_EMITTER_SPREAD, g_editorPanels.propEmitterSpread);
+        addField(L"Color R:", ID_PP_EMITTER_R, (float)g_editorPanels.propEmitterR);
+        addField(L"Color G:", ID_PP_EMITTER_G, (float)g_editorPanels.propEmitterG);
+        addField(L"Color B:", ID_PP_EMITTER_B, (float)g_editorPanels.propEmitterB);
+    } else if (selType == 11) { // GameEngine.PathNode
+        addSection("Path Node");
+        addTextField(L"Name:", ID_PP_PATHNAME, g_editorPanels.propPathName);
+        addField(L"Radius:", ID_PP_PATHRADIUS, g_editorPanels.propPathRadius);
+        addTextField(L"Next (a,b):", ID_PP_PATHNEXT, g_editorPanels.propPathNext);
+        {
+            HWND hCheck = CreateWindowEx(0, L"BUTTON", L"Loop",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                x, y, 200, 22, hwnd, (HMENU)(INT_PTR)ID_PP_PATHLOOP, g_hInst, nullptr);
+            SendMessage(hCheck, BM_SETCHECK, g_editorPanels.propPathLoop ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+        y += rowH;
+    } else if (selType == 12) { // WindZone
+        addSection("Wind Zone");
+        addField(L"Size X:", ID_PP_WIND_SX, g_editorPanels.propWindSizeX);
+        addField(L"Size Y:", ID_PP_WIND_SY, g_editorPanels.propWindSizeY);
+        addField(L"Size Z:", ID_PP_WIND_SZ, g_editorPanels.propWindSizeZ);
+        addField(L"Dir X:", ID_PP_WIND_DIRX, g_editorPanels.propWindDirX);
+        addField(L"Dir Y:", ID_PP_WIND_DIRY, g_editorPanels.propWindDirY);
+        addField(L"Dir Z:", ID_PP_WIND_DIRZ, g_editorPanels.propWindDirZ);
+        addField(L"Strength:", ID_PP_WIND_STRENGTH, g_editorPanels.propWindStrength);
+        addField(L"Frequency:", ID_PP_WIND_FREQ, g_editorPanels.propWindFrequency);
     }
     // ---------------------------------------------------------------------------
 
@@ -3537,6 +3769,42 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             if (!g_editorPanels.propDefPath.empty())
                 ShellExecuteA(hwnd, "open", g_editorPanels.propDefPath.c_str(),
                               nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
+        if (id == ID_PP_MESHRELOAD) {
+            g_editorPanels.actionReloadMesh = true;
+            break;
+        }
+        // Texture pickers for mesh / particle-emitter properties — pick from the
+        // Texture Manager ("Use Active Tex") or the OS dialog ("Browse Tex...")
+        // instead of hand-copying a path, then apply immediately.
+        if (id == ID_PP_MESHANIMFILE_BROWSE) {
+            std::string path;
+            if (ChooseAnimFile(path)) {
+                std::wstring w(path.begin(), path.end());
+                SetWindowTextW(GetDlgItem(hwnd, ID_PP_MESHANIMFILE), w.c_str());
+                g_editorPanels.propMeshAnimFile = path;
+                g_editorPanels.actionApplyProperties = true;
+            }
+            break;
+        }
+        if (id == ID_PP_CONVERT_ANIMATED) {
+            g_editorPanels.actionConvertToAnimated = true;
+            break;
+        }
+        if (id == ID_PP_MESHTEX_BROWSE || id == ID_PP_EMITTERTEX_BROWSE ||
+            id == ID_PP_MESHTEX_ACTIVE || id == ID_PP_EMITTERTEX_ACTIVE) {
+            bool mesh = (id == ID_PP_MESHTEX_BROWSE || id == ID_PP_MESHTEX_ACTIVE);
+            bool active = (id == ID_PP_MESHTEX_ACTIVE || id == ID_PP_EMITTERTEX_ACTIVE);
+            std::string path = active ? g_editorPanels.activeTexturePath : std::string();
+            if (!active && !ChooseImageFile(path)) break;
+            if (path.empty()) break;
+            int field = mesh ? ID_PP_MESHTEX : ID_PP_EMITTER_TEX;
+            std::wstring w(path.begin(), path.end());
+            SetWindowTextW(GetDlgItem(hwnd, field), w.c_str());
+            if (mesh) g_editorPanels.propMeshTex = path;
+            else      g_editorPanels.propEmitterTex = path;
+            g_editorPanels.actionApplyProperties = true;
             break;
         }
         if (id == ID_PP_APPLY) {
@@ -3585,6 +3853,44 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             if (HWND hb = GetDlgItem(hwnd, ID_PP_PBIDIR))
                 g_editorPanels.propPortalBidir =
                     SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            // GameEngine.Mesh object edits
+            g_editorPanels.propScale = readFloat(ID_PP_SCALE, g_editorPanels.propScale);
+            g_editorPanels.propMeshPath = readString(ID_PP_MESHPATH, g_editorPanels.propMeshPath);
+            g_editorPanels.propMeshTex = readString(ID_PP_MESHTEX, g_editorPanels.propMeshTex);
+            g_editorPanels.propAnimClip = readString(ID_PP_ANIMCLIP, g_editorPanels.propAnimClip);
+            g_editorPanels.propMeshAnimFile = readString(ID_PP_MESHANIMFILE, g_editorPanels.propMeshAnimFile);
+            g_editorPanels.propMeshAnimSpeed = readFloat(ID_PP_MESHANIMSPEED, g_editorPanels.propMeshAnimSpeed);
+            // GameEngine.ParticleEmitter edits
+            g_editorPanels.propEmitterType = readString(ID_PP_EMITTER_TYPE, g_editorPanels.propEmitterType);
+            g_editorPanels.propEmitterTex = readString(ID_PP_EMITTER_TEX, g_editorPanels.propEmitterTex);
+            g_editorPanels.propEmitterRate = readFloat(ID_PP_EMITTER_RATE, g_editorPanels.propEmitterRate);
+            g_editorPanels.propEmitterLife = readFloat(ID_PP_EMITTER_LIFE, g_editorPanels.propEmitterLife);
+            g_editorPanels.propEmitterSpeed = readFloat(ID_PP_EMITTER_SPEED, g_editorPanels.propEmitterSpeed);
+            g_editorPanels.propEmitterSize = readFloat(ID_PP_EMITTER_SIZE, g_editorPanels.propEmitterSize);
+            g_editorPanels.propEmitterSpread = readFloat(ID_PP_EMITTER_SPREAD, g_editorPanels.propEmitterSpread);
+            g_editorPanels.propEmitterR = (int)readFloat(ID_PP_EMITTER_R, (float)g_editorPanels.propEmitterR);
+            g_editorPanels.propEmitterG = (int)readFloat(ID_PP_EMITTER_G, (float)g_editorPanels.propEmitterG);
+            g_editorPanels.propEmitterB = (int)readFloat(ID_PP_EMITTER_B, (float)g_editorPanels.propEmitterB);
+            // GameEngine.PathNode edits
+            g_editorPanels.propPathName = readString(ID_PP_PATHNAME, g_editorPanels.propPathName);
+            g_editorPanels.propPathRadius = readFloat(ID_PP_PATHRADIUS, g_editorPanels.propPathRadius);
+            g_editorPanels.propPathNext = readString(ID_PP_PATHNEXT, g_editorPanels.propPathNext);
+            if (HWND hb = GetDlgItem(hwnd, ID_PP_PATHLOOP))
+                g_editorPanels.propPathLoop =
+                    SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            // GameEngine.Mesh wind flag
+            if (HWND hb = GetDlgItem(hwnd, ID_PP_MESHWIND))
+                g_editorPanels.propMeshWind =
+                    SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            // WindZone edits
+            g_editorPanels.propWindSizeX = readFloat(ID_PP_WIND_SX, g_editorPanels.propWindSizeX);
+            g_editorPanels.propWindSizeY = readFloat(ID_PP_WIND_SY, g_editorPanels.propWindSizeY);
+            g_editorPanels.propWindSizeZ = readFloat(ID_PP_WIND_SZ, g_editorPanels.propWindSizeZ);
+            g_editorPanels.propWindDirX = readFloat(ID_PP_WIND_DIRX, g_editorPanels.propWindDirX);
+            g_editorPanels.propWindDirY = readFloat(ID_PP_WIND_DIRY, g_editorPanels.propWindDirY);
+            g_editorPanels.propWindDirZ = readFloat(ID_PP_WIND_DIRZ, g_editorPanels.propWindDirZ);
+            g_editorPanels.propWindStrength = readFloat(ID_PP_WIND_STRENGTH, g_editorPanels.propWindStrength);
+            g_editorPanels.propWindFrequency = readFloat(ID_PP_WIND_FREQ, g_editorPanels.propWindFrequency);
             g_editorPanels.actionApplyProperties = true;
         }
         break;
@@ -3702,6 +4008,51 @@ void ShowPropertiesPanel(bool show) {
                 g_editorPanels.propPortalSpawn[1] = p.targetSpawn.y;
                 g_editorPanels.propPortalSpawn[2] = p.targetSpawn.z;
                 g_editorPanels.propPortalBidir = p.bidirectional;
+            }
+        } else if (g_editorPanels.propsTargetType == 9) { // GameEngine.Mesh
+            if (MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propMeshPath = m->meshPath;
+                g_editorPanels.propMeshTex = m->texturePath;
+                g_editorPanels.propAnimClip = m->animClip;
+                g_editorPanels.propMeshAnimFile = m->animFile;
+                g_editorPanels.propMeshAnimSpeed = m->animSpeed;
+                g_editorPanels.propScale = m->scale;
+                g_editorPanels.propMeshWind = m->windAffected;
+            }
+        } else if (g_editorPanels.propsTargetType == 10) { // GameEngine.ParticleEmitter
+            if (ParticleEmitterNode* e = PawnSystem::Instance().GetParticleEmitter(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propEmitterType = e->type;
+                g_editorPanels.propEmitterTex = e->texturePath;
+                g_editorPanels.propEmitterRate = e->rate;
+                g_editorPanels.propEmitterLife = e->lifetime;
+                g_editorPanels.propEmitterSpeed = e->speed;
+                g_editorPanels.propEmitterSize = e->sizeStart;
+                g_editorPanels.propEmitterSpread = e->spread;
+                g_editorPanels.propEmitterR = e->colorStart.r;
+                g_editorPanels.propEmitterG = e->colorStart.g;
+                g_editorPanels.propEmitterB = e->colorStart.b;
+            }
+        } else if (g_editorPanels.propsTargetType == 11) { // GameEngine.PathNode
+            if (PathNode* pn = PawnSystem::Instance().GetPathNode(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propPathName = pn->name;
+                g_editorPanels.propPathRadius = pn->radius;
+                g_editorPanels.propPathNext.clear();
+                for (size_t i = 0; i < pn->next.size(); i++) {
+                    if (i) g_editorPanels.propPathNext += ",";
+                    g_editorPanels.propPathNext += pn->next[i];
+                }
+                g_editorPanels.propPathLoop = pn->loop;
+            }
+        } else if (g_editorPanels.propsTargetType == 12) { // WindZone
+            if (WindZoneNode* z = PawnSystem::Instance().GetWindZone(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propWindSizeX = z->bounds.max.x - z->bounds.min.x;
+                g_editorPanels.propWindSizeY = z->bounds.max.y - z->bounds.min.y;
+                g_editorPanels.propWindSizeZ = z->bounds.max.z - z->bounds.min.z;
+                g_editorPanels.propWindDirX = z->direction.x;
+                g_editorPanels.propWindDirY = z->direction.y;
+                g_editorPanels.propWindDirZ = z->direction.z;
+                g_editorPanels.propWindStrength = z->strength;
+                g_editorPanels.propWindFrequency = z->frequency;
             }
         }
 
@@ -3954,6 +4305,197 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
 }
 
 // =====================================================================
+// Animation / vertex-keyframe tool (Phase B: clips + playback + scrub)
+// =====================================================================
+static const int ID_AN_CLOSE  = 100;
+static const int ID_AN_LIST   = 101;
+static const int ID_AN_NEW    = 102;
+static const int ID_AN_DELETE = 103;
+static const int ID_AN_SAVE   = 104;
+static const int ID_AN_PLAY   = 105;
+static const int ID_AN_PAUSE  = 106;
+static const int ID_AN_STOP   = 107;
+static const int ID_AN_TIME   = 108;
+static const int ID_AN_FPS    = 109;
+static const int ID_AN_LOOP   = 110;
+static const int ID_AN_STATUS = 111;
+static const int ID_AN_ADDKEY = 112;
+static const int ID_AN_DELKEY = 113;
+static const int ID_AN_EDITVERTS = 114;
+static const int ID_AN_UNDO = 115;
+static const int ID_AN_REDO = 116;
+static const int ID_AN_SELALL = 117;
+static const int ID_AN_CLRSEL = 118;
+
+// Returns the AnimatedMesh for the currently targeted mesh node, or nullptr.
+static oz::AnimatedMesh* AnimTargetMesh() {
+    MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+    if (!n || !n->mesh) return nullptr;
+    return dynamic_cast<oz::AnimatedMesh*>(n->mesh.get());
+}
+
+static void PopulateAnimPanel(HWND hwnd, HWND hList, HWND hTime, HWND hFps, HWND hStatus, HWND hLoop) {
+    SendMessage(hList, LB_RESETCONTENT, 0, 0);
+    MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
+    oz::AnimatedMesh* am = AnimTargetMesh();
+
+    if (!n) {
+        SetWindowTextA(hStatus, "No mesh selected. Select a GameEngine.Mesh object.");
+        return;
+    }
+    if (!am) {
+        SetWindowTextA(hStatus, n->animFile.empty()
+            ? "Mesh has no anim file. Use \"Convert to Animated\" in Entity Properties."
+            : "Anim file not loaded (check the path).");
+        return;
+    }
+
+    // Clip list
+    for (int i = 0; i < am->ClipCount(); i++)
+        SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)am->ClipName(i));
+    int cur = am->FindClip(g_editorPanels.animClipName);
+    if (cur < 0 && am->ClipCount() > 0) cur = 0;
+    if (cur >= 0) {
+        SendMessage(hList, LB_SETCURSEL, cur, 0);
+        g_editorPanels.animClipName = am->ClipName(cur);
+    }
+
+    const ozanim::Clip* clip = am->GetAnimation().FindClip(g_editorPanels.animClipName);
+    float dur = clip ? clip->Duration() : 0.0f;
+    wchar_t buf[128];
+    if (clip) swprintf(buf, 128, L"%d clip(s) | %d verts | dur %.2fs", am->ClipCount(),
+                       am->TotalVertexCount(), dur);
+    else      swprintf(buf, 128, L"%d clip(s) | %d verts", am->ClipCount(), am->TotalVertexCount());
+    SetWindowTextW(hStatus, buf);
+
+    if (clip) {
+        char fb[32]; snprintf(fb, sizeof(fb), "%g", clip->fps);
+        SetWindowTextA(hFps, fb);
+        SendMessage(hLoop, BM_SETCHECK, clip->loop ? BST_CHECKED : BST_UNCHECKED, 0);
+        g_editorPanels.animFps = clip->fps;
+        g_editorPanels.animLoop = clip->loop;
+        int pos = (dur > 0.0f) ? (int)(g_editorPanels.animTime / dur * 1000.0f) : 0;
+        if (pos < 0) pos = 0;
+        if (pos > 1000) pos = 1000;
+        SendMessage(hTime, SBM_SETPOS, pos, TRUE);
+    }
+}
+
+static LRESULT CALLBACK AnimPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    static HWND hList, hTime, hFps, hStatus, hLoop, hEditBtn;
+    switch (msg) {
+    case WM_CREATE: {
+        hList = CreateListBox(hwnd, 8, 8, 360, 130, ID_AN_LIST);
+        CreateButton(hwnd, L"New Clip", 8, 144, 72, 26, ID_AN_NEW);
+        CreateButton(hwnd, L"Delete",   84, 144, 60, 26, ID_AN_DELETE);
+        CreateButton(hwnd, L"Save",    148, 144, 56, 26, ID_AN_SAVE);
+        CreateButton(hwnd, L"Add Key", 208, 144, 68, 26, ID_AN_ADDKEY);
+        CreateButton(hwnd, L"Del Key", 280, 144, 64, 26, ID_AN_DELKEY);
+
+        CreateLabel(hwnd, L"FPS:", 8, 180, 32, 20, 0);
+        hFps = CreateCtrl(hwnd, L"EDIT", L"30", 42, 178, 46, 22, ID_AN_FPS, WS_BORDER);
+        hLoop = CreateWindowEx(0, L"BUTTON", L"Loop",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+            96, 178, 64, 22, hwnd, (HMENU)(INT_PTR)ID_AN_LOOP, g_hInst, nullptr);
+        SendMessage(hLoop, BM_SETCHECK, BST_CHECKED, 0);
+        CreateButton(hwnd, L"Play",  166, 176, 62, 26, ID_AN_PLAY);
+        CreateButton(hwnd, L"Pause", 232, 176, 62, 26, ID_AN_PAUSE);
+        CreateButton(hwnd, L"Stop",  298, 176, 70, 26, ID_AN_STOP);
+
+        hTime = CreateWindowEx(0, L"SCROLLBAR", L"",
+            WS_CHILD | WS_VISIBLE | SBS_HORZ, 8, 210, 360, 18,
+            hwnd, (HMENU)(INT_PTR)ID_AN_TIME, g_hInst, nullptr);
+        SetScrollRange(hTime, SB_CTL, 0, 1000, TRUE);
+
+        hStatus = CreateLabel(hwnd, L"", 8, 234, 360, 40, 0);
+
+        hEditBtn = CreateWindowEx(0, L"BUTTON", L"Edit Verts",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+            8, 276, 90, 24, hwnd, (HMENU)(INT_PTR)ID_AN_EDITVERTS, g_hInst, nullptr);
+        CreateButton(hwnd, L"Undo", 104, 276, 56, 24, ID_AN_UNDO);
+        CreateButton(hwnd, L"Redo", 164, 276, 56, 24, ID_AN_REDO);
+        CreateButton(hwnd, L"Sel All", 224, 276, 66, 24, ID_AN_SELALL);
+        CreateButton(hwnd, L"Clr Sel", 294, 276, 74, 24, ID_AN_CLRSEL);
+        CreateButton(hwnd, L"Close", 8, 306, 80, 26, ID_AN_CLOSE);
+        break;
+    }
+    case WM_USER + 50:
+        PopulateAnimPanel(hwnd, hList, hTime, hFps, hStatus, hLoop);
+        if (hEditBtn)
+            SendMessage(hEditBtn, BM_SETCHECK, g_editorPanels.animEditVerts ? BST_CHECKED : BST_UNCHECKED, 0);
+        break;
+    case WM_HSCROLL: {
+        if ((HWND)l == hTime) {
+            int pos = (int)SendMessage(hTime, SBM_GETPOS, 0, 0);
+            g_editorPanels.animTimeSlider = pos;
+            g_editorPanels.actionAnimScrub = true;
+        }
+        break;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w);
+        if (id == ID_AN_CLOSE) { ShowAnimPanel(false); break; }
+        if (id == ID_AN_LIST && HIWORD(w) == LBN_SELCHANGE) {
+            int s = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (s >= 0 && s < (int)SendMessage(hList, LB_GETCOUNT, 0, 0)) {
+                char buf[128] = {0};
+                SendMessageA(hList, LB_GETTEXT, s, (LPARAM)buf);
+                g_editorPanels.animClipName = buf;
+                g_editorPanels.animTime = 0.0f;
+                g_editorPanels.actionAnimRefresh = true;
+            }
+            break;
+        }
+        if (id == ID_AN_NEW)    { g_editorPanels.actionAnimNewClip = true; break; }
+        if (id == ID_AN_DELETE) { g_editorPanels.actionAnimDeleteClip = true; break; }
+        if (id == ID_AN_SAVE)   { g_editorPanels.actionAnimSave = true; break; }
+        if (id == ID_AN_ADDKEY) { g_editorPanels.actionAnimAddKey = true; break; }
+        if (id == ID_AN_DELKEY) { g_editorPanels.actionAnimDeleteKey = true; break; }
+        if (id == ID_AN_EDITVERTS) { g_editorPanels.actionAnimToggleEdit = true; break; }
+        if (id == ID_AN_UNDO)   { g_editorPanels.actionAnimUndo = true; break; }
+        if (id == ID_AN_REDO)   { g_editorPanels.actionAnimRedo = true; break; }
+        if (id == ID_AN_SELALL) { g_editorPanels.actionAnimSelectAll = true; break; }
+        if (id == ID_AN_CLRSEL) { g_editorPanels.actionAnimClearSel = true; break; }
+        if (id == ID_AN_PLAY)   { g_editorPanels.animPlaying = true;  g_editorPanels.actionAnimRefresh = true; break; }
+        if (id == ID_AN_PAUSE)  { g_editorPanels.animPlaying = false; break; }
+        if (id == ID_AN_STOP)   { g_editorPanels.animPlaying = false; g_editorPanels.animTime = 0.0f; g_editorPanels.actionAnimRefresh = true; break; }
+        if (id == ID_AN_FPS && HIWORD(w) == EN_CHANGE) {
+            char b[32] = {0};
+            GetWindowTextA(hFps, b, 32);
+            float v = (float)atof(b);
+            if (v > 0.0f) g_editorPanels.animFps = v;
+            g_editorPanels.actionAnimApplyClipMeta = true;
+            break;
+        }
+        if (id == ID_AN_LOOP && HIWORD(w) == BN_CLICKED) {
+            g_editorPanels.animLoop =
+                SendMessage(GetDlgItem(hwnd, ID_AN_LOOP), BM_GETCHECK, 0, 0) == BST_CHECKED;
+            g_editorPanels.actionAnimApplyClipMeta = true;
+            break;
+        }
+        break;
+    }
+    case WM_CLOSE: ShowAnimPanel(false); break;
+    case WM_DESTROY: g_editorPanels.hAnimPanel = nullptr; break;
+    default: return DefWindowProc(hwnd, msg, w, l);
+    }
+    return 0;
+}
+
+void ShowAnimPanel(bool show) {
+    g_editorPanels.showAnimPanel = show;
+    if (g_editorPanels.hAnimPanel) {
+        ShowWindow((HWND)g_editorPanels.hAnimPanel, show ? SW_SHOW : SW_HIDE);
+        if (show) SendMessage((HWND)g_editorPanels.hAnimPanel, WM_USER + 50, 0, 0);
+    }
+}
+
+void RefreshAnimPanel() {
+    if (g_editorPanels.hAnimPanel)
+        SendMessage((HWND)g_editorPanels.hAnimPanel, WM_USER + 50, 0, 0);
+}
+
+// =====================================================================
 // Public API — Create / Destroy
 // =====================================================================
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
@@ -3995,6 +4537,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_LIGHTPROPS, LightPropsProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_WORLDGRAPH, WorldGraphProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_PROPSPANEL, PropsPanelProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_ANIMPANEL, AnimPanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_LEVELLIST, LevelListProc, (HINSTANCE)hInst);
 
     // Stats sidebar uses dark background (override default COLOR_BTNFACE)
@@ -4033,6 +4576,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_LIGHTPROPS,  L"Light Properties",     g_editorPanels.lightPropsPos,       g_editorPanels.hLightProps);
     create(CLASS_WORLDGRAPH,  L"World Graph Explorer", g_editorPanels.worldGraphPos,       g_editorPanels.hWorldGraph);
     create(CLASS_PROPSPANEL,  L"Entity Properties",    g_editorPanels.propsPanelPos,        g_editorPanels.hPropsPanel);
+    create(CLASS_ANIMPANEL,   L"Animation",            g_editorPanels.animPanelPos,         g_editorPanels.hAnimPanel);
     create(CLASS_LEVELLIST,   L"Level List / Campaign",g_editorPanels.levelListPos,         g_editorPanels.hLevelList);
 
     // Docked native stats sidebar (child of raylib window)
@@ -4071,6 +4615,7 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hSoundMgr);
     destroy(g_editorPanels.hTextureMgr);
     destroy(g_editorPanels.hPawnMgr);
+    destroy(g_editorPanels.hAnimPanel);
     destroy(g_editorPanels.hScriptMgr);
     destroy(g_editorPanels.hModelBrowser);
     destroy(g_editorPanels.hEnvPanel);

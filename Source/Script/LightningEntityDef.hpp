@@ -15,32 +15,45 @@ enum class EntityType : uint8_t {
     PROJECTILE,
     SKYZONE,
     PAWN,
+    // GameEngine.Mesh taxonomy + world effect nodes
+    MESH_STATIC,
+    MESH_SKELETAL,
+    PARTICLE_EMITTER,
+    WIND_ZONE,
     UNKNOWN
 };
 
 inline const char* EntityTypeName(EntityType t) {
     switch (t) {
-        case EntityType::WEAPON:     return "weapon";
-        case EntityType::ARMOR:      return "armor";
-        case EntityType::CONSUMABLE: return "consumable";
-        case EntityType::UPGRADE:    return "upgrade";
-        case EntityType::PICKUP:     return "pickup";
-        case EntityType::PROJECTILE: return "projectile";
-        case EntityType::SKYZONE:    return "skyzone";
-        case EntityType::PAWN:       return "pawn";
-        default:                     return "unknown";
+        case EntityType::WEAPON:          return "weapon";
+        case EntityType::ARMOR:           return "armor";
+        case EntityType::CONSUMABLE:      return "consumable";
+        case EntityType::UPGRADE:         return "upgrade";
+        case EntityType::PICKUP:          return "pickup";
+        case EntityType::PROJECTILE:      return "projectile";
+        case EntityType::SKYZONE:         return "skyzone";
+        case EntityType::PAWN:            return "pawn";
+        case EntityType::MESH_STATIC:     return "Mesh.Static";
+        case EntityType::MESH_SKELETAL:   return "Mesh.Skeletal";
+        case EntityType::PARTICLE_EMITTER:return "ParticleEmitter";
+        case EntityType::WIND_ZONE:       return "WindZone";
+        default:                          return "unknown";
     }
 }
 
 inline EntityType EntityTypeFromName(const std::string& n) {
-    if (n == "weapon")     return EntityType::WEAPON;
-    if (n == "armor")      return EntityType::ARMOR;
-    if (n == "consumable") return EntityType::CONSUMABLE;
-    if (n == "upgrade")    return EntityType::UPGRADE;
-    if (n == "pickup")     return EntityType::PICKUP;
-    if (n == "projectile") return EntityType::PROJECTILE;
-    if (n == "skyzone")    return EntityType::SKYZONE;
-    if (n == "pawn")       return EntityType::PAWN;
+    if (n == "weapon")        return EntityType::WEAPON;
+    if (n == "armor")         return EntityType::ARMOR;
+    if (n == "consumable")    return EntityType::CONSUMABLE;
+    if (n == "upgrade")       return EntityType::UPGRADE;
+    if (n == "pickup")        return EntityType::PICKUP;
+    if (n == "projectile")    return EntityType::PROJECTILE;
+    if (n == "skyzone")       return EntityType::SKYZONE;
+    if (n == "pawn")          return EntityType::PAWN;
+    if (n == "Mesh.Static")   return EntityType::MESH_STATIC;
+    if (n == "Mesh.Skeletal") return EntityType::MESH_SKELETAL;
+    if (n == "ParticleEmitter") return EntityType::PARTICLE_EMITTER;
+    if (n == "WindZone")      return EntityType::WIND_ZONE;
     return EntityType::UNKNOWN;
 }
 
@@ -78,6 +91,15 @@ struct EntityDef {
     std::string skybox;
     std::string music;
     std::string sourcePath;  // where this was parsed from
+
+    // Mesh taxonomy / animation (first-class body keys, GameEngine.Mesh.*)
+    std::string meshType;    // "" | "static" | "skeletal"
+    std::string animIdle;
+    std::string animPatrol;
+    std::string animChase;
+    std::string animReturn;
+    std::string animDeath;
+    float animSpeed = 1.0f;
 
     // Player stat defaults (used when spawning "Player" entity)
     float defaultHealth = 100.0f;

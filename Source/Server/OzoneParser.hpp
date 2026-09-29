@@ -25,6 +25,11 @@ enum class OzonePrimitiveType : uint8_t {
     ENTITY_LEVELINFO,    // Level metadata (game rules, skybox)
     ENTITY_PARTICLES,    // Ambient particle weather settings
     ENTITY_EMITTER,      // Sound/music emitter marker (emitter sound|music x y z)
+    ENTITY_MESH_STATIC,  // GameEngine.Mesh.Static   (placed static prop/object)
+    ENTITY_MESH_SKELETAL,// GameEngine.Mesh.Skeletal (placed animated object)
+    ENTITY_PARTICLE_EMITTER, // GameEngine.ParticleEmitter (local 3D particles)
+    ENTITY_PATH_NODE,    // GameEngine.PathNode (NPC waypoint)
+    ENTITY_WIND_ZONE,    // WindZone (foliage wind region)
     HEIGHTMAP,           // Terrain heightmap (grayscale image)
     UNKNOWN
 };
@@ -42,6 +47,12 @@ struct OzonePrimitive {
     float texScaleV = 1.0f;         // texture tiling V (applied to mesh UVs)
     float texOffsetU = 0.0f;        // texture shift U
     float texOffsetV = 0.0f;        // texture shift V
+    std::string meshPath;           // GameEngine.Mesh.*: model path (mesh=Skeletal/default)
+    std::string animClip;           // GameEngine.Mesh.Skeletal: embedded clip name
+    std::string animFile;           // GameEngine.Mesh.Skeletal: external .ozanim file
+    float animSpeed = 1.0f;         // GameEngine.Mesh.Skeletal: playback speed
+    bool pathLoop = false;          // GameEngine.PathNode: loop to first node
+    bool meshWind = false;          // GameEngine.Mesh.*: foliage wind-affection flag
 };
 
 class OzoneParser {

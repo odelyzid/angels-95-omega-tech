@@ -99,6 +99,16 @@ struct ServerNPC {
     int attack_cooldown_max = 30;
     float death_timer = 0.0f;    // respawn countdown when in DEAD state
     std::string typeName;        // e.g. "Walker", "Skaarj" — from .cfg or hardcoded
+    int path_target = -1;        // index into WorldState::path_nodes (-1 = use spawn patrol)
+};
+
+// GameEngine.PathNode — waypoint for server-authoritative NPC patrol routes.
+struct ServerPathNode {
+    std::string name;
+    NetVec3 position{0, 0, 0};
+    std::vector<std::string> next; // successor node names
+    bool loop = false;
+    float radius = 1.0f;
 };
 
 // ---------------------------------------------------------------------------
@@ -221,6 +231,7 @@ struct WorldState {
     std::vector<WorldPartition> partitions;
     std::vector<ServerNPC> global_npcs;   // not partition-locked
     std::vector<ServerPickup> global_pickups; // not partition-locked
+    std::vector<ServerPathNode> path_nodes;   // GameEngine.PathNode waypoint graph
     std::vector<ServerProjectile> projectiles;
     uint32_t next_projectile_id = 1;
 };
