@@ -3,6 +3,14 @@
 #include <cctype>
 #include <cmath>
 
+// raylib renamed ModelAnimation.frameCount -> keyframeCount in 6.0. Support both
+// so the engine builds against the pinned 5.5 (CI) and newer local toolchains.
+#if defined(RAYLIB_VERSION_MAJOR) && RAYLIB_VERSION_MAJOR >= 6
+    #define OZ_ANIM_KEYFRAME_COUNT(a) ((a).keyframeCount)
+#else
+    #define OZ_ANIM_KEYFRAME_COUNT(a) ((a).frameCount)
+#endif
+
 namespace oz {
 
 SkeletalMesh::~SkeletalMesh() {
@@ -52,12 +60,13 @@ int SkeletalMesh::FindClip(const std::string& name) const {
 void SkeletalMesh::ApplyPose(int clipIndex, float timeSeconds, float fps) const {
     if (!m_valid || clipIndex < 0 || clipIndex >= m_animCount) return;
     const ModelAnimation& anim = m_anims[clipIndex];
-    if (anim.keyframeCount <= 0) return;
+    const int frames = OZ_ANIM_KEYFRAME_COUNT(anim);
+    if (frames <= 0) return;
     if (!IsModelAnimationValid(m_model, anim)) return;
 
     if (fps <= 0.0f) fps = 30.0f;
-    float frame = std::fmod(timeSeconds * fps, (float)anim.keyframeCount);
-    if (frame < 0.0f) frame += (float)anim.keyframeCount;
+    float frame = std::fmod(timeSeconds * fps, (float)frames);
+    if (frame < 0.0f) frame += (float)frames;
     UpdateModelAnimation(m_model, anim, frame);
 }
 

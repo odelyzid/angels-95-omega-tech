@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -136,8 +138,16 @@ static void ScanFilesAndPackages(const std::string& subdir,
         }
     }
 
-    std::sort(out.begin(), out.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name < b.name; });
+    // Deduplicate by display name, preferring real files over package entries.
+    auto isPkgRes = [](const ResourceEntry& e) { return !IsPathFile(e.path.c_str()); };
+    std::stable_sort(out.begin(), out.end(),
+        [&](const ResourceEntry& a, const ResourceEntry& b) {
+            if (a.name != b.name) return a.name < b.name;
+            return (isPkgRes(a) ? 1 : 0) < (isPkgRes(b) ? 1 : 0);
+        });
+    auto last = std::unique(out.begin(), out.end(),
+        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
+    out.erase(last, out.end());
 }
 
 // =====================================================================
@@ -191,6 +201,77 @@ static HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, 
 static HWND CreateListBox(HWND hParent, int x, int y, int w, int h, int id) {
     return CreateCtrl(hParent, L"LISTBOX", L"", x, y, w, h, id,
                       WS_BORDER | WS_VSCROLL | LBS_NOTIFY);
+}
+
+// --- Icon buttons (owner-draw) for the native stats sidebar -----------------
+static std::unordered_map<std::string, HBITMAP> g_uiBitmaps;
+static std::unordered_map<int, HBITMAP> g_uiBtnIcon;
+
+// Load a UI .bmp as an HBITMAP (cached). Searches AngelEd/UI then the packed
+// GameData/Global/Engine/UI library ("effect-effect-" names).
+static HBITMAP LoadUiBitmap(const std::string& name) {
+    auto it = g_uiBitmaps.find(name);
+    if (it != g_uiBitmaps.end()) return it->second;
+    const char* prefixes[] = {
+        "AngelEd/UI/",
+        "../AngelEd/UI/",
+        "GameData/Global/Engine/UI/effect-effect-",
+        "../GameData/Global/Engine/UI/effect-effect-",
+    };
+    HBITMAP bm = nullptr;
+    for (auto* p : prefixes) {
+        std::string full = std::string(p) + name + ".bmp";
+        std::wstring w(full.begin(), full.end());
+        bm = (HBITMAP)LoadImageW(nullptr, w.c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+        if (bm) break;
+    }
+    g_uiBitmaps[name] = bm;
+    return bm;
+}
+
+static HWND CreateIconButton(HWND hParent, const wchar_t* text, int x, int y,
+                             int w, int h, int id, const std::string& icon) {
+    HWND b = CreateWindowEx(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+                            x, y, w, h, hParent, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+    g_uiBtnIcon[id] = LoadUiBitmap(icon);
+    return b;
+}
+
+// Draw an owner-draw icon button (bitmap on the left, label after it).
+static LRESULT DrawIconButton(LPDRAWITEMSTRUCT dis) {
+    HBRUSH bg = CreateSolidBrush((dis->itemState & ODS_SELECTED) ? RGB(70, 90, 120) : RGB(45, 45, 50));
+    FillRect(dis->hDC, &dis->rcItem, bg);
+    DeleteObject(bg);
+    FrameRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(GRAY_BRUSH));
+
+    int x = dis->rcItem.left + 4;
+    int cy = (dis->rcItem.top + dis->rcItem.bottom) / 2;
+    auto it = g_uiBtnIcon.find((int)dis->CtlID);
+    if (it != g_uiBtnIcon.end() && it->second) {
+        BITMAP b;
+        GetObject(it->second, sizeof(b), &b);
+        int ih = (dis->rcItem.bottom - dis->rcItem.top) - 6;
+        if (ih > 20) ih = 20;
+        if (ih < 8) ih = 8;
+        int iw = (b.bmHeight > 0) ? (int)((float)b.bmWidth * ih / b.bmHeight) : ih;
+        if (iw > ih) iw = ih;
+        HDC mem = CreateCompatibleDC(dis->hDC);
+        HGDIOBJ old = SelectObject(mem, it->second);
+        SetStretchBltMode(dis->hDC, COLORONCOLOR);
+        StretchBlt(dis->hDC, x, cy - ih / 2, iw, ih, mem, 0, 0, b.bmWidth, b.bmHeight, SRCCOPY);
+        SelectObject(mem, old);
+        DeleteDC(mem);
+        x += iw + 5;
+    }
+    wchar_t txt[64] = {0};
+    GetWindowTextW(dis->hwndItem, txt, 64);
+    SetBkMode(dis->hDC, TRANSPARENT);
+    SetTextColor(dis->hDC, RGB(215, 225, 240));
+    RECT tr = dis->rcItem;
+    tr.left = x;
+    tr.right -= 3;
+    DrawTextW(dis->hDC, txt, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    return TRUE;
 }
 
 // =====================================================================
@@ -1199,20 +1280,42 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
     return true;
 }
 
+// Lay the Actor-Hierarchy controls out to fill the current client area so the
+// tree (and buttons) track window resizes.
+static void LayoutPawnMgr(HWND hwnd, HWND hLabel, HWND hTree,
+                          HWND hSpawn, HWND hRefresh, HWND hClose) {
+    if (!hwnd) return;
+    RECT rc; GetClientRect(hwnd, &rc);
+    int W = rc.right - rc.left, H = rc.bottom - rc.top;
+    if (hLabel) MoveWindow(hLabel, 10, 10, W - 20, 20, TRUE);
+    int top = 35, btnH = 26, pad = 10;
+    int treeH = H - top - (btnH + 12) - pad;
+    if (treeH < 60) treeH = 60;
+    if (hTree) MoveWindow(hTree, 10, top, W - 28, treeH, TRUE);
+    int by = top + treeH + 6;
+    if (hSpawn)   MoveWindow(hSpawn,   10, by, 110, btnH, TRUE);
+    if (hRefresh) MoveWindow(hRefresh, 128, by, 80, btnH, TRUE);
+    if (hClose)   MoveWindow(hClose, (W - 10 - 80 < 216) ? 216 : (W - 10 - 80), by, 80, btnH, TRUE);
+}
+
 static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hTree;
+    static HWND hTree, hLabel, hSpawn, hRefresh, hClose;
     switch (msg) {
     case WM_CREATE: {
-        CreateLabel(hwnd, L"Actor Hierarchy (select a leaf, then Spawn Selected):", 10, 10, 360, 20, 1);
+        hLabel = CreateLabel(hwnd, L"Actor Hierarchy (select a leaf, then Spawn Selected):", 10, 10, 360, 20, 1);
         hTree = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, L"",
             WS_CHILD | WS_VISIBLE | WS_BORDER | TVS_HASLINES | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
             10, 35, 370, 185, hwnd, (HMENU)(INT_PTR)ID_PAWN_TREE, g_hInst, nullptr);
-        CreateButton(hwnd, L"Spawn Selected", 10, 228, 110, 28, ID_PAWN_SPAWN);
-        CreateButton(hwnd, L"Refresh", 128, 228, 80, 28, ID_PAWN_REFRESH);
-        CreateButton(hwnd, L"Close", 216, 228, 80, 28, ID_PAWN_CLOSE);
+        hSpawn   = CreateButton(hwnd, L"Spawn Selected", 10, 228, 110, 28, ID_PAWN_SPAWN);
+        hRefresh = CreateButton(hwnd, L"Refresh", 128, 228, 80, 28, ID_PAWN_REFRESH);
+        hClose   = CreateButton(hwnd, L"Close", 216, 228, 80, 28, ID_PAWN_CLOSE);
+        LayoutPawnMgr(hwnd, hLabel, hTree, hSpawn, hRefresh, hClose);
         SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
     }
+    case WM_SIZE:
+        LayoutPawnMgr(hwnd, hLabel, hTree, hSpawn, hRefresh, hClose);
+        break;
     case WM_USER + 50: {
         PopulateTreeView(hTree);
         break;
@@ -1635,8 +1738,16 @@ void ScanModelBrowserFiles() {
         }
     }
     
-    std::sort(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
-        [](auto& a, auto& b) { return a.name < b.name; });
+    // Deduplicate by name, preferring real files over package copies.
+    auto isPkgModel = [](const ModelBrowserEntry& e) { return !IsPathFile(e.path.c_str()); };
+    std::stable_sort(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
+        [&](const ModelBrowserEntry& a, const ModelBrowserEntry& b) {
+            if (a.name != b.name) return a.name < b.name;
+            return (isPkgModel(a) ? 1 : 0) < (isPkgModel(b) ? 1 : 0);
+        });
+    auto last = std::unique(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
+        [](const ModelBrowserEntry& a, const ModelBrowserEntry& b) { return a.name == b.name; });
+    g_editorPanels.modelEntries.erase(last, g_editorPanels.modelEntries.end());
 
     if (g_editorPanels.hModelBrowser)
         SendMessage((HWND)g_editorPanels.hModelBrowser, WM_USER + 50, 0, 0);
@@ -1654,8 +1765,27 @@ void UpdateModelPreview(void* hBmp, int w, int h) {
     }
 }
 
+static void LayoutModelBrowser(HWND hwnd, HWND hList, HWND hPreview, HWND hInfo,
+                               HWND hRefresh, HWND hPlace, HWND hClose) {
+    if (!hwnd) return;
+    RECT rc; GetClientRect(hwnd, &rc);
+    int W = rc.right - rc.left, H = rc.bottom - rc.top;
+    int top = 32, bottomPad = 34;
+    int listW = (int)(W * 0.42f); if (listW < 160) listW = 160;
+    int listH = H - top - bottomPad; if (listH < 80) listH = 80;
+    int rx = listW + 18;
+    int rw = W - rx - 8; if (rw < 120) rw = 120;
+    int previewH = (H - top - bottomPad) / 2; if (previewH < 120) previewH = 120;
+    if (hList)    MoveWindow(hList, 8, top, listW, listH, TRUE);
+    if (hPreview) MoveWindow(hPreview, rx, top, rw, previewH, TRUE);
+    if (hInfo)    MoveWindow(hInfo, rx, top + previewH + 6, rw, 56, TRUE);
+    if (hRefresh) MoveWindow(hRefresh, 8, 4, 80, 22, TRUE);
+    if (hPlace)   MoveWindow(hPlace, rx, top + previewH + 68, 130, 24, TRUE);
+    if (hClose)   MoveWindow(hClose, W - 8 - 72, H - 8 - 24, 72, 24, TRUE);
+}
+
 static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hList, hPreview;
+    static HWND hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn;
     int id;
     switch (msg) {
     case WM_CREATE: {
@@ -1665,12 +1795,16 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
              WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
              248, 32, 260, 220, hwnd, (HMENU)(INT_PTR)ID_MDL_PREVIEW,
              g_hInst, nullptr);
-        CreateLabel(hwnd, L"Select a model from the list", 248, 260, 260, 60, 2);
-        CreateButton(hwnd, L"Refresh", 8, 4, 80, 22, ID_MDL_REFRESH);
-        CreateButton(hwnd, L"Place in World", 248, 340, 120, 24, ID_MDL_PLACE);
-        CreateButton(hwnd, L"Close", PW - 72, PH - 28, 64, 22, ID_MDL_CLOSE);
+        hInfo    = CreateLabel(hwnd, L"Select a model from the list", 248, 260, 260, 60, 2);
+        hRefreshBtn = CreateButton(hwnd, L"Refresh", 8, 4, 80, 22, ID_MDL_REFRESH);
+        hPlaceBtn   = CreateButton(hwnd, L"Place in World", 248, 340, 120, 24, ID_MDL_PLACE);
+        hCloseBtn   = CreateButton(hwnd, L"Close", PW - 72, PH - 28, 64, 22, ID_MDL_CLOSE);
+        LayoutModelBrowser(hwnd, hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn);
         break;
     }
+    case WM_SIZE:
+        LayoutModelBrowser(hwnd, hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn);
+        break;
     case WM_USER + 50: {
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (auto& e : g_editorPanels.modelEntries)
@@ -2644,12 +2778,12 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 
         CreateLabel(hwnd, L"Image Path:", x, y, lw, rowH, 2);
         CreateCtrl(hwnd, L"EDIT", L"", x + lw, y, ew, rowH, ID_HM_IMAGE, WS_BORDER | ES_AUTOHSCROLL);
-        CreateButton(hwnd, L"Browse...", x + lw + ew + gap, y, bw, rowH, ID_HM_BROWSE_IMG);
+        CreateIconButton(hwnd, L"Browse", x + lw + ew + gap, y, bw, rowH, ID_HM_BROWSE_IMG, "BBSheet");
         y += rowH + gap;
 
         CreateLabel(hwnd, L"Texture Path:", x, y, lw, rowH, 3);
         CreateCtrl(hwnd, L"EDIT", L"", x + lw, y, ew, rowH, ID_HM_TEX, WS_BORDER | ES_AUTOHSCROLL);
-        CreateButton(hwnd, L"Browse...", x + lw + ew + gap, y, bw, rowH, ID_HM_BROWSE_TEX);
+        CreateIconButton(hwnd, L"Browse", x + lw + ew + gap, y, bw, rowH, ID_HM_BROWSE_TEX, "BBSheet");
         y += rowH + gap + 6;
 
         CreateLabel(hwnd, L"Position (X Y Z):", x, y, lw + 40, rowH, 4);
@@ -2668,8 +2802,13 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         CreateCtrl(hwnd, L"EDIT", L"1.0", x + 55, y, 60, rowH, ID_HM_SCALE, WS_BORDER);
         y += rowH + gap + 6;
 
-        CreateButton(hwnd, L"Generate", x, y, 100, 30, ID_HM_GENERATE);
-        CreateButton(hwnd, L"Close", x + 110, y, 100, 30, ID_HM_CLOSE);
+        CreateIconButton(hwnd, L"Generate", x, y, 120, 30, ID_HM_GENERATE, "BBTerrain");
+        CreateButton(hwnd, L"Close", x + 130, y, 100, 30, ID_HM_CLOSE);
+        break;
+    }
+    case WM_DRAWITEM: {
+        LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)l;
+        if (dis && dis->CtlType == ODT_BUTTON) return DrawIconButton(dis);
         break;
     }
     case WM_COMMAND: {
@@ -4201,7 +4340,7 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         if (!g_sbBgBrush)
             g_sbBgBrush = CreateSolidBrush(RGB(25, 25, 30));
 
-        int x = 10, y = 10, lw = STATS_SIDEBAR_W - 20, bw = 75, bh = 24, gap = 4;
+        int x = 10, y = 10, lw = STATS_SIDEBAR_W - 20, bh = 24, gap = 4, bw = (lw - gap) / 2;
         // --- Stats section ---
         CreateLabel(hwnd, L"Stats", x, y, lw, 20, ID_SB_TITLE); y += 28;
         g_sbPos    = CreateLabel(hwnd, L"Pos: 0 0 0", x, y, lw, 18, ID_SB_POS); y += 20;
@@ -4216,27 +4355,32 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         g_sbCam    = CreateLabel(hwnd, L"0.0 0.0 0.0", x, y, lw, 18, ID_SB_CAM);
         y += 10;
 
-        // --- Primitives section ---
+        // --- Primitives section (icons) ---
         CreateLabel(hwnd, L"Primitives", x, y, lw, 18, 950); y += 22;
-        CreateButton(hwnd, L"Cube",     x, y, bw, bh, ID_TB_CSG_BOX);
-        CreateButton(hwnd, L"Cylinder", x + bw + gap, y, bw, bh, ID_TB_CSG_CYL); y += bh + gap;
-        CreateButton(hwnd, L"Sphere",   x, y, bw, bh, ID_TB_CSG_SPH);
-        CreateButton(hwnd, L"Pyramid",  x + bw + gap, y, bw, bh, ID_TB_CSG_PYR); y += bh + gap;
-        CreateButton(hwnd, L"Plane",    x, y, bw, bh, ID_TB_CSG_PLN); y += bh + 10;
+        CreateIconButton(hwnd, L"Cube",     x, y, bw, bh, ID_TB_CSG_BOX, "BBCube");
+        CreateIconButton(hwnd, L"Cylinder", x + bw + gap, y, bw, bh, ID_TB_CSG_CYL, "BBCylinder"); y += bh + gap;
+        CreateIconButton(hwnd, L"Sphere",   x, y, bw, bh, ID_TB_CSG_SPH, "BBSphere");
+        CreateIconButton(hwnd, L"Pyramid",  x + bw + gap, y, bw, bh, ID_TB_CSG_PYR, "BBGeneric"); y += bh + gap;
+        CreateIconButton(hwnd, L"Plane",    x, y, bw, bh, ID_TB_CSG_PLN, "BBSheet"); y += bh + 10;
 
-        // --- CSG Op section ---
+        // --- CSG Op section (icons) ---
         CreateLabel(hwnd, L"CSG Op", x, y, lw, 18, 951); y += 22;
-        CreateButton(hwnd, L"Solid",    x, y, bw, bh, ID_TB_OP_SOLID);
-        CreateButton(hwnd, L"Add",      x + bw + gap, y, bw, bh, ID_TB_OP_ADD); y += bh + gap;
-        CreateButton(hwnd, L"Sub",      x, y, bw, bh, ID_TB_OP_SUB);
-        CreateButton(hwnd, L"Inter",    x + bw + gap, y, bw, bh, ID_TB_OP_INTER); y += bh + 10;
+        CreateIconButton(hwnd, L"Solid",    x, y, bw, bh, ID_TB_OP_SOLID, "BBCube");
+        CreateIconButton(hwnd, L"Add",      x + bw + gap, y, bw, bh, ID_TB_OP_ADD, "ModeAdd"); y += bh + gap;
+        CreateIconButton(hwnd, L"Sub",      x, y, bw, bh, ID_TB_OP_SUB, "ModeSubtract");
+        CreateIconButton(hwnd, L"Inter",    x + bw + gap, y, bw, bh, ID_TB_OP_INTER, "ModeIntersect"); y += bh + 10;
 
-        // --- Tool Mode section ---
+        // --- Tool Mode section (icons) ---
         CreateLabel(hwnd, L"Tool", x, y, lw, 18, 952); y += 22;
-        CreateButton(hwnd, L"Cam",      x, y, bw, bh, ID_TB_MODE_CAM);
-        CreateButton(hwnd, L"Move",     x + bw + gap, y, bw, bh, ID_TB_MODE_MOVE); y += bh + gap;
-        CreateButton(hwnd, L"Scale",    x, y, bw, bh, ID_TB_MODE_SCALE);
-        CreateButton(hwnd, L"Rotate",   x + bw + gap, y, bw, bh, ID_TB_MODE_ROT);
+        CreateIconButton(hwnd, L"Cam",      x, y, bw, bh, ID_TB_MODE_CAM, "ModeCamera");
+        CreateIconButton(hwnd, L"Move",     x + bw + gap, y, bw, bh, ID_TB_MODE_MOVE, "ModeVertex"); y += bh + gap;
+        CreateIconButton(hwnd, L"Scale",    x, y, bw, bh, ID_TB_MODE_SCALE, "ModeScale");
+        CreateIconButton(hwnd, L"Rotate",   x + bw + gap, y, bw, bh, ID_TB_MODE_ROT, "ModeRotate");
+        break;
+    }
+    case WM_DRAWITEM: {
+        LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)l;
+        if (dis && dis->CtlType == ODT_BUTTON) return DrawIconButton(dis);
         break;
     }
     case WM_COMMAND: {

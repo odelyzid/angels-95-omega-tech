@@ -3006,16 +3006,18 @@ int main(int argc, char **argv){
             // Terrain editing buttons
             bool terrainMode = (g_placeMode == PlaceMode::TERRAIN);
             Color terrainColor = terrainMode ? (Color){90,70,50,255} : (Color){45,45,50,255};
-            int tbW = 52;
+            int tbW = 76;
             DrawRectangle(bx, 2, tbW, tbH-4, terrainColor);
-            DrawText("Raise", bx+4, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
+            if (ico.Has("BBTerrain")) ico.Draw("BBTerrain", bx+3, 4, 20, WHITE);
+            DrawText("Raise", bx+27, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
             if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)tbW, (float)tbH-4}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 g_placeMode = PlaceMode::TERRAIN;
                 g_editorPanels.terrainBrushMode = 0; // raise
             }
             bx += tbW + 2;
             DrawRectangle(bx, 2, tbW, tbH-4, terrainColor);
-            DrawText("Lower", bx+4, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
+            if (ico.Has("BBTerrain")) ico.Draw("BBTerrain", bx+3, 4, 20, WHITE);
+            DrawText("Lower", bx+27, 7, 12, terrainMode ? WHITE : LIGHTGRAY);
             if (CheckCollisionPointRec(GetMousePosition(), {(float)bx, 2, (float)tbW, (float)tbH-4}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 g_placeMode = PlaceMode::TERRAIN;
                 g_editorPanels.terrainBrushMode = 1; // lower

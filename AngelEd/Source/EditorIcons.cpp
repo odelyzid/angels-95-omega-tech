@@ -5,34 +5,51 @@
 
 namespace fs = std::filesystem;
 
-void EditorIcons::Load() {
-    // Search for icons in AngelEd/UI/ relative to working directory
-    fs::path iconDir = fs::current_path() / "AngelEd" / "UI";
-    if (!fs::exists(iconDir)) {
-        // Try alternate path relative to executable
-        iconDir = fs::path("..") / "AngelEd" / "UI";
-        if (!fs::exists(iconDir)) {
-            fprintf(stderr, "EditorIcons: no icon directory found\n");
-            return;
-        }
-    }
-
+// Scan a directory for *.bmp icons. `stripPrefix` (when non-empty) is removed
+// from the stem so packed names like "effect-effect-ModeAdd" map to "ModeAdd".
+static int ScanIconDir(const fs::path& dir, const std::string& stripPrefix,
+                       std::unordered_map<std::string, Texture2D>& out) {
+    if (!fs::exists(dir)) return 0;
     int count = 0;
-    for (auto& entry : fs::directory_iterator(iconDir)) {
-        if (entry.is_regular_file()) {
-            std::string ext = entry.path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == ".bmp") {
-                std::string name = entry.path().stem().string();
-                Texture2D tex = LoadTexture(entry.path().string().c_str());
-                if (tex.id > 0) {
-                    m_icons[name] = tex;
-                    count++;
-                }
-            }
+    for (auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext != ".bmp") continue;
+        std::string name = entry.path().stem().string();
+        if (!stripPrefix.empty() && name.rfind(stripPrefix, 0) == 0)
+            name = name.substr(stripPrefix.size());
+        if (name.empty() || out.count(name)) continue; // first source wins
+        Texture2D tex = LoadTexture(entry.path().string().c_str());
+        if (tex.id > 0) {
+            out[name] = tex;
+            count++;
         }
     }
-    fprintf(stdout, "EditorIcons: loaded %d icons from %s\n", count, iconDir.string().c_str());
+    return count;
+}
+
+void EditorIcons::Load() {
+    int count = 0;
+
+    // 1) AngelEd/UI (repo) — primary source with clean names.
+    fs::path iconDir = fs::current_path() / "AngelEd" / "UI";
+    if (!fs::exists(iconDir))
+        iconDir = fs::path("..") / "AngelEd" / "UI";
+    count += ScanIconDir(iconDir, "", m_icons);
+
+    // 2) GameData/Global/Engine/UI — packed engine UI icons
+    //    ("effect-effect-ModeAdd.bmp" -> "ModeAdd").
+    const char* gd = "GameData/Global/Engine/UI";
+    if (fs::exists(gd))
+        count += ScanIconDir(gd, "effect-effect-", m_icons);
+    else if (fs::exists(fs::path("..") / gd))
+        count += ScanIconDir(fs::path("..") / gd, "effect-effect-", m_icons);
+
+    if (count == 0)
+        fprintf(stderr, "EditorIcons: no icons loaded\n");
+    else
+        fprintf(stdout, "EditorIcons: loaded %d icons\n", count);
 }
 
 void EditorIcons::Unload() {

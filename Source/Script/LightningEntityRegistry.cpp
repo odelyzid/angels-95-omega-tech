@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -16,6 +17,10 @@ void LightningEntityRegistry::Init() {
     m_allDefs.clear();
     std::vector<std::string> contents;
     std::vector<std::string> paths;
+
+    // Basenames already loaded from the filesystem; package copies of the same
+    // file are skipped so defs are not duplicated (filesystem is authoritative).
+    std::unordered_set<std::string> seenBasenames;
 
     // Scan GameData/ recursively for .ozls
     fs::path gd = fs::current_path() / "GameData";
@@ -31,25 +36,28 @@ void LightningEntityRegistry::Init() {
                                              std::istreambuf_iterator<char>());
                         contents.push_back(content);
                         paths.push_back(entry.path().string());
+                        seenBasenames.insert(entry.path().filename().string());
                     }
                 }
             }
         }
     }
 
-    // Scan packages for .ozls entries
+    // Scan packages for .ozls entries (skip filesystem duplicates/dedup packages)
     std::vector<std::string> pkgFiles;
     PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
     for (const auto& pkgPath : pkgFiles) {
         std::string ext = pkgPath.substr(pkgPath.rfind('.'));
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".ozls") {
-            size_t sz;
-            const uint8_t* data = PackageAssetLoader::Instance().Find(pkgPath.c_str(), sz);
-            if (data) {
-                contents.push_back(std::string((const char*)data, sz));
-                paths.push_back(pkgPath);
-            }
+        if (ext != ".ozls") continue;
+        std::string base = pkgPath.substr(pkgPath.rfind('/') + 1);
+        if (seenBasenames.count(base)) continue;
+        seenBasenames.insert(base);
+        size_t sz;
+        const uint8_t* data = PackageAssetLoader::Instance().Find(pkgPath.c_str(), sz);
+        if (data) {
+            contents.push_back(std::string((const char*)data, sz));
+            paths.push_back(pkgPath);
         }
     }
 
