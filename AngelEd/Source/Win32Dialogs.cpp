@@ -1682,6 +1682,8 @@ static const int ID_MDL_REFRESH = 101;
 static const int ID_MDL_PLACE   = 102;
 static const int ID_MDL_CLOSE   = 103;
 static const int ID_MDL_PREVIEW = 104;
+static const int ID_MDL_IMPORT  = 105;
+static const int ID_MDL_EXPORT  = 106;
 
 static const UINT WM_MODEL_SELECTED = WM_USER + 100;
 static const UINT WM_PREVIEW_READY  = WM_USER + 101;
@@ -1797,6 +1799,8 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
              g_hInst, nullptr);
         hInfo    = CreateLabel(hwnd, L"Select a model from the list", 248, 260, 260, 60, 2);
         hRefreshBtn = CreateButton(hwnd, L"Refresh", 8, 4, 80, 22, ID_MDL_REFRESH);
+        CreateIconButton(hwnd, L"Import", 94, 4, 74, 22, ID_MDL_IMPORT, "BBGeneric");
+        CreateIconButton(hwnd, L"Export", 172, 4, 74, 22, ID_MDL_EXPORT, "BBSheet");
         hPlaceBtn   = CreateButton(hwnd, L"Place in World", 248, 340, 120, 24, ID_MDL_PLACE);
         hCloseBtn   = CreateButton(hwnd, L"Close", PW - 72, PH - 28, 64, 22, ID_MDL_CLOSE);
         LayoutModelBrowser(hwnd, hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn);
@@ -1809,12 +1813,15 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         SendMessage(hList, LB_RESETCONTENT, 0, 0);
         for (auto& e : g_editorPanels.modelEntries)
             SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)e.name.c_str());
+        SetWindowTextA(hInfo, "Select a model from the list");
         break;
     }
     case WM_PREVIEW_READY: {
         HBITMAP hBmp = (HBITMAP)w;
         if (hBmp) {
             SendMessage(hPreview, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+            InvalidateRect(hPreview, nullptr, TRUE);
+            UpdateWindow(hPreview);
         }
         break;
     }
@@ -1834,6 +1841,76 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_editorPanels.modelEntries.size()) {
                 g_editorPanels.selectedModel = sel;
+                const auto& e = g_editorPanels.modelEntries[sel];
+                char buf[512];
+                snprintf(buf, sizeof(buf), "%s   (%d verts, %d tris)\n%s",
+                         e.name.c_str(), e.vertices, e.triangles, e.path.c_str());
+                SetWindowTextA(hInfo, buf);
+            }
+        } else if (id == ID_MDL_IMPORT) {
+            // Copy an external model (and its companion texture) into GameData.
+            wchar_t path[MAX_PATH] = L"";
+            OPENFILENAMEW ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFile = path;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.lpstrFilter = L"Meshes (*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d)\0*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d\0All Files (*.*)\0*.*\0\0";
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+            if (GetOpenFileNameW(&ofn)) {
+                std::error_code ec;
+                fs::path src(path);
+                fs::path destDir = fs::current_path() / "GameData" / "Global" / "Models";
+                fs::create_directories(destDir, ec);
+                fs::path dest = destDir / src.filename();
+                fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
+                std::string stem = src.stem().string();
+                for (const char* suf : {"_texture.png", ".png", "_texture.tga", ".tga", "_texture.bmp", ".bmp"}) {
+                    fs::path tp = src.parent_path() / (stem + suf);
+                    if (fs::exists(tp)) {
+                        fs::copy_file(tp, destDir / tp.filename(), fs::copy_options::overwrite_existing, ec);
+                        break;
+                    }
+                }
+                ScanModelBrowserFiles();
+                fprintf(stdout, "Imported mesh '%s' -> %s\n", src.filename().string().c_str(), dest.string().c_str());
+            }
+        } else if (id == ID_MDL_EXPORT) {
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel < 0 || sel >= (int)g_editorPanels.modelEntries.size()) {
+                MessageBoxA(hwnd, "Select a model first.", "Export Mesh", MB_OK | MB_ICONINFORMATION);
+            } else {
+                const auto& e = g_editorPanels.modelEntries[sel];
+                std::string ext = ".obj";
+                size_t dot = e.path.rfind('.');
+                if (dot != std::string::npos) ext = e.path.substr(dot);
+                std::string defName = e.name + ext;
+                wchar_t path[MAX_PATH] = L"";
+                std::wstring wdef(defName.begin(), defName.end());
+                wcsncpy(path, wdef.c_str(), MAX_PATH - 1);
+                OPENFILENAMEW sfn = {};
+                sfn.lStructSize = sizeof(sfn);
+                sfn.hwndOwner = hwnd;
+                sfn.lpstrFile = path;
+                sfn.nMaxFile = MAX_PATH;
+                sfn.lpstrFilter = L"Meshes (*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d)\0*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d\0All Files (*.*)\0*.*\0\0";
+                sfn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+                if (GetSaveFileNameW(&sfn)) {
+                    std::error_code ec;
+                    fs::path dest(path);
+                    if (IsPathFile(e.path.c_str())) {
+                        fs::copy_file(e.path, dest, fs::copy_options::overwrite_existing, ec);
+                    } else {
+                        size_t sz = 0;
+                        const uint8_t* data =
+                            PackageAssetLoader::Instance().ResolvePackageKey(e.path.c_str(), sz);
+                        if (data && sz > 0) {
+                            std::ofstream out(dest, std::ios::binary);
+                            if (out.is_open()) out.write((const char*)data, (std::streamsize)sz);
+                        }
+                    }
+                    fprintf(stdout, "Exported mesh '%s' -> %s\n", e.name.c_str(), dest.string().c_str());
+                }
             }
         }
         break;
@@ -1852,6 +1929,7 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             DeleteDC(hdcMem);
             return TRUE;
         }
+        if (dis->CtlType == ODT_BUTTON) return DrawIconButton(dis);
         return DefWindowProc(hwnd, msg, w, l);
     }
     case WM_CLOSE:

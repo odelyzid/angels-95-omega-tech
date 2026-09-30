@@ -3632,10 +3632,10 @@ int main(int argc, char **argv){
             g_editorPanels.actionApplyTextureToSel = false;
         }
 
-        EndDrawing();
-
     #ifdef _WIN32
     // --- Model preview render-to-texture (for Win32 Model Browser dialog) ---
+    // Rendered inside the current frame (after the main viewport pass) so the
+    // offscreen pass is flushed by EndDrawing on every raylib version.
         if (g_editorPanels.selectedModel >= 0 &&
             g_editorPanels.selectedModel < (int)g_editorPanels.modelEntries.size() &&
             g_editorPanels.selectedModel != g_lastPreviewSel) {
@@ -3646,55 +3646,62 @@ int main(int argc, char **argv){
             g_lastPreviewSel < (int)g_editorPanels.modelEntries.size()) {
             auto& entry = g_editorPanels.modelEntries[g_lastPreviewSel];
             if (!entry.loaded) {
+                // Only need triangle/vertex counts for the info line; guard the
+                // "replace last 4 chars" so short/extensionless paths can't UB.
                 Model mdl = LoadModelWithFallback(entry.path.c_str());
-                std::string texPath = entry.path;
-                texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
-                std::string texPath2 = entry.path;
-                texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
-                Texture2D tex = {0};
-                if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
-                else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
-                else {
-                    std::string fext = entry.path.substr(entry.path.rfind('.'));
-                    std::transform(fext.begin(), fext.end(), fext.begin(), ::tolower);
-                    if (fext == ".png" || fext == ".jpg" || fext == ".jpeg" || fext == ".bmp" || fext == ".tga")
-                        tex = LoadTextureWithFallback(entry.path.c_str());
-                }
-                if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
                 if (mdl.meshes != nullptr) {
                     entry.triangles = mdl.meshes[0].triangleCount;
                     entry.vertices = mdl.meshes[0].vertexCount;
                 }
                 UnloadModel(mdl);
-                if (tex.id > 0) UnloadTexture(tex);
                 entry.loaded = true;
             }
+            Model mdl = LoadModelWithFallback(entry.path.c_str());
+            // Companion texture: "<stem>_texture.png" / "<stem>.png" beside the model.
+            std::string texPath, texPath2;
+            if (entry.path.size() > 4) {
+                texPath = entry.path;  texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
+                texPath2 = entry.path; texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
+            }
+            Texture2D tex = {0};
+            if (!texPath.empty() && fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
+            else if (!texPath2.empty() && fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
+            else {
+                size_t dot = entry.path.rfind('.');
+                if (dot != std::string::npos) {
+                    std::string fext = entry.path.substr(dot);
+                    std::transform(fext.begin(), fext.end(), fext.begin(), ::tolower);
+                    if (fext == ".png" || fext == ".jpg" || fext == ".jpeg" || fext == ".bmp" || fext == ".tga")
+                        tex = LoadTextureWithFallback(entry.path.c_str());
+                }
+            }
+            if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+
+            // Auto-frame the camera on the model bounds so any size is visible.
             Camera3D prevCam = {0};
-            prevCam.position = {5.0f, 4.0f, 5.0f};
-            prevCam.target = {0, 0, 0};
             prevCam.up = {0, 1, 0};
             prevCam.fovy = 45.0f;
             prevCam.projection = CAMERA_PERSPECTIVE;
+            Vector3 center = {0, 0, 0};
+            float radius = 3.0f;
+            if (mdl.meshCount > 0 && mdl.meshes != nullptr) {
+                BoundingBox bb = GetModelBoundingBox(mdl);
+                center = {(bb.min.x + bb.max.x) * 0.5f,
+                          (bb.min.y + bb.max.y) * 0.5f,
+                          (bb.min.z + bb.max.z) * 0.5f};
+                Vector3 ext = {bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z};
+                radius = fmaxf(ext.x, fmaxf(ext.y, ext.z)) * 0.5f;
+                if (radius < 0.05f) radius = 0.05f;
+            }
+            float dist = radius * 3.0f;
+            Vector3 dir = Vector3Normalize({1.0f, 0.7f, 1.0f});
+            prevCam.target = center;
+            prevCam.position = Vector3Add(center, Vector3Scale(dir, dist));
 
             BeginTextureMode(g_previewRT);
             ClearBackground((Color){40, 40, 50, 255});
             BeginMode3D(prevCam);
-            DrawGrid(10, 1.0f);
-            Model mdl = LoadModelWithFallback(entry.path.c_str());
-            std::string texPath = entry.path;
-            texPath.replace(texPath.end() - 4, texPath.end(), "_texture.png");
-            std::string texPath2 = entry.path;
-            texPath2.replace(texPath2.end() - 4, texPath2.end(), ".png");
-            Texture2D tex = {0};
-            if (fs::exists(texPath)) tex = LoadTextureWithFallback(texPath.c_str());
-            else if (fs::exists(texPath2)) tex = LoadTextureWithFallback(texPath2.c_str());
-            else {
-                std::string fext = entry.path.substr(entry.path.rfind('.'));
-                std::transform(fext.begin(), fext.end(), fext.begin(), ::tolower);
-                if (fext == ".png" || fext == ".jpg" || fext == ".jpeg" || fext == ".bmp" || fext == ".tga")
-                    tex = LoadTextureWithFallback(entry.path.c_str());
-            }
-            if (tex.id > 0) mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+            DrawGrid(20, radius / 2.0f); // scale the grid to the model
             if (mdl.meshes != nullptr) {
                 rlDisableBackfaceCulling();
                 DrawModel(mdl, {0, 0, 0}, 1.0f, WHITE);
@@ -3730,6 +3737,7 @@ int main(int argc, char **argv){
             g_previewNeedsUpdate = false;
         }
 #endif
+        EndDrawing();
 
         // Keep the camera aim point available to Win32 panels, which spawn
         // entities synchronously (see Win32Dialogs SpawnSelectedPawnTreeItem).
@@ -3938,6 +3946,8 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionRefreshBrowser) {
             ScanModelBrowserFiles();
+            g_lastPreviewSel = -1; // force a fresh preview after the list rebuilds
+            g_previewNeedsUpdate = false;
             g_editorPanels.actionRefreshBrowser = false;
         }
         // Heightmap generate handler
