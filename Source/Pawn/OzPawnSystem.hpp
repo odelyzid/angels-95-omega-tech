@@ -3,6 +3,9 @@
 #include "../Renderer/LitLightning.hpp"
 #include "../Renderer/Mesh/MeshCache.hpp"
 #include "../Physics/PhysicsInfo.hpp"
+#include "../World/LevelSettings.hpp"
+#include "../World/ZoneManager.hpp"
+#include "../World/ZoneTypes.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,13 +14,18 @@
 #include <unordered_set>
 
 // ---------------------------------------------------------------------------
-// PawnSystem â€” dynamic entity / NPC manager
+// PawnSystem — dynamic entity / NPC manager
 //
 // Replaces the hard-coded EntityCount=10 / Enemys[10] array with a
 // growable vector of Pawn objects, each with its own FSM state.
 //
-// States: IDLE â†’ PATROL (circle around spawn) â†’ CHASE (follow player) â†’
-//         RETURN (go back to spawn) â†’ PATROL
+// States: IDLE -> PATROL (circle around spawn) -> CHASE (follow player) ->
+//         RETURN (go back to spawn) -> PATROL
+//
+// Zone volumes, level portals and the point-region tracker are NOT owned here
+// anymore — see World/ZoneManager.hpp. Level metadata lives in
+// World/LevelSettings.hpp and the zone taxonomy in World/ZoneTypes.hpp; the
+// includes above re-export them so existing callers keep compiling.
 //
 // Usage:
 //   PawnSystem::Instance().Spawn({10,0,10}, "Walker");
@@ -32,63 +40,6 @@ enum class PawnState : uint8_t {
     RETURN,
     DEAD
 };
-
-// Zone environment overrides — fog/ambient/reverb applied on zone entry at runtime.
-// Separate from the editor's ZoneProperties (which has GameType/Particle fields too).
-struct ZoneEnvOverrides {
-    // Fog (defaults match legacy hardcoded fallback in Core.hpp)
-    int fogR = 179, fogG = 179, fogB = 204;
-    float fogDensity = 1.0f;
-    float fogStart = 10.0f, fogEnd = 100.0f;
-    bool applyFog = false;
-    // Ambient
-    int ambR = 180, ambG = 180, ambB = 200;
-    float ambIntensity = 0.4f;
-    bool applyAmbient = false;
-    // Reverb
-    float reverbMix = 0.0f;
-    float reverbDecay = 0.0f;
-};
-
-// Zone volume types
-enum class ZoneType : uint8_t {
-    ZONE_WATER = 0,
-    ZONE_LADDER = 1,
-    ZONE_SKY = 2,
-    ZONE_REVERB = 3,
-    ZONE_GAMEPLAY_SOUND = 4,
-    ZONE_PORTAL = 5
-};
-
-// Level metadata — per-world game rules + environment defaults (LevelInfo/Particles)
-struct LevelSettings {
-    int gameType = 0;              // matches editor GameType enum order
-    int maxPlayers = 8;
-    float respawnTime = 5.0f;
-    bool timeLimitEnabled = false;
-    float timeLimitMinutes = 10.0f;
-    int scoreLimit = 50;
-    bool friendlyFire = false;
-    std::string skyboxPath;        // empty = world default (Models/Skybox.png)
-    std::string skyboxSidePath;    // optional horizon/side sky texture (cap = skyboxPath)
-    // Ambient particle weather
-    int particleType = 0;          // 0=none, 1=snow, 2=rain, 3=void, 4=psychic
-    float particleDensity = 50.0f;
-    float particleSpeed = 1.0f;
-    int particleR = 200, particleG = 200, particleB = 200;
-    float particleWindX = 0.0f, particleWindZ = 0.0f;
-};
-
-// Sound profile - maps game types to music/sound actions
-struct GameplaySoundProfile {
-    std::string music_on_enter;   // Music to crossfade to on zone enter
-    std::string music_on_exit;    // Music to restore on zone exit
-    std::string sfx_on_enter;     // One-shot sound played on enter
-    std::string sfx_on_combat;    // Combat stinger (DM/TDM modes)
-    std::string ambience_loop;    // Ambience loop while inside zone
-    float volume_mult = 1.0f;     // Volume multiplier for this zone
-};
-
 
 // TODO: Gun/WEapon PawnDefs for stat block
 // Template definition shared between spawn calls; stored in an internal
@@ -108,6 +59,10 @@ struct PawnDef {
     std::string model_path;
     std::string model_texture;  // optional diffuse map for model_path
     std::string baseDir;        // directory of the defining .cfg (path resolution)
+    // World-space multiplier applied to model_path. Source packs are authored at
+    // wildly different units (1.4 to 4944 across the shipped library), so this
+    // trims a model whose GLB was not pre-normalised. Default 1 = as authored.
+    float model_scale = 1.0f;
     // Mesh taxonomy / animation (GameEngine.Mesh.Skeletal).
     std::string mesh_type;      // "" | "static" | "skeletal"
     std::string anim_idle;
@@ -272,55 +227,16 @@ struct ParticleEmitterNode {
     bool active = true;
 };
 
-// Zone volume node - AABB volumes with behavior flags
-struct ZoneVolumeNode {
-    uint32_t id = 0;
-    BoundingBox bounds;
-    ZoneType zoneType = ZoneType::ZONE_WATER;
-    float intensity = 1.0f;  // e.g., water density, ladder speed
-    int priority = 0;         // higher = wins when overlapping
-    std::string name;        // logical name for LightningScript zone lookups
-    GameplaySoundProfile soundProfile; // game-type-specific audio profile
-    ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
-    oz::physics::PhysicsInfo physics; // per-zone physics overrides (named kwargs)
-};
-
-// ZonePortal — connects two zones / two LEVELS (enable zone transitions + campaigns)
-struct ZonePortal {
-    BoundingBox bounds;           // trigger volume
-    std::string targetWorld;      // destination level folder name in GameData/Worlds/ ("" = unassigned)
-    Vector3 targetSpawn{0, 20, 0}; // player position on arrival in targetWorld
-    bool bidirectional = true;
-    bool enabled = true;
-};
-
 // WorldInfo — global world metadata + default environment fallback
 struct WorldInfo {
     ZoneEnvOverrides defaultEnv;  // defaults: fog, ambient, reverb
     std::string defaultSkybox;
     std::string defaultMusic;
-    std::vector<ZonePortal> portals;  // legacy same-level portals (level links live in m_portals)
+    std::vector<ZonePortal> portals;  // legacy same-level portals (level links live in ZoneManager)
     BoundingBox worldBounds;
     std::string name;
     std::string author;
     LevelSettings settings;       // game rules + weather metadata (LevelInfo/Particles)
-};
-
-// PointRegion — per-entity zone tracking with stacking support
-struct PointRegion {
-    int lastPrimaryZoneId = -1;    // previous frame's primary zone
-    int primaryZoneId = -1;        // current frame's primary zone
-    ZoneType primaryZoneType = ZoneType::ZONE_WATER; // type of primary zone
-    std::unordered_set<int> activeZoneIds;   // all overlapping zones this frame
-    std::unordered_set<int> enteredZoneIds;  // zones entered this frame
-    std::unordered_set<int> exitedZoneIds;   // zones exited this frame
-    ZoneEnvOverrides combinedEnv;            // merged from all active zones
-
-    void Rebuild(const std::vector<ZoneVolumeNode*>& activeZones);
-    bool HasZoneType(ZoneType type) const { return primaryZoneId >= 0 && primaryZoneType == type; }
-    bool HasZoneId(int id) const;
-    bool HasChanged() const { return primaryZoneId != lastPrimaryZoneId; }
-    void CommitFrame();
 };
 
 // Sky zone node — runtime state for isolated skybox chamber rendering
@@ -410,37 +326,13 @@ public:
     PickupNode* GetPickup(int id);
     void UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBounds);
 
-    // Zone volume nodes
-    int AddZone(const ZoneVolumeNode& node);
-    void RemoveZone(int id);
-    void ClearZones();
-    std::vector<ZoneVolumeNode>& GetZones() { return m_zones; }
-    const std::vector<ZoneVolumeNode>& GetZones() const { return m_zones; }
-    ZoneVolumeNode* GetZone(int id);
-    ZoneVolumeNode* CheckZoneCollision(Vector3 pos, BoundingBox bounds);
-
-    // Portal nodes — level-to-level connections (campaign system)
-    int AddPortal(const ZonePortal& node);
-    void RemovePortal(int id);
-    void ClearPortals();
-    std::vector<ZonePortal>& GetPortals() { return m_portals; }
-    const std::vector<ZonePortal>& GetPortals() const { return m_portals; }
-    ZonePortal* GetPortal(int id);
-    // Returns the first enabled portal whose volume contains pos/bounds, nullptr if none
-    ZonePortal* CheckPortalCollision(Vector3 pos, BoundingBox bounds);
-
-    // Consolidated multi-zone query — returns all overlapping zones sorted by priority
-    std::vector<ZoneVolumeNode*> GetActiveZones(Vector3 pos, BoundingBox bounds);
+    // Zone volumes, level portals and player region tracking live in
+    // World/ZoneManager.hpp (ZoneManager::Instance()).
 
     // WorldInfo management
     void SetWorldInfo(const WorldInfo& wi) { m_worldInfo = wi; }
     const WorldInfo& GetWorldInfo() const { return m_worldInfo; }
     WorldInfo& GetWorldInfo() { return m_worldInfo; }
-
-    // Player point-region tracking (enter/exit detection + combined env)
-    PointRegion& GetPlayerRegion() { return m_playerRegion; }
-    const PointRegion& GetPlayerRegion() const { return m_playerRegion; }
-    void UpdatePlayerRegion(Vector3 playerPos, BoundingBox playerBounds);
 
     // Sound/music emitter nodes
     int AddEmitter(const EmitterNode& node);
@@ -520,6 +412,11 @@ public:
     const std::vector<LightNode>& GetLights() const { return m_lights; }
     LightNode* GetLight(int id);
 
+    // Bind every light to the first zone volume that contains it
+    // (-1 = affects all zones). Called by the world orchestrator after the
+    // OZONE entity set has been injected.
+    void AssignLightZones();
+
     // Access registered definitions
     const std::vector<PawnDef>& GetDefs() const { return m_defs; }
 
@@ -537,8 +434,6 @@ private:
     std::vector<PlayerStartNode> m_playerStarts;
     std::vector<ProjectileNode> m_projectiles;
     std::vector<PickupNode> m_pickups;
-    std::vector<ZoneVolumeNode> m_zones;
-    std::vector<ZonePortal> m_portals;
     std::vector<EmitterNode> m_emitters;
     std::vector<ParticleEmitterNode> m_particleEmitters;
     std::vector<PathNode> m_pathNodes;
@@ -565,9 +460,6 @@ private:
 
     // World metadata + zone portal system
     WorldInfo m_worldInfo;
-
-    // Player zone tracking (enter/exit detection, combined env)
-    PointRegion m_playerRegion;
 
     PawnDef* FindDef(const char* name);
     int AllocSlot();

@@ -97,22 +97,50 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 
 ## Panels
 
+### Asset scope (Model Browser + Texture Manager)
+Both panels group assets as the same two-root tree instead of one flat list, so it is
+always obvious whether an asset is an editable file or a package record:
+
+- **`(GameData)`** — loose files under `GameData/`, nested by their real folder
+- **`(Packages)`** — assets that only exist inside a `.oz*` package
+
+A `.oz*` file is the only thing treated as a package; anything reachable on disk is a
+real file even when a package also holds a same-named copy (real files win).
+
+Both panels have a **Search** box that re-filters the already-loaded entries as you
+type (no filesystem hit per keystroke). While a search is active, matching folders
+auto-expand and folders with no matches are pruned.
+
 ### Model Browser
-- Lists all `.obj`/`.gltf`/`.glb`/`.iqm`/`.vox`/`.m3d` files from `GameData/` and packages
+- Scope tree of all `.obj`/`.gltf`/`.glb`/`.iqm`/`.vox`/`.m3d` files from `GameData/` and packages
 - Previews selected model in a 256x256 render texture
-- Select a model, click a target slot to place in world
+- Click a leaf to place it in the world; clicking a folder does nothing
+- **Import** packs the chosen mesh (and its companion texture, if present) straight into
+  `System/Data/imported_models.ozpak` and hot-loads it, so it shows up under
+  `(Packages)` immediately. The package is appended to, so repeated imports accumulate.
+  No loose file is written to `GameData/`.
+- **Export** writes the selected mesh back out to a path of your choosing
 
 ### Texture Manager
-- Lists all `.png`/`.tga`/`.bmp`/`.jpg`/`.jpeg` files from filesystem and packages
-- **Grid view** with 64x64 thumbnail previews in a custom scrollable control
+- Scope tree (left) + **grid view** with 64x64 thumbnail previews in a custom scrollable
+  control (right). The tree selects the *scope* the grid shows: pick a folder and the grid
+  lists that subtree, pick nothing and it lists everything. The "Source:" label reports how
+  many textures are in scope.
 - Click a texture to see full-size preview and file info
 - Select target model from dropdown (populated from loaded world models)
 - Click **Apply** to set texture on model; **Apply to All** checkbox applies to all model instances
 - **Add Package** button loads additional `.oztex`/`.ozpak` files at runtime
-- **Import Textures** button copies selected image file(s) into the open world's
-  `oztex/tileset/` folder (creating it if needed) so they appear in the browser
-  and become usable as `texSlot` indices; falls back to `GameData/Textures/` when
-  no world is open. Reopen the world (or Refresh) to pick them up as tileset slots.
+- **Import Textures** packs selected image file(s) into `System/Data/imported_textures.oztex`
+  (appended, then hot-loaded) rather than dropping loose files into a world folder.
+
+> **Imported textures are free-placement assets, not tileset entries.** Use them with
+> `tex=<path>` on `Mesh.Static` / `Mesh.Skeletal` entities, or as a model's texture.
+> They **cannot** be used as a brush `texSlot` — that argument is a *bare positional
+> float* selecting a tileset slot (1-based, ordered by filename in
+> `<world>/oztex/tileset/`), and only textures in that folder count. Writing `texSlot=3`
+> does nothing and you silently get auto-selection instead (`h<1` -> slot 1, else slot 2).
+> To make a texture a tileset slot, add the file to the world's `oztex/tileset/` folder on
+> disk and reopen the world.
 
 ### Sound Manager
 - Lists `.wav`/`.mp3`/`.ogg` files organized by category tabs: **SFX** / **Music** / **Ambience**

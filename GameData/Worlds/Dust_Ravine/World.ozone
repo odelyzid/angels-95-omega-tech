@@ -1,22 +1,32 @@
 OZONE
-# Dust_Ravine — Desert fortress with connected halls, corridors, and outdoor areas
+# Dust_Ravine - Desert fortress with connected halls, corridors, and outdoor areas
 # OZONE Z-up: x=east, y=north, z=up
-# Uses Dessert_Dreams texture set (sand floor, stone walls, rock columns, sky ceiling)
-# Scaled for player dimensions (Height=10, Width=2)
+# Uses the Desert_Dreams texture set (sand floor, stone walls, rock columns,
+# sky ceiling). All interior geometry is authored in "engine units" where the
+# player is 3 tall with a 2u eye height: corridors roof at 4.5, the Great Hall
+# and wings are deliberately grand at 10.
 #
 # Layout:
-#   West Approach (open desert) ──┬── Fortress ──┬── East Ruins Garden
-#                                  │              │
-#                                  └── South Canyon
+#   West Approach (open desert) --+-- Fortress --+-- East Ruins Garden
+#                                   |              |
+#                                   +-- South Canyon
+#
+# Verticality: the Upper Gallery (z=10) is reached by the 10-tread stair runs
+# beside the Great Hall. Every tread rises exactly 1.0, matching the engine's
+# kStepHeight, so stairs are walked rather than jumped.
 
 # ==============================================================================
-# Sky zone — covers the entire map
+# Sky zone - covers the entire map. Named explicitly so the .ozls skyzone def
+# resolves without relying on the loader's auto-generated zone_sky_0.
 # ==============================================================================
-zone sky -100 -100 -30 100 100 80
+zone sky -100 -100 -30 100 100 80 1 name=dust_sky
 
-# Level metadata — skybox: cloud_pilgrimage_02 for top+bottom (steep views),
-# sky_pilgrimage_01 for sides (near-horizontal views)
-levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/cloud_pilgrimage_02.dds GameData/Global/sky/sky_pilgrimage_01.dds
+# Level metadata - golden-hour desert: bright sunlit cloud deck overhead
+# (skydome_daylight) and a dusty tan horizon band (sky_evening) so the fortress
+# silhouette reads against it. The previous pair (cloud_pilgrimage_02 +
+# sky_pilgrimage_01) is a near-black nebula pair, which rendered a black sky.
+levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/skydome_daylight.dds GameData/Global/sky/skydome_daylight.dds
+
 
 # ==============================================================================
 # Ground — tessellated terrain (65x65 grid, 2.8u cells)
@@ -128,6 +138,11 @@ add box 15 2 5 10 10 0.5 0
 add cyl -5 10 5 0.4 0.4 10 16 0
 add cyl 5 10 5 0.4 0.4 10 16 0
 
+# Entry Hall ceiling. It was previously open-topped, so walking in from the
+# desert put the sky directly overhead. Roofed at 4.5 to read as a covered
+# gatehouse, in contrast with the 10-tall Great Hall beyond it.
+add box -5 10 4.75 20 0.5 17 0
+
 # ==============================================================================
 # FORTRESS — GREAT HALL (center-north)
 # ==============================================================================
@@ -142,19 +157,22 @@ add cyl 5 30 5 0.6 0.6 10 16 0
 add cyl -5 42 5 0.6 0.6 10 16 0
 add cyl 5 42 5 0.6 0.6 10 16 0
 
-# Ceiling slabs with open center gap for upper gallery view
-add box -5 36 10 10 0.5 28 0
-add box 5 36 10 10 0.5 28 0
+# Ceiling slabs, split to leave a genuine 8u atrium opening (x -4..4) so the
+# Upper Gallery overlooks the Great Hall. The two slabs used to meet at x=0 and
+# roof the hall completely.
+add box -7 36 10 6 0.5 28 0
+add box 7 36 10 6 0.5 28 0
 
 # Throne platform at north end
 add box 0 48 2 8 4 4 0
 
 # ==============================================================================
-# CORRIDOR: Entry Hall → Great Hall
+# CORRIDOR: Entry Hall -> Great Hall. Roofed at 4.5 (was 10) so the passage
+# reads as a low tunnel before the hall opens up.
 # ==============================================================================
 add box -4 20 5 0.5 10 4 0
 add box 4 20 5 0.5 10 4 0
-add box 0 20 10 8 0.5 4 0
+add box 0 20 4.75 8 0.5 4 0
 
 # ==============================================================================
 # FORTRESS — ARMORY (east wing)
@@ -218,11 +236,33 @@ add box 10 36 12.5 0.5 5 28 0
 add box -8 36 10 4 0.5 28 0
 add box -10 36 12.5 0.5 5 28 0
 
-# Stairs to upper gallery (stepped boxes)
-add box 8 18 5 4 10 7 0
-add box 8 18 8.5 4 3 7 0
-add box -8 18 5 4 10 7 0
-add box -8 18 8.5 4 3 7 0
+# Stairs to the Upper Gallery. A real stepped run: 10 treads of 1.0 rise /
+# 1.0 going (kStepHeight is 1.0, so each tread is a walk-on step). The previous
+# pair was two solid 10-tall blocks, which is a wall, not a staircase.
+# Step k: centre y = 12.5+(k-1), top z = k, so centre z = k/2 and height = k.
+add box 8 12.5 0.5 3 1 1 0
+add box 8 13.5 1 3 2 1 0
+add box 8 14.5 1.5 3 3 1 0
+add box 8 15.5 2 3 4 1 0
+add box 8 16.5 2.5 3 5 1 0
+add box 8 17.5 3 3 6 1 0
+add box 8 18.5 3.5 3 7 1 0
+add box 8 19.5 4 3 8 1 0
+add box 8 20.5 4.5 3 9 1 0
+add box 8 21.5 5 3 10 1 0
+add box -8 12.5 0.5 3 1 1 0
+add box -8 13.5 1 3 2 1 0
+add box -8 14.5 1.5 3 3 1 0
+add box -8 15.5 2 3 4 1 0
+add box -8 16.5 2.5 3 5 1 0
+add box -8 17.5 3 3 6 1 0
+add box -8 18.5 3.5 3 7 1 0
+add box -8 19.5 4 3 8 1 0
+add box -8 20.5 4.5 3 9 1 0
+add box -8 21.5 5 3 10 1 0
+# Solid stringer under each flight so the treads read as one structure
+add box 8 17 4.5 3 8 9 0
+add box -8 17 4.5 3 8 9 0
 
 # ==============================================================================
 # CORRIDOR: Fortress → East Ruins (covered passage)
@@ -267,17 +307,74 @@ add box 0 11 -1.5 6 0.5 34 0
 add box 0 -5 -3 6 6 4 0
 
 # ==============================================================================
-# Player start — west approach, facing fortress
+# Player start - west approach, facing the fortress (only playerstart #1 is
+# used, so this single line decides the first frame of the level)
 # ==============================================================================
 playerstart -70 0 0 90
 
 # ==============================================================================
-# Return portal to EngineTest (level-to-level connection test)
-# Volume sits WEST of the playerstart (clear of the spawn point so arriving
-# players don't instantly re-trigger it). Spawn is IN EngineTest coords
-# (Room 1, between its playerstart and exit portal), eye height 2.
+# Return portal to EngineTest. The volume sits WEST of the playerstart (clear of
+# the spawn so arriving players don't instantly re-trigger it). Spawn is in
+# EngineTest coords (Room 1, between its playerstart and exit portal).
+#
+# The portal renders as a bare shimmer quad, so it is framed by a purpose-built
+# desert gateway. Left unframed it read as two floating green bars against the
+# west backdrop wall.
 # ==============================================================================
 portal EngineTest -80 -3 0 -76 5 8 0 12 2 bidir
+
+# Gateway masonry around the portal opening (x -80..-76, y -6..8, z 0..9)
+add box -78 -4.5 4.5 4 9 3 0 3
+add box -78 6.5 4.5 4 9 3 0 3
+add box -78 1 8 4 2 14 0 3
+add box -78 1 0.5 5 1 15 0 1
+# Sun-bleached ruin debris so the gateway does not read as a clean box
+add box -80 -1 0.75 2 1.5 4 0 1
+add box -76 3 0.75 2 1.5 3 0 1
+add cyl -78 1 9.75 1.2 1.2 1.5 16 0 3
+# Warm light inside the gateway so the opening reads as a destination
+light point -78 1 3 150 200 255 0.7 14
+
+# ==============================================================================
+# NPC patrol graphs. Without PathNodes the server falls back to a circular walk
+# around each spawn, which reads as NPCs sliding on the spot. Links are by NAME
+# so the graph survives editor reordering.
+# ==============================================================================
+# Courtyard sentries
+PathNode court_a -30 12 1 radius=3 next=court_b,court_c
+PathNode court_b 0 12 1 radius=3 next=court_c,court_a
+PathNode court_c 30 12 1 radius=3 next=court_a,court_b
+# Great Hall guard loop
+PathNode hall_a -6 30 1 radius=3 next=hall_b,hall_c
+PathNode hall_b 0 40 1 radius=3 next=hall_c,hall_d
+PathNode hall_c 6 44 1 radius=3 next=hall_d,hall_a
+PathNode hall_d 0 28 1 radius=3 next=hall_a,hall_b
+# Armory patrol
+PathNode armory_a 20 27 1 radius=2.5 next=armory_b
+PathNode armory_b 30 34 1 radius=2.5 next=armory_a
+# Shrine sentry
+PathNode shrine_a -25 27 1 radius=2.5 next=shrine_b
+PathNode shrine_b -25 34 1 radius=2.5 next=shrine_a
+# South canyon hunters
+PathNode canyon_a -12 -58 1 radius=4 next=canyon_b,canyon_c
+PathNode canyon_b 0 -68 1 radius=4 next=canyon_c,canyon_a
+PathNode canyon_c 12 -58 1 radius=4 next=canyon_a,canyon_b
+# East ruins wanderers
+PathNode ruins_a 50 25 1 radius=4 next=ruins_b
+PathNode ruins_b 62 38 1 radius=4 next=ruins_c
+PathNode ruins_c 48 45 1 radius=4 next=ruins_a
+
+# NPCs on those routes
+npc Walker -30 12 1
+npc Walker 0 12 1
+npc Skaarj -6 30 1
+npc Skaarj 0 40 1
+npc Brute 20 27 1
+npc Brute -25 27 1
+npc Floater -12 -58 1
+npc Floater 12 -58 1
+npc Walker 50 25 1
+npc Skaarj 62 38 1
 
 # ==============================================================================
 # Pickups — scattered strategically
@@ -286,17 +383,18 @@ portal EngineTest -80 -3 0 -76 5 8 0 12 2 bidir
 # West Approach
 pickup HealthVial -65 5 3
 pickup ManaVial -60 -10 3
-pickup pistol_01 -55 15 2
+# 1u proud of the west gate canopy (x -61..-49, y 14.25..15.75, z 0..4)
+pickup pistol_01 -55 13 1
 
 # Entry Hall
 pickup HealthVial 0 8 3
 pickup Key -5 12 0
 pickup Medkit 2 12 3
 
-# Great Hall
+# Great Hall (throne platform tops out at z=4, so pickups clear it)
 pickup ManaVial -5 35 3
 pickup HealthVial 5 45 3
-pickup Powerup 0 48 3
+pickup Powerup 0 48 4.5
 
 # Armory
 pickup pistol_01 22 27 2
@@ -304,14 +402,14 @@ pickup Coin 28 33 0
 pickup rifle_01 32 27 2
 pickup etheral_waver 26 30 2
 
-# Shrine
-pickup EnergyCrystal -25 30 3
-pickup Key -22 35 0
-pickup ManaTonic -28 38 3
+# Shrine (altar tops out at z=4; the ManaTonic was 7u inside the north wall)
+pickup EnergyCrystal -25 30 4.5
+pickup Key -22 35 1
+pickup ManaTonic -28 35 1
 
-# Upper Gallery
-pickup HealthVial 8 40 10
-pickup ManaVial -8 30 10
+# Upper Gallery (walkway slabs top out at z=10.25, so pickups sit on them)
+pickup HealthVial 8 40 11
+pickup ManaVial -8 30 11
 
 # Underground
 pickup EnergyCrystal -3 30 -6
@@ -322,48 +420,57 @@ pickup Coin 0 15 -6
 # South Canyon
 pickup HealthVial 0 -65 3
 pickup ManaVial 10 -60 3
-pickup Key -10 -70 0
-pickup PistonPart 5 -55 0
+# south buttress is x -14..-6, y -73..-67, z 0..2 — this sat inside it
+pickup Key -10 -75 1
+# PistonPart has no item definition (it hit the WEAPON fallback and spawned a
+# broken pickup), so use a real coin.
+pickup Coin 5 -55 3
 
-# East Ruins
-pickup ManaVial 55 20 3
+# East Ruins (ruin wall is x 52..58, y 19.5..20.5, z 0..8 — this sat inside it)
+pickup ManaVial 55 18 1
 pickup EnergyCrystal 60 35 3
-pickup Coin 50 45 0
+pickup Coin 50 45 1
 
 # ==============================================================================
-# Zone volumes
+# Zone volumes. Every name is explicit: auto-generated names ("zone_sky_0")
+# collide between worlds, which made this map run another map's skyzone script.
 # ==============================================================================
-zone reverb -10 22 0 10 50 10
+zone reverb -10 22 0 10 50 10 name=dust_reverb_hall
 zone water -3 30 -8 3 36 -2 name=acidpool
-zone sound -36 22 0 -14 38 10
-zone sky -30 -80 0 30 -40 20
+zone sky -30 -80 0 30 -40 20 1 name=dust_canyon_sky
 zone water -15 -75 -4 15 -45 6 name=arena
 
 # ==============================================================================
 # Lights
 # ==============================================================================
 
-# Desert sun (directional) — warm ambient fill
-light directional -80 -80 100 255 220 180 1.2
+# Desert sun. The authored point is the light SOURCE (see the loader's
+# directional-light handling), aimed at the world origin - so a large positive
+# z puts the sun high and to the west, raking the fortress's west face and the
+# West Approach. The second, dimmer light from the opposite side keeps shadowed
+# faces readable.
+light directional -70 -40 90 255 228 190 1.0
+light directional 60 50 50 165 175 200 0.30
 
-# West Approach — warm ambient
-light point -60 10 4 200 180 150 0.5 30
-light point -55 -10 4 200 180 150 0.5 30
+# West Approach - warm fill so the spawn area is not a void
+light point -70 0 6 255 210 170 0.45 45
+light point -55 10 6 255 205 165 0.40 40
+light point -50 -20 6 255 200 160 0.40 40
 
 # Entry Hall
 light point 0 10 4 255 200 150 0.8 25
 
-# Great Hall — torch-lit warm glow
-light point -5 30 4 255 180 80 0.9 25 1
-light point 5 42 4 255 180 80 0.9 25 1
+# Great Hall — torch-lit warm glow (effect 2 = TORCH)
+light point -5 30 4 255 180 80 0.9 25 2
+light point 5 42 4 255 180 80 0.9 25 2
 light point 0 48 4 255 220 160 1.0 20
 
 # Armory — cool workshop light
 light point 22 27 4 180 200 255 0.7 20
 light point 28 33 4 180 200 255 0.7 20
 
-# Shrine — mystical blue glow
-light point -25 30 4 100 180 255 0.8 25 2
+# Shrine — mystical blue glow (effect 1 = WATERY, the rippling shimmer)
+light point -25 30 4 100 180 255 0.8 25 1
 
 # Upper Gallery
 light point 0 48 11 255 200 100 0.5 20
@@ -391,7 +498,7 @@ light point 55 20 4 200 200 180 0.5 25
 light point 60 35 4 200 200 180 0.5 25
 light point 50 45 4 200 200 180 0.5 25
 
-# Fortress outer walls — torch sconces
-light point -40 25 4 255 180 80 0.6 25 1
-light point 40 25 4 255 180 80 0.6 25 1
-light point 0 50 4 255 180 80 0.6 25 1
+# Fortress outer walls — torch sconces (effect 2 = TORCH)
+light point -40 25 4 255 180 80 0.6 25 2
+light point 40 25 4 255 180 80 0.6 25 2
+light point 0 50 4 255 180 80 0.6 25 2

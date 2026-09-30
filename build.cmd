@@ -4,7 +4,33 @@ setlocal enabledelayedexpansion
 REM ============================================================================
 REM build.cmd -- Clean compile all targets, package assets, copy to System/
 REM Requires: C:\raylib\w64devkit (GCC 15.2.0 + raylib 5.5)
+REM
+REM Args: fast      incremental rebuild (keep build/ objects, skip clean)
+REM       debug     MODE=debug (-O0 -g, much faster compiles + symbols)
+REM       skipdata  skip asset packaging
+REM   e.g.  build.cmd fast debug
 REM ============================================================================
+
+REM --- Parse optional args ---
+set FAST=0
+set DEBUG=0
+set SKIPDATA=0
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="fast"      set FAST=1
+if /i "%~1"=="-fast"     set FAST=1
+if /i "%~1"=="debug"     set DEBUG=1
+if /i "%~1"=="-debug"    set DEBUG=1
+if /i "%~1"=="skipdata"  set SKIPDATA=1
+if /i "%~1"=="-skipdata" set SKIPDATA=1
+shift
+goto parse_args
+:args_done
+
+set MAKE_MODE=
+if "%DEBUG%"=="1" set MAKE_MODE=MODE=debug
+if "%DEBUG%"=="1" (echo Build mode: debug ^(-O0 -g^)) else (echo Build mode: release ^(-O3^))
+if "%FAST%"=="1"  (echo Incremental: keeping build/ objects) else (echo Clean build)
 
 set ROOT=%~dp0
 set W64DEVKIT=C:\raylib\w64devkit
@@ -33,19 +59,24 @@ if errorlevel 1 (
 g++ --version | findstr /i "g++"
 
 REM --- Clean previous artifacts ---
-echo.
-echo === Cleaning previous build ===
-cd /d "%ROOT%"
-mingw32-make clean 2>nul
-cd /d "%ROOT%AngelEd"
-mingw32-make clean 2>nul
-cd /d "%ROOT%"
+if "%FAST%"=="1" (
+    echo.
+    echo === Skipping clean ^(incremental build^) ===
+) else (
+    echo.
+    echo === Cleaning previous build ===
+    cd /d "%ROOT%"
+    mingw32-make clean 2>nul
+    cd /d "%ROOT%AngelEd"
+    mingw32-make clean 2>nul
+    cd /d "%ROOT%"
+)
 
 REM --- 1. Build OTENGINE (game client) ---
 echo.
 echo === Building Angels95 (OTENGINE) ===
 cd /d "%ROOT%"
-mingw32-make -j %NUMBER_OF_PROCESSORS% OTENGINE
+mingw32-make -j %NUMBER_OF_PROCESSORS% %MAKE_MODE% OTENGINE
 if errorlevel 1 (
     echo ERROR: OTENGINE build failed
     exit /b 1
@@ -56,7 +87,7 @@ REM --- 2. Build AngelServ (dedicated server) ---
 echo.
 echo === Building AngelServ ===
 cd /d "%ROOT%"
-mingw32-make AngelServ
+mingw32-make %MAKE_MODE% AngelServ
 if errorlevel 1 (
     echo ERROR: AngelServ build failed
     exit /b 1
@@ -67,7 +98,7 @@ REM --- 3. Build OzPack (asset packer) ---
 echo.
 echo === Building OzPack ===
 cd /d "%ROOT%"
-mingw32-make ozpack
+mingw32-make %MAKE_MODE% ozpack
 if errorlevel 1 (
     echo ERROR: OzPack build failed
     exit /b 1
@@ -78,7 +109,7 @@ REM --- 3b. Build AngelMaster (master server) ---
 echo.
 echo === Building AngelMaster ===
 cd /d "%ROOT%"
-mingw32-make AngelMaster
+mingw32-make %MAKE_MODE% AngelMaster
 if errorlevel 1 (
     echo ERROR: AngelMaster build failed
     exit /b 1
@@ -89,7 +120,7 @@ REM --- 4. Build AngelEd (level editor) via Makefile ---
 echo.
 echo === Building AngelEd ===
 cd /d "%ROOT%AngelEd"
-mingw32-make -j %NUMBER_OF_PROCESSORS% AngelEd
+mingw32-make -j %NUMBER_OF_PROCESSORS% %MAKE_MODE% AngelEd
 if errorlevel 1 ( echo ERROR: AngelEd build failed & exit /b 1 )
 cd /d "%ROOT%"
 echo AngelEd.exe built.
@@ -167,15 +198,19 @@ echo start "" "%%~dp0Angels95.exe" >> "%OUT_DIR%\run.bat"
 
 REM --- 6. Package assets ---
 echo.
-echo === Packaging assets ===
-cd /d "%ROOT%"
-if exist "build-data.ps1" (
-    powershell -ExecutionPolicy Bypass -File build-data.ps1
-    if errorlevel 1 (
-        echo WARNING: Asset packaging returned errors
-    )
+if "%SKIPDATA%"=="1" (
+    echo === Skipping asset packaging ^(skipdata^) ===
 ) else (
-    echo WARNING: build-data.ps1 not found, skipping asset packaging
+    echo === Packaging assets ===
+    cd /d "%ROOT%"
+    if exist "build-data.ps1" (
+        powershell -ExecutionPolicy Bypass -File build-data.ps1
+        if errorlevel 1 (
+            echo WARNING: Asset packaging returned errors
+        )
+    ) else (
+        echo WARNING: build-data.ps1 not found, skipping asset packaging
+    )
 )
 
 REM Copy shaders if present

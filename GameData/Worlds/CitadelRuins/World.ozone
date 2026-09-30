@@ -1,77 +1,272 @@
-# OZONE world: CitadelRuins
-# Z-up convention: x = east, y = north, z = up
-# CSG prefix: add / sub / intersect
-# Tileset (oztex/tileset, 1-based sorted by filename):
-#   1 = floor  2 = wall  3 = column  4 = ceiling
+OZONE
+# CitadelRuins - a ruined hill-citadel: roofed courtyard, four corner towers,
+# a gatehouse over the south gate, and watch balconies over a collar of sand.
+# OZONE Z-up: x=east, y=north, z=up.
+#
+# Authoring notes:
+#   * Ground level is z=0 across the whole map. The previous revision had the
+#     outer sand topping out at z=-1.75 while the courtyard sat at z=0, a 1.75
+#     rise - above the engine's kStepHeight of 1.0 - so the courtyard was a
+#     one-way island you could leave but never re-enter.
+#   * `box <cx> <cy> <cz> <w> <h> <d> <rot> [texSlot]` is CENTRE-based, h is the
+#     Z extent, and texSlot is a BARE POSITIONAL after rot (NOT `texSlot=`).
+#   * `cyl <cx> <cy> <cz> <rTop> <rBot> <h> <slices> <rot> [texSlot]` spans
+#     z = [cz-h, cz]: the authored cz is the cylinder's TOP.
+#   * Ceiling undersides sit at z=7.0 so a 3-tall player has ample clearance.
+#   * Stair treads rise exactly 1.0 (kStepHeight) so they are walked, not jumped.
+#   * Cover props top out at least 1.5 above their floor, otherwise the player
+#     walks straight over them.
+#   * Every zone carries an explicit, world-unique name=.
+#   * `light directional <x> <y> <z>`: the point is the light SOURCE, aimed at
+#     the world origin, so a large z is an overhead sun.
 
-# --- 1. Foundation ---
-add box 0 0 -2 80 0.5 80 0 texScaleU=8 texScaleV=8
+# ==============================================================================
+# Ground. Plinth top = 0 (the courtyard deck), outer sand top = -1.0, so the
+# step between them is exactly 1.0 in both directions.
+# ==============================================================================
+add box 0 0 -0.5 44 1 44 0 3          # citadel plinth, top z=0
+add box 0 0 -1.25 84 0.5 84 0 1        # outer sand, top z=-1.0
 
-# --- 2. Subterranean drainage tunnels ---
-add box 0 0 -1.5 6 2 40 0 texScaleU=16 texScaleV=16
-add box -15 0 -1.5 20 2 6 0 texScaleU=16 texScaleV=16
+# ==============================================================================
+# Courtyard curtain walls (top z=7.0). 30x30 inner courtyard.
+# South wall is in two segments leaving a 4-wide gate at x=-2..2.
+# ==============================================================================
+add box 0 15.25 3.5 30 7 0.5 0 2               # north
+add box -8.5 -15.25 3.5 13 7 0.5 0 2           # south, west of the gate
+add box 8.5 -15.25 3.5 13 7 0.5 0 2            # south, east of the gate
+add box -15.25 0 3.5 0.5 7 30 0 2              # west
+add box 15.25 0 3.5 0.5 7 30 0 2               # east
 
-# --- 3. Central courtyard & perimeter walls (gate in the south wall) ---
-add box 0 0 -0.25 30 0.5 30 0 texScaleU=8 texScaleV=8
-add box 0 15.25 3 30 6.5 0.5 0 texScaleU=16 texScaleV=16
-add box -8.5 -15.25 3 13 6.5 0.5 0 texScaleU=16 texScaleV=16
-add box 8.5 -15.25 3 13 6.5 0.5 0 texScaleU=16 texScaleV=16
-add box -15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
-add box 15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
+# ==============================================================================
+# Corner towers (8x8 footprint, top z=14) - the citadel silhouette.
+# ==============================================================================
+add box -17 -17 7 8 14 8 0 3
+add box 17 -17 7 8 14 8 0 3
+add box -17 17 7 8 14 8 0 3
+add box 17 17 7 8 14 8 0 3
+# Crenellated lips
+add box -17 -17 14.4 9 0.8 9 0 2
+add box 17 -17 14.4 9 0.8 9 0 2
+add box -17 17 14.4 9 0.8 9 0 2
+add box 17 17 14.4 9 0.8 9 0 2
+# Merlons on the tower lips
+add box -19.5 -17 15.2 2 1 8 0 2
+add box -14.5 -17 15.2 2 1 8 0 2
+add box 19.5 -17 15.2 2 1 8 0 2
+add box 14.5 -17 15.2 2 1 8 0 2
+add box -19.5 17 15.2 2 1 8 0 2
+add box -14.5 17 15.2 2 1 8 0 2
+add box 19.5 17 15.2 2 1 8 0 2
+add box 14.5 17 15.2 2 1 8 0 2
 
-# --- 4. Raised balconies & pillars ---
-add box -10 10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
-add box 10 10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
-add box -10 -10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
-add box 10 -10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
-add cyl -6 6 2.5 0.6 0.6 5 16 0
-add cyl 6 6 2.5 0.6 0.6 5 16 0
-add cyl -6 -6 2.5 0.6 0.6 5 16 0
-add cyl 6 -6 2.5 0.6 0.6 5 16 0
+# ==============================================================================
+# Gatehouse over the south gate (x -4..4, y=-15.25).
+# ==============================================================================
+add box -3 -15.25 3.5 2 7 2 0 3            # gate jamb, west
+add box 3 -15.25 3.5 2 7 2 0 3             # gate jamb, east
+add box 0 -15.25 8.5 10 3 3 0 3            # lintel / gatehouse block
+add box 0 -15.25 10.4 8 0.8 3 0 2          # cap
+add box -2.5 -15.25 10.4 2 1.6 3 0 2        # merlons
+add box 0 -15.25 10.4 2 1.6 3 0 2           # merlon
+add box 2.5 -15.25 10.4 2 1.6 3 0 2        # merlon
 
-# --- 5. Courtyard cover ---
-add box 0 0 0.5 4 1.5 4 0 texScaleU=16 texScaleV=16
-add box -4 3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
-add box 4 -3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
+# ==============================================================================
+# Merlons along the curtain walls, so the skyline is not four flat lines.
+# ==============================================================================
+add box -12 15.25 7.4 2 0.8 0.5 0 2
+add box -8 15.25 7.4 2 0.8 0.5 0 2
+add box -4 15.25 7.4 2 0.8 0.5 0 2
+add box 4 15.25 7.4 2 0.8 0.5 0 2
+add box 8 15.25 7.4 2 0.8 0.5 0 2
+add box 12 15.25 7.4 2 0.8 0.5 0 2
+add box -15.25 -10 7.4 0.5 0.8 2 0 2
+add box -15.25 -6 7.4 0.5 0.8 2 0 2
+add box -15.25 6 7.4 0.5 0.8 2 0 2
+add box -15.25 10 7.4 0.5 0.8 2 0 2
+add box 15.25 -10 7.4 0.5 0.8 2 0 2
+add box 15.25 -6 7.4 0.5 0.8 2 0 2
+add box 15.25 6 7.4 0.5 0.8 2 0 2
+add box 15.25 10 7.4 0.5 0.8 2 0 2
 
-# --- 6. Southern corridor network (long spine + crossing branch) ---
-# Floors: spine runs north-south, branch crosses it east-west
-add box 0 -27.5 -0.25 4.5 0.5 25 0 texScaleU=8 texScaleV=8
-add box 0 -27 -0.25 40.5 0.5 4.5 0 texScaleU=8 texScaleV=8
-# Spine walls (split to leave the branch junction open)
-add box -2.25 -19.875 2.5 0.5 5 9.75 0 texScaleU=16 texScaleV=16
-add box 2.25 -19.875 2.5 0.5 5 9.75 0 texScaleU=16 texScaleV=16
-add box -2.25 -34.375 2.5 0.5 5 10.25 0 texScaleU=16 texScaleV=16
-add box 2.25 -34.375 2.5 0.5 5 10.25 0 texScaleU=16 texScaleV=16
-# Branch walls (split to leave the spine junction open)
-add box -11.25 -24.75 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
-add box 11.25 -24.75 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
-add box -11.25 -29.25 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
-add box 11.25 -29.25 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
-# End caps (branch ends + spine south end)
-add box -20.25 -27 2.5 0.5 5 4.5 0 texScaleU=16 texScaleV=16
-add box 20.25 -27 2.5 0.5 5 4.5 0 texScaleU=16 texScaleV=16
-add box 0 -39.75 2.5 4.5 5 0.5 0 texScaleU=16 texScaleV=16
-# Ceilings (tileset slot 4)
-add box 0 -27.5 5.25 4.5 0.5 25 0 4 texScaleU=16 texScaleV=16
-add box 0 -27 5.25 40.5 0.5 4.5 0 4 texScaleU=16 texScaleV=16
+# ==============================================================================
+# Courtyard roof in 04_ceiling_sky_128 (a bright gold "sky" panel), leaving a
+# 10x10 central oculus so a shaft of daylight drops onto the centrepiece.
+# Underside z=7.0.
+# ==============================================================================
+add box -9 0 7.3 12 0.6 30 0 4
+add box 9 0 7.3 12 0.6 30 0 4
+add box 0 -10 7.3 10 0.6 10 0 4
+add box 0 10 7.3 10 0.6 10 0 4
 
+# ==============================================================================
+# Courtyard floor detail + centrepiece. The centrepiece top is z=1.5, above
+# kStepHeight, so it is real cover (the old one was only 1.5 tall from z=-0.25
+# and read as a kerb).
+# ==============================================================================
+add box 0 0 0.75 4 1.5 4 0 3                # centre plinth, top z=1.5
+add cyl 0 0 3.5 0.7 0.7 2 16 0 3            # finial, spans z 1.5..3.5
+# Inlaid paving rings, 0.2 proud so they read without being an obstacle
+add box 0 0 0.1 20 0.2 20 0 1
+add box 0 0 0.22 10 0.2 10 0 2
+
+# ==============================================================================
+# Watch balconies on the east and west curtain walls (top z=4.0).
+# Kept deliberately below the roof underside at 7.0 - the parapets used to top
+# out at 8.7 and punched straight through the roof slabs.
+# ==============================================================================
+add box -13 8 3.75 6 0.5 12 0 3             # west balcony, x -16..-10
+add box 13 8 3.75 6 0.5 12 0 3              # east balcony, x 10..16
+add box -16 8 5.1 0.5 1.8 12 0 3            # west parapet, top z=6.0
+add box 16 8 5.1 0.5 1.8 12 0 3             # east parapet
+# Balcony corbels
+add box -15 4 3.5 1.5 1 1.5 0 3
+add box -15 12 3.5 1.5 1 1.5 0 3
+add box 15 4 3.5 1.5 1 1.5 0 3
+add box 15 12 3.5 1.5 1 1.5 0 3
+
+# ==============================================================================
+# Stair runs up to the balconies. Four treads of exactly 1.0, on the courtyard
+# face of each balcony (the old balconies were a 6.25 climb with no steps at
+# all, so both weapon pickups were unobtainable).
+# Tread k: top z=k, so centre y = 5.5-(k-1), centre z=k/2, height=k.
+# ==============================================================================
+add box -13 5.5 0.5 4 1 1 0 1
+add box -13 4.5 1 4 2 1 0 1
+add box -13 3.5 1.5 4 3 1 0 1
+add box -13 2.5 2 4 4 1 0 1
+add box 13 5.5 0.5 4 1 1 0 1
+add box 13 4.5 1 4 2 1 0 1
+add box 13 3.5 1.5 4 3 1 0 1
+add box 13 2.5 2 4 4 1 0 1
+
+# ==============================================================================
+# Cover inside the courtyard. All tops are >=1.5 above the floor so they block.
+# ==============================================================================
+add box -8 -6 0.9 5 1.8 3 0 2
+add box 8 6 0.9 5 1.8 3 0 2
+add box -8 7 0.75 3 1.5 3 0 2
+add box 7 -7 0.75 3 1.5 3 0 2
+# Rubble against the towers
+add cyl -12 -12 1.8 1.5 1.5 1.8 16 0 3
+add cyl 12 12 2.2 1.8 1.8 2.2 16 0 3
+
+# ==============================================================================
+# South corridor: a covered approach running south from the gate.
+# Deck top z=0, walls 5 tall, ceiling underside z=5.0.
+# ==============================================================================
+add box 0 -27 -0.5 4.5 1 26 0 1              # corridor deck (top z=0)
+add box -2.75 -27 2.5 0.5 5 26 0 2           # west wall
+add box 2.75 -27 2.5 0.5 5 26 0 2            # east wall
+add box 0 -27 5.3 6 0.6 26 0 4               # ceiling
+add box 0 -39.75 2.5 5 5 0.5 0 2             # south end wall
+# Approach ramp out of the corridor onto the sand (two 1.0 steps down)
+add box 0 -41.5 -1 4.5 1 3 0 1
+add box 0 -43.5 -1.25 4.5 0.5 1 0 1
+
+# ==============================================================================
+# Painted cliff backdrop (SURF_FAKEBACKDROP, flags=8). Unlit at full painted
+# value and the map's outer collision edge. Replaces the unused bb_wall_13.dds.
+# Heights alternate so the skyline is broken.
+# ==============================================================================
+add box -30 42 11 30 22 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 0 42 13 30 26 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 30 42 9 30 18 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -30 -42 9 30 18 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 0 -42 12 30 24 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 30 -42 13 30 26 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 -30 11 1 22 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 0 12 1 24 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 30 10 1 20 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 -30 12 1 24 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 0 10 1 20 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 30 11 1 22 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+
+# ==============================================================================
 # Entities
-playerstart 0 -13 0 0
-playerstart 0 13 0 180
-pickup HealthVial 0 -15 -1.25 25
-pickup rifle_01 -10 10 6.5 20
-pickup pistol_01 10 10 6.5 30
-pickup Medkit 0 0 0.5 45
-pickup Medkit -15 -27 0.5 30
-npc Skaarj -12 -12 0
-npc Skaarj 12 -12 0
-npc Skaarj -8 -27 0
-light point 0 -27 4 255 210 140 1 20
-light point 10 10 7.5 100 150 255 1 12
-light point 0 0 5.5 255 240 200 1 25
-light point -10 10 7.5 100 150 255 1 12
-zone sky -100 -100 -30 100 100 80 1 name=zone_sky_0 gravity=20 jump=8 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
-levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/sky_evening.dds
+# ==============================================================================
+# Only playerstart #1 is ever used, so this line decides the first frame. Just
+# inside the south gate looking north up the courtyard: the centre plinth under
+# the oculus dead ahead, the east and west balconies flanking, towers at the
+# corners and the gatehouse lintel behind. The previous spawn faced a wall 2.25
+# away from inside the courtyard.
+playerstart 0 -11 0 180
+playerstart 0 -34 0 180
 
-# End of OZONE export
+# --- Pickups (all on a real surface, none inside a brush) ---
+pickup HealthVial 0 -13 1 25            # gate threshold
+pickup Medkit 0 0 1.5 45                # on the centre plinth
+pickup Medkit 0 -27 1 30                # south corridor
+pickup Coin -11 -20 -0.5 30             # on the sand outside the gate
+pickup HealthVial 11 -20 -0.5 30        # on the sand outside the gate
+pickup rifle_01 -13 8 4.5 20            # west balcony
+pickup pistol_01 13 8 4.5 30            # east balcony
+pickup ManaVial -8 7 1.8 30             # on the courtyard cover
+pickup EnergyCrystal 8 -6 1.8 30        # on the courtyard cover
+pickup Key 0 -33 1 30                   # deep in the corridor
+
+# ==============================================================================
+# NPC patrol graphs. Links are by NAME so the graph survives editor reordering.
+# ==============================================================================
+PathNode court_sw -9 -9 1 radius=3 next=court_se,court_nw
+PathNode court_se 8 -7 1 radius=3 next=court_ne,court_sw
+PathNode court_ne 9 7 1 radius=3 next=court_nw,court_se
+PathNode court_nw -8 7 1 radius=3 next=court_sw,court_ne
+PathNode centre 0 0 1 radius=2.5 next=court_sw
+PathNode gate 0 -13 1 radius=2.5 next=corridor
+PathNode corridor 0 -27 1 radius=2.5 next=gate,court_s
+PathNode court_s 0 -6 1 radius=2.5 next=corridor,court_sw
+PathNode balk_w -13 8 4.5 radius=2 next=balk_e
+PathNode balk_e 13 8 4.5 radius=2 next=balk_w
+PathNode sand_n -11 -20 -0.5 radius=4 next=sand_s
+PathNode sand_s 11 -20 -0.5 radius=4 next=sand_n
+
+npc Skaarj -8 -7 1
+npc Skaarj 8 6 1
+npc Brute 0 -13 1
+npc Walker -13 8 4.5
+npc Walker 13 8 4.5
+npc Skaarj 0 -30 1
+npc Brute -11 -20 -0.5
+
+# ==============================================================================
+# Lights. effect 2 = TORCH, 1 = WATERY, 3 = FIRE, 4 = LAMP.
+# ==============================================================================
+# Low evening sun raking from the west; weak opposing fill for the shadows.
+light directional -70 -40 70 255 225 180 0.85
+light directional 60 50 40 150 165 195 0.25
+
+# Courtyard: daylight through the oculus plus warm braziers on the towers
+light point 0 0 6 255 240 210 0.7 22
+light point -17 -17 11 255 180 90 0.6 16 2
+light point 17 -17 11 255 180 90 0.6 16 2
+light point -17 17 11 255 180 90 0.6 16 2
+light point 17 17 11 255 180 90 0.6 16 2
+# Gate lanterns
+light point -3 -15 4 255 190 120 0.5 10 2
+light point 3 -15 4 255 190 120 0.5 10 2
+# Balcony lamps
+light point -13 8 5.5 255 205 150 0.45 12
+light point 13 8 5.5 255 205 150 0.45 12
+# Corridor
+light point 0 -22 4 255 205 150 0.45 14
+light point 0 -33 4 255 205 150 0.45 14
+# Sand outside the gate
+light point -11 -22 -0.5 255 200 150 0.4 16
+light point 11 -22 -0.5 255 200 150 0.4 16
+
+# ==============================================================================
+# Zones
+# ==============================================================================
+# Named explicitly: auto-generated names ("zone_sky_0") collide between worlds
+# and made this map run another world's skyzone script. The gravity/jump kwargs
+# were also dropped - they pinned gravity=20/jump=8 while the engine is now
+# gravity 18 / jump 9, so they were silently overriding the new tuning.
+zone sky -100 -100 -30 100 100 90 1 name=citadel_sky
+# Courtyard reverb - a roofed stone box
+zone reverb -14 -14 0 14 14 7 name=citadel_court
+# Sand heat-haze outside the gate
+zone sound -20 -40 -1 20 -16 1 name=citadel_approach
+
+# Evening sky, matching skyzone_citadel.ozls (which previously disagreed with
+# levelinfo, so the authored dusk sky was overridden by a night one).
+levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/sky_evening.dds GameData/Global/sky/sky_death_land.dds

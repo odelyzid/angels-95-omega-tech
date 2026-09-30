@@ -27,8 +27,13 @@ void PlayerModel::EnsureLoaded() {
     }
 
     const std::string baseDir = "GameData/Global/Player/";
+    // The texture fallback must only apply when the mesh is also the legacy
+    // default. A def that names a mesh but no texture (a GLB with its own
+    // embedded materials) would otherwise have Character_Killer_01.png forced
+    // across every material by Mesh::Load.
+    const bool usingDefaultMesh = meshPath.empty();
     if (meshPath.empty()) meshPath = baseDir + "Character_Killer_01.glb";
-    if (texPath.empty()) texPath = baseDir + "Character_Killer_01.png";
+    if (texPath.empty() && usingDefaultMesh) texPath = baseDir + "Character_Killer_01.png";
 
     m_mesh = skeletal
         ? MeshCache::Instance().GetSkeletal(meshPath, texPath, baseDir, true)

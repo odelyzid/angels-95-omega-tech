@@ -182,15 +182,18 @@ void DrawRemotePlayers3D() {
             mt.scale = {1.0f, yScale, 1.0f};
             pm.DrawInstance(mt, {0}, clip, clipTime);
         } else {
-            const float height = (rp.stance == net::STANCE_CROUCH) ? 4.5f : 8.0f;
-            const float radius = 1.5f;
+            // Fallback capsule scaled to the local player box so remote avatars
+            // match the collision silhouette (body Height, width/2 radius).
+            const float height = g_playerMovement.Height * (rp.stance == net::STANCE_CROUCH ? 0.65f : 1.0f);
+            const float radius = g_playerMovement.Width * 0.5f;
             DrawCylinder(pos, radius, radius, height, 8, col);
-            DrawSphere({pos.x, pos.y + height + 1.0f, pos.z}, 1.2f, col);
+            DrawSphere({pos.x, pos.y + height, pos.z}, radius * 0.8f, col);
         }
 
         // Facing indicator — kept in both paths so players stay distinguishable.
-        DrawLine3D({pos.x, pos.y + 4.0f, pos.z},
-                   {pos.x + sinf(rp.yaw) * 3.0f, pos.y + 4.0f, pos.z + cosf(rp.yaw) * 3.0f},
+        DrawLine3D({pos.x, pos.y + g_playerMovement.Height * 0.6f, pos.z},
+                   {pos.x + sinf(rp.yaw) * 3.0f, pos.y + g_playerMovement.Height * 0.6f,
+                    pos.z + cosf(rp.yaw) * 3.0f},
                    col);
     }
 }
@@ -423,6 +426,7 @@ int main(int argc, char** argv){
     RelocateToInstallRoot();
 
     // CLI args
+    bool worldExplicit = false;
     for (int i = 1; i < argc; i++) {
         const char* arg = argv[i];
         const std::string argLower = JoinUri::Lower(arg);
@@ -430,9 +434,32 @@ int main(int argc, char** argv){
             strncpy(g_world_to_load, argv[++i], sizeof(g_world_to_load) - 1);
             g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
             g_skipMenu = true;
+            worldExplicit = true;
         } else if (strcmp(arg, "--world-dir") == 0 && i + 1 < argc) {
             strncpy(g_world_dir_override, argv[++i], sizeof(g_world_dir_override) - 1);
             g_world_dir_override[sizeof(g_world_dir_override) - 1] = '\0';
+        } else if (strcmp(arg, "--shot") == 0 && i + 1 < argc) {
+            g_shot.active = true;
+            g_shot.outPath = argv[++i];
+            g_skipMenu = true;   // a shot run never wants the title menu
+        } else if (strcmp(arg, "--shot-delay") == 0 && i + 1 < argc) {
+            g_shot.delayFrames = atoi(argv[++i]);
+        } else if (strcmp(arg, "--shot-res") == 0 && i + 1 < argc) {
+            int w = 0, h = 0;
+            if (sscanf(argv[++i], "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+                g_shot.resWidth = w;
+                g_shot.resHeight = h;
+            } else {
+                OZ_WARN("Bad --shot-res (expected WxH): %s", argv[i]);
+            }
+        } else if (strcmp(arg, "--shot-cam") == 0 && i + 1 < argc) {
+            ShotCam cam;
+            if (ParseShotCam(argv[++i], cam))
+                g_shot.cams.push_back(cam);
+            else
+                OZ_WARN("Bad --shot-cam (expected x,y,z,yaw[,pitch]): %s", argv[i]);
+        } else if (strcmp(arg, "--shot-hud") == 0) {
+            g_shot.hideHud = false;
         } else if ((strcmp(arg, "--join") == 0 || strcmp(arg, "--connect") == 0) && i + 1 < argc) {
             if (!ApplyJoinTarget(argv[++i]))
                 OZ_WARN("Invalid --join target: %s", argv[i]);
@@ -446,33 +473,70 @@ int main(int argc, char** argv){
         }
     }
 
+    // A --shot run without an explicit --world falls back to the compiled-in
+    // default. Make that loud rather than silently capturing the wrong map.
+    if (g_shot.active && !worldExplicit)
+        OZ_WARN("--shot given without --world; falling back to '%s'", g_world_to_load);
+    if (g_shot.active) {
+        if (g_shot.outPath.empty())
+            OZ_ERROR("Screenshot mode needs an output path (--shot <file.png>)");
+        EnsureShotOutputDir(g_shot.outPath);
+        OZ_INFO("Screenshot mode: world='%s' shots=%d delay=%d hideHud=%d out='%s'",
+                g_world_to_load, (int)g_shot.cams.size(), g_shot.delayFrames,
+                (int)g_shot.hideHud, g_shot.outPath.c_str());
+    }
+
     // Load persisted user settings BEFORE window creation so window size,
     // VSync and MSAA are applied by InitWindow.
     LoadClientSettings();
 
+    if (g_shot.active) {
+        // Deterministic, reproducible captures: nothing that varies run to run
+        // may be left on.
+        if (g_shot.resWidth > 0 && g_shot.resHeight > 0) {
+            ConfigWindowWidth = g_shot.resWidth;
+            ConfigWindowHeight = g_shot.resHeight;
+        }
+        VSYNCToggle = false;   // a capped frame rate makes --shot-delay a wall-clock guess
+        MXAAToggle  = false;   // the 3D pass renders into a non-MSAA render texture anyway
+        PixelShader = false;  // post effects are the user's taste, not the level's
+        JitterEnabled = false;
+        FogEnabled  = false;
+        HeadBob     = false;
+        Debug       = false;  // light gizmos
+        FPSEnabled  = false;
+        ShowSettings = false;
+        ShowInventory = false;
+        ShowSkillTree = false;
+    }
+
     // Browser deep links (angels95://join/...) need an OS protocol handler.
     // HKCU / user .desktop only, so no elevation is required.
-    if (ProtocolHandler::EnsureRegistered())
+    if (!g_shot.active && ProtocolHandler::EnsureRegistered())
         OZ_INFO("Protocol handler: angels95:// -> %s", ProtocolHandler::ExecutablePath().c_str());
-    else
+    else if (!g_shot.active)
         OZ_WARN("Protocol handler: angels95:// registration unavailable");
     if (VSYNCToggle) SetConfigFlags(FLAG_VSYNC_HINT);
     if (MXAAToggle)  SetConfigFlags(FLAG_MSAA_4X_HINT);
 
-    InitWindow(ConfigWindowWidth, ConfigWindowHeight, "Angels95");
+    InitWindow(ConfigWindowWidth, ConfigWindowHeight,
+               g_shot.active ? "Angels95 [shot]" : "Angels95");
     SetExitKey(0);
     SetTargetFPS(60);
 
-    InitAudioDevice();
+    // Audio is pointless for a capture run and the device init adds latency and
+    // a failure mode on headless CI boxes.
+    if (!g_shot.active) {
+        InitAudioDevice();
 
-    if (IsAudioDeviceReady()) {
-        // Wire the zone reverb DSP into the master output mix.
-        DspReverb::Reset();
-        AttachAudioMixedProcessor(DspReverb::AudioCallback);
-    } else {
-        CloseAudioDevice();
+        if (IsAudioDeviceReady()) {
+            // Wire the zone reverb DSP into the master output mix.
+            SoundManager::Instance().AttachReverbProcessor();
+        } else {
+            CloseAudioDevice();
+        }
+        ApplyMasterVolume();
     }
-    ApplyMasterVolume();
 
     OmegaTechInit();
     GameUi::Instance().Init();
@@ -480,8 +544,7 @@ int main(int argc, char** argv){
         OmegaTechTextSystem.Write(msg);
     });
     InventoryBehaviour::Instance().SetFeedbackSink([]() {
-        if (OmegaTechSoundData.UIClick.frameCount > 0)
-            PlaySound(OmegaTechSoundData.UIClick);
+        SoundManager::Instance().PlayUIClick();
     });
     WeaponBehaviour::Instance().SetClient(&g_client, &g_network_enabled);
     PickupPawns::Instance().SetClient(&g_client);
@@ -516,9 +579,7 @@ int main(int argc, char** argv){
 
     g_client.set_on_player_hurt([](int damage, float remaining_health) {
         LightningEntityManager::Instance().SetPlayerHealth(remaining_health);
-        if (OmegaTechSoundData.Death.frameCount > 0 &&
-            !IsSoundPlaying(OmegaTechSoundData.Death))
-            PlaySound(OmegaTechSoundData.Death);
+        SoundManager::Instance().PlayDeath();
     });
 
     // Weapon pickup granted by the server (item_id 15) — add to hotbar.
@@ -703,10 +764,11 @@ int main(int argc, char** argv){
             static std::string lastZoneName;
 
             // Get active zones from pre-computed player region (set in UpdateEntities)
-            auto& region = PawnSystem::Instance().GetPlayerRegion();
+            auto& region = ZoneManager::Instance().GetPlayerRegion();
             ZoneVolumeNode* activeZone = (region.primaryZoneId >= 0)
-                ? PawnSystem::Instance().GetZone(region.primaryZoneId) : nullptr;
+                ? ZoneManager::Instance().GetZone(region.primaryZoneId) : nullptr;
             g_playerMovement.inWater = false;
+            g_playerMovement.isClimbing = false;
 
             if (activeZone) {
                 // Per-zone authored physics overrides (falls back to defaults
@@ -730,13 +792,12 @@ int main(int argc, char** argv){
                         g_playerMovement.inWater = true;
                         break;
                     case ZoneType::ZONE_LADDER:
-                        // Ladder: disable gravity, allow vertical movement with W/S
-                        g_playerMovement.velocityY = 0.0f;
+                        // Flag only — the actual climb (and gravity suppression)
+                        // lives in PlayerController::UpdateVertical /
+                        // PlayerPhysics::UpdateLadderVertical, which runs once per
+                        // fixed sub-step after this loop.
+                        g_playerMovement.isClimbing = true;
                         g_playerMovement.onGround = false;
-                        if (IsKeyDown(KEY_W))
-                            OmegaTechData.MainCamera.position.y += activeZone->physics.ladderSpeed * dt;
-                        if (IsKeyDown(KEY_S))
-                            OmegaTechData.MainCamera.position.y -= activeZone->physics.ladderSpeed * dt;
                         break;
                     case ZoneType::ZONE_REVERB:
                         // Placeholder: reverb DSP will be applied via audio system
@@ -788,7 +849,22 @@ int main(int argc, char** argv){
         }
 
         FadeColor = (Color){R, G, B, 255};
-    
+
+        // Screenshot mode: drive the requested camera, then hold it perfectly
+        // still. isNoClip is what makes that work — it exempts RestorePosition
+        // and the ground clamp, and UpdateFlyVertical leaves Y untouched with no
+        // keys held, so gravity cannot drift the framing over the settle frames.
+        if (g_shot.active) {
+            g_playerMovement.isNoClip = true;
+            g_playerMovement.LookInit = true;
+            if (!g_shot.camApplied && g_shot.shotIndex < (int)g_shot.cams.size()) {
+                ApplyShotCamera(OmegaTechData.MainCamera, g_shot.cams[g_shot.shotIndex]);
+                g_shot.camApplied = true;
+                if (g_shot.startTime < 0.0)
+                    g_shot.startTime = GetTime();
+            }
+        }
+
         DrawWorld();
 
         BeginDrawing();  
@@ -822,15 +898,17 @@ int main(int argc, char** argv){
             if (shaderActive) EndShaderMode();
         }
         // LightningScript dynamic hotbar
-        LightningEntityManager::Instance().DrawHotbar();
+        if (!g_shot.active || !g_shot.hideHud)
+            LightningEntityManager::Instance().DrawHotbar();
         if (IsKeyPressed(KEY_R)) oz::ViewModel::Instance().TriggerReload();
         LightningEntityManager::Instance().HandleInput();
 
-        if (FPSEnabled){
+        if (FPSEnabled && !(g_shot.active && g_shot.hideHud)){
             DrawFPS(0,0);
         }
 
-        UpdateSettings();
+        if (!(g_shot.active && g_shot.hideHud))
+            UpdateSettings();
 
         OmegaTechTextSystem.Update();
 
@@ -902,8 +980,9 @@ int main(int argc, char** argv){
         }
 
         // HUD: player stats (always visible)
-        InventoryBehaviour::Instance().DrawHud(OmegaTechData.MainCamera, OmegaTechData.Ticker,
-                                               g_playerMovement.isCrouching, g_playerMovement.isSprinting);
+        if (!(g_shot.active && g_shot.hideHud))
+            InventoryBehaviour::Instance().DrawHud(OmegaTechData.MainCamera, OmegaTechData.Ticker,
+                                                   g_playerMovement.isCrouching, g_playerMovement.isSprinting);
 
         // Screen flash on pickup collect (fades out)
         {
@@ -946,7 +1025,8 @@ int main(int argc, char** argv){
         DrawConsole();
 
         // Crosshair
-        if (!ShowInventory && !ShowSkillTree && !g_consoleOpen) {
+        if (!ShowInventory && !ShowSkillTree && !g_consoleOpen &&
+            !(g_shot.active && g_shot.hideHud)) {
             int cx = GetScreenWidth() / 2;
             int cy = GetScreenHeight() / 2;
             const bool ads = WeaponBehaviour::Instance().AdsActive();
@@ -956,31 +1036,43 @@ int main(int argc, char** argv){
             DrawLine(cx - gap - len, cy, cx - gap, cy, col);
             DrawLine(cx + gap, cy, cx + gap + len, cy, col);
             DrawLine(cx, cy - gap - len, cx, cy - gap, col);
-            DrawLine(cx, cy + gap, cx, cy + gap + len, col);
+            DrawLine(cx + gap, cy + gap, cx + gap + len, cy + gap, col);
         }
 
         EndDrawing();
 
+        // Screenshot capture. Runs after EndDrawing so LoadImageFromScreen sees
+        // the finished frame, and it consumes the loop when every camera is done.
+        if (g_shot.active && TickScreenshot()) {
+            OZ_INFO("Screenshot run complete: %d capture(s)", (int)g_shot.cams.size());
+            CloseWindow();   // unwind the outer menu/game loop cleanly
+            break;
+        }
+
         if (IsKeyPressed(KEY_F11))ToggleFullscreen();
+
 
     } // end inner game loop
 
     // Cleanup before returning to menu
     g_client.disconnect();
-    if (OmegaTechSoundData.MusicFound) {
-        StopMusicStream(OmegaTechSoundData.BackgroundMusic);
-        UnloadMusicStream(OmegaTechSoundData.BackgroundMusic);
-        OmegaTechSoundData.MusicFound = false;
-    }
+    SoundManager::Instance().ResetWorldAudio();
 
     } // end outer menu/game loop
     
-    UnloadRenderTexture(Target);
-    EngineBillboard::Shutdown();
-    for (int i = 0; i < 6; i++) {
-        if (OmegaTechData.SkyboxFace[i].meshCount > 0) {
-            UnloadModel(OmegaTechData.SkyboxFace[i]);
-            OmegaTechData.SkyboxFace[i] = Model{0};
+    // The screenshot tick already called CloseWindow() so the outer loop would
+    // unwind, which means the GL context is gone by this point. Unloading render
+    // textures, billboards and models now would call into a dead context and
+    // fault on exit (observed as 0xC0000005 after an otherwise successful
+    // capture), so skip the GPU teardown for shot runs.
+    if (!g_shot.active) {
+        UnloadRenderTexture(Target);
+        EngineBillboard::Shutdown();
+        for (int i = 0; i < 6; i++) {
+            if (OmegaTechData.SkyboxFace[i].meshCount > 0) {
+                UnloadModel(OmegaTechData.SkyboxFace[i]);
+                OmegaTechData.SkyboxFace[i] = Model{0};
+            }
         }
     }
     CloseWindow();

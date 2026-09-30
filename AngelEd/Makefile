@@ -1,18 +1,52 @@
 # Detect OS
 UNAME_S := $(shell uname -s)
+
+# --- Build mode: release (default) or debug ---
+#   release: -O3 -g       shipping build (editor keeps symbols)
+#   debug:   -O0 -g       fast compiles for iteration
+# Usage:  make -C AngelEd MODE=debug AngelEd
+MODE ?= release
+ifeq ($(MODE),debug)
+  OPTFLAGS := -O0 -g
+else ifeq ($(MODE),release)
+  OPTFLAGS := -O3 -g
+else
+  $(error MODE must be 'release' or 'debug' (got '$(MODE)'))
+endif
+
+# Optional compiler cache (ccache) and faster linker (LLD), auto-detected via
+# `command -v`. Only probed when a POSIX shell is present (UNAME_S non-empty).
+# Disable with CCACHE= / LDEXTRA=, or force explicitly.
+ifneq ($(UNAME_S),)
+  CCACHE ?= $(shell command -v ccache 2>/dev/null)
+  LLD_BIN := $(shell command -v ld.lld 2>/dev/null || command -v lld 2>/dev/null)
+endif
+
+ifneq ($(CCACHE),)
+  CCACHE_PREFIX := $(CCACHE)
+else
+  CCACHE_PREFIX :=
+endif
+
+ifneq ($(LLD_BIN),)
+  LDEXTRA ?= -fuse-ld=lld
+else
+  LDEXTRA ?=
+endif
+
 ifeq ($(UNAME_S),Linux)
   $(error AngelEd requires Win32 API (native panels). Build on Windows with w64devkit or MSYS2.)
-  CFLAGS   = -O3 -g --std=c++20 -fPIC -Wno-narrowing
+  CFLAGS   = $(OPTFLAGS) --std=c++20 -fPIC -Wno-narrowing
   LDFLAGS  = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
   WIN32_OBJS :=
 else
   # Windows (MSYS2/MINGW64)
-  CFLAGS   = -O3 -g --std=c++20 -Wno-narrowing -DWIN32_LEAN_AND_MEAN -I../Source
+  CFLAGS   = $(OPTFLAGS) --std=c++20 -Wno-narrowing -DWIN32_LEAN_AND_MEAN -I../Source
   LDFLAGS  = -lraylib -lopengl32 -lgdi32 -lcomctl32 -lwinmm -lcomdlg32 -lm
   WIN32_OBJS := Win32Dialogs.o
 endif
 
-COMP := g++
+COMP := $(CCACHE_PREFIX) g++
 BUILD_DIR := ../build-ed
 
 .PHONY: all clean
@@ -39,7 +73,7 @@ $(BUILD_DIR)/Custom.so:
 	else \
 		echo "int main_custom() { return 0; }" | $(COMP) $(CFLAGS) -x c++ -c - -o $(BUILD_DIR)/OTCustom.o; \
 	fi
-	$(COMP) $(CFLAGS) -shared $(BUILD_DIR)/OTCustom.o -o $@
+	$(COMP) $(CFLAGS) $(LDEXTRA) -shared $(BUILD_DIR)/OTCustom.o -o $@
 	rm -f $(BUILD_DIR)/OTCustom.o
 
 # 4a. Compile LightningScript system
@@ -84,6 +118,12 @@ $(BUILD_DIR)/OzBsp.o: ../Source/Physics/OzBsp.cpp ../Source/Physics/OzBsp.hpp | 
 $(BUILD_DIR)/OzoneParser.o: ../Source/World/OzoneParser.cpp ../Source/World/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/World/OzoneParser.cpp -o $@
 
+$(BUILD_DIR)/ZoneManager.o: ../Source/World/ZoneManager.cpp ../Source/World/ZoneManager.hpp ../Source/World/ZoneTypes.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/ZoneManager.cpp -o $@
+
+$(BUILD_DIR)/SoundManager.o: ../Source/Audio/SoundManager.cpp ../Source/Audio/SoundManager.hpp ../Source/Audio/DspReverb.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Audio/SoundManager.cpp -o $@
+
 $(BUILD_DIR)/Log.o: ../Source/Log.cpp ../Source/Log.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Log.cpp -o $@
 
@@ -92,7 +132,7 @@ $(BUILD_DIR)/OzAssetMapper.o: ../Source/Renderer/OzAssetMapper.cpp ../Source/Ren
 
 # miniz (C compile; g++ would mangle symbols vs the extern "C" prototypes)
 $(BUILD_DIR)/miniz.o: ../Source/miniz/miniz.c ../Source/miniz/miniz.h | $(BUILD_DIR)
-	gcc -O3 -std=c99 -I../Source/miniz -c ../Source/miniz/miniz.c -o $@
+	$(CCACHE_PREFIX) gcc $(OPTFLAGS) -std=c99 -I../Source/miniz -c ../Source/miniz/miniz.c -o $@
 
 $(BUILD_DIR)/WorldChunk.o: ../Source/Physics/WorldChunk.cpp ../Source/Physics/WorldChunk.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/WorldChunk.cpp -o $@
@@ -122,7 +162,8 @@ $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Rendere
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/rlights/rlights.cpp -o $@
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
-             $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
+             $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/ZoneManager.o $(BUILD_DIR)/SoundManager.o \
+             $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \
              $(BUILD_DIR)/MeshCache.o $(BUILD_DIR)/AnimatedMesh.o $(BUILD_DIR)/OzAnimFormat.o \
              $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o
@@ -133,7 +174,7 @@ $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUI
 
 EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
-	$(COMP) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
+	$(COMP) $(LDEXTRA) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 
 clean:
 	rm -f AngelEd

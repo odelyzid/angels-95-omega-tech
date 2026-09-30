@@ -212,7 +212,7 @@ static RayCollision RaycastTestPickups(Ray ray, EditorSelection& out) {
 
 static RayCollision RaycastTestZones(Ray ray, EditorSelection& out) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
-    auto& zones = PawnSystem::Instance().GetZones();
+    auto& zones = ZoneManager::Instance().GetZones();
     Vector3 camPos = OTEditor.MainCamera.position;
     for (auto& z : zones) {
         // Skip zones containing the camera — can't select the boundary you're inside
@@ -265,7 +265,7 @@ static RayCollision RaycastTestStarts(Ray ray, EditorSelection& out) {
 
 static RayCollision RaycastTestPortals(Ray ray, EditorSelection& out) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
-    auto& portals = PawnSystem::Instance().GetPortals();
+    auto& portals = ZoneManager::Instance().GetPortals();
     for (size_t p = 0; p < portals.size(); p++) {
         auto& portal = portals[p];
         RayCollision hit = GetRayCollisionBox(ray, portal.bounds);
@@ -421,7 +421,7 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
             OmegaTechEditor.L = vols[sel.index].aabb.max.z - vols[sel.index].aabb.min.z;
         }
     } else if (sel.type == SelType::ZONE) {
-        auto& zones = PawnSystem::Instance().GetZones();
+        auto& zones = ZoneManager::Instance().GetZones();
         for (auto& z : zones) {
             if ((int)z.id == sel.index) {
                 OmegaTechEditor.W = z.bounds.max.x - z.bounds.min.x;
@@ -431,7 +431,7 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
             }
         }
     } else if (sel.type == SelType::PORTAL) {
-        auto& portals = PawnSystem::Instance().GetPortals();
+        auto& portals = ZoneManager::Instance().GetPortals();
         if (sel.index >= 0 && sel.index < (int)portals.size()) {
             auto& p = portals[sel.index];
             OmegaTechEditor.W = p.bounds.max.x - p.bounds.min.x;
@@ -507,11 +507,11 @@ static void DeleteSelectedEntity() {
     } else if (g_sel.type == SelType::LIGHT) {
         PawnSystem::Instance().RemoveLight(g_sel.index);
     } else if (g_sel.type == SelType::ZONE) {
-        PawnSystem::Instance().RemoveZone(g_sel.index);
+        ZoneManager::Instance().RemoveZone(g_sel.index);
     } else if (g_sel.type == SelType::SPAWN) {
         PawnSystem::Instance().RemovePlayerStart(g_sel.index);
     } else if (g_sel.type == SelType::PORTAL) {
-        PawnSystem::Instance().RemovePortal(g_sel.index);
+        ZoneManager::Instance().RemovePortal(g_sel.index);
         RefreshPortalList();
         RefreshLevelList();
     } else if (g_sel.type == SelType::MESH) {
@@ -547,13 +547,13 @@ static void DuplicateSelectedEntity() {
             }
         }
     } else if (g_sel.type == SelType::ZONE) {
-        auto& zones = PawnSystem::Instance().GetZones();
+        auto& zones = ZoneManager::Instance().GetZones();
         for (auto& z : zones) {
             if ((int)z.id == g_sel.index) {
                 ZoneVolumeNode clone = z;
                 clone.bounds.min.x += offset.x; clone.bounds.min.z += offset.z;
                 clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
-                PawnSystem::Instance().AddZone(clone);
+                ZoneManager::Instance().AddZone(clone);
                 break;
             }
         }
@@ -584,12 +584,12 @@ static void DuplicateSelectedEntity() {
             }
         }
     } else if (g_sel.type == SelType::PORTAL) {
-        auto& portals = PawnSystem::Instance().GetPortals();
+        auto& portals = ZoneManager::Instance().GetPortals();
         if (g_sel.index >= 0 && g_sel.index < (int)portals.size()) {
             ZonePortal clone = portals[g_sel.index];
             clone.bounds.min.x += offset.x; clone.bounds.min.z += offset.z;
             clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
-            PawnSystem::Instance().AddPortal(clone);
+            ZoneManager::Instance().AddPortal(clone);
             RefreshLevelList();
         }
     } else if (g_sel.type == SelType::MESH) {
@@ -751,12 +751,13 @@ static void ClearScene() {
     StopSoundPreview();
     OzoneLoader::Instance().Unload();
     auto& pawns = PawnSystem::Instance();
+    auto& zones = ZoneManager::Instance();
     pawns.DespawnAll();
     pawns.ClearPlayerStarts();
     pawns.ClearPickups();
-    pawns.ClearZones();
+    zones.ClearZones();
     pawns.ClearLights();     // lights otherwise accumulate across loads
-    pawns.ClearPortals();
+    zones.ClearPortals();
     pawns.ClearEmitters();
     pawns.ClearParticleEmitters();
     pawns.ClearPathNodes();
@@ -808,6 +809,10 @@ static bool LoadWorldDocument(const fs::path& path) {
     if (extension == ".ozone") {
         EditorLog("OZONE format: %s", path.string().c_str());
         bool ok = OzoneLoader::Instance().LoadFile(path.string().c_str());
+        // The loader only parses; applying the parsed entities to the editor's
+        // scene is an explicit step.
+        InjectOzoneEntities(OzoneLoader::Instance().GetEntities(),
+                            PawnSystem::Instance());
         // The OZONE loader does not populate the editor's level metadata, so a
         // saved levelinfo skybox/particles would be invisible in the viewport.
         // Parse them here into GetLevelMetadata()/SetLevelMetadata().
@@ -873,12 +878,12 @@ static void AppendOzoneEntities(std::wofstream& output) {
         output << L"NPC:" << std::wstring(pawn.defName.begin(), pawn.defName.end()) << L":"
                << pawn.position.x << L":" << pawn.position.y << L":" << pawn.position.z << L":\n";
     }
-    for (const auto& zone : pawns.GetZones())
+    for (const auto& zone : ZoneManager::Instance().GetZones())
         output << L"ZoneInfo:" << WDLZoneTypeName(zone.zoneType) << L":"
                << zone.bounds.min.x << L":" << zone.bounds.min.y << L":" << zone.bounds.min.z << L":"
                << zone.bounds.max.x << L":" << zone.bounds.max.y << L":" << zone.bounds.max.z << L":"
                << zone.intensity << L":\n";
-    for (const auto& portal : pawns.GetPortals())
+    for (const auto& portal : ZoneManager::Instance().GetPortals())
         output << L"Portal:" << std::wstring(portal.targetWorld.begin(), portal.targetWorld.end()) << L":"
                << portal.bounds.min.x << L":" << portal.bounds.min.y << L":" << portal.bounds.min.z << L":"
                << portal.bounds.max.x << L":" << portal.bounds.max.y << L":" << portal.bounds.max.z << L":"
@@ -1100,7 +1105,7 @@ static void ExportToOzone(std::ostream& output) {
     }
 
     // Zone volumes
-    for (auto& zone : pawns.GetZones()) {
+    for (auto& zone : ZoneManager::Instance().GetZones()) {
         const char* zt = WDLZoneTypeName(zone.zoneType);
         Vector3 mn = zup(zone.bounds.min);
         Vector3 mx = zup(zone.bounds.max);
@@ -1134,7 +1139,7 @@ static void ExportToOzone(std::ostream& output) {
     }
 
     // Portals (level connections)
-    for (auto& portal : pawns.GetPortals()) {
+    for (auto& portal : ZoneManager::Instance().GetPortals()) {
         Vector3 mn = zup(portal.bounds.min);
         Vector3 mx = zup(portal.bounds.max);
         Vector3 sp = zup(portal.targetSpawn);
@@ -1598,6 +1603,8 @@ static void HistoryRestore(const std::string& text) {
     ClearScene();
     OzoneLoader::Instance().LoadString(
         text.c_str(), OTEditor.Path[0] ? OTEditor.Path : nullptr);
+    InjectOzoneEntities(OzoneLoader::Instance().GetEntities(),
+                        PawnSystem::Instance());
     OzoneLoader::Instance().RebuildCollisionVolumes();
     g_sel = { SelType::NONE, -1, "", {0,0,0} };
     g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
@@ -1758,7 +1765,11 @@ int main(int argc, char **argv){
         LoadWorldDocument(g_documentPath);
     } else {
         fs::path ozonePath = g_documentPath.parent_path() / "World.ozone";
-        if (fs::exists(ozonePath)) OzoneLoader::Instance().LoadFile(ozonePath.string().c_str());
+        if (fs::exists(ozonePath)) {
+            OzoneLoader::Instance().LoadFile(ozonePath.string().c_str());
+            InjectOzoneEntities(OzoneLoader::Instance().GetEntities(),
+                                PawnSystem::Instance());
+        }
     }
 
     // Suppress raylib's texture-not-found warnings from .obj material refs
@@ -2314,7 +2325,7 @@ int main(int argc, char **argv){
 
         // Zone volume wireframes
         {
-            auto& zones = PawnSystem::Instance().GetZones();
+            auto& zones = ZoneManager::Instance().GetZones();
             for (auto& z : zones) {
                 Color wireColor;
                 switch (z.zoneType) {
@@ -2633,7 +2644,7 @@ int main(int argc, char **argv){
                         if ((int)s.id == idx) { s.position = newPos; break; }
                     }
                 } else if (g_sel.type == SelType::PORTAL) {
-                    auto& portals = PawnSystem::Instance().GetPortals();
+                    auto& portals = ZoneManager::Instance().GetPortals();
                     if (idx >= 0 && idx < (int)portals.size()) {
                         auto& p = portals[idx];
                         Vector3 center = {(p.bounds.min.x + p.bounds.max.x) * 0.5f,
@@ -2705,7 +2716,7 @@ int main(int argc, char **argv){
                         node.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
                         node.zoneType = ZoneType::ZONE_WATER;
                         node.intensity = 1.0f;
-                        PawnSystem::Instance().AddZone(node);
+                        ZoneManager::Instance().AddZone(node);
                     } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::PORTAL) {
                         float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
                         float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
@@ -2720,7 +2731,7 @@ int main(int argc, char **argv){
                         portal.targetWorld = target;
                         portal.targetSpawn = {0, 20, 0};
                         portal.bidirectional = true;
-                        PawnSystem::Instance().AddPortal(portal);
+                        ZoneManager::Instance().AddPortal(portal);
                         RefreshLevelList();
                     } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::SPAWN) {
                         PlayerStartNode node;
@@ -2834,7 +2845,7 @@ int main(int argc, char **argv){
                 if (sel.index >= 0 && sel.index < (int)vols.size())
                     return vols[sel.index].aabb;
             } else if (sel.type == SelType::ZONE) {
-                auto& zones = PawnSystem::Instance().GetZones();
+                auto& zones = ZoneManager::Instance().GetZones();
                 for (auto& z : zones) {
                     if ((int)z.id == sel.index)
                         return z.bounds;
@@ -2852,7 +2863,7 @@ int main(int argc, char **argv){
                                 {s.position.x+0.6f,s.position.y+1.2f,s.position.z+0.6f}};
                 }
             } else if (sel.type == SelType::PORTAL) {
-                auto& portals = PawnSystem::Instance().GetPortals();
+                auto& portals = ZoneManager::Instance().GetPortals();
                 if (sel.index >= 0 && sel.index < (int)portals.size())
                     return portals[sel.index].bounds;
             } else if (sel.type == SelType::MESH) {
@@ -3200,7 +3211,7 @@ int main(int argc, char **argv){
                 LightNode* l = PawnSystem::Instance().GetLight(tgtIdx);
                 if (l) l->position = {px, py, pz};
             } else if (tgtType == SelType::ZONE) {
-                auto& zones = PawnSystem::Instance().GetZones();
+                auto& zones = ZoneManager::Instance().GetZones();
                 for (auto& zone : zones) {
                     if ((int)zone.id == tgtIdx) {
                         float szx = g_editorPanels.propSizeX;
@@ -3245,7 +3256,7 @@ int main(int argc, char **argv){
                     }
                 }
             } else if (tgtType == SelType::PORTAL) {
-                auto& portals = PawnSystem::Instance().GetPortals();
+                auto& portals = ZoneManager::Instance().GetPortals();
                 if (tgtIdx >= 0 && tgtIdx < (int)portals.size()) {
                     auto& p = portals[tgtIdx];
                     float szx = g_editorPanels.propSizeX;
@@ -3908,7 +3919,7 @@ int main(int argc, char **argv){
             node.bounds.min = {c.x - 4.0f, c.y - 2.0f, c.z - 4.0f};
             node.bounds.max = {c.x + 4.0f, c.y + 2.0f, c.z + 4.0f};
             node.zoneType = (ZoneType)g_editorPanels.actionSpawnZone;
-            PawnSystem::Instance().AddZone(node);
+            ZoneManager::Instance().AddZone(node);
             EditorLog("Placed ZoneVolumeNode (type=%d) at camera target",
                       g_editorPanels.actionSpawnZone);
             g_editorPanels.actionSpawnZone = -1;
@@ -4056,7 +4067,7 @@ int main(int argc, char **argv){
         // Portal editing actions (Portal tab in Zone Properties)
         if (g_editorPanels.actionApplyPortal >= 0) {
             int idx = g_editorPanels.actionApplyPortal;
-            auto& portals = PawnSystem::Instance().GetPortals();
+            auto& portals = ZoneManager::Instance().GetPortals();
             if (idx >= 0 && idx < (int)portals.size()) {
                 HistoryPush();
                 PortalEditValues pe = GetPortalEditValues();
@@ -4075,7 +4086,7 @@ int main(int argc, char **argv){
         if (g_editorPanels.actionDeletePortal >= 0) {
             int idx = g_editorPanels.actionDeletePortal;
             HistoryPush();
-            PawnSystem::Instance().RemovePortal(idx);
+            ZoneManager::Instance().RemovePortal(idx);
             EditorLog("Portal %d deleted", idx);
             RefreshPortalList();
             RefreshLevelList();
@@ -4083,7 +4094,7 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionSelectPortal >= 0) {
             int idx = g_editorPanels.actionSelectPortal;
-            auto& portals = PawnSystem::Instance().GetPortals();
+            auto& portals = ZoneManager::Instance().GetPortals();
             if (idx >= 0 && idx < (int)portals.size()) {
                 auto& p = portals[idx];
                 g_sel = { SelType::PORTAL, idx, p.targetWorld, {
@@ -4122,7 +4133,7 @@ int main(int argc, char **argv){
             portal.targetWorld = target;
             portal.targetSpawn = {0, 20, 0};
             portal.bidirectional = true;
-            PawnSystem::Instance().AddPortal(portal);
+            ZoneManager::Instance().AddPortal(portal);
             g_editorPanels.portalTargetWorld = target;
             RefreshPortalList();
             RefreshLevelList();

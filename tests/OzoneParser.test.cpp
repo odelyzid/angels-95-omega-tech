@@ -1,5 +1,6 @@
 // OzoneParser test — standalone, no raylib dependency
 #include "../Source/World/OzoneParser.hpp"
+#include "../Source/Physics/PhysicsInfo.hpp"
 #include <cstdio>
 #include <string>
 
@@ -228,11 +229,14 @@ static void test_zone_default_physics() {
     auto e = OzoneParser::parse_string(
         "zone water -3 30 -8 3 36 -2 1 name=acidpool\n");
     auto& p = e[0];
+    // Assert against the engine defaults themselves, not hardcoded literals,
+    // so re-tuning PhysicsInfo does not require editing this test.
+    const oz::physics::PhysicsInfo d;
     bool ok = e.size() == 1 && p.type == OzonePrimitiveType::ENTITY_ZONE
         && !p.hasPhysics
-        && p.physics.gravity == 20.0f
-        && p.physics.jumpSpeed == 8.0f
-        && p.physics.ladderSpeed == 6.0f;
+        && p.physics.gravity == d.gravity
+        && p.physics.jumpSpeed == d.jumpSpeed
+        && p.physics.ladderSpeed == d.ladderSpeed;
     if (ok) { pass_count++; printf("PASS\n"); }
     else printf("FAIL: hasPhysics=%d g=%f\n",
                 e.size() ? (int)p.hasPhysics : -1,

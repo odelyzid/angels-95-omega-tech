@@ -32,19 +32,13 @@ static int ScanIconDir(const fs::path& dir, const std::string& stripPrefix,
 void EditorIcons::Load() {
     int count = 0;
 
-    // 1) AngelEd/UI (repo) — primary source with clean names.
+    // 1) AngelEd/UI (repo) — primary (and only) source of editor icons.
+    //    Scanned from the filesystem only; these are not reachable through
+    //    PackageAssetLoader, so there is no package-side fallback to probe.
     fs::path iconDir = fs::current_path() / "AngelEd" / "UI";
     if (!fs::exists(iconDir))
         iconDir = fs::path("..") / "AngelEd" / "UI";
     count += ScanIconDir(iconDir, "", m_icons);
-
-    // 2) GameData/Global/Engine/UI — packed engine UI icons
-    //    ("effect-effect-ModeAdd.bmp" -> "ModeAdd").
-    const char* gd = "GameData/Global/Engine/UI";
-    if (fs::exists(gd))
-        count += ScanIconDir(gd, "effect-effect-", m_icons);
-    else if (fs::exists(fs::path("..") / gd))
-        count += ScanIconDir(fs::path("..") / gd, "effect-effect-", m_icons);
 
     if (count == 0)
         fprintf(stderr, "EditorIcons: no icons loaded\n");

@@ -3,7 +3,7 @@
 #include "Physics/PlayerPhysics.hpp"
 #include "Client/JoinUri.hpp"
 #include "Renderer/OzAssetMapper.hpp"
-#include "Audio/DspReverb.hpp"
+#include "Audio/SoundManager.hpp"
 #include "World/OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Package/PackageAssetLoader.hpp"
@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include "Screenshot.hpp"
+
 bool FloorCollision = true;
 bool ObjectCollision = false;
 bool g_showCollisionDebug = false;
@@ -37,7 +39,7 @@ Vector3 g_portalSpawnPos = {0, 20, 0};
 float g_portalCooldown = 0.0f;
 
 // Bidirectional portals: remember where we came from so a reverse portal can
-// be spawned at the arrival point. g_returnPortalId indexes PawnSystem's
+// be spawned at the arrival point. g_returnPortalId indexes ZoneManager's
 // portals (-1 = none); it starts disabled and arms once the player steps away.
 std::string g_portalReturnWorld;
 Vector3 g_portalReturnPos = {0, 0, 0};
@@ -48,13 +50,18 @@ int ScriptTimer = 0;
 
 // Cross-world state that must be reset on each LoadWorld()
 float g_damageCooldown = 0.0f;
-std::string g_prevSoundZone;
-Music g_defaultWorldMusic = {0};
-Sound g_ambienceHandle = {0};
-std::string g_ambienceZoneName;
-bool g_wasInReverb = false;
 std::string g_activeEnvZone;
 Texture2D g_skySideTex = {0};   // optional horizon/side skybox variant
+
+// Distance from the camera to each skybox cube face. The faces are 2000 units
+// square, so this sets the sky's angular coverage: atan(1000 / kSkyboxDist)
+// either side of centre. The horizontal half-FOV of a 16:9 window at fovy 60 is
+// about 47.5 degrees, so anything under ~840 leaves black corners (the original
+// 1000 covered only 45 and did exactly that). 700 gives ~55 degrees, which
+// covers the frustum without the side planes looming as huge flat slabs.
+// Depth writes are disabled for the sky, so distance does not affect occlusion,
+// and 700 stays well inside the 4000 far plane.
+constexpr float kSkyboxDist = 700.0f;
 
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
@@ -79,17 +86,25 @@ class OzoneCollisionQuery : public PlayerPhysics::CollisionQuery {
 public:
     GroundSample SampleGround(float x, float z, float feetY) override {
         auto& ozLoader = OzoneLoader::Instance();
-        // Heightmap first: only when its surface is at or below the player's
-        // feet — underground areas (tunnels) must fall through to brush-top
-        // support instead of being teleported to the surface.
-        float hmY = ozLoader.HasHeightmap()
-                        ? ozLoader.SampleHeightmapY(x, z)
-                        : -99999.0f;
-        if (hmY > kNoGroundY && hmY <= feetY + kGroundEpsilon)
-            return GroundSample{hmY, true};
+        // Support tolerance: a surface up to kStepHeight above the feet counts,
+        // so walking into a step or stair climbs it. Everything higher is
+        // ignored, which also keeps underground areas working — a tunnel at
+        // feet=-6 must fall through to its own floor rather than being snapped
+        // up to the heightmap surface far above.
+        const float supportCeiling = feetY + kStepHeight;
 
-        // Fallback: stand on top of OZONE brush primitives (chunk-accelerated)
-        float brushTop = -99999.0f;
+        // Heightmap candidate (heightmap first, then brush tops, then the higher
+        // valid one wins). BOTH are always evaluated: returning early on a valid
+        // heightmap would hide every platform, stair and balcony authored above
+        // a heightmap-covered map.
+        float best = kNoGroundY;
+        if (ozLoader.HasHeightmap()) {
+            float hmY = ozLoader.SampleHeightmapY(x, z);
+            if (hmY > kNoGroundY && hmY <= supportCeiling)
+                best = hmY;
+        }
+
+        // Brush-top candidate (chunk-accelerated).
         auto& chunkMgr = ozLoader.GetChunkManager();
         std::vector<int> nearIndices;
         chunkMgr.GetVolumesNear(x, z, nearIndices);
@@ -102,12 +117,12 @@ public:
                 z >= vol.aabb.min.z && z <= vol.aabb.max.z)
             {
                 float top = vol.aabb.max.y;
-                if (top > brushTop && top <= feetY + kGroundEpsilon)
-                    brushTop = top;
+                if (top > best && top <= supportCeiling)
+                    best = top;
             }
         }
-        if (brushTop > kNoGroundY)
-            return GroundSample{brushTop, true};
+        if (best > kNoGroundY)
+            return GroundSample{best, true};
         return GroundSample{0.0f, false};
     }
 
@@ -121,8 +136,11 @@ public:
             if (idx >= 0 && idx < (int)vols.size() &&
                 CheckCollisionBoxes(player, vols[idx].aabb))
             {
-                // Floors/surfaces the player stands on are not obstacles.
-                if (vols[idx].aabb.max.y <= feetY + kGroundEpsilon)
+                // Floors, steps and stairs are not obstacles: anything whose top
+                // face is within the step-up tolerance of the feet is walked
+                // over by ClampToGround. This is a hard threshold, so anything
+                // taller still blocks and walls stay solid.
+                if (vols[idx].aabb.max.y <= feetY + kStepHeight)
                     continue;
                 // The heightmap is the ground: support comes from the ground
                 // clamp, not the obstacle test.
@@ -134,9 +152,9 @@ public:
         return false;
     }
 };
-
 } // namespace physics
 } // namespace oz
+
 
 class EngineData
 {
@@ -203,17 +221,10 @@ auto LoadWorld()
 
     // Reset cross-world state that would otherwise persist across LoadWorld calls
     g_damageCooldown = 0.0f;
-    g_prevSoundZone.clear();
-    g_defaultWorldMusic = Music{0};
-    if (g_ambienceHandle.frameCount > 0)
-    {
-        StopSound(g_ambienceHandle);
-        UnloadSound(g_ambienceHandle);
-    }
-    g_ambienceHandle = {0};
-    g_ambienceZoneName.clear();
-    g_wasInReverb = false;
     g_activeEnvZone.clear();
+    // Audio (world music, zone ambience, reverb hook, script sound cache) owns
+    // its own per-world reset.
+    SoundManager::Instance().ResetWorldAudio();
     ScriptTimer = 0;
 
     {
@@ -238,6 +249,12 @@ auto LoadWorld()
             assetPrefix = std::string("GameData/Worlds/") + worldLoad + "/";
         }
 
+        // World-scoped .ozls defs (every world ships a "zone_sky_0", so the
+        // global registry collides by name). Make the by-name map point at THIS
+        // world before anything resolves a zone name, otherwise on_enter never
+        // fires and the level renders with the default black ambient.
+        LightningEntityRegistry::Instance().LoadWorldOverrides(assetPrefix);
+
         // World skybox: filesystem first, then packages (resolves "Skybox.png"
         // inside the world's .ozone container in packaged builds)
         {
@@ -253,8 +270,8 @@ auto LoadWorld()
         PawnSystem::Instance().ClearLights();
         PawnSystem::Instance().ClearPlayerStarts();
         PawnSystem::Instance().ClearPickups();
-        PawnSystem::Instance().ClearZones();
-        PawnSystem::Instance().ClearPortals();
+        ZoneManager::Instance().ClearZones();
+        ZoneManager::Instance().ClearPortals();
         PawnSystem::Instance().ClearEmitters();
         PawnSystem::Instance().ClearParticleEmitters();
         PawnSystem::Instance().ClearPathNodes();
@@ -280,6 +297,11 @@ auto LoadWorld()
             else
                 OZ_ERROR("LoadWorld: missing world '%s' (no World.ozone; WDL fallback removed)", ozonePath);
 
+            // The loader only parses: it hands back the world's entities and
+            // level metadata, and this orchestrator decides what to apply.
+            InjectOzoneEntities(OzoneLoader::Instance().GetEntities(),
+                                PawnSystem::Instance());
+
             // Re-assert the lit-fog shader on the freshly loaded world geometry.
             // The loader assigns it per-material when building brushes, but if
             // the shader was (re)loaded or the materials ended up with the
@@ -291,7 +313,7 @@ auto LoadWorld()
 
         // Apply level metadata (LevelInfo/Particles) after entities are loaded
         {
-            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
+            const LevelSettings& s = OzoneLoader::Instance().GetLevelSettings();
             if (!s.skyboxPath.empty())
             {
                 Texture2D newSky = LoadTextureWithFallback(s.skyboxPath.c_str());
@@ -326,26 +348,8 @@ auto LoadWorld()
             }
         }
 
-        if (OmegaTechSoundData.MusicFound)
-        {
-            StopMusicStream(OmegaTechSoundData.BackgroundMusic);
-            UnloadMusicStream(OmegaTechSoundData.BackgroundMusic);
-        }
-
-        OmegaTechSoundData.MusicFound = false;
-
-        if (IsPathFile(TextFormat("%sMusic/Main.mp3", assetPrefix.c_str())))
-        {
-                OmegaTechSoundData.BackgroundMusic = LoadMusicStream(TextFormat("%sMusic/Main.mp3", assetPrefix.c_str()));
-            OmegaTechSoundData.MusicFound = true;
-            PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
-        }
-        else if (IsPathFile("GameData/Global/Sounds/Ambience/Music_Atmo_1.wav"))
-        {
-            OmegaTechSoundData.BackgroundMusic = LoadMusicStream("GameData/Global/Sounds/Ambience/Music_Atmo_1.wav");
-            OmegaTechSoundData.MusicFound = true;
-            PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
-        }
+        // World music: <prefix>Music/Main.mp3, else the shared global ambience.
+        SoundManager::Instance().PlayWorldMusic(assetPrefix);
 
         // Spawn at the world's playerstart unless resuming from a saved
         // position ("Continue" from the title menu sets SetCameraFlag).
@@ -457,7 +461,13 @@ void OmegaTechInit()
     OZ_INFO("CWD: %s", fs::current_path().string().c_str());
     OZ_INFO("GameData/Worlds exists: %d", (int)fs::exists("GameData/Worlds"));
     OZ_INFO("System/Data/Zones exists: %d", (int)fs::exists("System/Data/Zones"));
-    LoadLaunchConfig();
+    // Launch.conf calls SetWindowSize after InitWindow, which would silently
+    // override an explicit --shot-res. A capture run is meant to be exactly the
+    // requested size, so skip it there.
+    if (!g_shot.active)
+        LoadLaunchConfig();
+    else if (g_shot.resWidth > 0 && g_shot.resHeight > 0)
+        SetWindowSize(g_shot.resWidth, g_shot.resHeight);
 
     GuiLoadStyleDark();
 
@@ -478,6 +488,15 @@ void OmegaTechInit()
     CombatFX::Instance().Init();
 
     // Initialize 3D skybox cube faces (6 planes with correct UV orientation per face)
+    //
+    // The cube is drawn at kSkyboxDist from the camera with depth writes off, so
+    // its distance is purely a field-of-view decision: a plane of half-width
+    // S/D covers atan(S/D) either side. At 2000/1000 that is only 45 degrees,
+    // but the horizontal FOV at fovy=60 on a 16:9 window is ~47.5 degrees — the
+    // corners fell outside the cube and rendered as black wedges, which is what
+    // made outdoor levels look like they had a black sky. Halving the distance
+    // to 500 gives atan(1000/500) = 63.4 degrees, comfortably past the corner
+    // angles, and 500 is well inside RL_CULL_DISTANCE_FAR (4000).
     const float skySize = 2000.0f;
     for (int i = 0; i < 6; i++) {
         Mesh plane = GenMeshPlane(skySize, skySize, 1, 1);
@@ -510,7 +529,7 @@ void OmegaTechInit()
                 std::string name, sp, sc, modelPath, modelTex;
                 std::string meshType, animIdle, animPatrol, animChase, animReturn, animDeath;
                 float speed = 1.5f, aggroRange = 6.0f, attackRange = 1.5f, damage = 10.0f;
-                float animSpeed = 1.0f;
+                float animSpeed = 1.0f, modelScale = 1.0f;
                 int maxHealth = 100;
                 std::string line;
                 while (std::getline(f, line)) {
@@ -535,6 +554,7 @@ void OmegaTechInit()
                     else if (key == "model_path") modelPath = val;
                     else if (key == "model_texture") modelTex = val;
                     else if (key == "mesh_type") meshType = val;
+                    else if (key == "model_scale") modelScale = std::stof(val);
                     else if (key == "anim_idle") animIdle = val;
                     else if (key == "anim_patrol") animPatrol = val;
                     else if (key == "anim_chase") animChase = val;
@@ -554,6 +574,7 @@ void OmegaTechInit()
                     def.scream_path = sc;
                     def.model_path = modelPath;
                     def.model_texture = modelTex;
+                    def.model_scale = modelScale;
                     def.mesh_type = meshType;
                     def.anim_idle = animIdle;
                     def.anim_patrol = animPatrol;
@@ -646,13 +667,8 @@ void OmegaTechInit()
 
     OmegaTechTextSystem.Bar = LoadTextureWithFallback("GameData/Global/TextBar.png");
     OmegaTechTextSystem.BarFont = LoadFontWithFallback("GameData/Global/Font.ttf");
-    OmegaTechSoundData.CollisionSound = LoadSoundWithFallback("GameData/Global/Sounds/CollisionSound.mp3");
-    OmegaTechSoundData.WalkingSound = LoadSoundWithFallback("GameData/Global/Sounds/WalkingSound.mp3");
-    OmegaTechSoundData.ChasingSound = LoadSoundWithFallback("GameData/Global/Sounds/ChasingSound.mp3");
-    OmegaTechSoundData.UIClick = LoadSoundWithFallback("GameData/Global/Title/Click.mp3");
-    OmegaTechSoundData.Death = LoadSoundWithFallback("GameData/Global/Sounds/Hurt.mp3");
-
-    OmegaTechTextSystem.TextNoise = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
+    // UI/gameplay one-shots + the typewriter blip (all owned by SoundManager).
+    SoundManager::Instance().LoadCoreSounds();
 
     OmegaTechData.GameLights[0] = CreateLight(LIGHT_DIRECTIONAL, {OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z}, Vector3Zero(), WHITE, OmegaTechData.Lights);
 
@@ -673,11 +689,16 @@ void OmegaTechInit()
         }
     }
 
-    PlayMusicStream(OmegaTechData.HomeScreenMusic);
+    SoundManager::Instance().PlayStream(OmegaTechData.HomeScreenMusic);
 }
 
 void PlaySplashScreen()
 {
+    // Screenshot runs are automated: the 2.5s splash is pure latency and would
+    // also leave the title logo in the first captured frame on slow machines.
+    if (g_shot.active)
+        return;
+
     Texture2D splash = LoadTexture("GameData/Global/Title/splash.png");
     double startTime = GetTime();
 
@@ -720,7 +741,7 @@ void PlayHomeScreen()
     {
     }
 
-    StopMusicStream(OmegaTechData.HomeScreenMusic);
+    SoundManager::Instance().StopStream(OmegaTechData.HomeScreenMusic);
 
     // Release the title video (it will be re-opened on the next menu visit).
     if (OmegaTechData.HomeScreenVideo.ok)
@@ -820,14 +841,14 @@ void UpdateEntitiesSim(float dt)
     Vector3 playerPos = OmegaTechData.MainCamera.position;
 
     // Single-pass zone scan for player â€” replaces 4 separate CheckZoneCollision calls
-    PawnSystem::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
+    ZoneManager::Instance().UpdatePlayerRegion(playerPos, g_playerMovement.PlayerBounds);
 
     // Portal trigger — level-to-level transitions (campaign system)
     if (g_portalCooldown > 0.0f)
         g_portalCooldown -= dt;
     else
     {
-        ZonePortal* portal = PawnSystem::Instance().CheckPortalCollision(playerPos, g_playerMovement.PlayerBounds);
+        ZonePortal* portal = ZoneManager::Instance().CheckPortalCollision(playerPos, g_playerMovement.PlayerBounds);
         if (portal && !SetSceneFlag)
         {
             OZ_INFO("Portal: entering level '%s'", portal->targetWorld.c_str());
@@ -853,10 +874,10 @@ void UpdateEntitiesSim(float dt)
     // Arm the transient return portal once the player has walked away from it.
     if (g_returnPortalId >= 0)
     {
-        const auto& portals = PawnSystem::Instance().GetPortals();
+        const auto& portals = ZoneManager::Instance().GetPortals();
         if (g_returnPortalId < (int)portals.size())
         {
-            ZonePortal& rp = PawnSystem::Instance().GetPortals()[g_returnPortalId];
+            ZonePortal& rp = ZoneManager::Instance().GetPortals()[g_returnPortalId];
             Vector3 c = {(rp.bounds.min.x + rp.bounds.max.x) * 0.5f,
                          (rp.bounds.min.y + rp.bounds.max.y) * 0.5f,
                          (rp.bounds.min.z + rp.bounds.max.z) * 0.5f};
@@ -903,8 +924,7 @@ void UpdateEntitiesSim(float dt)
                 OmegaTechData.PanicCounter += 2;
             if (OmegaTechData.Ticker % 2 == 0)
             {
-                if (!IsSoundPlaying(OmegaTechSoundData.ChasingSound))
-                    PlaySound(OmegaTechSoundData.ChasingSound);
+                SoundManager::Instance().PlayChasing();
             }
         }
     }
@@ -961,17 +981,11 @@ void UpdatePlayer()
                 g_playerMovement.HeadBob += (g_playerMovement.HeadBobDirection == 1) ? 1 : -1;
             }
         }
-        if (!IsSoundPlaying(OmegaTechSoundData.WalkingSound))
-        {
-            PlaySound(OmegaTechSoundData.WalkingSound);
-        }
+        SoundManager::Instance().StartWalkLoop();
     }
     else
     {
-        if (IsSoundPlaying(OmegaTechSoundData.WalkingSound))
-        {
-            StopSound(OmegaTechSoundData.WalkingSound);
-        }
+        SoundManager::Instance().StopWalkLoop();
     }
 
     g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
@@ -1219,7 +1233,7 @@ void DrawWorld()
             {
                 Color fallback = {80, 120, 200, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y + 1000.0f, camPos.z);
+                rlTranslatef(camPos.x, camPos.y + kSkyboxDist, camPos.z);
                 rlRotatef(180.0f, 1.0f, 0.0f, 0.0f);
                 if (capTex.id > 0) {
                     OmegaTechData.SkyboxFace[0].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
@@ -1233,7 +1247,7 @@ void DrawWorld()
             {
                 Color fallback = {80, 120, 200, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y - 1000.0f, camPos.z);
+                rlTranslatef(camPos.x, camPos.y - kSkyboxDist, camPos.z);
                 if (capTex.id > 0) {
                     OmegaTechData.SkyboxFace[1].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
                     DrawModel(OmegaTechData.SkyboxFace[1], {0,0,0}, 1.0f, WHITE);
@@ -1242,12 +1256,18 @@ void DrawWorld()
                 }
                 rlPopMatrix();
             }
-            // +X face (index 2) — at x=+1000, normal -X (faces west)
+            // +X face (index 2) - vertical wall at x=+kSkyboxDist
+            // NOTE: the plane is generated in the XZ plane, so standing it up
+            // requires a rotation about X or Z. A rotation about Y (as this code
+            // previously used) only spins the quad within its own plane and
+            // leaves it horizontal, i.e. edge-on and invisible at the camera's
+            // own height - which is why outdoor levels showed a black void
+            // wherever a side face should have been.
             {
                 Color fallback = {120, 180, 240, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x + 1000.0f, camPos.y, camPos.z);
-                rlRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+                rlTranslatef(camPos.x + kSkyboxDist, camPos.y, camPos.z);
+                rlRotatef(90.0f, 0.0f, 0.0f, 1.0f);
                 if (sideTex.id > 0) {
                     OmegaTechData.SkyboxFace[2].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
                     DrawModel(OmegaTechData.SkyboxFace[2], {0,0,0}, 1.0f, WHITE);
@@ -1256,12 +1276,12 @@ void DrawWorld()
                 }
                 rlPopMatrix();
             }
-            // -X face (index 3) — at x=-1000, normal +X (faces east)
+            // -X face (index 3) - vertical wall at x=-kSkyboxDist
             {
                 Color fallback = {120, 180, 240, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x - 1000.0f, camPos.y, camPos.z);
-                rlRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+                rlTranslatef(camPos.x - kSkyboxDist, camPos.y, camPos.z);
+                rlRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
                 if (sideTex.id > 0) {
                     OmegaTechData.SkyboxFace[3].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
                     DrawModel(OmegaTechData.SkyboxFace[3], {0,0,0}, 1.0f, WHITE);
@@ -1270,12 +1290,12 @@ void DrawWorld()
                 }
                 rlPopMatrix();
             }
-            // +Z face (index 4) — at z=+1000, normal -Z (faces south)
+            // +Z face (index 4) - vertical wall at z=+kSkyboxDist
             {
                 Color fallback = {120, 180, 240, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y, camPos.z + 1000.0f);
-                rlRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+                rlTranslatef(camPos.x, camPos.y, camPos.z + kSkyboxDist);
+                rlRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
                 if (sideTex.id > 0) {
                     OmegaTechData.SkyboxFace[4].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
                     DrawModel(OmegaTechData.SkyboxFace[4], {0,0,0}, 1.0f, WHITE);
@@ -1284,11 +1304,12 @@ void DrawWorld()
                 }
                 rlPopMatrix();
             }
-            // -Z face (index 5) — at z=-1000, normal +Z (faces north)
+            // -Z face (index 5) - vertical wall at z=-kSkyboxDist
             {
                 Color fallback = {120, 180, 240, 255};
                 rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y, camPos.z - 1000.0f);
+                rlTranslatef(camPos.x, camPos.y, camPos.z - kSkyboxDist);
+                rlRotatef(90.0f, 1.0f, 0.0f, 0.0f);
                 if (sideTex.id > 0) {
                     OmegaTechData.SkyboxFace[5].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
                     DrawModel(OmegaTechData.SkyboxFace[5], {0,0,0}, 1.0f, WHITE);
@@ -1313,85 +1334,10 @@ if (inSkyZone)
         rlEnableDepthMask();
     }
 
-    // GameplaySoundZone â€” trigger zone-specific music/sound profiles
-    {
-        auto& region = PawnSystem::Instance().GetPlayerRegion();
-        // Find the primary gameplay sound zone from the player region
-        ZoneVolumeNode* soundZone = nullptr;
-        if (region.primaryZoneId >= 0) {
-            soundZone = PawnSystem::Instance().GetZone(region.primaryZoneId);
-            if (soundZone && soundZone->zoneType != ZoneType::ZONE_GAMEPLAY_SOUND)
-                soundZone = nullptr;
-        }
-        if (soundZone && soundZone->zoneType == ZoneType::ZONE_GAMEPLAY_SOUND)
-        {
-            auto &sp = soundZone->soundProfile;
-            if (!sp.music_on_enter.empty() && g_prevSoundZone != soundZone->name)
-            {
-                // Save default world music before crossfading
-                if (g_prevSoundZone.empty() && OmegaTechSoundData.MusicFound)
-                    g_defaultWorldMusic = OmegaTechSoundData.BackgroundMusic;
-                StopMusicStream(OmegaTechSoundData.BackgroundMusic);
-                Music newMusic = LoadMusicWithFallback(sp.music_on_enter.c_str());
-                if (newMusic.ctxData != nullptr)
-                {
-                    OmegaTechSoundData.BackgroundMusic = newMusic;
-                    OmegaTechSoundData.MusicFound = true;
-                    PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
-                }
-            }
-            if (!sp.ambience_loop.empty())
-            {
-                if (g_ambienceZoneName != soundZone->name)
-                {
-                    if (g_ambienceHandle.frameCount > 0)
-                    {
-                        StopSound(g_ambienceHandle);
-                        UnloadSound(g_ambienceHandle);
-                        g_ambienceHandle = {0};
-                    }
-                    g_ambienceHandle = LoadSoundWithFallback(sp.ambience_loop.c_str());
-                    if (g_ambienceHandle.frameCount > 0)
-                        PlaySound(g_ambienceHandle);
-                    g_ambienceZoneName = soundZone->name;
-                }
-                if (g_ambienceHandle.frameCount > 0 && !IsSoundPlaying(g_ambienceHandle))
-                    PlaySound(g_ambienceHandle);
-            }
-            if (!sp.sfx_on_enter.empty() && g_prevSoundZone != soundZone->name)
-            {
-                Sound sfx = LoadSoundWithFallback(sp.sfx_on_enter.c_str());
-                if (sfx.frameCount > 0)
-                    PlaySound(sfx);
-            }
-            g_prevSoundZone = soundZone->name;
-        }
-        else if (region.primaryZoneId < 0 && !g_prevSoundZone.empty())
-        {
-            // Exited sound zone â€” stop ambience loop, restore default music
-            if (g_ambienceHandle.frameCount > 0)
-            {
-                StopSound(g_ambienceHandle);
-                UnloadSound(g_ambienceHandle);
-                g_ambienceHandle = {0};
-            }
-            g_ambienceZoneName.clear();
-            if (g_defaultWorldMusic.ctxData != nullptr)
-            {
-                StopMusicStream(OmegaTechSoundData.BackgroundMusic);
-                OmegaTechSoundData.BackgroundMusic = g_defaultWorldMusic;
-                OmegaTechSoundData.MusicFound = true;
-                PlayMusicStream(OmegaTechSoundData.BackgroundMusic);
-                g_defaultWorldMusic = Music{0};
-            }
-            g_prevSoundZone.clear();
-        }
-    }
-
-    if (OmegaTechSoundData.MusicFound)
-    {
-        UpdateMusicStream(OmegaTechSoundData.BackgroundMusic);
-    }
+    // GameplaySoundZone - zone music/ambience/enter-sfx profiles plus the
+    // per-frame music stream pump are owned by SoundManager.
+    SoundManager::Instance().UpdateSoundZones(ZoneManager::Instance().GetPlayerRegion());
+    SoundManager::Instance().Update();
 
     OzoneLoader::Instance().DrawWorldGeometry(OmegaTechData.MainCamera);
 
@@ -1409,7 +1355,7 @@ if (inSkyZone)
 
     // OZONE ground clamp -- delegated to the physics module (heightmap first,
     // then brush primitives, as supplied by the adapter).
-    if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
+    if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip && !g_playerMovement.isClimbing)
     {
         oz::physics::OzoneCollisionQuery q;
         oz::physics::PlayerPhysics pphys;
@@ -1448,7 +1394,7 @@ if (inSkyZone)
         }
 
         // Zone volumes
-        for (auto &zone : PawnSystem::Instance().GetZones())
+        for (auto &zone : ZoneManager::Instance().GetZones())
             DrawBoundingBox(zone.bounds, BLUE);
 
         // Player start markers
@@ -1501,8 +1447,12 @@ if (inSkyZone)
         DrawLightFlares(OmegaTechData.MainCamera);
 
         // First-person weapon view-model (drawn on top of the world).
-        oz::ViewModel::Instance().Update(GetFrameTime());
-        oz::ViewModel::Instance().Draw(OmegaTechData.MainCamera, OmegaTechData.Lights);
+        // Suppressed for --shot captures: the view-model is camera-locked UI,
+        // not the level, and it covers a third of the frame.
+        if (!(g_shot.active && g_shot.hideHud)) {
+            oz::ViewModel::Instance().Update(GetFrameTime());
+            oz::ViewModel::Instance().Draw(OmegaTechData.MainCamera, OmegaTechData.Lights);
+        }
     }
     // Collision rollback - delegated to the physics module.
     if (ObjectCollision)
@@ -1514,38 +1464,9 @@ if (inSkyZone)
         ObjectCollision = false;
     }
 
-    // Zone reverb â€” apply simulated DSP (volume/muffle) while inside reverb zone
-    {
-        auto& region = PawnSystem::Instance().GetPlayerRegion();
-        bool inReverb = region.HasZoneType(ZoneType::ZONE_REVERB);
-        // Get reverb params from combined env (or highest-priority reverb zone)
-        float mix = region.combinedEnv.reverbMix;
-        float decay = region.combinedEnv.reverbDecay;
-        if (inReverb && !g_wasInReverb)
-        {
-            if (mix <= 0.0f) mix = 0.35f;
-            if (decay <= 0.0f) decay = 0.5f;
-            float vol = 1.0f - mix * 0.5f;
-            OZ_INFO("ZONE_REVERB entered â€” mix=%.2f decay=%.2f vol=%.2f", mix, decay, vol);
-            if (OmegaTechSoundData.MusicFound)
-            {
-                SetMusicVolume(OmegaTechSoundData.BackgroundMusic, vol);
-            }
-            DspReverb::SetMix(mix);
-            DspReverb::SetDecay(decay);
-        }
-        else if (!inReverb && g_wasInReverb)
-        {
-            OZ_INFO("ZONE_REVERB exited â€” restoring audio");
-            if (OmegaTechSoundData.MusicFound)
-            {
-                SetMusicVolume(OmegaTechSoundData.BackgroundMusic, 1.0f);
-            }
-            DspReverb::SetMix(0.0f);
-            DspReverb::SetDecay(0.5f);
-        }
-        g_wasInReverb = inReverb;
-    }
+    // Zone reverb - the simulated DSP (mix/decay + music ducking) is applied
+    // by SoundManager on zone transitions.
+    SoundManager::Instance().UpdateReverb(ZoneManager::Instance().GetPlayerRegion());
 
     // LightningScript entity tick
     {
@@ -1611,7 +1532,7 @@ if (inSkyZone)
 
         // Zone environment override application (from combined player region)
         {
-            auto& region = PawnSystem::Instance().GetPlayerRegion();
+            auto& region = ZoneManager::Instance().GetPlayerRegion();
             bool inEnvZone = region.combinedEnv.applyFog || region.combinedEnv.applyAmbient;
             std::string envZoneName = (region.primaryZoneId >= 0) ? std::to_string(region.primaryZoneId) : "";
 
@@ -1738,7 +1659,7 @@ if (inSkyZone)
                     {c.x - 1.5f, c.y - 1.5f, c.z - 1.5f},
                     {c.x + 1.5f, c.y + 1.5f, c.z + 1.5f}
                 };
-                g_returnPortalId = PawnSystem::Instance().AddPortal(rp);
+                g_returnPortalId = ZoneManager::Instance().AddPortal(rp);
                 OZ_INFO("Portal: return portal to '%s' placed at arrival point",
                         g_portalReturnWorld.c_str());
             }

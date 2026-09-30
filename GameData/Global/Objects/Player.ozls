@@ -1,8 +1,12 @@
 entity "Player" : upgrade {
-    // Player character model used to render players in the world. STUB: static
-    // mesh only (no skeletal clips yet) converted from the psx character pack.
-    mesh = "GameData/Global/Player/Character_Killer_01.glb"
-    texture = "GameData/Global/Player/Character_Killer_01.png"
+    // Player character model used to render players in the world.
+    // Plague Arcanist: rigged GLB with its own embedded textures, so `texture` is
+    // omitted (PlayerModel only falls back to the legacy PNG for the default mesh).
+    // mesh_type is static on purpose - the GLB's 10 clips are unnamed mixamo takes
+    // whose semantics are unknown, and guessing an idle/walk mapping would leave
+    // the character playing an arbitrary animation. Rename the clips (editor
+    // Anim panel) and set anim_idle / anim_chase here to switch it to skeletal.
+    mesh = "GameData/Global/Player/Plague_Arcanist.glb"
     mesh_type = "static"
     // Base walk-speed multiplier (sprint/crouch scale this at runtime).
     movement_speed = 1.4

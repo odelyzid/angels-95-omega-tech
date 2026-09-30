@@ -280,6 +280,7 @@ static PickupType pickup_type_from_name(const std::string& name, bool& isWeapon)
         {"EnergyCrystal", PickupType::PSYCHIC},
         {"Key", PickupType::KEY},             {"Coin", PickupType::COIN},
         {"Powerup", PickupType::POWERUP},
+        {"Ammo", PickupType::AMMO},
     };
     for (auto& [n, t] : kMap)
         if (name == n) return t;

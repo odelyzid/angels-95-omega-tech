@@ -1,6 +1,11 @@
 #pragma once
 #include "raylib.h"
+#include "LevelSettings.hpp"
+#include "ZoneManager.hpp"
+#include "ZoneTypes.hpp"
+#include "../Pawn/OzPawnSystem.hpp"
 #include "../Physics/WorldChunk.hpp"
+#include "OzoneParser.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -65,6 +70,60 @@ struct OzoneCollisionVolume {
     float texOffsetV = 0.0f; // texture shift V
     bool isHeightmap = false; // true = terrain volume (support via ground clamp, never an obstacle)
 };
+
+// ---------------------------------------------------------------------------
+// OzoneEntitySet — every non-brush primitive of a world, parsed but NOT yet
+// injected into any runtime system.
+//
+// OzoneLoader used to push entities straight into PawnSystem::Instance() while
+// it was still parsing, which made loading a side-effecting operation that could
+// not be tested, replayed or rolled back. Parsing now stops here: the loader
+// fills an OzoneEntitySet and the world orchestrator (Core.hpp LoadWorld, and
+// AngelEd when opening a world) applies it explicitly via
+// InjectOzoneEntities().
+// ---------------------------------------------------------------------------
+
+// NPC spawn cannot be resolved while parsing (it needs the PawnDef registry),
+// so it is recorded as a deferred request.
+struct PawnSpawnRequest {
+    Vector3 position{0, 0, 0};
+    std::string defName;
+};
+
+struct OzoneEntitySet {
+    std::vector<PlayerStartNode>     playerStarts;
+    std::vector<PickupNode>          pickups;
+    std::vector<ZoneVolumeNode>      zones;
+    std::vector<SkyZoneNode>         skyZones;
+    std::vector<ZonePortal>          portals;
+    std::vector<LightNode>           lights;
+    std::vector<MeshObjectNode>      meshObjects;
+    std::vector<PathNode>            pathNodes;
+    std::vector<WindZoneNode>        windZones;
+    std::vector<ParticleEmitterNode> particleEmitters;
+    std::vector<EmitterNode>         emitters;
+    std::vector<PawnSpawnRequest>    pawnSpawns;
+    // `levelinfo` and `particles` metadata (game rules, skybox, weather).
+    LevelSettings                    settings;
+
+    void Clear() { *this = OzoneEntitySet{}; }
+    bool Empty() const {
+        return playerStarts.empty() && pickups.empty() && zones.empty() &&
+               skyZones.empty() && portals.empty() && lights.empty() &&
+               meshObjects.empty() && pathNodes.empty() && windZones.empty() &&
+               particleEmitters.empty() && emitters.empty() && pawnSpawns.empty();
+    }
+    size_t Count() const {
+        return playerStarts.size() + pickups.size() + zones.size() +
+               skyZones.size() + portals.size() + lights.size() +
+               meshObjects.size() + pathNodes.size() + windZones.size() +
+               particleEmitters.size() + emitters.size() + pawnSpawns.size();
+    }
+};
+
+// Zone names are generated per world (zone_sky_0, ...) so the counters must be
+// reset on every parse.
+using OzoneZoneCounters = std::unordered_map<std::string, int>;
 
 class OzoneLoader {
 public:
@@ -151,6 +210,12 @@ public:
         return m_tilesetTex[idx - 1];
     }
 
+    // --- Parsed world data (no side effects) ------------------------------
+    const OzoneEntitySet& GetEntities() const { return m_entities; }
+    const LevelSettings& GetLevelSettings() const { return m_entities.settings; }
+    // Directory the world was loaded from ("" when LoadString got no worldDir).
+    const std::string& GetWorldDir() const { return m_worldDir; }
+
     static OzoneLoader& Instance();
     
     static Shader GetLitFogShader() { return s_litFogShader; }
@@ -179,7 +244,8 @@ private:
     std::vector<Texture2D> m_tilesetTex;
 
     std::string m_worldDir;        // current world directory (for .ozls def matching)
-    std::unordered_map<std::string, int> m_zoneCounters; // per-load zone name counters
+    OzoneZoneCounters m_zoneCounters; // per-load zone name counters
+    OzoneEntitySet m_entities;     // parsed, not-yet-injected entity nodes
 
     void UnloadTextures();
     void UnloadHeightmap();
@@ -196,3 +262,20 @@ private:
                              float cellX, float cellZ, float heightScale,
                              float uvTileSize = 8.0f);
 };
+
+// ---------------------------------------------------------------------------
+// Entity ingestion — the explicit seam between world parsing and the engine.
+// ---------------------------------------------------------------------------
+
+// Convert every entity primitive into plain node structures. Pure: performs no
+// allocation of GPU resources and touches no global system state.
+// `worldDir` is used to resolve world-scoped .ozls skyzone defs.
+void ParseOzoneEntities(const std::vector<struct OzonePrimitive>& primitives,
+                        const std::string& worldDir,
+                        OzoneZoneCounters& zoneCounters,
+                        OzoneEntitySet& out);
+
+// Apply a parsed entity set to the runtime systems (PawnSystem + ZoneManager)
+// and copy the level metadata into the world's WorldInfo. Lights are bound to
+// the zone volume that contains them. Safe to call on an empty set.
+void InjectOzoneEntities(const OzoneEntitySet& entities, class PawnSystem& pawns);

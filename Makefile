@@ -34,23 +34,72 @@ RES_95  =
 RES_SRV =
 endif
 
-CFLAGS := -O3 --std=c++20 $(PIC) $(RAYLIB_INC)
-COMP := g++
-SERVER_CXX := g++
-SERVER_FLAGS := -O3 --std=c++20 $(RAYLIB_INC)
+# --- Build mode: release (default) or debug ---
+#   release: -O3          shipping build
+#   debug:   -O0 -g       fast compiles + symbols for iteration
+# Usage:  make MODE=debug OTENGINE
+MODE ?= release
+ifeq ($(MODE),debug)
+  OPTFLAGS := -O0 -g
+else ifeq ($(MODE),release)
+  OPTFLAGS := -O3
+else
+  $(error MODE must be 'release' or 'debug' (got '$(MODE)'))
+endif
+
+# Optional compiler cache (ccache) and faster linker (LLD), auto-detected via
+# `command -v`. Only probed when a POSIX shell is present (UNAME_S is set by the
+# `uname` probe above); this keeps cmd.exe-based make quiet.
+# Disable with CCACHE= / LDEXTRA=, or force with CCACHE=<path> / LDEXTRA=-fuse-ld=lld.
+ifneq ($(UNAME_S),)
+  CCACHE ?= $(shell command -v ccache 2>/dev/null)
+  LLD_BIN := $(shell command -v ld.lld 2>/dev/null || command -v lld 2>/dev/null)
+endif
+
+ifneq ($(CCACHE),)
+  CCACHE_PREFIX := $(CCACHE)
+else
+  CCACHE_PREFIX :=
+endif
+
+ifneq ($(LLD_BIN),)
+  LDEXTRA ?= -fuse-ld=lld
+else
+  LDEXTRA ?=
+endif
+
+CFLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC)
+COMP := $(CCACHE_PREFIX) g++
+CC := $(CCACHE_PREFIX) gcc
+SERVER_CXX := $(CCACHE_PREFIX) g++
+SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(RAYLIB_INC)
 
 BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o Main.o Network.o Log.o Client.o \
-          OzAssetMapper.o OzPawnSystem.o GameUi.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o \
+          OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o PlayerPhysics.o \
+          ZoneManager.o SoundManager.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
           LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
           ViewModel.o OzParticleSimulationManager.o rlights.o UiHandler.o)
 
-.PHONY: all clean test
+.PHONY: all clean test help
 all: OTENGINE AngelServ AngelMaster ozpack
+
+# Build-speed helpers:
+#   MODE=debug     -O0 -g instead of -O3 (much faster compiles for iteration)
+#   CCACHE=...     compiler cache; auto-detected when 'ccache' is on PATH
+#   LDEXTRA=...    extra linker driver flags; -fuse-ld=lld auto-set when available
+help:
+	@echo "Targets: OTENGINE AngelServ AngelMaster ozpack test clean"
+	@echo "MODE      = $(MODE)      (release | debug)"
+	@echo "OPTFLAGS  = $(OPTFLAGS)"
+	@echo "ccache    = $(if $(CCACHE),$(CCACHE),<not found>)"
+	@echo "LDEXTRA   = $(if $(LDEXTRA),$(LDEXTRA),<none>)"
+	@echo ""
+	@echo "Fast iteration:  make -j$$(nproc) MODE=debug OTENGINE"
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -67,7 +116,7 @@ $(BUILD_DIR)/raygui.o: Source/Renderer/raygui/raygui.c | $(BUILD_DIR)
 # Must be compiled as C (gcc): g++ would C++-mangle the definitions while
 # consumers see extern "C" prototypes from miniz.h.
 $(BUILD_DIR)/miniz.o: Source/miniz/miniz.c Source/miniz/miniz.h | $(BUILD_DIR)
-	gcc -O3 -std=c99 $(PIC) -ISource/miniz -c Source/miniz/miniz.c -o $@
+	$(CC) $(OPTFLAGS) -std=c99 $(PIC) -ISource/miniz -c Source/miniz/miniz.c -o $@
 
 # 5. Compile Network library (used by both client and server)
 $(BUILD_DIR)/Network.o: Source/Network/Network.cpp Source/Network/Network.hpp | $(BUILD_DIR)
@@ -93,6 +142,9 @@ $(BUILD_DIR)/GameUi.o: Source/Pawn/AngelPlayer/GameUi.cpp Source/Pawn/AngelPlaye
 
 $(BUILD_DIR)/InventoryBehaviour.o: Source/Pawn/AngelPlayer/InventoryBehaviour.cpp Source/Pawn/AngelPlayer/InventoryBehaviour.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Pawn/AngelPlayer/InventoryBehaviour.cpp -o $@
+
+$(BUILD_DIR)/SlotBar.o: Source/Pawn/AngelPlayer/SlotBar.cpp Source/Pawn/AngelPlayer/SlotBar.hpp Source/Pawn/AngelPlayer/GameUi.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Pawn/AngelPlayer/SlotBar.cpp -o $@
 
 $(BUILD_DIR)/WeaponBehaviour.o: Source/Pawn/AngelPlayer/WeaponBehaviour.cpp Source/Pawn/AngelPlayer/WeaponBehaviour.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Pawn/AngelPlayer/WeaponBehaviour.cpp -o $@
@@ -154,6 +206,14 @@ $(BUILD_DIR)/OzoneHeightmap.o: Source/World/OzoneHeightmap.cpp Source/World/OzOz
 $(BUILD_DIR)/OzoneParser.o: Source/World/OzoneParser.cpp Source/World/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/World/OzoneParser.cpp -o $@
 
+# 5e2. Zone volume storage + runtime queries (extracted from PawnSystem)
+$(BUILD_DIR)/ZoneManager.o: Source/World/ZoneManager.cpp Source/World/ZoneManager.hpp Source/World/ZoneTypes.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/World/ZoneManager.cpp -o $@
+
+# 5e3. Audio facade (one-shots, world music, sound zones, reverb, script SFX)
+$(BUILD_DIR)/SoundManager.o: Source/Audio/SoundManager.cpp Source/Audio/SoundManager.hpp Source/Audio/DspReverb.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Audio/SoundManager.cpp -o $@
+
 # 5f. Compile CSG/BSP processor
 $(BUILD_DIR)/OzBsp.o: Source/Physics/OzBsp.cpp Source/Physics/OzBsp.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Physics/OzBsp.cpp -o $@
@@ -189,23 +249,23 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o GameUi.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o PlayerPhysics.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o UiHandler.o)
-	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o SoundManager.o OzBsp.o WorldChunk.o PlayerPhysics.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o UiHandler.o)
+	$(COMP) $(LDEXTRA) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
 AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/Server/ServerInternal.hpp Source/Network/Network.hpp Source/World/OzoneParser.hpp Source/World/OzoneParser.cpp Source/Server/Master/MasterClient.hpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/World/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
+	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/World/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS) $(LDEXTRA)
 
 # 7b. Build AngelMaster (standalone master server, no raylib)
 AngelMaster: $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp -o AngelMaster$(EXE) $(SERVER_LIBS)
+	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp -o AngelMaster$(EXE) $(SERVER_LIBS) $(LDEXTRA)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp Source/miniz/miniz.h $(BUILD_DIR)/miniz.o
-	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp $(BUILD_DIR)/miniz.o -o OzPack$(EXE) $(SERVER_LIBS)
+	$(SERVER_CXX) $(SERVER_FLAGS) Source/OzPack.cpp $(BUILD_DIR)/miniz.o -o OzPack$(EXE) $(SERVER_LIBS) $(LDEXTRA)
 
 # 9. Unit tests (no raylib dependency)
 TEST_FLAGS := -O0 -g --std=c++20 -DOMEGA_TEST_ENV
@@ -218,11 +278,11 @@ test_parser: tests/LightningScriptParser.test.cpp Source/Script/LightningScriptP
 test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
-test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
-	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
+test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Audio/SoundManager.cpp Source/World/ZoneManager.cpp Source/Log.cpp
+	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
 
-test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Physics/PlayerPhysics.cpp Source/Log.cpp Source/Renderer/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Package/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp
-	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
+test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/World/ZoneManager.cpp Source/Audio/SoundManager.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Physics/PlayerPhysics.cpp Source/Log.cpp Source/Renderer/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Package/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp
+	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
 
 test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@

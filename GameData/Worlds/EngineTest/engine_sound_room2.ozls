@@ -1,0 +1,15 @@
+// Renamed from zone_sound_room2.ozls, re-keyed to the world's zone name.
+//
+// IMPORTANT: Main.cpp deliberately skips ZONE_GAMEPLAY_SOUND (and ZONE_SKY) when
+// dispatching LightningScript on_enter/on_exit. So this def's messages never
+// fire. That is not a data bug: the zone still works for audio, because
+// SoundManager::UpdateSoundZones consumes its GameplaySoundProfile for the
+// music/ambience crossfade. Only the script hooks are suppressed. Un-skipping
+// it is an engine change, tracked separately.
+entity "engine_sound" : skyzone {
+    actions {
+        on_enter {
+            say "Entered GAMEPLAY_SOUND zone - ambient audio active"
+        }
+    }
+}

@@ -72,6 +72,10 @@ void PlayerController::UpdateVertical(float dt, Camera3D& cam, float savedCamY, 
     if (g_playerMovement.isNoClip || g_playerMovement.isFlying) {
         // Noclip / flying: direct vertical control (Space up / Ctrl down)
         physics.UpdateFlyVertical(cam, g_playerMovement.BaseSpeed, phys, dt, true, true);
+    } else if (g_playerMovement.isClimbing) {
+        // Ladder: W/S climb at ladderSpeed, no gravity. Checked before water so
+        // a ladder volume inside a pool still behaves as a ladder.
+        physics.UpdateLadderVertical(cam, motion, savedCamY, uiBlocked, phys, dt);
     } else if (g_playerMovement.inWater) {
         // Water: restore Y, reduced gravity, dampen fall
         physics.UpdateWaterVertical(cam, motion, savedCamY, g_playerMovement.EyeHeight,

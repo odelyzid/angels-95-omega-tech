@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -81,6 +82,26 @@ struct ResourceEntry {
 
 static std::vector<ResourceEntry> g_textureFiles;
 static std::vector<ResourceEntry> g_soundFiles;
+
+// Indices into g_textureFiles for the leaves currently in scope (the subtree
+// selected in the Texture Manager's scope tree, or everything when a search is
+// active). Empty means "no scope filter" and the grid shows every texture,
+// which is the grid's original behaviour.
+static std::vector<int> g_textureVisible;
+
+static int TexVisibleCount() {
+    return g_textureVisible.empty() ? (int)g_textureFiles.size()
+                                    : (int)g_textureVisible.size();
+}
+
+// Map a grid position to a g_textureFiles index, or -1 when out of range.
+static int TexEntryAt(int pos) {
+    if (g_textureVisible.empty()) {
+        return (pos >= 0 && pos < (int)g_textureFiles.size()) ? pos : -1;
+    }
+    if (pos < 0 || pos >= (int)g_textureVisible.size()) return -1;
+    return g_textureVisible[pos];
+}
 
 // Texture target model names (set from Main.cpp after model loading)
 static std::vector<std::string> g_textureTargetNames;
@@ -210,24 +231,72 @@ static HWND CreateListBox(HWND hParent, int x, int y, int w, int h, int id) {
 static std::unordered_map<std::string, HBITMAP> g_uiBitmaps;
 static std::unordered_map<int, HBITMAP> g_uiBtnIcon;
 
-// Load a UI .bmp as an HBITMAP (cached). Searches AngelEd/UI then the packed
-// GameData/Global/Engine/UI library ("effect-effect-" names).
+// Button face color icons are pre-composited against. Must match DrawIconButton's
+// unselected fill so no seam shows around the glyph.
+static const COLORREF UI_BTN_FACE = RGB(45, 45, 50);
+
+// Wrap a raylib Image as a 32-bit top-down DIB, pre-compositing the RGBA over the
+// button face. Compositing once at load time lets DrawIconButton keep plain
+// StretchBlt/SRCCOPY (no AlphaBlend, so no -lmsimg32).
+static HBITMAP MakeUiBitmap(const Image& img) {
+    if (!img.data || img.width <= 0 || img.height <= 0) return nullptr;
+    int w = img.width, h = img.height;
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;                 // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HDC screen = GetDC(nullptr);
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (!bmp || !bits) { if (bmp) DeleteObject(bmp); return nullptr; }
+    const unsigned bgR = GetRValue(UI_BTN_FACE), bgG = GetGValue(UI_BTN_FACE), bgB = GetBValue(UI_BTN_FACE);
+    auto* dst = static_cast<unsigned char*>(bits);
+    for (int y = 0; y < h; y++) {
+        unsigned char* d = dst + (size_t)y * w * 4;
+        for (int x = 0; x < w; x++, d += 4) {
+            // GetImageColor rather than reading img.data directly: it normalizes
+            // whatever format the decoder produced into a plain Color.
+            Color c = GetImageColor(img, x, y);
+            unsigned a = c.a;
+            if (a == 255) { d[0] = c.b; d[1] = c.g; d[2] = c.r; }
+            else {
+                d[0] = (unsigned char)(c.b * a / 255 + bgB * (255 - a) / 255);
+                d[1] = (unsigned char)(c.g * a / 255 + bgG * (255 - a) / 255);
+                d[2] = (unsigned char)(c.r * a / 255 + bgR * (255 - a) / 255);
+            }
+            d[3] = 255;
+        }
+    }
+    return bmp;
+}
+
+// Load a UI icon as an HBITMAP (cached).
+//
+// NOTE: every file in AngelEd/UI is PNG data carrying a .bmp extension, which made
+// LoadImageW(..., IMAGE_BITMAP, ..., LR_LOADFROMFILE) return NULL and left all 18
+// icon buttons (13 sidebar + ModelBrowser Import/Export + Heightmap Browse/Generate)
+// rendering label-only. raylib's LoadImage sniffs the magic bytes, so it decodes them
+// correctly; LoadImageW stays as a fallback for any genuine .bmp added later.
 static HBITMAP LoadUiBitmap(const std::string& name) {
     auto it = g_uiBitmaps.find(name);
     if (it != g_uiBitmaps.end()) return it->second;
-    const char* prefixes[] = {
-        "AngelEd/UI/",
-        "../AngelEd/UI/",
-        "GameData/Global/Engine/UI/effect-effect-",
-        "../GameData/Global/Engine/UI/effect-effect-",
-    };
+    const char* prefixes[] = { "AngelEd/UI/", "../AngelEd/UI/" };
     HBITMAP bm = nullptr;
     for (auto* p : prefixes) {
         std::string full = std::string(p) + name + ".bmp";
-        std::wstring w(full.begin(), full.end());
-        bm = (HBITMAP)LoadImageW(nullptr, w.c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+        Image img = LoadImage(full.c_str());
+        if (img.data) { bm = MakeUiBitmap(img); UnloadImage(img); }
+        if (!bm) {
+            std::wstring w(full.begin(), full.end());
+            bm = (HBITMAP)LoadImageW(nullptr, w.c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+        }
         if (bm) break;
     }
+    if (!bm) OZ_WARN("UiBitmap: MISSING '%s' (tried %d prefixes)", name.c_str(), (int)(sizeof(prefixes) / sizeof(prefixes[0])));
     g_uiBitmaps[name] = bm;
     return bm;
 }
@@ -236,7 +305,9 @@ static HWND CreateIconButton(HWND hParent, const wchar_t* text, int x, int y,
                              int w, int h, int id, const std::string& icon) {
     HWND b = CreateWindowEx(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
                             x, y, w, h, hParent, (HMENU)(INT_PTR)id, g_hInst, nullptr);
-    g_uiBtnIcon[id] = LoadUiBitmap(icon);
+    HBITMAP bm = LoadUiBitmap(icon);
+    if (!bm) OZ_WARN("CreateIconButton: no icon '%s' for control id %d", icon.c_str(), id);
+    g_uiBtnIcon[id] = bm;
     return b;
 }
 
@@ -414,7 +485,7 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Texture Manager v2 Ã¢â‚¬â€ oztex integration, preview, source info
+// Texture Manager v2 ��� oztex integration, preview, source info
 // =====================================================================
 static const int ID_TEX_LIST       = 101;
 static const int ID_TEX_REFRESH    = 102;
@@ -427,6 +498,154 @@ static const int ID_TEX_SRC_LABEL  = 108;
 static const int ID_TEX_APPLY_ALL  = 109;
 static const int ID_TEX_ADDPKG     = 110;
 static const int ID_TEX_IMPORT     = 111;
+static const int ID_TEX_SCOPE      = 112;   // scope tree
+static const int ID_TEX_SEARCH     = 113;   // search edit box
+
+// =====================================================================
+// Asset scoping — shared by the Model Browser and the Texture Manager.
+// See the AssetScopeItem/AssetScopeNode docs in Win32Dialogs.hpp.
+// =====================================================================
+static std::string LowerAscii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)::tolower(c); });
+    return s;
+}
+
+// Find or create the child of `parent` labelled `name`.
+static AssetScopeNode& ChildFor(AssetScopeNode& parent, const std::string& name) {
+    for (auto& c : parent.children)
+        if (c.label == name && c.entryIndex < 0) return c;
+    parent.children.push_back(AssetScopeNode{});
+    parent.children.back().label = name;
+    return parent.children.back();
+}
+
+// Split "dir/sub/file.ext" into its directory segments, dropping the leading
+// anchor (drive letter, "GameData/", or a package key's own first segment).
+static std::vector<std::string> DirSegments(const std::string& path) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : path) {
+        if (c == '/' || c == '\\') {
+            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
+                               const std::string& search) {
+    AssetScopeNode root;
+    root.label = "Assets";
+
+    AssetScopeNode gameData;  gameData.label  = "(GameData)";
+    AssetScopeNode packages;  packages.label  = "(Packages)";
+
+    const std::string needle = LowerAscii(search);
+    const bool filtering = !needle.empty();
+
+    for (size_t i = 0; i < items.size(); ++i) {
+        const AssetScopeItem& it = items[i];
+        if (filtering &&
+            LowerAscii(it.name).find(needle) == std::string::npos &&
+            LowerAscii(it.path).find(needle) == std::string::npos)
+            continue;
+
+        AssetScopeNode* scope = it.fromPackage ? &packages : &gameData;
+
+        // Group by folder. Package keys are stored with '/' separators by
+        // PackageAssetLoader; loose files may use '\' on Windows.
+        std::vector<std::string> segs = DirSegments(it.path);
+        if (!segs.empty()) segs.pop_back();          // drop the file name itself
+
+        // A loose path scanned from disk is absolute
+        // ("C:/repo/GameData/Global/x.glb"), so hide everything up to and
+        // including the GameData anchor: the visible hierarchy is just the part
+        // under GameData/. Package keys have no such anchor and are used whole.
+        size_t start = 0;
+        if (!it.fromPackage) {
+            for (size_t k = 0; k < segs.size(); ++k) {
+                if (LowerAscii(segs[k]) == "gamedata") { start = k + 1; break; }
+            }
+        }
+
+        AssetScopeNode* cur = scope;
+        for (size_t k = start; k < segs.size(); ++k)
+            cur = &ChildFor(*cur, segs[k]);
+
+        cur->children.push_back(AssetScopeNode{});
+        cur->children.back().label = it.name;
+        cur->children.back().entryIndex = (int)i;
+    }
+
+    // Prune folders that ended up with no leaves (common while filtering).
+    struct Pruner {
+        static bool Keep(AssetScopeNode& n) {
+            if (n.entryIndex >= 0) return true;
+            std::vector<AssetScopeNode> kept;
+            for (auto& c : n.children) if (Keep(c)) kept.push_back(std::move(c));
+            n.children = std::move(kept);
+            return !n.children.empty();
+        }
+    };
+    Pruner::Keep(gameData);
+    Pruner::Keep(packages);
+
+    // Sort: folders first, then leaves, each alphabetically (case-insensitive).
+    struct Sorter {
+        static bool Less(const AssetScopeNode& a, const AssetScopeNode& b) {
+            bool af = a.entryIndex < 0, bf = b.entryIndex < 0;
+            if (af != bf) return af;
+            return LowerAscii(a.label) < LowerAscii(b.label);
+        }
+        static void Go(AssetScopeNode& n) {
+            std::sort(n.children.begin(), n.children.end(), Less);
+            for (auto& c : n.children) Go(c);
+        }
+    };
+    Sorter::Go(gameData);
+    Sorter::Go(packages);
+
+    if (!gameData.children.empty()) root.children.push_back(std::move(gameData));
+    if (!packages.children.empty()) root.children.push_back(std::move(packages));
+    return root;
+}
+
+#ifdef _WIN32
+void CollectScopeLeavesUnder(HWND tree, void* node, std::vector<int>& out) {
+    if (!tree) return;
+    std::vector<HTREEITEM> stack;
+    if (node == TVI_ROOT) {
+        for (HTREEITEM it = (HTREEITEM)SendMessage(tree, TVM_GETNEXTITEM, TVGN_ROOT, 0);
+             it; it = (HTREEITEM)SendMessage(tree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)it))
+            stack.push_back(it);
+    } else {
+        stack.push_back((HTREEITEM)node);
+    }
+    while (!stack.empty()) {
+        HTREEITEM it = stack.back();
+        stack.pop_back();
+        TVITEMW tvi = {};
+        tvi.mask = TVIF_PARAM;
+        tvi.hItem = it;
+        if (SendMessage(tree, TVM_GETITEMW, 0, (LPARAM)&tvi) && tvi.lParam >= 0) {
+            out.push_back((int)tvi.lParam);
+            continue;   // a leaf has no children
+        }
+        // Folder: push children in reverse so they pop in document order.
+        std::vector<HTREEITEM> kids;
+        for (HTREEITEM k = (HTREEITEM)SendMessage(tree, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)it);
+             k; k = (HTREEITEM)SendMessage(tree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)k))
+            kids.push_back(k);
+        for (auto it2 = kids.rbegin(); it2 != kids.rend(); ++it2)
+            stack.push_back(*it2);
+    }
+}
+#endif
+
 
 // Texture grid view constants
 static const int TEX_THUMB_SIZE = 64;
@@ -496,6 +715,10 @@ void ScanTextureBrowserFiles() {
         [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
     g_textureFiles.erase(last, g_textureFiles.end());
 
+    // Entry indices changed underneath any scope selection, so drop it; the
+    // tree is rebuilt below and re-selects the scope by path.
+    g_textureVisible.clear();
+
     if (g_editorPanels.hTextureMgr)
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 50, 0, 0);
 }
@@ -511,9 +734,97 @@ void SetTextureTargetNames(const std::vector<std::string>& names) {
 }
 
 // ---------------------------------------------------------------------
-// Import Textures — copy image file(s) into the open world's tileset so
-// they become selectable in the browser and usable as texSlot indices.
+// Import helpers — every import is PACKED immediately (Phase F).
+//
+// Imports used to drop loose files into GameData/, which meant the asset only
+// became visible after a rescan and shipped builds (which run from packed
+// System/Data/*.oz*) could not see it at all. Now the bytes go straight into a
+// .oz* package in System/Data/ and the package is hot-loaded, so the new entry
+// shows up under the (Packages) scope immediately and a rebuild needs no extra
+// step.
+//
+// The package is APPENDED to, not overwritten: existing entries are read back
+// and rewritten so repeated imports accumulate.
 // ---------------------------------------------------------------------
+static bool ReadWholeFile(const fs::path& p, std::vector<uint8_t>& out) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f.is_open()) return false;
+    f.seekg(0, std::ios::end);
+    std::streamoff n = f.tellg();
+    if (n < 0) return false;
+    f.seekg(0, std::ios::beg);
+    out.resize((size_t)n);
+    if (n > 0) f.read((char*)out.data(), n);
+    return (bool)f || n == 0;
+}
+
+// Pack `add` (entry name -> bytes) into `pkgPath`, preserving whatever the
+// package already held. Returns false and fills `err` on failure.
+static bool PackIntoPackage(const fs::path& pkgPath, uint32_t magic,
+                            const std::vector<std::pair<std::string, std::vector<uint8_t>>>& add,
+                            std::string& err) {
+    std::error_code ec;
+    fs::create_directories(pkgPath.parent_path(), ec);
+
+    OzPackageWriter writer(magic);
+
+    // Carry forward the existing entries.
+    if (fs::exists(pkgPath)) {
+        OzPackageReader reader;
+        if (!reader.Open(pkgPath.string().c_str())) {
+            err = "existing package could not be read (corrupt?): " + pkgPath.string();
+            return false;
+        }
+        std::vector<std::string> names;
+        reader.List(names);
+        for (const auto& nm : names) {
+            std::vector<uint8_t> data;
+            if (reader.Read(nm.c_str(), data) > 0 && !data.empty())
+                writer.AddFile(nm.c_str(), data.data(), data.size());
+        }
+    }
+
+    for (const auto& kv : add) {
+        if (kv.second.empty()) continue;
+        writer.AddFile(kv.first.c_str(), kv.second.data(), kv.second.size());
+    }
+
+    if (!writer.WriteToFile(pkgPath.string().c_str())) {
+        err = "failed to write " + pkgPath.string();
+        return false;
+    }
+    return true;
+}
+
+// Hot-load a freshly written package so its entries resolve this session.
+static bool HotLoadPackage(const fs::path& pkgPath, std::string& err) {
+    if (!PackageAssetLoader::Instance().LoadPackageFile(pkgPath.string().c_str())) {
+        err = "package written but failed to load: " + pkgPath.string();
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------
+// Import Textures — pack image file(s) straight into System/Data.
+//
+// These are FREELY PLACEABLE assets (Phase G): they can be assigned with `tex=`
+// on Mesh.Static / Mesh.Skeletal entities and as a model's texture, but they are
+// NOT tileset entries, so they cannot be used as a brush `texSlot`. The user is
+// told this loudly, because silently getting texSlot 0/auto-selection back is a
+// confusing authoring bug.
+// ---------------------------------------------------------------------
+static const char* kTexSlotWarning =
+    "NOTE: packed textures are FREE-PLACEMENT assets, not tileset entries.\n"
+    "\n"
+    "Use them with  tex=<path>  on Mesh.Static / Mesh.Skeletal entities, or as\n"
+    "a model's texture. They CANNOT be used as a brush texSlot: that argument is\n"
+    "a BARE POSITIONAL float selecting a tileset slot (1-based, ordered by\n"
+    "filename in <world>/oztex/tileset/), and only textures in that folder count.\n"
+    "\n"
+    "To make this texture a tileset slot instead, add the file to the world's\n"
+    "oztex/tileset/ folder on disk and reopen the world.";
+
 static void ImportTexturesIntoWorld(HWND hwnd) {
     std::vector<wchar_t> buf(32768, 0);
     OPENFILENAMEW ofn = {};
@@ -545,41 +856,53 @@ static void ImportTexturesIntoWorld(HWND hwnd) {
     }
     if (files.empty()) return;
 
-    // Destination: <world>/oztex/tileset (1-based, sorted → new tile slots).
-    // With no world open, fall back to GameData/Textures.
-    fs::path dest;
-    std::string worldDir = Editor_GetCurrentWorldDir();
-    if (!worldDir.empty())
-        dest = fs::path(worldDir) / "oztex" / "tileset";
-    else
-        dest = fs::current_path() / "GameData" / "Textures";
-
-    std::error_code ec;
-    fs::create_directories(dest, ec);
-
-    int copied = 0, failed = 0;
+    // Pack into System/Data/imported_textures.oztex (OZTX). Entry keys are
+    // "Textures/<file>" — PackageAssetLoader strips the first segment when
+    // resolving a bare name, matching build-data.ps1's per-subdirectory packs.
+    fs::path pkg = fs::current_path() / "System" / "Data" / "imported_textures.oztex";
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> add;
+    std::vector<std::string> names;
+    int failed = 0;
     for (const auto& f : files) {
         fs::path src(f);
-        fs::path out = dest / src.filename();
-        std::error_code cec;
-        fs::copy_file(src, out, fs::copy_options::overwrite_existing, cec);
-        if (cec) failed++; else copied++;
+        std::vector<uint8_t> data;
+        if (!ReadWholeFile(src, data) || data.empty()) { failed++; continue; }
+        names.push_back(src.filename().string());
+        add.push_back({"Textures/" + src.filename().string(), std::move(data)});
+    }
+    if (add.empty()) {
+        MessageBoxA(hwnd, "None of the selected files could be read.",
+                    "Import Textures", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::string err;
+    if (!PackIntoPackage(pkg, OZ_PACKAGE_MAGIC_TX, add, err)) {
+        MessageBoxA(hwnd, err.c_str(), "Import Textures", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (!HotLoadPackage(pkg, err)) {
+        MessageBoxA(hwnd, err.c_str(), "Import Textures", MB_OK | MB_ICONERROR);
+        return;
     }
 
     ScanTextureBrowserFiles();
 
-    std::string msg = "Imported " + std::to_string(copied) + " texture(s) into:\n" +
-                      dest.string();
-    if (failed) msg += "\n" + std::to_string(failed) + " file(s) failed.";
-    msg += "\n\nReopen the world (or Refresh) to use them as tileset slots.";
-    MessageBoxA(hwnd, msg.c_str(), "Import Textures", MB_OK | MB_ICONINFORMATION);
+    std::string msg = "Packed " + std::to_string(add.size()) + " texture(s) into:\n" +
+                      pkg.string() + "\n\nAvailable as:\n  tex=Textures/" +
+                      (names.empty() ? std::string() : names[0]);
+    if (names.size() > 1) msg += "\n  ... and " + std::to_string(names.size() - 1) + " more";
+    if (failed) msg += "\n\n" + std::to_string(failed) + " file(s) failed to read.";
+    msg += "\n\n";
+    msg += kTexSlotWarning;
+    MessageBoxA(hwnd, msg.c_str(), "Import Textures (packed)", MB_OK | MB_ICONINFORMATION);
 }
 
 // =====================================================================
 // Texture Grid View — custom control drawing thumbnails in a responsive grid
 // =====================================================================
 struct TextureGridState {
-    int selectedIdx = -1;
+    int selectedIdx = -1;   // grid position, NOT a g_textureFiles index
     int columns = 1;
     int totalHeight = 0;
 };
@@ -606,7 +929,7 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         if (ch < 1) ch = 1;
         state->columns = (cw - 8) / (TEX_CELL_W + TEX_GRID_GAP);
         if (state->columns < 1) state->columns = 1;
-        int rows = ((int)g_textureFiles.size() + state->columns - 1) / state->columns;
+        int rows = (TexVisibleCount() + state->columns - 1) / state->columns;
         state->totalHeight = rows * (TEX_CELL_H + TEX_GRID_GAP) + 8;
         SCROLLINFO si = { sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE, 0, state->totalHeight, ch, 0 };
         SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
@@ -624,16 +947,19 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 
         FillRect(hdc, &ps.rcPaint, GetSysColorBrush(COLOR_WINDOW));
 
-        for (size_t i = 0; i < g_textureFiles.size(); i++) {
-            int col = (int)(i % state->columns);
-            int row = (int)(i / state->columns);
+        const int visCount = TexVisibleCount();
+        for (int i = 0; i < visCount; i++) {
+            const int fi = TexEntryAt(i);
+            if (fi < 0) continue;
+            int col = (i % state->columns);
+            int row = (i / state->columns);
             int x = 4 + col * (TEX_CELL_W + TEX_GRID_GAP);
             int y = 4 + row * (TEX_CELL_H + TEX_GRID_GAP) - scrollPos;
 
             if (y + TEX_CELL_H < 0 || y > rc.bottom) continue;
 
             // Selection highlight
-            if ((int)i == state->selectedIdx) {
+            if (i == state->selectedIdx) {
                 RECT sel = { x - 2, y - 2, x + TEX_CELL_W + 2, y + TEX_CELL_H + 2 };
                 HBRUSH hBrush = CreateSolidBrush(RGB(60, 80, 120));
                 FillRect(hdc, &sel, hBrush);
@@ -641,8 +967,8 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
             }
 
             // Thumbnail
-            if (g_textureFiles[i].thumbnail) {
-                SelectObject(hdcMem, g_textureFiles[i].thumbnail);
+            if (g_textureFiles[fi].thumbnail) {
+                SelectObject(hdcMem, g_textureFiles[fi].thumbnail);
                 StretchBlt(hdc, x + (TEX_CELL_W - TEX_THUMB_SIZE) / 2, y + 2,
                            TEX_THUMB_SIZE, TEX_THUMB_SIZE, hdcMem, 0, 0, TEX_THUMB_SIZE, TEX_THUMB_SIZE, SRCCOPY);
             }
@@ -651,7 +977,7 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
             RECT tr = { x, y + TEX_THUMB_SIZE + 4, x + TEX_CELL_W, y + TEX_CELL_H };
             SetTextColor(hdc, RGB(200, 200, 200));
             SetBkMode(hdc, TRANSPARENT);
-            DrawTextA(hdc, g_textureFiles[i].name.c_str(), -1, &tr, DT_CENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
+            DrawTextA(hdc, g_textureFiles[fi].name.c_str(), -1, &tr, DT_CENTER | DT_SINGLELINE | DT_WORD_ELLIPSIS);
         }
         DeleteDC(hdcMem);
         EndPaint(hwnd, &ps);
@@ -664,7 +990,7 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         int col = (mx - 4) / (TEX_CELL_W + TEX_GRID_GAP);
         int row = (my + scrollPos - 4) / (TEX_CELL_H + TEX_GRID_GAP);
         int idx = row * state->columns + col;
-        if (idx >= 0 && idx < (int)g_textureFiles.size() && col < state->columns && mx >= 4) {
+        if (idx >= 0 && idx < TexVisibleCount() && col < state->columns && mx >= 4) {
             state->selectedIdx = idx;
             InvalidateRect(hwnd, NULL, TRUE);
             PostMessage(GetParent(hwnd), WM_COMMAND, MAKEWPARAM(ID_TEX_LIST, 1), 0);
@@ -678,7 +1004,7 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         int col = (mx - 4) / (TEX_CELL_W + TEX_GRID_GAP);
         int row = (my + scrollPos - 4) / (TEX_CELL_H + TEX_GRID_GAP);
         int idx = row * state->columns + col;
-        if (idx >= 0 && idx < (int)g_textureFiles.size() && col < state->columns && mx >= 4) {
+        if (idx >= 0 && idx < TexVisibleCount() && col < state->columns && mx >= 4) {
             state->selectedIdx = idx;
             InvalidateRect(hwnd, NULL, TRUE);
             PostMessage(GetParent(hwnd), WM_COMMAND, MAKEWPARAM(ID_TEX_LIST, 2), 0);
@@ -732,8 +1058,90 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 // =====================================================================
 // Texture Manager v3 — Grid-based texture browser, dynamic resize, package-only
 // =====================================================================
+// Rebuilds the (GameData)/(Packages) scope tree from g_textureFiles, honouring
+// the search box, then republishes the grid's visible set. Mirrors
+// FillModelScopeTree in the Model Browser.
+// Republish the grid's visible set from the tree's current selection and
+// refresh it. Split out from FillTextureScopeTree so a selection change can
+// refresh the grid WITHOUT rebuilding the tree — rebuilding from inside the
+// tree's own TVN_SELCHANGED notification would destroy the very selection that
+// triggered it.
+static void UpdateTextureScopeSelection(HWND hwnd, HWND hTree, HWND hGrid) {
+    // Grid shows the selected scope's leaves; with no selection it shows all
+    // (g_textureVisible empty => identity mapping), which is the pre-tree
+    // behaviour.
+    g_textureVisible.clear();
+    HTREEITEM sel = hTree ? (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0) : nullptr;
+    if (sel) CollectScopeLeavesUnder(hTree, sel, g_textureVisible);
+
+    if (hGrid) {
+        RECT rc;
+        GetClientRect(hGrid, &rc);
+        auto* gs = (TextureGridState*)GetWindowLongPtr(hGrid, GWLP_USERDATA);
+        if (gs) gs->selectedIdx = -1;   // grid positions just changed
+        SendMessage(hGrid, WM_SIZE, 0, MAKELPARAM(rc.right - rc.left, rc.bottom - rc.top));
+        InvalidateRect(hGrid, NULL, TRUE);
+    }
+    if (hwnd) {
+        HWND hSrc = GetDlgItem(hwnd, ID_TEX_SRC_LABEL);
+        if (hSrc) {
+            if (g_textureVisible.empty())
+                SetWindowTextA(hSrc, "Source: all textures (no scope selected)");
+            else if (g_textureVisible.size() == 1)
+                SetWindowTextA(hSrc, "Source: 1 texture in scope");
+            else
+                SetWindowTextA(hSrc, TextFormat("Source: %d textures in scope",
+                                                (int)g_textureVisible.size()));
+        }
+    }
+}
+
+static void FillTextureScopeTree(HWND hwnd, HWND hTree, HWND hGrid) {
+    if (!hTree) return;
+    std::vector<AssetScopeItem> items;
+    items.reserve(g_textureFiles.size());
+    for (const auto& e : g_textureFiles)
+        items.push_back({e.name, e.path, !IsPathFile(e.path.c_str())});
+
+    char search[128] = {};
+    GetWindowTextA(GetDlgItem(hwnd, ID_TEX_SEARCH), search, sizeof(search));
+    AssetScopeNode tree = BuildAssetScope(items, search);
+
+    SendMessage(hTree, WM_SETREDRAW, FALSE, 0);
+    SendMessage(hTree, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
+
+    std::function<void(const AssetScopeNode&, HTREEITEM)> add =
+        [&](const AssetScopeNode& n, HTREEITEM parent) {
+            for (const auto& c : n.children) {
+                std::wstring wl(c.label.begin(), c.label.end());
+                TVINSERTSTRUCTW ins = {};
+                ins.hParent = parent;
+                ins.itemex.mask = TVIF_TEXT | TVIF_PARAM;
+                ins.itemex.pszText = (LPWSTR)wl.c_str();
+                ins.itemex.lParam = (LPARAM)c.entryIndex;
+                HTREEITEM h = (HTREEITEM)SendMessage(hTree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+                if (h && c.entryIndex < 0) {
+                    add(c, h);
+                    if (search[0]) SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)h);
+                }
+            }
+        };
+    add(tree, TVI_ROOT);
+
+    if (!search[0]) {
+        HTREEITEM r = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_ROOT, 0);
+        for (; r; r = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)r))
+            SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)r);
+    }
+    SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(hTree, nullptr, TRUE);
+
+    UpdateTextureScopeSelection(hwnd, hTree, hGrid);
+}
+
 static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hGrid = nullptr, hTarget = nullptr, hPreview = nullptr, hDims = nullptr, hSrc = nullptr;
+    static HWND hScope = nullptr;
     switch (msg) {
     case WM_CREATE: {
         int x = 10, y = 10, bw = 500;
@@ -743,12 +1151,21 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         CreateButton(hwnd, L"Import Textures", x + 106, y, 116, 24, ID_TEX_IMPORT);
         CreateButton(hwnd, L"Refresh", x + 228, y, 70, 24, ID_TEX_REFRESH);
         CreateButton(hwnd, L"Close", x + bw - 80, y, 80, 24, ID_TEX_CLOSE);
+        // Search box shares the toolbar row (right of the buttons).
+        CreateLabel(hwnd, L"Search", x + 304, y + 2, 44, 20, 2);
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            x + 348, y, 150, 24, hwnd, (HMENU)(INT_PTR)ID_TEX_SEARCH, g_hInst, nullptr);
         y += 30;
 
-        // Grid view (replaces old owner-drawn listbox)
+        // Scope tree (left) + thumbnail grid (right)
+        hScope = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | TVS_HASBUTTONS |
+            TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+            x, y, 150, 200, hwnd, (HMENU)(INT_PTR)ID_TEX_SCOPE, g_hInst, nullptr);
         hGrid = CreateWindowEx(WS_EX_CLIENTEDGE, CLASS_TEXTURE_GRID, L"",
             WS_CHILD | WS_VISIBLE | WS_VSCROLL,
-            x, y, bw, 200, hwnd, (HMENU)(INT_PTR)ID_TEX_LIST, g_hInst, nullptr);
+            x + 156, y, bw - 156, 200, hwnd, (HMENU)(INT_PTR)ID_TEX_LIST, g_hInst, nullptr);
         y += 206;
 
         // Source + dimensions info
@@ -803,14 +1220,19 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_REFRESH), NULL, x + 228, 10, 70, 24, SWP_NOZORDER);
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_CLOSE), NULL, x + bw - 80, 10, 80, 24, SWP_NOZORDER);
 
-        // Grid — fill most of the window
+        // Grid — fill most of the window, to the right of the scope tree
         int gridBot = winH - 280;
         if (gridBot < 60) gridBot = 60;
         int gridH = gridBot - 40;
         if (gridH < 20) gridH = 20;
+        int treeW = 150;
+        if (bw - treeW - 156 < 80) treeW = 90;   // keep the grid usable when narrow
+        if (hScope) {
+            SetWindowPos(hScope, NULL, x, 40, treeW, gridH, SWP_NOZORDER);
+        }
         if (hGrid) {
-            SetWindowPos(hGrid, NULL, x, 40, bw, gridH, SWP_NOZORDER);
-            SendMessage(hGrid, WM_SIZE, 0, MAKELPARAM(bw, gridH));
+            SetWindowPos(hGrid, NULL, x + treeW + 6, 40, bw - treeW - 6, gridH, SWP_NOZORDER);
+            SendMessage(hGrid, WM_SIZE, 0, MAKELPARAM(bw - treeW - 6, gridH));
         }
 
         // Info labels
@@ -895,12 +1317,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             }
         }
         // Refresh grid
-        if (hGrid) {
-            RECT rc;
-            GetClientRect(hGrid, &rc);
-            SendMessage(hGrid, WM_SIZE, 0, MAKELPARAM(rc.right - rc.left, rc.bottom - rc.top));
-            InvalidateRect(hGrid, NULL, TRUE);
-        }
+        FillTextureScopeTree(hwnd, hScope, hGrid);
         break;
     }
     case WM_USER + 51: {
@@ -952,11 +1369,15 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             }
         } else if (id == ID_TEX_IMPORT) {
             ImportTexturesIntoWorld(hwnd);
+        } else if (id == ID_TEX_SEARCH && notify == EN_CHANGE) {
+            // Tree is rebuilt from the existing g_textureFiles (already in
+            // memory), so typing does not hit the filesystem.
+            FillTextureScopeTree(hwnd, hScope, hGrid);
         } else if (id == ID_TEX_LIST && notify == 1) {
             // Grid selection changed — update preview
             if (hGrid) {
                 auto* gs = (TextureGridState*)GetWindowLongPtr(hGrid, GWLP_USERDATA);
-                int sel = gs ? gs->selectedIdx : -1;
+                int sel = TexEntryAt(gs ? gs->selectedIdx : -1);
                 if (sel >= 0 && sel < (int)g_textureFiles.size()) {
                     std::string& p = g_textureFiles[sel].path;
                     g_editorPanels.activeTexturePath = p;
@@ -998,7 +1419,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             int sel = -1;
             if (hGrid) {
                 auto* gs = (TextureGridState*)GetWindowLongPtr(hGrid, GWLP_USERDATA);
-                sel = gs ? gs->selectedIdx : -1;
+                sel = TexEntryAt(gs ? gs->selectedIdx : -1);
             }
             if (sel >= 0 && sel < (int)g_textureFiles.size()) {
                 int target = (int)SendMessage(hTarget, CB_GETCURSEL, 0, 0);
@@ -1007,6 +1428,17 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                     g_editorPanels.actionTextureTarget = target + 1;
                 }
             }
+        }
+        break;
+    }
+    case WM_NOTIFY: {
+        // Scope tree selection (WM_NOTIFY, not WM_COMMAND). Refresh the grid
+        // from the new selection WITHOUT rebuilding the tree.
+        NMHDR* nh = (NMHDR*)l;
+        if (nh && nh->idFrom == ID_TEX_SCOPE &&
+            nh->code == TVN_SELCHANGEDW) {
+            UpdateTextureScopeSelection(hwnd, hScope, hGrid);
+            return 0;
         }
         break;
     }
@@ -1320,7 +1752,7 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
         else if (defName == "ZONE_REVERB")         n.zoneType = ZoneType::ZONE_REVERB;
         else if (defName == "ZONE_GAMEPLAY_SOUND") n.zoneType = ZoneType::ZONE_GAMEPLAY_SOUND;
         else                                        n.zoneType = ZoneType::ZONE_WATER;
-        ps.AddZone(n);
+        ZoneManager::Instance().AddZone(n);
     } else if (typeTag == "mesh_static" || typeTag == "mesh_skeletal") {
         int idx = g_editorPanels.selectedModel;
         if (idx < 0 || idx >= (int)g_editorPanels.modelEntries.size()) return false;
@@ -1750,13 +2182,14 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // =====================================================================
 // Model / Mesh Browser
 // =====================================================================
-static const int ID_MDL_LIST    = 100;
 static const int ID_MDL_REFRESH = 101;
 static const int ID_MDL_PLACE   = 102;
 static const int ID_MDL_CLOSE   = 103;
 static const int ID_MDL_PREVIEW = 104;
 static const int ID_MDL_IMPORT  = 105;
 static const int ID_MDL_EXPORT  = 106;
+static const int ID_MDL_SCOPE   = 107;   // scope tree
+static const int ID_MDL_SEARCH  = 108;   // search edit box
 
 static const UINT WM_MODEL_SELECTED = WM_USER + 100;
 static const UINT WM_PREVIEW_READY  = WM_USER + 101;
@@ -1859,21 +2292,105 @@ static void LayoutModelBrowser(HWND hwnd, HWND hList, HWND hPreview, HWND hInfo,
     if (hClose)   MoveWindow(hClose, W - 8 - 72, H - 8 - 24, 72, 24, TRUE);
 }
 
+// --- Model Browser scope tree -------------------------------------------
+// Rebuilds the (GameData)/(Packages) tree from modelEntries, honouring the
+// search box. Leaves carry their modelEntries index in lParam; folders carry -1.
+static void FillModelScopeTree(HWND hTree) {
+    if (!hTree) return;
+    std::vector<AssetScopeItem> items;
+    items.reserve(g_editorPanels.modelEntries.size());
+    for (const auto& e : g_editorPanels.modelEntries)
+        items.push_back({e.name, e.path, !IsPathFile(e.path.c_str())});
+
+    char search[128] = {};
+    GetWindowTextA(GetDlgItem(GetParent(hTree), ID_MDL_SEARCH), search, sizeof(search));
+    AssetScopeNode tree = BuildAssetScope(items, search);
+
+    SendMessage(hTree, WM_SETREDRAW, FALSE, 0);
+    SendMessage(hTree, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
+
+    std::function<void(const AssetScopeNode&, HTREEITEM, bool)> add =
+        [&](const AssetScopeNode& n, HTREEITEM parent, bool isRoot) {
+            for (const auto& c : n.children) {
+                std::wstring wl(c.label.begin(), c.label.end());
+                TVINSERTSTRUCTW ins = {};
+                ins.hParent = parent;
+                ins.itemex.mask = TVIF_TEXT | TVIF_PARAM;
+                ins.itemex.pszText = (LPWSTR)wl.c_str();
+                ins.itemex.lParam = (LPARAM)c.entryIndex;
+                HTREEITEM h = (HTREEITEM)SendMessage(hTree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+                if (h && c.entryIndex < 0) {
+                    add(c, h, false);
+                    // While filtering, reveal matches without a click.
+                    if (search[0]) SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)h);
+                }
+            }
+        };
+    add(tree, TVI_ROOT, true);
+
+    // With no filter, start with the two roots expanded so the tree is useful
+    // immediately; folders stay collapsed so deep hierarchies don't explode.
+    if (!search[0]) {
+        HTREEITEM r = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_ROOT, 0);
+        for (; r; r = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)r))
+            SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)r);
+    }
+    SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(hTree, nullptr, TRUE);
+}
+
+// Selected leaf's modelEntries index, or -1 when a folder (or nothing) is picked.
+static int SelectedModelFromTree(HWND hTree) {
+    if (!hTree) return -1;
+    HTREEITEM h = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
+    if (!h) return -1;
+    TVITEMW tvi = {};
+    tvi.mask = TVIF_PARAM;
+    tvi.hItem = h;
+    if (!SendMessage(hTree, TVM_GETITEMW, 0, (LPARAM)&tvi)) return -1;
+    if (tvi.lParam < 0) return -1;
+    if (tvi.lParam >= (int)g_editorPanels.modelEntries.size()) return -1;
+    return (int)tvi.lParam;
+}
+
+static void ShowModelInfoFor(HWND hInfo, int idx) {
+    if (!hInfo || idx < 0 || idx >= (int)g_editorPanels.modelEntries.size()) {
+        if (hInfo) SetWindowTextA(hInfo, "Select a model from the tree");
+        return;
+    }
+    g_editorPanels.selectedModel = idx;
+    const auto& e = g_editorPanels.modelEntries[idx];
+    char buf[640];
+    snprintf(buf, sizeof(buf), "%s   (%d verts, %d tris)\n%s",
+             e.name.c_str(), e.vertices, e.triangles, e.path.c_str());
+    SetWindowTextA(hInfo, buf);
+}
+
 static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn;
     int id;
     switch (msg) {
     case WM_CREATE: {
         int PW = 540, PH = 500;
-        hList = CreateListBox(hwnd, 8, 32, 230, PH - 100, ID_MDL_LIST);
+        // Scope tree replaces the old flat listbox: (GameData) / (Packages)
+        // roots with the real folder hierarchy underneath.
+        hList = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+             WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | TVS_HASBUTTONS |
+             TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+             8, 32, 230, PH - 100, hwnd, (HMENU)(INT_PTR)ID_MDL_SCOPE,
+             g_hInst, nullptr);
         hPreview = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"",
              WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
              248, 32, 260, 220, hwnd, (HMENU)(INT_PTR)ID_MDL_PREVIEW,
              g_hInst, nullptr);
-        hInfo    = CreateLabel(hwnd, L"Select a model from the list", 248, 260, 260, 60, 2);
+        hInfo    = CreateLabel(hwnd, L"Select a model from the tree", 248, 260, 260, 60, 2);
         hRefreshBtn = CreateButton(hwnd, L"Refresh", 8, 4, 80, 22, ID_MDL_REFRESH);
         CreateIconButton(hwnd, L"Import", 94, 4, 74, 22, ID_MDL_IMPORT, "BBGeneric");
         CreateIconButton(hwnd, L"Export", 172, 4, 74, 22, ID_MDL_EXPORT, "BBSheet");
+        CreateLabel(hwnd, L"Search", 252, 4, 44, 22, 2);
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
+             WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+             294, 4, 150, 22, hwnd, (HMENU)(INT_PTR)ID_MDL_SEARCH, g_hInst, nullptr);
         hPlaceBtn   = CreateButton(hwnd, L"Place in World", 248, 340, 120, 24, ID_MDL_PLACE);
         hCloseBtn   = CreateButton(hwnd, L"Close", PW - 72, PH - 28, 64, 22, ID_MDL_CLOSE);
         LayoutModelBrowser(hwnd, hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn);
@@ -1883,10 +2400,8 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         LayoutModelBrowser(hwnd, hList, hPreview, hInfo, hRefreshBtn, hPlaceBtn, hCloseBtn);
         break;
     case WM_USER + 50: {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (auto& e : g_editorPanels.modelEntries)
-            SendMessageA(hList, LB_ADDSTRING, 0, (LPARAM)e.name.c_str());
-        SetWindowTextA(hInfo, "Select a model from the list");
+        FillModelScopeTree(hList);
+        SetWindowTextA(hInfo, "Select a model from the tree");
         break;
     }
     case WM_PREVIEW_READY: {
@@ -1904,24 +2419,20 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             ShowModelBrowser(false);
         } else if (id == ID_MDL_REFRESH) {
             g_editorPanels.actionRefreshBrowser = true;
+        } else if (id == ID_MDL_SEARCH && HIWORD(w) == EN_CHANGE) {
+            // Rebuild the tree from the current search text. modelEntries is
+            // already populated, so this does not touch the filesystem.
+            FillModelScopeTree(hList);
+            SetWindowTextA(hInfo, "Select a model from the tree");
         } else if (id == ID_MDL_PLACE) {
-            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < (int)g_editorPanels.modelEntries.size()) {
+            int sel = SelectedModelFromTree(hList);
+            if (sel >= 0) {
                 g_editorPanels.selectedModel = sel;
                 g_editorPanels.actionPlaceModel = sel;
             }
-        } else if (id == ID_MDL_LIST && HIWORD(w) == LBN_SELCHANGE) {
-            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < (int)g_editorPanels.modelEntries.size()) {
-                g_editorPanels.selectedModel = sel;
-                const auto& e = g_editorPanels.modelEntries[sel];
-                char buf[512];
-                snprintf(buf, sizeof(buf), "%s   (%d verts, %d tris)\n%s",
-                         e.name.c_str(), e.vertices, e.triangles, e.path.c_str());
-                SetWindowTextA(hInfo, buf);
-            }
         } else if (id == ID_MDL_IMPORT) {
-            // Copy an external model (and its companion texture) into GameData.
+            // Import an external model (and its companion texture) by packing it
+            // straight into System/Data/imported_models.ozpak (OZPK).
             wchar_t path[MAX_PATH] = L"";
             OPENFILENAMEW ofn = {};
             ofn.lStructSize = sizeof(ofn);
@@ -1931,26 +2442,42 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             ofn.lpstrFilter = L"Meshes (*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d)\0*.obj;*.glb;*.gltf;*.iqm;*.vox;*.m3d\0All Files (*.*)\0*.*\0\0";
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
             if (GetOpenFileNameW(&ofn)) {
-                std::error_code ec;
                 fs::path src(path);
-                fs::path destDir = fs::current_path() / "GameData" / "Global" / "Models";
-                fs::create_directories(destDir, ec);
-                fs::path dest = destDir / src.filename();
-                fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
+                std::vector<std::pair<std::string, std::vector<uint8_t>>> add;
+                std::vector<uint8_t> data;
+                if (ReadWholeFile(src, data) && !data.empty())
+                    add.push_back({"Models/" + src.filename().string(), std::move(data)});
+                if (add.empty()) {
+                    MessageBoxA(hwnd, "Could not read the selected file.",
+                                "Import Mesh", MB_OK | MB_ICONERROR);
+                    break;
+                }
+                // Companion texture, if one sits next to the mesh.
                 std::string stem = src.stem().string();
-                for (const char* suf : {"_texture.png", ".png", "_texture.tga", ".tga", "_texture.bmp", ".bmp"}) {
+                for (const char* suf : {"_texture.png", ".png", "_texture.tga", ".tga",
+                                        "_texture.bmp", ".bmp"}) {
                     fs::path tp = src.parent_path() / (stem + suf);
-                    if (fs::exists(tp)) {
-                        fs::copy_file(tp, destDir / tp.filename(), fs::copy_options::overwrite_existing, ec);
+                    if (fs::exists(tp) && ReadWholeFile(tp, data) && !data.empty()) {
+                        add.push_back({"Models/" + tp.filename().string(), data});
                         break;
                     }
                 }
+
+                fs::path pkg = fs::current_path() / "System" / "Data" / "imported_models.ozpak";
+                std::string err;
+                if (!PackIntoPackage(pkg, OZ_PACKAGE_MAGIC_PK, add, err) ||
+                    !HotLoadPackage(pkg, err)) {
+                    MessageBoxA(hwnd, err.c_str(), "Import Mesh", MB_OK | MB_ICONERROR);
+                    break;
+                }
                 ScanModelBrowserFiles();
-                fprintf(stdout, "Imported mesh '%s' -> %s\n", src.filename().string().c_str(), dest.string().c_str());
+                fprintf(stdout, "Packed mesh '%s' -> %s\n",
+                        src.filename().string().c_str(), pkg.string().c_str());
             }
         } else if (id == ID_MDL_EXPORT) {
-            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-            if (sel < 0 || sel >= (int)g_editorPanels.modelEntries.size()) {
+
+            int sel = SelectedModelFromTree(hList);
+            if (sel < 0) {
                 MessageBoxA(hwnd, "Select a model first.", "Export Mesh", MB_OK | MB_ICONINFORMATION);
             } else {
                 const auto& e = g_editorPanels.modelEntries[sel];
@@ -1985,6 +2512,16 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                     fprintf(stdout, "Exported mesh '%s' -> %s\n", e.name.c_str(), dest.string().c_str());
                 }
             }
+        }
+        break;
+    }
+    case WM_NOTIFY: {
+        // Treeview selection arrives as WM_NOTIFY, not WM_COMMAND.
+        NMHDR* nh = (NMHDR*)l;
+        if (nh && nh->idFrom == ID_MDL_SCOPE &&
+            nh->code == TVN_SELCHANGEDW) {
+            ShowModelInfoFor(hInfo, SelectedModelFromTree(hList));
+            return 0;
         }
         break;
     }
@@ -2196,11 +2733,11 @@ static void ShowZoneTab(HWND hwnd, int tab) {
 
 // --- Portal tab data plumbing ---
 int GetPortalCount() {
-    return (int)PawnSystem::Instance().GetPortals().size();
+    return (int)ZoneManager::Instance().GetPortals().size();
 }
 
 const char* GetPortalTargetWorld(int index) {
-    auto& portals = PawnSystem::Instance().GetPortals();
+    auto& portals = ZoneManager::Instance().GetPortals();
     if (index < 0 || index >= (int)portals.size()) return nullptr;
     return portals[index].targetWorld.c_str();
 }
@@ -2212,7 +2749,7 @@ void RefreshPortalList() {
     HWND hList = GetDlgItem((HWND)g_editorPanels.hEnvPanel, ID_CMB_PORTAL_LIST);
     if (!hList) return;
     SendMessage(hList, CB_RESETCONTENT, 0, 0);
-    auto& portals = PawnSystem::Instance().GetPortals();
+    auto& portals = ZoneManager::Instance().GetPortals();
     for (size_t p = 0; p < portals.size(); p++) {
         wchar_t label[300];
         std::wstring tgt(portals[p].targetWorld.begin(), portals[p].targetWorld.end());
@@ -2227,7 +2764,7 @@ void RefreshPortalList() {
 }
 
 static void LoadPortalIntoEditor(int index) {
-    auto& portals = PawnSystem::Instance().GetPortals();
+    auto& portals = ZoneManager::Instance().GetPortals();
     g_portalEdit.selectedIndex = index;
     if (index < 0 || index >= (int)portals.size()) {
         g_portalEdit.targetWorld[0] = 0;
@@ -3292,7 +3829,7 @@ static void BuildWorldGraphEntries() {
 
     // Zones
     {
-        auto& zones = PawnSystem::Instance().GetZones();
+        auto& zones = ZoneManager::Instance().GetZones();
         for (auto& z : zones) {
             WorldGraphEntry e;
             e.typeLabel = "Zone";
@@ -3309,7 +3846,7 @@ static void BuildWorldGraphEntries() {
 
     // Portals (level connections)
     {
-        auto& portals = PawnSystem::Instance().GetPortals();
+        auto& portals = ZoneManager::Instance().GetPortals();
         for (size_t p = 0; p < portals.size(); p++) {
             auto& portal = portals[p];
             WorldGraphEntry e;
@@ -4300,7 +4837,7 @@ void ShowPropertiesPanel(bool show) {
                 }
             }
         } else if (g_editorPanels.propsTargetType == 6) { // ZONE
-            for (auto& z : PawnSystem::Instance().GetZones()) {
+            for (auto& z : ZoneManager::Instance().GetZones()) {
                 if ((int)z.id == g_editorPanels.propsTargetIndex) {
             g_editorPanels.propZoneType = (int)z.zoneType;
             if (g_editorPanels.propZoneType > 4) g_editorPanels.propZoneType = 0;
@@ -4319,7 +4856,7 @@ void ShowPropertiesPanel(bool show) {
                 }
             }
         } else if (g_editorPanels.propsTargetType == 8) { // PORTAL
-            auto& portals = PawnSystem::Instance().GetPortals();
+            auto& portals = ZoneManager::Instance().GetPortals();
             if (g_editorPanels.propsTargetIndex >= 0 &&
                 g_editorPanels.propsTargetIndex < (int)portals.size()) {
                 auto& p = portals[g_editorPanels.propsTargetIndex];
@@ -4405,7 +4942,7 @@ void ShowPropertiesPanel(bool show) {
                 }
             }
         } else if (g_editorPanels.propsTargetType == 6) { // ZONE
-            auto& zones = PawnSystem::Instance().GetZones();
+            auto& zones = ZoneManager::Instance().GetZones();
             for (auto& z : zones) {
                 if ((int)z.id == g_editorPanels.propsTargetIndex) {
                     g_editorPanels.propSizeX = z.bounds.max.x - z.bounds.min.x;
@@ -4415,7 +4952,7 @@ void ShowPropertiesPanel(bool show) {
                 }
             }
         } else if (g_editorPanels.propsTargetType == 8) { // PORTAL
-            auto& portals = PawnSystem::Instance().GetPortals();
+            auto& portals = ZoneManager::Instance().GetPortals();
             if (g_editorPanels.propsTargetIndex >= 0 &&
                 g_editorPanels.propsTargetIndex < (int)portals.size()) {
                 auto& p = portals[g_editorPanels.propsTargetIndex];

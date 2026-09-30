@@ -13,8 +13,8 @@ namespace physics {
 
 struct PhysicsInfo {
     // Normal (grounded/airborne) integration
-    float gravity = 20.0f;            // positive magnitude; applied as -gravity
-    float jumpSpeed = 8.0f;           // upward impulse on Space
+    float gravity = 18.0f;            // positive magnitude; applied as -gravity
+    float jumpSpeed = 9.0f;           // upward impulse on Space
     float terminalVelocity = 60.0f;   // max fall speed (new; was unbounded)
 
     // Water zones

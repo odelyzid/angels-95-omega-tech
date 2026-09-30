@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <cstring>
 #include <unordered_set>
 
 namespace fs = std::filesystem;
@@ -108,4 +109,104 @@ bool LightningEntityRegistry::Register(const EntityDef& def) {
     }
     m_allDefs.push_back(def);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// LoadWorldOverrides — make the by-name map world-correct
+// ---------------------------------------------------------------------------
+namespace {
+
+std::string Slashes(std::string s) {
+    std::replace(s.begin(), s.end(), '\\', '/');
+    return s;
+}
+
+// Strip trailing separators so "…/Dust_Ravine/" and "…/Dust_Ravine" agree.
+std::string StripTrailingSlash(std::string s) {
+    while (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+    return s;
+}
+
+// The world NAME a def was parsed from, or "" when the def is global
+// (GameData/Global, GameData/Pawns, packages) and therefore always valid.
+// Comparing names rather than full paths keeps this working for the absolute
+// paths the .ozls scanner records and for packaged worlds.
+std::string WorldNameOfDef(const std::string& sourcePath) {
+    std::string sp = Slashes(sourcePath);
+
+    // Packaged worlds: System/Data/Zones/world_<Name>.ozone
+    const size_t zones = sp.find("System/Data/Zones/world_");
+    if (zones != std::string::npos) {
+        sp = sp.substr(zones + std::strlen("System/Data/Zones/world_"));
+        const size_t dot = sp.find_first_of(".\\");
+        return (dot == std::string::npos) ? sp : sp.substr(0, dot);
+    }
+
+    static const char* kRoot = "GameData/Worlds/";
+    const size_t at = sp.find(kRoot);
+    if (at == std::string::npos)
+        return "";
+    sp = sp.substr(at + std::strlen(kRoot));
+    const size_t slash = sp.find('/');
+    return (slash == std::string::npos) ? sp : sp.substr(0, slash);
+}
+
+// The world NAME a LoadWorld asset prefix refers to. Handles both
+// "GameData/Worlds/<Name>/" and a direct .ozone path (editor playtest), whose
+// world name is its containing folder.
+std::string WorldNameFromPrefix(const std::string& assetPrefix) {
+    const std::string s = StripTrailingSlash(Slashes(assetPrefix));
+    static const char* kRoot = "GameData/Worlds/";
+    const size_t at = s.find(kRoot);
+    if (at != std::string::npos) {
+        const std::string rest = s.substr(at + std::strlen(kRoot));
+        const size_t slash = rest.find('/');
+        return (slash == std::string::npos) ? rest : rest.substr(0, slash);
+    }
+    const size_t slash = s.find_last_of('/');
+    if (slash == std::string::npos) return "";
+    const std::string last = s.substr(slash + 1);
+    if (last.find('.') != std::string::npos)
+        return "";   // a bare filename, not a world directory
+    return last;
+}
+
+} // namespace
+
+void LightningEntityRegistry::LoadWorldOverrides(const std::string& worldDir) {
+    const std::string want = WorldNameFromPrefix(worldDir);
+    if (want.empty())
+        return;
+
+    int promoted = 0, dropped = 0;
+    for (auto it = m_defs.begin(); it != m_defs.end(); ) {
+        const std::string owner = WorldNameOfDef(it->second.sourcePath);
+        if (owner.empty() || owner == want) {   // global def, or already ours
+            ++it;
+            continue;
+        }
+        // This name is currently held by another world's def. Promote this
+        // world's version if it defines the same name, otherwise remove it so
+        // the other world cannot leak into this one.
+        const EntityDef* mine = nullptr;
+        for (const auto& d : m_allDefs) {
+            if (d.name == it->first && WorldNameOfDef(d.sourcePath) == want) {
+                mine = &d;
+                break;
+            }
+        }
+        if (mine) {
+            it->second = *mine;
+            ++promoted;
+            ++it;
+        } else {
+            OZ_DEBUG("Registry: world '%s' does not define '%s'; dropping %s's copy",
+                     want.c_str(), it->first.c_str(), owner.c_str());
+            it = m_defs.erase(it);
+            ++dropped;
+        }
+    }
+    if (promoted || dropped)
+        OZ_INFO("Registry: world overrides for '%s' (%d promoted, %d dropped)",
+                want.c_str(), promoted, dropped);
 }

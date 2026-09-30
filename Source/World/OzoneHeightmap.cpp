@@ -171,7 +171,11 @@ Model OzoneLoader::BuildHeightmap(const std::string& imagePath,
     if (!m_hmTexture.id) {
         OZ_WARN("OZONE heightmap: texture load failed for '%s'", texPath.c_str());
     } else {
-        // Tiled UVs need repeat wrapping; mipmaps + trilinear reduce shimmer
+        // Tiled UVs need repeat wrapping. The terrain is by far the largest
+        // surface in a level and is always seen at a grazing angle, so it keeps
+        // mipmaps + trilinear: with POINT the 32px sand tile minifies to ~22
+        // repeats across the map and aliases into a dark, noisy plate. This is
+        // a deliberate exception to the engine's point-filtered PS1 look.
         SetTextureWrap(m_hmTexture, TEXTURE_WRAP_REPEAT);
         GenTextureMipmaps(&m_hmTexture);
         SetTextureFilter(m_hmTexture, TEXTURE_FILTER_TRILINEAR);

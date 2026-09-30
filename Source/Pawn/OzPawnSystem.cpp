@@ -1,20 +1,43 @@
-﻿#include "OzPawnSystem.hpp"
+#include "OzPawnSystem.hpp"
 #include "../Renderer/OzAssetMapper.hpp"
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Renderer/CombatFX.hpp"
 #include "../Renderer/WindShader.hpp"
 #include "../Particle/OzParticleSimulationManager.hpp"
+#include "../Audio/SoundManager.hpp"
 #include "../Script/LightningEntityManager.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
 #include "PlayerMovement.hpp"
 #include "Items.hpp"
+#include "../DebugFlags.hpp"
 #include "../Log.hpp"
 #include <rlgl.h>
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+
+// ---------------------------------------------------------------------------
+// AssignLightZones — bind each light to the first zone volume that contains it.
+// zoneId -1 means "affects every zone" (the default). Called by the world
+// orchestrator (Core.hpp LoadWorld / AngelEd open) once the OZONE entity set has
+// been injected, so the loader itself never writes entity-system state.
+// ---------------------------------------------------------------------------
+void PawnSystem::AssignLightZones() {
+    auto& zones = ZoneManager::Instance().GetZones();
+    for (auto& l : m_lights) {
+        l.zoneId = -1;
+        for (auto& z : zones) {
+            if (l.position.x >= z.bounds.min.x && l.position.x <= z.bounds.max.x &&
+                l.position.y >= z.bounds.min.y && l.position.y <= z.bounds.max.y &&
+                l.position.z >= z.bounds.min.z && l.position.z <= z.bounds.max.z) {
+                l.zoneId = (int)z.id;
+                break;   // first containing zone wins
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -39,7 +62,7 @@ PawnDef* PawnSystem::FindDef(const char* name) {
 }
 
 // ---------------------------------------------------------------------------
-// AllocSlot â€” find a free slot or grow the vector
+// AllocSlot — find a free slot or grow the vector
 // ---------------------------------------------------------------------------
 int PawnSystem::AllocSlot() {
     if (!m_freeIds.empty()) {
@@ -101,17 +124,8 @@ int PawnSystem::Spawn(Vector3 pos, const char* defName) {
             p.sprite = LoadTextureWithFallback(fallbackSprite.c_str());
         }
 
-        if (!def->scream_path.empty())
-            p.scream = LoadSoundWithFallback(def->scream_path.c_str());
-        if (p.scream.frameCount == 0) {
-            // Convention fallback: GameData/Global/Pawn/<name>.wav then .mp3
-            std::string fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".wav";
-            p.scream = LoadSoundWithFallback(fallbackScream.c_str());
-            if (p.scream.frameCount == 0) {
-                fallbackScream = std::string("GameData/Global/Pawn/") + defName + ".mp3";
-                p.scream = LoadSoundWithFallback(fallbackScream.c_str());
-            }
-        }
+        // Aggro stinger: explicit def path, then GameData/Global/Pawn/<name>.{wav,mp3}
+        p.scream = SoundManager::LoadPawnScream(def->name, def->scream_path);
     }
 
     // Optionally create a LightningScript entity instance for script hooks
@@ -199,13 +213,13 @@ LightNode* PawnSystem::GetLight(int id) {
 }
 
 // ---------------------------------------------------------------------------
-// IsPlayerAttacked — check if any pawn is close enough to damage the player
+// IsPlayerAttacked � check if any pawn is close enough to damage the player
 // ---------------------------------------------------------------------------
 bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
     outDamage = 0.0f;
     for (auto& p : m_pawns) {
         if (!p.active || p.state == PawnState::DEAD) continue;
-        // Server-owned NPCs apply damage server-side (PLAYER_HURT) — skip locally.
+        // Server-owned NPCs apply damage server-side (PLAYER_HURT) � skip locally.
         if (p.networkControlled) continue;
 
         float dx = playerPos.x - p.position.x;
@@ -221,7 +235,7 @@ bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
 }
 
 // ---------------------------------------------------------------------------
-// ApplyPawnDamage — damage + death transition (fires on_death script hook)
+// ApplyPawnDamage � damage + death transition (fires on_death script hook)
 // ---------------------------------------------------------------------------
 void PawnSystem::ApplyPawnDamage(Pawn& p, int damage) {
     if (!p.active || p.state == PawnState::DEAD) return;
@@ -482,64 +496,6 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
     }
 }
 
-// ---------------------------------------------------------------------------
-// Zone Volume Nodes
-// ---------------------------------------------------------------------------
-int PawnSystem::AddZone(const ZoneVolumeNode& node) {
-    ZoneVolumeNode n = node;
-    if (n.id == 0) n.id = m_nextEntityId++;
-    m_zones.push_back(n);
-    return (int)n.id;
-}
-
-void PawnSystem::RemoveZone(int id) {
-    auto it = std::remove_if(m_zones.begin(), m_zones.end(),
-        [id](const ZoneVolumeNode& n) { return n.id == (uint32_t)id; });
-    m_zones.erase(it, m_zones.end());
-}
-
-void PawnSystem::ClearZones() {
-    m_zones.clear();
-}
-
-ZoneVolumeNode* PawnSystem::GetZone(int id) {
-    for (auto& n : m_zones) {
-        if (n.id == (uint32_t)id) return &n;
-    }
-    return nullptr;
-}
-
-ZoneVolumeNode* PawnSystem::CheckZoneCollision(Vector3 pos, BoundingBox bounds) {
-    // Check if point is inside any zone
-    for (auto& n : m_zones) {
-        if (pos.x >= n.bounds.min.x && pos.x <= n.bounds.max.x &&
-            pos.y >= n.bounds.min.y && pos.y <= n.bounds.max.y &&
-            pos.z >= n.bounds.min.z && pos.z <= n.bounds.max.z) {
-            return &n;
-        }
-    }
-    // Also check box collision
-    for (auto& n : m_zones) {
-        if (CheckCollisionBoxes(bounds, n.bounds)) {
-            return &n;
-        }
-    }
-    return nullptr;
-}
-
-// ---------------------------------------------------------------------------
-// Portal Nodes — level-to-level connections (campaign system)
-// ---------------------------------------------------------------------------
-int PawnSystem::AddPortal(const ZonePortal& node) {
-    ZonePortal n = node;
-    m_portals.push_back(n);
-    return (int)m_portals.size() - 1;
-}
-
-void PawnSystem::RemovePortal(int id) {
-    if (id < 0 || id >= (int)m_portals.size()) return;
-    m_portals.erase(m_portals.begin() + id);
-}
 
 void PawnSystem::EnsurePortalVisual() {
     if (m_portalVisualReady) return;
@@ -593,31 +549,6 @@ void PawnSystem::UnloadPortalVisual() {
         UnloadModel(m_portalQuadModel);
     }
     m_portalQuadModel = Model{0};
-}
-
-void PawnSystem::ClearPortals() {
-    UnloadPortalVisual();
-    m_portals.clear();
-}
-
-ZonePortal* PawnSystem::GetPortal(int id) {
-    if (id < 0 || id >= (int)m_portals.size()) return nullptr;
-    return &m_portals[id];
-}
-
-ZonePortal* PawnSystem::CheckPortalCollision(Vector3 pos, BoundingBox bounds) {
-    for (auto& p : m_portals) {
-        if (!p.enabled || p.targetWorld.empty()) continue;
-        if (pos.x >= p.bounds.min.x && pos.x <= p.bounds.max.x &&
-            pos.y >= p.bounds.min.y && pos.y <= p.bounds.max.y &&
-            pos.z >= p.bounds.min.z && pos.z <= p.bounds.max.z) {
-            return &p;
-        }
-        if (CheckCollisionBoxes(bounds, p.bounds)) {
-            return &p;
-        }
-    }
-    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -727,7 +658,7 @@ void PawnSystem::UpdateSkyZone(Vector3 playerPos, BoundingBox playerBounds) {
 }
 
 // ---------------------------------------------------------------------------
-// SyncSkyboxState — pull pending script effects into active SkyZoneNode
+// SyncSkyboxState � pull pending script effects into active SkyZoneNode
 // ---------------------------------------------------------------------------
 void PawnSystem::SyncSkyboxState() {
     SkyZoneNode* sky = GetActiveSkyZone();
@@ -745,7 +676,7 @@ void PawnSystem::SyncSkyboxState() {
 void PawnSystem::Update(Vector3 playerPos, float dt) {
     for (auto& p : m_pawns) {
         if (!p.active) continue;
-        // Network-controlled pawns: the server owns AI/position — no local FSM
+        // Network-controlled pawns: the server owns AI/position � no local FSM
         // (prevents double simulation and fights over position).
         if (p.networkControlled) continue;
 
@@ -807,7 +738,7 @@ void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
                     ? p.yaw
                     : atan2f(camera.position.x - p.position.x,
                              camera.position.z - p.position.z) * RAD2DEG;
-                t.scale = {1.0f, 1.0f, 1.0f};
+                t.scale = {def->model_scale, def->model_scale, def->model_scale};
                 p.mesh->Draw(t, litShader);
                 continue;
             }
@@ -819,7 +750,9 @@ void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
             } else {
                 DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
             }
-        } else {
+        } else if (g_debugEnabled) {
+            // No model and no sprite: fall back to the editor's pawn-node gizmo
+            // rather than a magenta missing-icon grid in a shipping frame.
             EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f, litShader);
         }
     }
@@ -987,7 +920,7 @@ Vector4 PawnSystem::SampleWind(Vector3 worldPos) const {
 }
 
 // ---------------------------------------------------------------------------
-// ClearWeaponPickupCache — release every cached render mesh asset
+// ClearWeaponPickupCache � release every cached render mesh asset
 // ---------------------------------------------------------------------------
 void PawnSystem::ClearWeaponPickupCache() {
     for (auto& p : m_pawns) p.mesh.reset();
@@ -1048,10 +981,15 @@ void PawnSystem::SyncPawnAnim(Pawn& p, PawnDef* def, float dt) {
 // DrawEntities - draw player starts, pickups, zones, emitters as billboards
 // ---------------------------------------------------------------------------
 void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windShader) {
-    // Player start billboards
-    for (auto& n : m_playerStarts) {
-        EngineBillboard::Draw(camera, "PlayerStart",
-            {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f, litShader);
+    // Player start billboards. Editor/debug visualisation only - these are gizmos
+    // marking authoring anchors, not level art, so they are hidden unless Debug
+    // is on. Previously unconditional, which put a marker at the player's feet in
+    // every frame of normal play and in every --shot capture.
+    if (g_debugEnabled) {
+        for (auto& n : m_playerStarts) {
+            EngineBillboard::Draw(camera, "PlayerStart",
+                {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f, litShader);
+        }
     }
 
     // Pickups with bobbing: render the entity's 3D model when it declares one
@@ -1096,7 +1034,14 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
             oz::MeshTransform t;
             t.position = pos;
             t.yaw = yaw;
-            t.scale = {1.5f, 1.5f, 1.5f};
+            // 1.5 is the historical pickup size; "mesh_scale" in the .ozls
+            // multiplies it so an authored model can be dialled in per pickup.
+            float s = 1.5f;
+            if (edef) {
+                auto ms = edef->stats.floats.find("mesh_scale");
+                if (ms != edef->stats.floats.end() && ms->second > 0.0f) s *= ms->second;
+            }
+            t.scale = {s, s, s};
             mesh->Draw(t, litShader);
         } else {
             EngineBillboard::DrawPickup(camera, n.typeName.c_str(), n.position, 0.8f, litShader);
@@ -1164,30 +1109,37 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
         n.mesh->Draw(t, shader);
     }
 
-    // Zone billboards at center of bounding box
-    for (auto& n : m_zones) {
-        Vector3 center = {
-            (n.bounds.min.x + n.bounds.max.x) * 0.5f,
-            (n.bounds.min.y + n.bounds.max.y) * 0.5f,
-            (n.bounds.min.z + n.bounds.max.z) * 0.5f
-        };
-        const char* icon = "ZoneInfo";
-        if (n.zoneType == ZoneType::ZONE_WATER) icon = "ZoneWater";
-        else if (n.zoneType == ZoneType::ZONE_LADDER) icon = "ZoneLadder";
-        else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
-        else if (n.zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) icon = "ZoneSound";
-        else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
-        EngineBillboard::Draw(camera, icon, center, 1.0f, litShader);
-    }
+    // Zone billboards at center of bounding box (volumes live in ZoneManager),
+    // plus sound/music emitter markers. Both are authoring gizmos, so they are
+    // Debug-only - otherwise a big icon floats in the middle of every zone in
+    // normal play and in every capture.
+    if (g_debugEnabled) {
+        for (auto& n : ZoneManager::Instance().GetZones()) {
+            Vector3 center = {
+                (n.bounds.min.x + n.bounds.max.x) * 0.5f,
+                (n.bounds.min.y + n.bounds.max.y) * 0.5f,
+                (n.bounds.min.z + n.bounds.max.z) * 0.5f
+            };
+            const char* icon = "ZoneInfo";
+            if (n.zoneType == ZoneType::ZONE_WATER) icon = "ZoneWater";
+            else if (n.zoneType == ZoneType::ZONE_LADDER) icon = "ZoneLadder";
+            else if (n.zoneType == ZoneType::ZONE_SKY) icon = "ZoneSky";
+            else if (n.zoneType == ZoneType::ZONE_GAMEPLAY_SOUND) icon = "ZoneSound";
+            else if (n.zoneType == ZoneType::ZONE_REVERB) icon = "ZoneReverb";
+            EngineBillboard::Draw(camera, icon, center, 1.0f, litShader);
+        }
 
-    // Sound / music emitter billboards
-    for (auto& n : m_emitters) {
-        const char* icon = (n.type == EmitterType::SOUND) ? "Sound" : "Music";
-        EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f, litShader);
+        for (auto& n : m_emitters) {
+            const char* icon = (n.type == EmitterType::SOUND) ? "Sound" : "Music";
+            EngineBillboard::Draw(camera, icon, {n.position.x, n.position.y + 0.5f, n.position.z}, 1.0f, litShader);
+        }
     }
 
     // Portal visuals: shimmer plane on the thinnest face of the trigger volume
-    for (auto& p : m_portals) {
+    const auto& portals = ZoneManager::Instance().GetPortals();
+    if (portals.empty())
+        UnloadPortalVisual();   // nothing left to shimmer — release the quad
+    for (auto& p : portals) {
         if (!p.enabled) continue;
         EnsurePortalVisual();
         Vector3 center = {
@@ -1228,7 +1180,7 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
         EngineBillboard::Draw(camera, "Portal", center, 1.2f, litShader);
     }
 
-    // GameEngine.ParticleEmitter — particles live in (and are drawn by) the
+    // GameEngine.ParticleEmitter � particles live in (and are drawn by) the
     // isolated simulation manager; the emitter nodes themselves are boxed here.
     OzParticleSimulationManager::Instance().Draw(camera);
 }
@@ -1302,7 +1254,7 @@ void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
         float now = (float)GetTime();
         if (now - p.lastScreamTime > 4.0f) {
             p.lastScreamTime = now;
-            PlaySound(p.scream);
+            SoundManager::Instance().PlayScream(p.scream);
         }
     }
 #endif
@@ -1329,114 +1281,5 @@ void PawnSystem::TransitionState(Pawn& p, PawnState newState) {
 PawnSystem::PatrolState& PawnSystem::PState(Pawn& p) {
     static std::unordered_map<uint32_t, PatrolState> states;
     return states[p.id];
-}
-
-// ---------------------------------------------------------------------------
-// GetActiveZones — returns all zones overlapping the given position/bounds,
-// sorted by priority (highest first), then by volume (smallest first).
-// ---------------------------------------------------------------------------
-std::vector<ZoneVolumeNode*> PawnSystem::GetActiveZones(Vector3 pos, BoundingBox bounds) {
-    std::vector<ZoneVolumeNode*> result;
-    for (auto& z : m_zones) {
-        // Point test
-        bool inside = (pos.x >= z.bounds.min.x && pos.x <= z.bounds.max.x &&
-                       pos.y >= z.bounds.min.y && pos.y <= z.bounds.max.y &&
-                       pos.z >= z.bounds.min.z && pos.z <= z.bounds.max.z);
-        // Fallback to box test
-        if (!inside)
-            inside = CheckCollisionBoxes(bounds, z.bounds);
-        if (inside)
-            result.push_back(&z);
-    }
-    // Sort: highest priority first, then smallest volume
-    std::sort(result.begin(), result.end(), [](ZoneVolumeNode* a, ZoneVolumeNode* b) {
-        if (a->priority != b->priority) return a->priority > b->priority;
-        float va = (a->bounds.max.x - a->bounds.min.x) *
-                   (a->bounds.max.y - a->bounds.min.y) *
-                   (a->bounds.max.z - a->bounds.min.z);
-        float vb = (b->bounds.max.x - b->bounds.min.x) *
-                   (b->bounds.max.y - b->bounds.min.y) *
-                   (b->bounds.max.z - b->bounds.min.z);
-        return va < vb;
-    });
-    return result;
-}
-
-// ---------------------------------------------------------------------------
-// PointRegion::Rebuild — rebuild active zone set from a sorted list
-// ---------------------------------------------------------------------------
-void PointRegion::Rebuild(const std::vector<ZoneVolumeNode*>& activeZones) {
-    std::unordered_set<int> newIds;
-    ZoneEnvOverrides merged;
-
-    for (auto* z : activeZones) {
-        if (!z) continue;
-        newIds.insert((int)z->id);
-        // Merge env overrides (later zones in sorted order override earlier)
-        if (z->envOverrides.applyFog) {
-            merged.applyFog = true;
-            merged.fogR = z->envOverrides.fogR;
-            merged.fogG = z->envOverrides.fogG;
-            merged.fogB = z->envOverrides.fogB;
-            merged.fogDensity = z->envOverrides.fogDensity;
-            merged.fogStart = z->envOverrides.fogStart;
-            merged.fogEnd = z->envOverrides.fogEnd;
-        }
-        if (z->envOverrides.applyAmbient) {
-            merged.applyAmbient = true;
-            merged.ambR = z->envOverrides.ambR;
-            merged.ambG = z->envOverrides.ambG;
-            merged.ambB = z->envOverrides.ambB;
-            merged.ambIntensity = z->envOverrides.ambIntensity;
-        }
-        // Reverb always uses the highest-priority zone's values
-        if (z->zoneType == ZoneType::ZONE_REVERB || z->envOverrides.reverbMix > 0.0f) {
-            merged.reverbMix = z->envOverrides.reverbMix;
-            merged.reverbDecay = z->envOverrides.reverbDecay;
-        }
-    }
-
-    // Compute enter/exit sets
-    enteredZoneIds.clear();
-    exitedZoneIds.clear();
-    for (int id : newIds) {
-        if (activeZoneIds.find(id) == activeZoneIds.end())
-            enteredZoneIds.insert(id);
-    }
-    for (int id : activeZoneIds) {
-        if (newIds.find(id) == newIds.end())
-            exitedZoneIds.insert(id);
-    }
-
-    activeZoneIds = std::move(newIds);
-    combinedEnv = merged;
-    lastPrimaryZoneId = primaryZoneId;
-    if (activeZoneIds.empty()) {
-        primaryZoneId = -1;
-        primaryZoneType = ZoneType::ZONE_WATER;
-    } else {
-        primaryZoneId = *activeZoneIds.begin();
-        // Find type from the first active zone (highest priority after sorting)
-        // Since we received sorted zones, the first entry is highest priority
-        primaryZoneType = (!activeZones.empty() && activeZones[0])
-            ? activeZones[0]->zoneType : ZoneType::ZONE_WATER;
-    }
-}
-
-bool PointRegion::HasZoneId(int id) const {
-    return activeZoneIds.find(id) != activeZoneIds.end();
-}
-
-void PointRegion::CommitFrame() {
-    enteredZoneIds.clear();
-    exitedZoneIds.clear();
-}
-
-// ---------------------------------------------------------------------------
-// UpdatePlayerRegion — single-pass zone scan for the player
-// ---------------------------------------------------------------------------
-void PawnSystem::UpdatePlayerRegion(Vector3 playerPos, BoundingBox playerBounds) {
-    auto active = GetActiveZones(playerPos, playerBounds);
-    m_playerRegion.Rebuild(active);
 }
 

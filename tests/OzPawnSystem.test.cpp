@@ -27,7 +27,7 @@ static void reset_pawn_system() {
     ps.ClearPlayerStarts();
     ps.ClearProjectiles();
     ps.ClearPickups();
-    ps.ClearZones();
+    ZoneManager::Instance().ClearZones();
     ps.ClearEmitters();
     ps.ClearLights();
     ps.ClearSkyZones();
@@ -158,21 +158,21 @@ static int test_pickup_unlisted_item_no_crash() {
 }
 
 static int test_zone_crud() {
-    TEST("AddZone, GetZone, RemoveZone");
-    auto& ps = PawnSystem::Instance();
-    ps.ClearZones();
+    TEST("ZoneManager: AddZone, GetZone, RemoveZone");
+    auto& zones = ZoneManager::Instance();
+    zones.ClearZones();
     ZoneVolumeNode zone;
     zone.bounds = {{-5, -5, -5}, {5, 5, 5}};
     zone.zoneType = ZoneType::ZONE_WATER;
     zone.name = "test_water";
-    int id = ps.AddZone(zone);
+    int id = zones.AddZone(zone);
     CHECK(id >= 0);
-    ZoneVolumeNode* found = ps.GetZone(id);
+    ZoneVolumeNode* found = zones.GetZone(id);
     CHECK(found != nullptr);
     CHECK(found->zoneType == ZoneType::ZONE_WATER);
     CHECK(found->name == "test_water");
-    ps.RemoveZone(id);
-    CHECK(ps.GetZone(id) == nullptr);
+    zones.RemoveZone(id);
+    CHECK(zones.GetZone(id) == nullptr);
     PASS(); return 0; END_TEST();
 }
 

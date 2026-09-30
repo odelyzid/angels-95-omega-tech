@@ -1,5 +1,6 @@
 #include "InventoryBehaviour.hpp"
 #include "../Items.hpp"
+#include "SlotBar.hpp"
 #include "../../Script/LightningEntityManager.hpp"
 #include "../../Script/LightningEntityRegistry.hpp"
 #include "../../Renderer/OzAssetMapper.hpp"
@@ -376,23 +377,43 @@ void InventoryBehaviour::DrawOverlay() {
         }
     }
 
-    // Hotbar preview at bottom (from EntityManager)
-    int hx = px + 20;
-    int hy = py + panel_h - 48;
-    DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
-    hx += 60;
-    for (int i = 0; i < LightningEntityManager::HOTBAR_SIZE && i < 8; i++) {
-        int idx = lem.HotbarAt(i);
-        bool hasItem = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->def);
-        Color c = hasItem ? WHITE : (Color){50, 50, 50, 255};
-        DrawRectangle(hx, hy, 32, 32, (Color){20, 20, 30, 255});
-        DrawRectangleLines(hx, hy, 32, 32, c);
-        if (hasItem && lem.Get(idx)->iconIdx >= 0) {
-            Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
-            if (iconTex && iconTex->id > 0)
-                DrawTextureEx(*iconTex, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
+    // Hotbar preview at the bottom, drawn with the same authored bar art as the
+    // in-world HUD (GameUI.ozls) so the two never drift apart.
+    {
+        const int  hy        = py + panel_h - 48;
+        const float miniCell = 34.0f;
+        const int  nSlots    = LightningEntityManager::HOTBAR_SIZE;
+
+        SlotBarOptions opt;
+        opt.firstSlot       = 0;
+        opt.slotCount       = nSlots;
+        opt.forcedWidth     = miniCell * (float)nSlots * 1.18f;
+        opt.centerX         = (float)px + 20.0f + opt.forcedWidth * 0.5f;
+        opt.bottomY         = (float)(hy + 40);
+        opt.drawSlotNumbers = true;
+        opt.drawSlotName    = false;   // the panel already labels things
+        opt.clickToSelect   = false;   // the panel owns its own clicks
+
+        int hover = -1;
+        if (!DrawSlotBar(opt, hover)) {
+            // No authored bar: fall back to plain cells (missing art / headless).
+            int hx = px + 20;
+            DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
+            hx += 60;
+            for (int i = 0; i < nSlots; i++) {
+                int idx = lem.HotbarAt(i);
+                bool hasItem = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->def);
+                Color c = hasItem ? WHITE : (Color){50, 50, 50, 255};
+                DrawRectangle(hx, hy, 32, 32, (Color){20, 20, 30, 255});
+                DrawRectangleLines(hx, hy, 32, 32, c);
+                if (hasItem && lem.Get(idx)->iconIdx >= 0) {
+                    Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
+                    if (iconTex && iconTex->id > 0)
+                        DrawTextureEx(*iconTex, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
+                }
+                hx += 36;
+            }
         }
-        hx += 36;
     }
 
     // Controls hint

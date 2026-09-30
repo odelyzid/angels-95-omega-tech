@@ -1,0 +1,12 @@
+// Typed `skyzone` because it is the only zone-capable EntityType; the sibling
+// water-zone scripts (acidpool.ozls, arena.ozls) do the same. A literal
+// `: reverb` parses with an "unknown entity type" warning.
+entity "dust_reverb_hall" : skyzone {
+    reverb_mix = 0.45
+    reverb_decay = 2.6
+    actions {
+        on_enter {
+            say "Great Hall - your footsteps echo off the stone"
+        }
+    }
+}

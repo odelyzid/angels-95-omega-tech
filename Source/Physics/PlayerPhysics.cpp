@@ -50,6 +50,22 @@ void PlayerPhysics::UpdateWaterVertical(Camera3D& cam, Motion& motion, float sav
     }
 }
 
+void PlayerPhysics::UpdateLadderVertical(Camera3D& cam, Motion& motion, float savedCamY,
+                                        bool uiBlocked, const PhysicsInfo& phys, float dt) {
+    // Neutralise gravity first: the ladder is the only thing that moves you.
+    cam.position.y = savedCamY;
+    motion.velocityY = 0.0f;
+    motion.onGround = false;
+
+    if (uiBlocked)
+        return;
+
+    if (IsKeyDown(KEY_W))
+        cam.position.y += phys.ladderSpeed * dt;
+    if (IsKeyDown(KEY_S))
+        cam.position.y -= phys.ladderSpeed * dt;
+}
+
 void PlayerPhysics::UpdateGroundVertical(Camera3D& cam, Motion& motion, float savedCamY,
                                          bool jumpBlocked, const PhysicsInfo& phys, float dt) {
     cam.position.y = savedCamY;

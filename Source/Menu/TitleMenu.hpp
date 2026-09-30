@@ -4,6 +4,7 @@
 #include "../Network/Network.hpp"
 #include "InternetBrowser.hpp"
 #include "../Client/MasterList.hpp"
+#include "../Audio/SoundManager.hpp"
 #include <string>
 #include <vector>
 #include <cstring>
@@ -161,7 +162,7 @@ public:
     bool Tick() {
         if (WindowShouldClose()) { m_exit = true; return true; }
 
-        UpdateMusicStream(OmegaTechData.HomeScreenMusic);
+        SoundManager::Instance().UpdateStream(OmegaTechData.HomeScreenMusic);
 
         // LAN/internet browsers: pump while the Multiplayer pane is open.
         bool multiOpen = false;
@@ -383,7 +384,7 @@ private:
         // Dropdown tab clicks
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (m_hoveredTab >= 0) {
-                PlaySound(OmegaTechSoundData.UIClick);
+                SoundManager::Instance().PlayUIClick();
                 if (m_openTab == m_hoveredTab && m_dropdownOpen) { m_dropdownOpen = false; m_openTab = -1; }
                 else { m_openTab = m_hoveredTab; m_dropdownOpen = true; BuildDropdownItems(); }
                 return;
@@ -396,7 +397,7 @@ private:
                 for (size_t i = 0; i < m_itemRects.size(); i++)
                     if (CheckCollisionPointRec(mp, m_itemRects[i])) { m_hoveredItem = (int)i; break; }
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && m_hoveredItem >= 0) {
-                    PlaySound(OmegaTechSoundData.UIClick);
+                    SoundManager::Instance().PlayUIClick();
                     HandleDropdownClick(m_openTab, m_hoveredItem);
                     return;
                 }
@@ -538,7 +539,7 @@ private:
             for (int i = (int)m_panes.size() - 1; i >= 0; i--) {
                 Rectangle closeBtn = GetPaneCloseBtnRect(m_panes[i]);
                 if (CheckCollisionPointRec(mp, closeBtn)) {
-                    PlaySound(OmegaTechSoundData.UIClick);
+                    SoundManager::Instance().PlayUIClick();
                     m_panes.erase(m_panes.begin() + i);
                     return;
                 }
@@ -578,7 +579,7 @@ private:
                 float bx = contentRect.x + 12, by = contentRect.y + 40;
                 auto checkBtn = [&](int idx, Rectangle r) {
                     if (CheckCollisionPointRec(mp, r)) {
-                        PlaySound(OmegaTechSoundData.UIClick);
+                        SoundManager::Instance().PlayUIClick();
                         m_multiplayerSubPage = idx;
                         // Leaving a page must drop textbox focus so a hidden
                         // box can't keep editing with a stale cursor index.
@@ -599,7 +600,7 @@ private:
                     int r = (int)(i / cols), c = (int)(i % cols);
                     Rectangle cell = {(float)(sx + c * (CELL_W + CELL_GAP)), (float)(sy + r * (CELL_H + CELL_GAP)), (float)CELL_W, (float)CELL_H};
                     if (CheckCollisionPointRec(mp, cell)) {
-                        PlaySound(OmegaTechSoundData.UIClick);
+                        SoundManager::Instance().PlayUIClick();
                         m_selectedWorld = m_worlds[i].dirName;
                         if (!campaign) { m_loadGame = false; }
                         m_exit = true;
@@ -613,7 +614,7 @@ private:
                 float bx = contentRect.x + 12, by = contentRect.y + 40;
                 auto checkBtn = [&](int idx, Rectangle r) {
                     if (CheckCollisionPointRec(mp, r)) {
-                        PlaySound(OmegaTechSoundData.UIClick);
+                        SoundManager::Instance().PlayUIClick();
                         m_settingsSubPage = idx;
                     }
                 };
@@ -630,7 +631,7 @@ private:
                 for (int i = 0; i < 7; i++) {
                     Rectangle sw = {sx2 + i * 30, y, 24, 24};
                     if (CheckCollisionPointRec(mp, sw)) {
-                        PlaySound(OmegaTechSoundData.UIClick);
+                        SoundManager::Instance().PlayUIClick();
                         m_teamColor = i;
                         break;
                     }
@@ -999,7 +1000,7 @@ private:
                 m_joinPortEditing = !m_joinPortEditing;
             y += 30;
             if (GuiButton({sx + 8, (float)y, 140, 24}, "Connect")) {
-                PlaySound(OmegaTechSoundData.UIClick);
+                SoundManager::Instance().PlayUIClick();
                 // Commit the typed/selected values (authoritative join target)
                 std::strncpy(m_joinIP, m_joinIPBuffer, sizeof(m_joinIP) - 1);
                 m_joinIP[sizeof(m_joinIP) - 1] = '\0';
@@ -1013,12 +1014,12 @@ private:
             // Discovery source: LAN broadcast or internet master server.
             DrawText("Source:", (int)(sx + 8), y + 5, 12, LIGHTGRAY);
             if (GuiButton({sx + 60, (float)y, 64, 22}, "LAN")) {
-                if (m_serverSource != 0) PlaySound(OmegaTechSoundData.UIClick);
+                if (m_serverSource != 0) SoundManager::Instance().PlayUIClick();
                 m_serverSource = 0;
             }
             if (GuiButton({sx + 130, (float)y, 82, 22}, "Internet")) {
                 if (m_serverSource != 1) {
-                    PlaySound(OmegaTechSoundData.UIClick);
+                    SoundManager::Instance().PlayUIClick();
                     m_serverSource = 1;
                     // Auto-fetch the master list the first time Internet is opened
                     if (!m_internet.HasResult() && !m_internet.IsScanning()) {
@@ -1031,12 +1032,12 @@ private:
 
             if (m_serverSource == 0) {
                 if (GuiButton({sx + 8, (float)y, 140, 24}, "Scan LAN")) {
-                    PlaySound(OmegaTechSoundData.UIClick);
+                    SoundManager::Instance().PlayUIClick();
                     LanStartScan();
                 }
             } else {
                 if (GuiButton({sx + 8, (float)y, 160, 24}, "Scan Internet")) {
-                    PlaySound(OmegaTechSoundData.UIClick);
+                    SoundManager::Instance().PlayUIClick();
                     m_internet.SetMasters(m_masterUrls);
                     m_internet.Refresh();
                 }
@@ -1080,7 +1081,7 @@ private:
                             DrawText(rowText, (int)(row.x + 4), (int)(ry + 4), 11,
                                      hov ? WHITE : (Color){170, 190, 210, 230});
                             if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                                PlaySound(OmegaTechSoundData.UIClick);
+                                SoundManager::Instance().PlayUIClick();
                                 snprintf(m_joinIPBuffer, sizeof(m_joinIPBuffer), "%s", s.ip.c_str());
                                 snprintf(m_hostPortBuffer, sizeof(m_hostPortBuffer), "%u", (unsigned)s.port);
                                 // Keep the authoritative join target in sync with
@@ -1114,7 +1115,7 @@ private:
                             DrawText(rowText, (int)(row.x + 4), (int)(ry + 4), 11,
                                      hov ? WHITE : (Color){170, 190, 210, 230});
                             if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                                PlaySound(OmegaTechSoundData.UIClick);
+                                SoundManager::Instance().PlayUIClick();
                                 snprintf(m_joinIPBuffer, sizeof(m_joinIPBuffer), "%s", s.ip.c_str());
                                 snprintf(m_hostPortBuffer, sizeof(m_hostPortBuffer), "%u", (unsigned)s.port);
                                 // Keep the authoritative join target in sync (GetJoinIP reads m_joinIP)
@@ -1160,7 +1161,7 @@ private:
                 m_hostPortEditing = !m_hostPortEditing;
             y += 34;
             if (GuiButton({sx + 8, (float)y, 140, 24}, "Start Server")) {
-                PlaySound(OmegaTechSoundData.UIClick);
+                SoundManager::Instance().PlayUIClick();
                 m_hostPortEditing = false;
                 if (!m_selectedServerWorld.empty()) {
                     m_selectedWorld = m_selectedServerWorld;

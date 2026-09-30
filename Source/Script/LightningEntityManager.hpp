@@ -197,19 +197,13 @@ private:
     std::string m_pendingMessage;
     bool m_playerHurt = false;
 
-    // Simple one-shot sound cache: path -> loaded Sound
-    struct CachedSound { Sound sound; float timer = 0.0f; };
-    std::unordered_map<std::string, CachedSound> m_soundCache;
-
     // Ammo-change hook (bridged by the host to the network layer)
     std::function<void(int, int, int, int)> m_on_ammo_changed;
 
     int CacheModel(const std::string& path);
     int CacheTexture(const std::string& path);
-    int CacheSound(const std::string& path);
     void UncacheResource(int idx);
     void UnloadAllResources();
-    void PruneSoundCache();
 
     // Sum a numeric stat over all equipped items (`key`, e.g. "max_health_bonus").
     float EquipmentStatSum(const char* key) const;

@@ -619,6 +619,50 @@ static int test_parse_gameui() {
     PASS(); return 0; END_TEST();
 }
 
+// Regression guard for the HUD object bar: slot_rects must survive the stats
+// parser as a single whitespace-delimited STRING token (it is not a float, and
+// the parser does not honour quotes), and it must contain no spaces or the
+// value is silently truncated at the first one.
+static int test_parse_gameui_slot_rects() {
+    TEST("parse GameUI slot_rects bar geometry (no spaces, string stat)");
+    std::string ozls = R"(
+        entity "GameUI" : GameUI {
+            texture = "GameData/Global/ObjectBar_Redesigned_8_Slot.png"
+            stats {
+                slot_rects = "114,126,681,494,807,126,683,494,1502,126,682,494"
+                hud_width_pct = 0.42
+                icon_inset = 16
+            }
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_slotbar.ozls");
+    CHECK(def.type == EntityType::GAMEUI);
+    CHECK(def.texture == "GameData/Global/ObjectBar_Redesigned_8_Slot.png");
+
+    auto it = def.stats.strings.find("slot_rects");
+    CHECK(it != def.stats.strings.end());
+    if (it != def.stats.strings.end()) {
+        // The parser keeps the token verbatim, quotes included; GameUi strips
+        // them. What matters here is that no space truncated the value and that
+        // all 12 numbers (3 cells x 4) survived.
+        const std::string& v = it->second;
+        CHECK(v.find(' ') == std::string::npos);
+        int nums = 0;
+        bool prevDigit = false;
+        for (char c : v) {
+            bool isDigit = (c >= '0' && c <= '9');
+            if (isDigit && !prevDigit) ++nums;
+            prevDigit = isDigit;
+        }
+        CHECK(nums == 12);
+    }
+    // Float stats must not be misfiled as strings.
+    CHECK_APROX(def.stats.floats["hud_width_pct"], 0.42f, 0.001f);
+    CHECK_APROX(def.stats.floats["icon_inset"], 16.0f, 0.001f);
+    CHECK(def.stats.strings.find("hud_width_pct") == def.stats.strings.end());
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptParser Tests:\n");
     int failures = 0;
@@ -650,6 +694,7 @@ int main() {
     failures += test_parse_wind_zone();
     failures += test_parse_skill();
     failures += test_parse_gameui();
+    failures += test_parse_gameui_slot_rects();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

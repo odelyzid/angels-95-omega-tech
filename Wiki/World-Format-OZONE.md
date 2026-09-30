@@ -52,3 +52,97 @@ AngelEd loads, edits and exports OZONE only. Export path:
 
 `Source/PPGIO.hpp` provides `LoadFile`, `WSplitValue`, `WReadValue`, `ToFloat`
 (save/config parsing only).
+
+## Authoring traps
+
+Each of these fails **silently** - the line parses, the value is just ignored,
+or the wrong thing happens. All four shipped worlds hit at least one of them
+before being fixed.
+
+### `texSlot` is a bare positional, not `key=value`
+
+`texSlot` is read as positional argument 8 for `box` (and 9 for `cyl`), i.e.
+immediately after `<rot>`:
+
+```
+add box 0 0 0.75 4 1.5 4 0 3        # correct: texSlot = 3
+add box 0 0 0.75 4 1.5 4 0 texSlot=3   # WRONG: token silently dropped
+```
+
+`OzoneParser` only recognises `flags=`, `texScaleU/V`, `texOffsetU/V` and
+`texPath=` as brush keywords. Writing `texSlot=3` hits the catch-all branch,
+is thrown away, and the primitive falls back to auto-selection (`h < 1` -> slot
+1, otherwise slot 2). The brush still looks *plausible*, just wrongly textured.
+
+Tile slot order is the tileset filenames **sorted ascending**
+(`oztex/tileset/*.png`), so `01_..`, `02_..`, `03_..` map to slots 1, 2, 3.
+The loader sorts explicitly, so slots are stable across machines.
+
+### `light directional <x> <y> <z>` is the light SOURCE
+
+The authored point is where the sun/moon **is**; the light is aimed at the world
+origin. A large positive `z` therefore puts the source overhead and lights the
+ground. Writing it the other way round (target above the map) makes `lightDir`
+point downward, every up-facing surface gets `NdotL = 0`, and the level renders
+almost black regardless of how high you crank the intensity.
+
+### `cyl` spans `z = [cz-h, cz]`
+
+The authored `cz` is the **top** of the cylinder, not its centre - the loader
+shifts the generated mesh down by `h/2`. `box` is centre-based. Mixing these up
+is why props and columns in old revisions sat half-buried in the floor.
+
+`rTop`/`rBot` are also collapsed to `max(rTop, rBot)`: cones are not cones, at
+load time or on editor round-trip.
+
+### Always name your zones, and expect `zone sound` to be script-inert
+
+Auto-generated zone names (`zone_sky_0`, `zone_water_0`, ...) are per-load
+counters, so **every world collides on them**. `.ozls` defs live in one global
+registry keyed by name; `LightningEntityRegistry::LoadWorldOverrides()` is called
+on every `LoadWorld()` to re-point that map at the world being played. Without a
+`name=` you are relying on that, and a mismatch means the level runs another
+world's `set_ambient` / `set_fog` / `set_skybox` (or none at all).
+
+Relatedly, `Main.cpp` deliberately skips `ZONE_SKY` and `ZONE_GAMEPLAY_SOUND`
+when dispatching LightningScript `on_enter`/`on_exit`. A `zone sound` still works
+for audio - `SoundManager::UpdateSoundZones` consumes its `GameplaySoundProfile`
+- but its `.ozls` message will never fire.
+
+### Trailing comments eat bare numbers
+
+Brush lines ignore unrecognised tokens, so `# at 12 4` is harmless. But
+`std::stof` is attempted first, and a bare number in a comment is swallowed as
+the *next positional argument* - which for `box` is `texSlot`. Write comments
+without numbers, or put them on their own line.
+
+### `sub` never cuts the render mesh
+
+`sub` and `intersect` carve **collision volumes only**. The visible brush stays
+whole, so a subtracted pit is an invisible hole the player falls into. Build
+openings from separate pier/lintel boxes and stepped runs instead.
+
+## Previewing / screenshotting a world
+
+`Angels95.exe --world <Name> --shot <out.png> [--shot-delay N] [--shot-res WxH]
+[--shot-cam "x,y,z,yaw[,pitch]"]... [--shot-hud]` captures deterministic,
+HUD-free frames. Coordinates are **OZONE Z-up** with yaw/pitch in degrees.
+Shot mode skips the splash, title menu and audio, forces vsync/MSAA/pixel/
+jitter/fog/head-bob off, hides the hotbar, HUD, crosshair, view-model, message
+log and all authoring gizmos, and freezes the camera. `GameData/Launch.conf` is
+skipped so `--shot-res` is authoritative. See `Source/Screenshot.hpp`.
+
+## Level-scale conventions
+
+The player collision box is **3 units tall with a 2-unit eye height**
+(`PlayerMovement::Height` / `PLAYER_EYE_HEIGHT`), and `kStepHeight = 1.0`
+(`Physics/PlayerPhysics.hpp`).
+
+- Floor tops at a single shared `z`. Overlapping slabs z-fight visibly.
+- Ceiling undersides at `4.0` or more.
+- Stair treads rise exactly `1.0`, or they are not walkable.
+- Cover props must top out at least `1.5` above their floor - anything within
+  `1.0` of the feet is a step, not a wall.
+
+Walls taller than that only *read* as taller; a 10-unit wall in a 30-unit room
+is what made the old maps read as shafts rather than halls.

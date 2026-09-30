@@ -1,0 +1,14 @@
+// Renamed from zone_ladder_corridorD.ozls, re-keyed to the world's zone name.
+// The ladder zone is one of the ones that works: PlayerController routes it to
+// PlayerPhysics::UpdateLadderVertical, which suspends gravity (previously
+// UpdateGroundVertical's gravity=18 beat ladderSpeed=6 and the player sank).
+entity "engine_ladder" : skyzone {
+    actions {
+        on_enter {
+            say "Entered LADDER zone - press W/S to climb"
+        }
+        on_exit {
+            say "Left the LADDER zone"
+        }
+    }
+}

@@ -4,7 +4,10 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "OzAssetMapper.hpp"
+#include "../Package/PackageAssetLoader.hpp"
+#include "../Script/LightningEntityRegistry.hpp"
 #include <string>
+#include <unordered_map>
 
 // EngineBillboard - Helper class for drawing billboard sprites with optional shader support
 // Used for displaying entity icons (Light, Sound, Music, NPCs, pickups, etc.)
@@ -69,10 +72,31 @@ public:
     }
 
     // Draw a pickup billboard (floating, bobbing), optionally with a lit shader.
-    static void DrawPickup(Camera3D camera, const char* itemName, Vector3 position,
-                           float size = 1.2f, Shader litShader = {0}) {
-        Texture2D tex = AssetMapper::Instance().GetTexture(itemName);
-        if (tex.id == 0) return;
+// Resolve a pickup's icon. AssetMapper is name-based, so it only finds items
+// that happen to have a file named after them (HealthVial.png, Coin.png, ...).
+// Items whose .ozls aliases a different texture - Medkit reuses
+// HealthVial.png, PistonPart reuses key.png - fall through to the magenta
+// missing-icon grid. Consult the entity def's own `icon` first and cache it.
+inline static Texture2D ResolvePickupIcon(const char* itemName) {
+    static std::unordered_map<std::string, Texture2D> s_defIconCache;
+    auto cached = s_defIconCache.find(itemName ? itemName : "");
+    if (cached != s_defIconCache.end())
+        return cached->second;
+
+    Texture2D tex{0};
+    const EntityDef* def = itemName ? LightningEntityRegistry::Instance().Find(itemName) : nullptr;
+    if (def && !def->icon.empty())
+        tex = LoadTextureWithFallback(def->icon.c_str());
+    s_defIconCache[itemName ? itemName : ""] = tex;
+    return tex;
+}
+
+static void DrawPickup(Camera3D camera, const char* itemName, Vector3 position,
+  float size = 1.2f, Shader litShader = {0}) {
+  Texture2D tex = ResolvePickupIcon(itemName);
+  if (tex.id == 0)
+    tex = AssetMapper::Instance().GetTexture(itemName);
+  if (tex.id == 0) return;
 
         float bob = sinf((float)GetTime() * 3.0f) * 0.15f;
         Vector3 bobPos = {position.x, position.y + 0.9f + bob, position.z};

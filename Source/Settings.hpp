@@ -2,6 +2,7 @@
 #include "Renderer/raygui/raygui.h"
 #include  "Renderer/raygui/dark.h"
 #include "Log.hpp"
+#include "DebugFlags.hpp"
 #include <cstddef>
 
 static bool ShowSettings = false;

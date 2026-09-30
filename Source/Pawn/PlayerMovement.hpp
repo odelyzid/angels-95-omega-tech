@@ -17,17 +17,22 @@ constexpr float PLAYER_EYE_HEIGHT = 2.0f;
 // ---------------------------------------------------------------------------
 class PlayerMovement {
 public:
-    float Height = 10.0f;
+    // Collision box, anchored to the FEET (see UpdateBounds). Height is the
+    // full standing body height; PLAYER_EYE_HEIGHT is where the camera sits
+    // inside that box. Keeping the two related is what stops walls reading as
+    // five-times-taller-than-the-player shafts.
+    float Height = 3.0f;
     float Width = 2.0f;
 
     int HeadBob = 0;
     int HeadBobDirection = 1;
 
-    float velocityY = 0.0f;
+    float velocityY = 0.2f;
     bool onGround = false;
     bool isFlying = false;
     bool isNoClip = false;
     bool inWater = false;
+    bool isClimbing = false;   // inside a `zone ladder`; gravity suspended
 
     // --- Controller tuning ---
     float BaseSpeed = 5.4f;          // units/sec at movement_speed == 1
@@ -138,13 +143,24 @@ public:
         cam.target = Vector3Add(cam.position, Vector3Scale(dir, LookDistance));
     }
 
+    // Collision box in world space, measured from the FEET upward.
+    //
+    // The box deliberately spans [feet, feet + Height] rather than
+    // [cam.y - Height, cam.y]: the old anchoring hung most of the box below the
+    // feet, where OverlapsObstacle's "top at/below the feet is a floor, not an
+    // obstacle" rule discarded it, so the effective body was only EyeHeight tall
+    // and Height did nothing. Anchoring to the feet makes Height meaningful and
+    // makes ceilings below feet+Height solid.
+    //
+    // Uses the smoothed EyeHeight so crouching (1.2) ducks under low ceilings.
     void UpdateBounds(Camera3D& cam) {
+        const float feet = cam.position.y - EyeHeight;
         PlayerBounds = (BoundingBox){
             (Vector3){cam.position.x - Width / 2,
-                       cam.position.y - Height,
+                       feet,
                        cam.position.z - Width / 2},
             (Vector3){cam.position.x + Width / 2,
-                       cam.position.y,
+                       feet + Height,
                        cam.position.z + Width / 2}};
     }
 };

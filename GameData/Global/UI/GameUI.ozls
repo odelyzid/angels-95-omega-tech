@@ -1,15 +1,42 @@
 // GameUI — declarative HUD/UI layer for the AngelPlayer.
 //
 // Data + hooks only: LightningScript cannot draw or call C++, so the C++
-// InventoryBehaviour / PlayerController read these stats and the `texture` key
-// and perform all rendering and input handling. `on_tick` is executed once per
-// frame by LightningEntityManager::Update.
+// SlotBar renderer / InventoryBehaviour / PlayerController read these stats and
+// the `texture` key and perform all rendering and input handling. `on_tick` is
+// executed once per frame by LightningEntityManager::Update.
 entity "GameUI" : GameUI {
-    texture = "GameData/Global/TextBar.png"
+    // Object/slot bar atlas. 5632x704, 8 cells. The C++ side scales the whole
+    // texture to `hud_width_pct` of the screen width and then maps each cell
+    // with slot_rects below, so a differently-sized atlas only needs new
+    // slot_rects -- no recompile.
+    texture = "GameData/Global/ObjectBar_Redesigned_8_Slot.png"
     stats {
-        hud_scale = 1.0
-        hud_x = 0
-        show_pos_debug = 0
+        // Per-cell rects (x,y,w,h) in SOURCE TEXTURE pixels, left to right.
+        // Measured off ObjectBar_Redesigned_8_Slot.png: the cell band is
+        // y=126..619 and the vertical dividers sit at x=114/807/1502/2196/
+        // 2890/3585/4277/4969. The final cell is 585px wide rather than ~683
+        // because the source art is cropped ~14px short on the right; its icon
+        // therefore renders slightly smaller, which matches its cell.
+        //
+        // NO SPACES ALLOWED: the stats parser reads a single whitespace-
+        // delimited token and does not honour quotes, so a space here would
+        // truncate the value.
+        slot_rects = "114,126,681,494,807,126,683,494,1502,126,682,494,2196,126,683,494,2890,126,682,494,3585,126,682,494,4277,126,683,494,4969,126,585,494"
+
+        // Bar width as a fraction of screen width (0..1). Cell size follows.
+        hud_width_pct     = 0.42
+        // Gap between the bottom of the bar and the bottom of the screen, px.
+        hud_bottom_margin = 18
+        // Inset applied to each cell rect before the icon is placed, in
+        // source-texture pixels (keeps icons clear of the glowing border).
+        // Cells are ~682x494, so 64 leaves a comfortable ~9% margin. The icon
+        // is then fit inside the inset box preserving aspect ratio, so square
+        // and wide source art both land centred without stretching.
+        icon_inset        = 64
+        // Draw the 1..8 slot number in each cell's top-left corner.
+        show_slot_numbers = 1
+        // Draw the item name under the bar for the selected slot.
+        show_slot_name    = 1
     }
     actions {
         on_tick {

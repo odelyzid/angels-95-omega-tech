@@ -1,9 +1,11 @@
 #include "LightningEntityManager.hpp"
 #include "LightningEntityRegistry.hpp"
 #include "../Package/PackageAssetLoader.hpp"
+#include "../Audio/SoundManager.hpp"
 #include "../Log.hpp"
 #ifndef OMEGA_TEST_ENV
 #include "../Pawn/OzPawnSystem.hpp"
+#include "../Pawn/AngelPlayer/SlotBar.hpp"
 #endif
 #include <algorithm>
 #include <cctype>
@@ -245,7 +247,6 @@ void LightningEntityManager::Init() {
     m_playerEntityIndex = -1;
     m_instances.clear();
     m_resources.clear();
-    m_soundCache.clear();
     m_pendingFog = false;
     m_pendingSkybox.clear();
     m_pendingAmbient = false;
@@ -307,8 +308,6 @@ void LightningEntityManager::Update(float dt) {
         }
     }
 
-    // Clean up finished one-shot sounds
-    PruneSoundCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -319,13 +318,8 @@ void LightningEntityManager::ApplyEntityScriptEffects(EntityInstance& inst) {
     if (!inst.def) return;
 
     std::string sound = inst.ctx.PopPendingSound();
-    if (!sound.empty()) {
-        if (CacheSound(sound) >= 0) {
-            auto it = m_soundCache.find(sound);
-            if (it != m_soundCache.end() && it->second.sound.frameCount > 0)
-                PlaySound(it->second.sound);
-        }
-    }
+    if (!sound.empty())
+        SoundManager::Instance().PlayScriptSound(sound);
 
     float fr=0, fg=0, fb=0, fd=0;
     if (inst.ctx.PopPendingFog(fr, fg, fb, fd)) {
@@ -586,33 +580,6 @@ int LightningEntityManager::CacheTexture(const std::string& path) {
     return (int)m_resources.size() - 1;
 }
 
-int LightningEntityManager::CacheSound(const std::string& path) {
-    auto it = m_soundCache.find(path);
-    if (it != m_soundCache.end()) {
-        // Reset timer so it isn't pruned
-        it->second.timer = 0.0f;
-        return 0; // arbitrary non-negative = success
-    }
-    Sound snd = LoadSound(path.c_str());
-    if (snd.frameCount == 0) return -1;
-    m_soundCache[path] = { snd, 0.0f };
-    return 0;
-}
-
-void LightningEntityManager::PruneSoundCache() {
-    auto it = m_soundCache.begin();
-    while (it != m_soundCache.end()) {
-        it->second.timer += GetFrameTime();
-        // Unload after 5 seconds past playback
-        if (it->second.timer > 5.0f) {
-            UnloadSound(it->second.sound);
-            it = m_soundCache.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
 void* LightningEntityManager::GetModel(int idx) const {
     if (idx < 0 || idx >= (int)m_resources.size() || m_resources[idx].type != 1) return nullptr;
     return (void*)&m_resources[idx].model;
@@ -693,9 +660,20 @@ void LightningEntityManager::HandleInput() {
 }
 
 // ---------------------------------------------------------------------------
-// DrawHotbar — render 8 hotbar slots (ported from Objects.hpp::DrawHotbarSlot)
+// DrawHotbar — render the GameUI object bar, falling back to plain rectangles
+// when GameUI.ozls declares no usable bar (missing texture or slot_rects).
 // ---------------------------------------------------------------------------
 void LightningEntityManager::DrawHotbar() {
+    // Authored path: GameData/Global/UI/GameUI.ozls supplies the atlas plus a
+    // per-cell rect list, and SlotBar does the mapping/drawing.
+#ifndef OMEGA_TEST_ENV
+    {
+        SlotBarOptions opt;  // all defaults: centred, bottom, click-to-select
+        int hover = -1;
+        if (DrawSlotBar(opt, hover)) return;
+    }
+#endif
+
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int slotSize = 50;

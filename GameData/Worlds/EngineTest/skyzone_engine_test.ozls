@@ -1,19 +1,21 @@
-entity "zone_sky_0" : skyzone {
-    fog_color = (0.6, 0.65, 0.75)
-    fog_density = 0.004
-    ambient_light = (0.6, 0.55, 0.5)
-    skybox = "GameData/Worlds/EngineTest/Models/Skybox.png"
+// Renamed zone (the world file now uses an explicit "engine_sky" name rather
+// than the auto-generated "zone_sky_0", which collided between worlds).
+entity "engine_sky" : skyzone {
+    fog_color = (0.62, 0.66, 0.72)
+    fog_density = 0.003
+    ambient_light = (0.58, 0.58, 0.60)
+    skybox = "GameData/Global/sky/sky_day.dds"
     actions {
         on_enter {
-            set_fog 0.6 0.65 0.75 0.004
-            set_ambient 0.6 0.55 0.5
-            set_skybox "GameData/Worlds/EngineTest/Models/Skybox.png"
-            say "Entered EngineTest — ambient/fog/skybox active"
+            set_fog 0.62 0.66 0.72 0.003
+            set_ambient 0.58 0.58 0.60
+            set_skybox "GameData/Global/sky/sky_day.dds"
+            say "Engine Test - ambient, fog and skybox active"
         }
         on_exit {
             restore_fog
             restore_skybox
-            say "Exited EngineTest sky zone"
+            say "Left the Engine Test sky zone"
         }
     }
 }

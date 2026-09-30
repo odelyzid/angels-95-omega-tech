@@ -54,6 +54,9 @@ build/cmake*
 # Docs scratch
 .docs/
 
+# Debug screenshot renders (--shot mode output; regenerate, never commit)
+GameData/Screenshots/
+
 # Scratch plan files (keep main plan files tracked)
 PLAN_STUBS_*.scratch
 build/

@@ -1,0 +1,14 @@
+// Renamed from zone_water_room4.ozls and re-keyed to the world's explicit zone
+// name (auto-generated names collided between worlds).
+// NOTE: the old "say" strings contained a mangled em-dash (mojibake) from being
+// written as Windows-1252; plain ASCII hyphens are used here.
+entity "engine_water" : skyzone {
+    actions {
+        on_enter {
+            say "Entered WATER zone - reduced gravity active"
+        }
+        on_exit {
+            say "Left the WATER zone"
+        }
+    }
+}

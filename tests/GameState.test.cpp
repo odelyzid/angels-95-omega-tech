@@ -325,9 +325,9 @@ static int test_world_seeding_from_file() {
     gs.init_worlds("GameData", {"EngineTest"});
     WorldState* ws = gs.get_world(0);
     CHECK(ws != nullptr);
-    // EngineTest world file defines 6 npc + 6 pickup entities
-    CHECK_EQ(ws->global_npcs.size(), (size_t)6);
-    CHECK_EQ(ws->global_pickups.size(), (size_t)6);
+// EngineTest world file defines 7 npc + 10 pickup entities
+  CHECK_EQ(ws->global_npcs.size(), (size_t)7);
+  CHECK_EQ(ws->global_pickups.size(), (size_t)10);
     // Type names come from the file; stats resolved from PawnDefs
     CHECK(!ws->global_npcs[0].typeName.empty());
     CHECK(ws->global_npcs[0].max_health > 0);

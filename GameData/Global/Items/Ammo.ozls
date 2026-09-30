@@ -1,0 +1,16 @@
+entity "Ammo" : pickup {
+    icon = "GameData/Global/Items/Ammo_Box.png"
+    // Ammunition box. Refills the shared ammo pool collected by the ranged
+    // weapons; mapped to PickupType::AMMO in the server's pickup_type_from_name.
+    // The GLB has its own texture, so `texture` is omitted on purpose.
+    mesh = "GameData/Global/Items/Ammo_Box.glb"
+    mesh_type = "static"
+    stats {
+        item_id = 14
+        preview_color = (0.55, 0.45, 0.25)
+        value = 30
+        respawn_time = 20.0
+        pickup_category = "ammo"
+        mesh_scale = 0.7
+    }
+}

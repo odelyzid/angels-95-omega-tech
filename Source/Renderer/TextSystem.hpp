@@ -1,6 +1,9 @@
 #pragma once
 // Objects.hpp removed — migrated to LightningEntityManager
 
+#include "../Audio/SoundManager.hpp"
+#include "../Screenshot.hpp"
+
 using namespace std;
 
 auto ReadValue(string Data , int Start , int End){ // Reads Value from (Start to End) 
@@ -27,7 +30,8 @@ class TextSystem{
         bool SEnable = false;
         Texture2D Bar;
         Font BarFont;
-        Sound TextNoise;
+        // Typewriter blip: owned and played by Audio/SoundManager.hpp
+        // (SoundManager::PlayTextNoise()), which also unloads it at shutdown.
 
         int ScaleValue = 0;
         Color TextColor = WHITE;
@@ -66,8 +70,10 @@ class TextSystem{
                 }
             }
 
-            // Draw log window background (bottom-left)
-            if (!logHistory.empty()) {
+// Draw log window background (bottom-left). Screenshot mode captures
+            // the clean frame only, so the message log is skipped there (it is
+            // HUD, and it was leaking "Collected ..." lines into captures).
+            if (!g_shot.active && !logHistory.empty()) {
                 int logH = min((int)logHistory.size(), MAX_LOG_LINES) * LOG_LINE_HEIGHT + 10;
                 int logY = GetScreenHeight() - LOG_Y_OFFSET - logH;
                 DrawRectangle(LOG_X - 5, logY - 5, LOG_WIDTH + 10, logH + 10,
@@ -116,7 +122,7 @@ class TextSystem{
                             exit(0);
                         }
                         if (Lines[i] == ' '){
-                            StopSound(TextNoise);
+                            SoundManager::Instance().StopTextNoise();
                         }
                         if (Lines[i] == '/'){
                             // Commit current line(s) to log history
@@ -142,7 +148,7 @@ class TextSystem{
                             exit(0);
                         }
                         if (Lines[i] == ' '){
-                            StopSound(TextNoise);
+                            SoundManager::Instance().StopTextNoise();
                         }
                     }
                     if (Trigger && ReadLine)
@@ -161,8 +167,7 @@ class TextSystem{
                     }
 
                     if (FrameCounter < TotalChars && FrameCounter % 14 == 1){
-                        StopSound(TextNoise);
-                        PlaySound(TextNoise);
+                        SoundManager::Instance().PlayTextNoise();
                     }
 
                     if (OmegaInputController.TextButton){

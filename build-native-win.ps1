@@ -3,8 +3,17 @@
 
 param(
     [switch]$SkipData,
-    [switch]$SkipClean
+    [switch]$SkipClean,
+    [switch]$Fast,      # incremental rebuild: keep build/ objects (implies -SkipClean)
+    [switch]$Debug      # MODE=debug: -O0 -g for fast compiles + symbols
 )
+
+# -Fast is sugar for -SkipClean (iterate without recompiling the world).
+if ($Fast) { $SkipClean = $true }
+
+# Forward MODE to every make invocation.
+$MakeMode = @()
+if ($Debug) { $MakeMode += "MODE=debug" }
 
 $W64DEVKIT = "C:\raylib\w64devkit"
 $RAYLIB_SRC = "C:\raylib\raylib"
@@ -52,28 +61,30 @@ if (-not $SkipClean) {
     Pop-Location
 }
 
+Write-Step "Build mode: $(if ($Debug) { 'debug (-O0 -g)' } else { 'release (-O3)' })$(if ($SkipClean) { ', incremental' } else { ', clean' })"
+
 # --- 1. Build OTENGINE (game client) ---
 Write-Step "Building Angels95 (OTENGINE)..."
 Push-Location $PSScriptRoot
-& mingw32-make -j $env:NUMBER_OF_PROCESSORS OTENGINE 2>&1
+& mingw32-make -j $env:NUMBER_OF_PROCESSORS @MakeMode OTENGINE 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OTENGINE build failed" }
 Write-Step "Angels95.exe built."
 
 # --- 2. Build AngelServ (dedicated server) ---
 Write-Step "Building AngelServ..."
-& mingw32-make AngelServ 2>&1
+& mingw32-make @MakeMode AngelServ 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "AngelServ build failed" }
 Write-Step "AngelServ.exe built."
 
 # --- 3. Build OzPack (asset packer) ---
 Write-Step "Building OzPack..."
-& mingw32-make ozpack 2>&1
+& mingw32-make @MakeMode ozpack 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "OzPack build failed" }
 Write-Step "OzPack.exe built."
 
 # --- 3b. Build AngelMaster (master server) ---
 Write-Step "Building AngelMaster..."
-& mingw32-make AngelMaster 2>&1
+& mingw32-make @MakeMode AngelMaster 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "AngelMaster build failed" }
 Write-Step "AngelMaster.exe built."
 Pop-Location
@@ -81,7 +92,7 @@ Pop-Location
 # --- 4. Build AngelEd (level editor) via Makefile ---
 Write-Step "Building AngelEd..."
 Push-Location "$PSScriptRoot\AngelEd"
-& mingw32-make -j $env:NUMBER_OF_PROCESSORS AngelEd 2>&1
+& mingw32-make -j $env:NUMBER_OF_PROCESSORS @MakeMode AngelEd 2>&1
 if ($LASTEXITCODE -ne 0) { Fail "AngelEd build failed" }
 Pop-Location
 Write-Step "AngelEd.exe built."

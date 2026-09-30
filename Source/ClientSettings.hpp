@@ -38,6 +38,7 @@ static inline void LoadClientSettings() {
     FPSEnabled       = cfg.GetBool(S, "fps",          FPSEnabled);
     HeadBob          = cfg.GetBool(S, "head_bob",     HeadBob);
     Debug            = cfg.GetBool(S, "debug",        Debug);
+    g_debugEnabled   = Debug;   // mirror into the cross-TU flag (see Settings.hpp)
     MuteToggle       = cfg.GetBool(S, "mute",         MuteToggle);
     AudioSlider      = CfgClampF(cfg.GetFloat(S, "audio_volume", AudioSlider), 0.0f, 100.0f);
 }

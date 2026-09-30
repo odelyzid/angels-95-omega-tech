@@ -1,0 +1,15 @@
+// Renamed from zone_reverb_largeroom.ozls, re-keyed to the world's zone name.
+// The reverb zone now covers the whole Great Hall; it previously spanned only
+// y -46..-30 of a hall running y -49.5..-26.5.
+entity "engine_reverb" : skyzone {
+    reverb_mix = 0.40
+    reverb_decay = 2.4
+    actions {
+        on_enter {
+            say "Entered REVERB zone - echo effect active"
+        }
+        on_exit {
+            say "Left the REVERB zone"
+        }
+    }
+}

@@ -6,6 +6,16 @@ set -euo pipefail
 
 RAYLIB_VERSION="5.5"
 
+# --- Build mode (release default). Usage: ./build.sh debug | ./build.sh fast ---
+#   debug: -O0 -g (fast compiles + symbols)   fast: release, no-op for clean (this
+#   script is already incremental - it never runs `make clean`).
+MODE="${MODE:-release}"
+case "${1:-}" in
+    debug|--debug|-d) MODE=debug ;;
+    fast|--fast)      MODE=release ;;
+esac
+echo "==> Build mode: $MODE"
+
 # --- Detect package manager ---
 install_raylib_system() {
     echo "==> Installing raylib system-wide..."
@@ -47,15 +57,15 @@ fi
 
 # --- Game ---
 echo "==> Building Angels95..."
-make -j"$(nproc)" OTENGINE
+make -j"$(nproc)" MODE="$MODE" OTENGINE
 
 # --- Server ---
 echo "==> Building AngelServ..."
-make -j"$(nproc)" AngelServ
+make -j"$(nproc)" MODE="$MODE" AngelServ
 
 # --- Master server ---
 echo "==> Building AngelMaster..."
-make -j"$(nproc)" AngelMaster
+make -j"$(nproc)" MODE="$MODE" AngelMaster
 
 echo ""
 echo "Done. Run ./Angels95 to launch, ./AngelServ to start the server, or ./AngelMaster to host the master server."

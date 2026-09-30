@@ -51,17 +51,6 @@ class WorldModelSet
 
 inline WorldModelSet WorldModels;
 
-class GameSounds
-{
-    public:
-        Sound CollisionSound;
-        Sound WalkingSound;
-        Music BackgroundMusic;
-        Sound UIClick;
-        Sound ChasingSound;
-        Sound Death;
-
-        bool MusicFound = false;
-};
-
-inline GameSounds OmegaTechSoundData;
+// Audio state (GameSounds/OmegaTechSoundData and every playback call) lives in
+// Audio/SoundManager.hpp — include it instead of reaching for raylib sound
+// handles directly.

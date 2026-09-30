@@ -19,6 +19,44 @@ struct ModelBrowserEntry {
     int modelIndex = -1;
 };
 
+// --- Asset scoping (shared by the Model Browser and the Texture Manager) ---
+// Both managers present their entries as a two-root tree instead of one flat
+// list, so it is always obvious whether an asset is an editable file on disk or
+// a read-only record inside a package:
+//
+//   (GameData)   loose files, nested by their real folder under GameData/
+//   (Packages)   assets that only exist inside a .oz* package
+//
+// A .oz* file is the ONLY thing treated as a package (see PackageAssetLoader);
+// anything reachable on disk is a real file even if a package also holds a copy
+// of the same name.
+struct AssetScopeItem {
+    std::string name;        // display/file stem
+    std::string path;        // on-disk path, or package key
+    bool        fromPackage = false;
+};
+
+struct AssetScopeNode {
+    std::string label;       // display text for this node
+    int         entryIndex = -1;              // >= 0 => leaf into the caller's vector
+    std::vector<AssetScopeNode> children;
+};
+
+// Group `items` into the (GameData)/(Packages) tree. `search` is a
+// case-insensitive substring filter on name+path; when non-empty, only matching
+// leaves are kept (and empty folders are pruned). Roots are auto-expanded when
+// filtering so matches are visible without clicking.
+AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
+                               const std::string& search);
+
+#ifdef _WIN32
+// Collect the leaf entry indices of the subtree rooted at `node` (walked with
+// TVGN_CHILD). Pass TVI_ROOT to collect every root. Drives the Texture Manager's
+// thumbnail grid from the scope tree. `node` is an HTREEITEM, typed as void*
+// because this header is included before <windows.h>.
+void CollectScopeLeavesUnder(HWND tree, void* node, std::vector<int>& out);
+#endif
+
 struct EditorPanelState {
     bool showSoundMgr = false;
     bool showTextureMgr = false;

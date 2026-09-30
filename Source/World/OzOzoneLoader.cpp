@@ -1,4 +1,5 @@
 #include "OzOzoneLoader.hpp"
+#include "rlgl.h"
 #include "OzoneFrustum.hpp"
 #include "../Renderer/OzAssetMapper.hpp"
 #include "../Pawn/OzPawnSystem.hpp"
@@ -23,28 +24,41 @@ static std::string StripQuotes(std::string s) {
     return s;
 }
 
-static ZoneType ParseZoneType(std::string name) {
-    std::transform(name.begin(), name.end(), name.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    if (name == "ladder") return ZoneType::ZONE_LADDER;
-    if (name == "sky") return ZoneType::ZONE_SKY;
-    if (name == "reverb") return ZoneType::ZONE_REVERB;
-    // Editor writes "sound" for gameplay-sound zones; accept both spellings so
-    // exported worlds round-trip back to ZONE_GAMEPLAY_SOUND.
-    if (name == "gameplay_sound" || name == "sound")
-        return ZoneType::ZONE_GAMEPLAY_SOUND;
-    return ZoneType::ZONE_WATER;   // default
+// True for primitives that carry entity/level metadata rather than brush
+// geometry — they are handled by ParseOzoneEntities, not the mesh builder.
+static bool IsEntityPrimitive(OzonePrimitiveType t) {
+    switch (t) {
+        case OzonePrimitiveType::ENTITY_PLAYERSTART:
+        case OzonePrimitiveType::ENTITY_PICKUP:
+        case OzonePrimitiveType::ENTITY_ZONE:
+        case OzonePrimitiveType::ENTITY_NPC:
+        case OzonePrimitiveType::ENTITY_LIGHT:
+        case OzonePrimitiveType::ENTITY_PORTAL:
+        case OzonePrimitiveType::ENTITY_LEVELINFO:
+        case OzonePrimitiveType::ENTITY_PARTICLES:
+        case OzonePrimitiveType::ENTITY_EMITTER:
+        case OzonePrimitiveType::ENTITY_MESH_STATIC:
+        case OzonePrimitiveType::ENTITY_MESH_SKELETAL:
+        case OzonePrimitiveType::ENTITY_PARTICLE_EMITTER:
+        case OzonePrimitiveType::ENTITY_PATH_NODE:
+        case OzonePrimitiveType::ENTITY_WIND_ZONE:
+            return true;
+        default:
+            return false;
+    }
 }
 
-static bool LoadOzoneEntity(const OzonePrimitive& prim,
-                            std::unordered_map<std::string, int>& zoneCounters,
-                            const std::string& worldDir) {
-    auto& pawns = PawnSystem::Instance();
+static bool ParseOzoneEntity(const OzonePrimitive& prim,
+                             OzoneZoneCounters& zoneCounters,
+                             const std::string& worldDir,
+                             OzoneEntitySet& out) {
+    auto& settings = out.settings;
     switch (prim.type) {
         case OzonePrimitiveType::ENTITY_PLAYERSTART:
             if (prim.args.size() >= 3) {
-                pawns.AddPlayerStart({0, {prim.args[0], prim.args[2], prim.args[1]},
-                                      prim.args.size() >= 4 ? prim.args[3] : 0.0f});
+                out.playerStarts.push_back(
+                    {0, {prim.args[0], prim.args[2], prim.args[1]},
+                     prim.args.size() >= 4 ? prim.args[3] : 0.0f});
             }
             return true;
         case OzonePrimitiveType::ENTITY_PICKUP:
@@ -53,7 +67,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 node.position = {prim.args[0], prim.args[2], prim.args[1]};
                 node.typeName = prim.entityType;
                 if (prim.args.size() >= 4) node.respawnTime = prim.args[3];
-                pawns.AddPickup(node);
+                out.pickups.push_back(node);
             }
             return true;
         case OzonePrimitiveType::ENTITY_ZONE:
@@ -69,7 +83,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                     std::max(prim.args[2], prim.args[5]),
                     std::max(prim.args[1], prim.args[4])
                 };
-                node.zoneType = ParseZoneType(prim.entitySubType);
+                node.zoneType = ZoneTypeFromString(prim.entitySubType);
                 if (prim.args.size() >= 7) node.intensity = prim.args[6];
                 // Generate unique zone name for .ozls script hook matching.
                 // An explicit name= kwarg overrides the auto-generated one so
@@ -102,10 +116,10 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 }
                 // Per-zone physics overrides (named kwargs; absent = defaults)
                 node.physics = prim.physics;
-                pawns.AddZone(node);
+                out.zones.push_back(node);
 
-                // For sky zones, also register a SkyZoneNode
-                if (ParseZoneType(prim.entitySubType) == ZoneType::ZONE_SKY) {
+                // For sky zones, also build a SkyZoneNode
+                if (node.zoneType == ZoneType::ZONE_SKY) {
                     SkyZoneNode skyNode;
                     skyNode.bounds = node.bounds;
                     skyNode.position = {
@@ -180,13 +194,19 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                             if (!skyNode.skyboxPath.empty()) break;
                         }
                     }
-                    pawns.AddSkyZone(skyNode);
+                    out.skyZones.push_back(skyNode);
                 }
             }
             return true;
         case OzonePrimitiveType::ENTITY_NPC:
-            if (prim.args.size() >= 3)
-                pawns.Spawn({prim.args[0], prim.args[2], prim.args[1]}, prim.entityType.c_str());
+            // NPC spawning goes through PawnDef resolution, which only exists in
+            // the entity system, so it is recorded as a pending spawn request.
+            if (prim.args.size() >= 3) {
+                PawnSpawnRequest req;
+                req.position = {prim.args[0], prim.args[2], prim.args[1]};
+                req.defName = prim.entityType;
+                out.pawnSpawns.push_back(req);
+            }
             return true;
         case OzonePrimitiveType::ENTITY_MESH_STATIC:
         case OzonePrimitiveType::ENTITY_MESH_SKELETAL: {
@@ -204,7 +224,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 node.animFile = StripQuotes(prim.animFile);
                 node.animSpeed = prim.animSpeed;
                 node.baseDir = worldDir.empty() ? std::string() : (worldDir + "/");
-                pawns.AddMeshObject(node);
+                out.meshObjects.push_back(node);
             }
             return true;
         }
@@ -224,7 +244,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 z.direction = {arg(6, 1.0f), arg(8, 0.0f), arg(7, 0.0f)}; // Z-up -> Y-up
                 z.strength = arg(9, 1.0f);
                 z.frequency = arg(10, 1.0f);
-                pawns.AddWindZone(z);
+                out.windZones.push_back(z);
             }
             return true;
         }
@@ -249,7 +269,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                     if (comma == std::string::npos) break;
                     start = comma + 1;
                 }
-                pawns.AddPathNode(node);
+                out.pathNodes.push_back(node);
             }
             return true;
         }
@@ -279,7 +299,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 node.direction = {dx, dz, dy}; // Z-up -> Y-up
                 node.yaw = arg(20, 0.0f);
                 node.texturePath = StripQuotes(prim.texPath);
-                pawns.AddParticleEmitter(node);
+                out.particleEmitters.push_back(node);
             }
             return true;
         }
@@ -289,7 +309,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 EmitterNode node;
                 node.type = (prim.entityType == "music") ? EmitterType::MUSIC : EmitterType::SOUND;
                 node.position = {prim.args[0], prim.args[2], prim.args[1]};
-                pawns.AddEmitter(node);
+                out.emitters.push_back(node);
             }
             return true;
         case OzonePrimitiveType::ENTITY_LIGHT: {
@@ -327,6 +347,21 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 // light directional tx ty tz r g b intensity [flare] [corona]
                 node.type = LitLightType::DIRECTIONAL;
                 node.target = {arg(0), arg(2), arg(1)};
+                // A directional light has no emitter position, only an aim
+                // point. The lighting shader resolves its direction as
+                //     lightDir = normalize(position - target)
+                // so leaving position at the origin made lightDir point from the
+                // authored point DOWN to the world: for an overhead sun
+                // (`... 100` in OZONE z) every up-facing surface got NdotL = 0 and
+                // the ground was lit by ambient alone. That is why outdoor
+                // levels needed absurd ambient values to be visible at all.
+                //
+                // Treat the authored point as the light SOURCE and aim at the
+                // world origin, which is the intuitive reading of
+                // `light directional <x> <y> <z>` and makes an overhead sun
+                // light the ground.
+                node.position = node.target;
+                node.target = {0.0f, 0.0f, 0.0f};
                 node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
                 node.intensity = arg(6);
                 if (prim.args.size() >= 8) node.flare = arg(7) != 0.0f;
@@ -335,7 +370,7 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                 OZ_WARN("OZONE: invalid light definition (subtype=%s args=%zu)", subtype.c_str(), prim.args.size());
                 return true;
             }
-            pawns.AddLight(node);
+            out.lights.push_back(node);
             return true;
         }
         case OzonePrimitiveType::ENTITY_PORTAL: {
@@ -364,47 +399,70 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                     };
                 }
                 if (prim.args.size() >= 10) portal.bidirectional = prim.args[9] != 0.0f;
-                pawns.AddPortal(portal);
+                out.portals.push_back(portal);
             }
             return true;
         }
-        case OzonePrimitiveType::ENTITY_LEVELINFO: {
+        case OzonePrimitiveType::ENTITY_LEVELINFO:
             // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes
-            //           scoreLimit friendlyFire skyboxPath
-            auto arg = [&](int i) -> float {
-                return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
-            };
-            LevelSettings& s = pawns.GetWorldInfo().settings;
-            s.gameType = (int)arg(0);
-            s.maxPlayers = (int)arg(1);
-            s.respawnTime = arg(2);
-            s.timeLimitEnabled = arg(3) != 0.0f;
-            s.timeLimitMinutes = arg(4);
-            s.scoreLimit = (int)arg(5);
-            s.friendlyFire = arg(6) != 0.0f;
-            s.skyboxPath = prim.entityType;
-            s.skyboxSidePath = prim.entitySubType;
+            //           scoreLimit friendlyFire skyboxPath [skyboxSidePath]
+            ParseLevelInfo(settings, prim.args,
+                           StripQuotes(prim.entityType),
+                           StripQuotes(prim.entitySubType));
             return true;
-        }
-        case OzonePrimitiveType::ENTITY_PARTICLES: {
+        case OzonePrimitiveType::ENTITY_PARTICLES:
             // particles type density speed r g b windX windZ
-            auto arg = [&](int i) -> float {
-                return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
-            };
-            LevelSettings& s = pawns.GetWorldInfo().settings;
-            s.particleType = (int)arg(0);
-            s.particleDensity = arg(1);
-            s.particleSpeed = arg(2);
-            s.particleR = (int)arg(3);
-            s.particleG = (int)arg(4);
-            s.particleB = (int)arg(5);
-            s.particleWindX = arg(6);
-            s.particleWindZ = arg(7);
+            ParseLevelParticles(settings, prim.args);
             return true;
-        }
         default:
             return false;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Entity ingestion
+// ---------------------------------------------------------------------------
+void ParseOzoneEntities(const std::vector<OzonePrimitive>& primitives,
+                        const std::string& worldDir,
+                        OzoneZoneCounters& zoneCounters,
+                        OzoneEntitySet& out) {
+    for (const auto& prim : primitives)
+        ParseOzoneEntity(prim, zoneCounters, worldDir, out);
+}
+
+void InjectOzoneEntities(const OzoneEntitySet& entities, PawnSystem& pawns) {
+    auto& zones = ZoneManager::Instance();
+
+    for (const auto& n : entities.playerStarts)
+        pawns.AddPlayerStart(n);
+    for (const auto& n : entities.pickups)
+        pawns.AddPickup(n);
+    for (const auto& n : entities.zones)
+        zones.AddZone(n);
+    for (const auto& n : entities.skyZones)
+        pawns.AddSkyZone(n);
+    for (const auto& n : entities.portals)
+        zones.AddPortal(n);
+    for (const auto& n : entities.lights)
+        pawns.AddLight(n);
+    for (const auto& n : entities.meshObjects)
+        pawns.AddMeshObject(n);
+    for (const auto& n : entities.pathNodes)
+        pawns.AddPathNode(n);
+    for (const auto& n : entities.windZones)
+        pawns.AddWindZone(n);
+    for (const auto& n : entities.particleEmitters)
+        pawns.AddParticleEmitter(n);
+    for (const auto& n : entities.emitters)
+        pawns.AddEmitter(n);
+    // NPC spawns resolve PawnDefs, so they must run after the defs are registered.
+    for (const auto& req : entities.pawnSpawns)
+        pawns.Spawn(req.position, req.defName.c_str());
+
+    // Lights only make sense bound to a volume, and volumes live in ZoneManager.
+    pawns.AssignLightZones();
+
+    pawns.GetWorldInfo().settings = entities.settings;
 }
 
 // ---------------------------------------------------------------------------
@@ -722,8 +780,12 @@ bool OzoneLoader::LoadFile(const char* path) {
     auto primitives = OzoneParser::parse_file(path);
     if (primitives.empty()) return false;
 
+    // Entities are parsed into a plain set first; the orchestrator decides when
+    // (and whether) to inject them into the runtime systems.
+    ParseOzoneEntities(primitives, m_worldDir, m_zoneCounters, m_entities);
+
     for (auto& prim : primitives) {
-        if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
+        if (IsEntityPrimitive(prim.type)) continue;
 
         // Heightmap is handled specially — builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
@@ -800,28 +862,12 @@ bool OzoneLoader::LoadFile(const char* path) {
     }
     }
 
-    // Post-process: assign zoneId to lights based on containing zone
-    {
-        auto& lights = PawnSystem::Instance().GetLights();
-        auto& zones = PawnSystem::Instance().GetZones();
-        for (auto& l : lights) {
-            l.zoneId = -1; // default: affects all zones
-            for (auto& z : zones) {
-                if (l.position.x >= z.bounds.min.x && l.position.x <= z.bounds.max.x &&
-                    l.position.y >= z.bounds.min.y && l.position.y <= z.bounds.max.y &&
-                    l.position.z >= z.bounds.min.z && l.position.z <= z.bounds.max.z) {
-                    l.zoneId = (int)z.id;
-                    break; // first containing zone wins
-                }
-            }
-        }
-    }
-
+    // Lights are bound to zone volumes by InjectOzoneEntities(), not here.
     RebuildCollisionVolumes();
     int r0shader = (!m_renderables.empty() && m_renderables[0].model.materialCount > 0)
         ? m_renderables[0].model.materials[0].shader.id : -1;
-    OZ_INFO("OZONE: lights=%zu litShader=%d renderable0.shader=%d",
-            PawnSystem::Instance().GetLights().size(), GetLitFogShader().id, r0shader);
+    OZ_INFO("OZONE: entities=%zu litShader=%d renderable0.shader=%d",
+            m_entities.Count(), GetLitFogShader().id, r0shader);
     OZ_INFO("OzoneLoader: loaded %zu primitives, %zu collision volumes from %s",
             primitives.size(), m_collisionVolumes.size(), path);
     return true;
@@ -846,8 +892,10 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
     auto primitives = OzoneParser::parse_string(data);
     if (primitives.empty()) return false;
 
+    ParseOzoneEntities(primitives, m_worldDir, m_zoneCounters, m_entities);
+
     for (auto& prim : primitives) {
-if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
+        if (IsEntityPrimitive(prim.type)) continue;
 
         // Heightmap is handled specially
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
@@ -908,22 +956,7 @@ if (LoadOzoneEntity(prim, m_zoneCounters, m_worldDir)) continue;
         ApplyRenderableTexture((int)m_renderables.size() - 1, tp.c_str());
     }
     }
-    // Post-process: assign zoneId to lights based on containing zone
-    {
-        auto& lights = PawnSystem::Instance().GetLights();
-        auto& zones = PawnSystem::Instance().GetZones();
-        for (auto& l : lights) {
-            l.zoneId = -1;
-            for (auto& z : zones) {
-                if (l.position.x >= z.bounds.min.x && l.position.x <= z.bounds.max.x &&
-                    l.position.y >= z.bounds.min.y && l.position.y <= z.bounds.max.y &&
-                    l.position.z >= z.bounds.min.z && l.position.z <= z.bounds.max.z) {
-                    l.zoneId = (int)z.id;
-                    break;
-                }
-            }
-        }
-    }
+    // Lights are bound to zone volumes by InjectOzoneEntities(), not here.
     RebuildCollisionVolumes();
     return true;
 }
@@ -1357,6 +1390,35 @@ void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vecto
 // (with optional bounds filter for backward compat)
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
+    // SURF_FAKEBACKDROP brushes are 2D painted backdrops, the Ocarina of Time /
+    // Majora's Mask trick: they stand in for distant scenery and must be seen at
+    // their full painted value. Through the lit shader they do not get that:
+    //   litColor = baseColor * (colDiffuse * lightAccum)
+    //            + baseColor * (ambient / 10) * colDiffuse
+    // so any panel facing away from the directional sun has colDiffuse ~ 0 and
+    // collapses to black — which is what turned the fortress perimeter into a
+    // black void. For this pass only, force colDiffuse to white and ambient to
+    // 1.0-in-units, which reduces the expression to exactly the painted texture.
+    // Both uniforms are re-applied by the lighting/zone-env passes every frame.
+    Shader lit = s_litFogShader;
+    static int locDiffuse = -1, locAmbient = -1;
+    const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    // 5.5 rather than 10.0: full value (10.0) renders the painted panels at 100%
+    // and blows the pale stone out to flat white. 5.5 keeps them clearly brighter
+    // than the lit geometry while preserving the painting's own tonality.
+    const float backdrop[4] = { 5.5f, 5.5f, 5.5f, 1.0f };
+    if (lit.id > 0) {
+        if (locDiffuse < 0) {
+            locDiffuse = GetShaderLocation(lit, "colDiffuse");
+            locAmbient = GetShaderLocation(lit, "ambient");
+        }
+        if (locDiffuse >= 0)
+            SetShaderValue(lit, locDiffuse, white, SHADER_UNIFORM_VEC4);
+        if (locAmbient >= 0)
+            SetShaderValue(lit, locAmbient, backdrop, SHADER_UNIFORM_VEC4);
+    }
+
+
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
         if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
@@ -1378,27 +1440,37 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
             r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
             continue;
 
+        // SURF_FAKEBACKDROP brushes are 2D painted backdrops, the Ocarina of
+        // Time / Majora's Mask trick: they stand in for distant scenery and are
+        // meant to be seen at full painted value. Drawing them through the lit
+        // shader made every panel facing away from the directional sun collapse
+        // to black (litColor = baseColor * colDiffuse * lightAccum, and ambient
+        // only contributes ambient/10), which turned the fortress perimeter into
+        // a black void. The uniforms set above reduce the lit expression to the
+        // painted texture for this pass.
         DrawModel(r.model, r.position, r.scale, WHITE);
+    }
+
+    // Restore a neutral ambient. The env/lighting passes re-apply the world's
+    // real value next frame, but leaving ambient=10 here would leak into
+    // anything drawn after this function.
+    if (lit.id > 0 && locAmbient >= 0) {
+        const float one[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        SetShaderValue(lit, locAmbient, one, SHADER_UNIFORM_VEC4);
     }
 }
 
-// ---------------------------------------------------------------------------
-// DrawZoneGeometry â€” draw all SURF_FAKEBACKDROP brushes (no bounds filter)
-// ---------------------------------------------------------------------------
-void OzoneLoader::DrawZoneGeometry(Camera3D& camera) {
-    for (auto& r : m_renderables) {
-        if (!r.loaded) continue;
-        if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
-        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
-            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
-            continue;
 
-        DrawModel(r.model, r.position, r.scale, WHITE);
-    }
+// ---------------------------------------------------------------------------
+// DrawZoneGeometry - draw all SURF_FAKEBACKDROP brushes (no bounds filter)
+// ---------------------------------------------------------------------------
+// Delegates to the bounds-filtered overload with a box that always contains the
+// backdrop, so the unlit-painted-backdrop handling lives in exactly one place.
+// (Two separate loops previously meant the fix had to be duplicated, and this
+// overload - the one the renderer actually calls - was missed.)
+void OzoneLoader::DrawZoneGeometry(Camera3D& camera) {
+    const BoundingBox all = { {-1e9f, -1e9f, -1e9f}, {1e9f, 1e9f, 1e9f} };
+    DrawZoneGeometry(camera, all);
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,6 +1485,7 @@ void OzoneLoader::Unload() {
     }
     m_renderables.clear();
     m_collisionVolumes.clear();
+    m_entities.Clear();
     m_zoneCounters.clear();
     m_worldDir.clear();
     UnloadHeightmap();
