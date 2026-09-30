@@ -1,0 +1,17 @@
+// Ethereal / angelic skill tree — tier-2 node (client-only stub).
+entity "seraphic_ward" : skill {
+    stats {
+        cost = 40
+        cost_type = psychic_energy
+        tier = 2
+        col = 0
+        row = 0
+        requires = angelic_might
+        max_health_bonus = 25
+    }
+    actions {
+        on_unlock {
+            msg "Seraphic Ward unlocked: +25 max health."
+        }
+    }
+}

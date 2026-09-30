@@ -1,4 +1,11 @@
 entity "Player" : upgrade {
+    // Player character model used to render players in the world. STUB: static
+    // mesh only (no skeletal clips yet) converted from the psx character pack.
+    mesh = "GameData/Global/Player/Character_Killer_01.glb"
+    texture = "GameData/Global/Player/Character_Killer_01.png"
+    mesh_type = "static"
+    // Base walk-speed multiplier (sprint/crouch scale this at runtime).
+    movement_speed = 1.0
     stats {
         health = 100
         max_health = 100

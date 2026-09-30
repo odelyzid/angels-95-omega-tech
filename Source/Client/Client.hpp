@@ -50,6 +50,7 @@ struct RemotePlayer {
     uint32_t color_packed = 0xFFFFFFFF; // RGBA
     int ammo = 0;           // current ammo in the remote player's selected weapon
     int magazine = 0;       // its magazine size
+    uint8_t stance = 0;     // net::PlayerStance (crouch/sprint) for rendering
 };
 
 // Projectile from weapon fire for rendering
@@ -78,9 +79,10 @@ public:
     // Disconnect from server
     void disconnect();
 
-    // Call every frame: sends player position, processes incoming messages
+    // Call every frame: sends player position, processes incoming messages.
+    // `stance` is a net::PlayerStance value replicated to other clients.
     void update(float cam_x, float cam_y, float cam_z,
-                float cam_yaw, float cam_pitch);
+                float cam_yaw, float cam_pitch, uint8_t stance = 0);
 
     // Send a chat message
     void send_chat(const char* text);

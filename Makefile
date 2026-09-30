@@ -111,6 +111,9 @@ $(BUILD_DIR)/AnimatedMesh.o: Source/Renderer/Mesh/AnimatedMesh.cpp Source/Render
 $(BUILD_DIR)/ViewModel.o: Source/Renderer/ViewModel.cpp Source/Renderer/ViewModel.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Renderer/ViewModel.cpp -o $@
 
+$(BUILD_DIR)/PlayerModel.o: Source/Renderer/PlayerModel.cpp Source/Renderer/PlayerModel.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/PlayerModel.cpp -o $@
+
 # 5d-particle. Isolated ParticleEmitter simulation
 $(BUILD_DIR)/OzParticleSimulationManager.o: Source/Particle/OzParticleSimulationManager.cpp Source/Particle/OzParticleSimulationManager.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Particle/OzParticleSimulationManager.cpp -o $@
@@ -163,7 +166,7 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o OzParticleSimulationManager.o rlights.o)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)

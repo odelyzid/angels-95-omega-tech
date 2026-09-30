@@ -270,6 +270,9 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
         } else if (tok == "anim_speed") {
             Expect(s, "=");
             def.animSpeed = ReadNumber(s);
+        } else if (tok == "movement_speed") {
+            Expect(s, "=");
+            def.movementSpeed = ReadNumber(s);
         } else if (tok == "stats") {
             def.stats = ParseStatBlock(s);
         } else if (tok == "actions") {

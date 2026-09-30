@@ -12,6 +12,8 @@
 #include "Renderer/CombatFX.hpp"
 #include "Renderer/Mesh/MeshCache.hpp"
 #include "Renderer/ViewModel.hpp"
+#include "Renderer/PlayerModel.hpp"
+#include "Menu/SkillTree.hpp"
 #include <cmath>
 #include <memory>
 #include <cstdlib>
@@ -141,6 +143,7 @@ static void CreateNativeMenuBar() {
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
+static bool ShowSkillTree = false;
 
 // Deep-link / CLI join target. SetServerJoinIP is a raw pointer consumed long
 // after parsing, so the host string must live for the whole process.
@@ -264,6 +267,12 @@ static void DrawPlayerHUD() {
         DrawText("FIRE", x, y, 20, RED);
     }
 
+    // Movement stance indicator (sprint / crouch)
+    if (g_playerMovement.isCrouching)
+        DrawText("CROUCH", pad, sh - 46, 16, (Color){120, 200, 255, 255});
+    else if (g_playerMovement.isSprinting)
+        DrawText("SPRINT", pad, sh - 46, 16, (Color){255, 210, 120, 255});
+
     // Coordinates (top-right)
     Camera3D& cam = OmegaTechData.MainCamera;
     float yaw = -atan2f(cam.target.x - cam.position.x, cam.target.z - cam.position.z) * RAD2DEG;
@@ -293,36 +302,6 @@ static Color unpack_color(uint32_t packed) {
 // Remote player rendering — drawn inside DrawWorld()'s BeginMode3D pass
 // (called from Core.hpp). TODO: Move into Render/
 // ---------------------------------------------------------------------------
-// Shared remote-player mesh, loaded lazily through the internal MeshCache.
-// Uses the "Player" entity def's mesh/texture when declared (skeletal when the
-// def says so), else the GameData/Global/Player convention; when nothing loads
-// the caller keeps the primitive capsule placeholder.
-static std::shared_ptr<oz::Mesh> RemotePlayerMesh() {
-    static std::shared_ptr<oz::Mesh> mesh;
-    static bool tried = false;
-    static bool skeletal = false;
-    if (!tried) {
-        tried = true;
-        std::string meshPath, texPath;
-        if (const EntityDef* def = LightningEntityRegistry::Instance().Find("Player")) {
-            meshPath = def->mesh;
-            texPath = def->texture;
-            skeletal = (def->meshType == "skeletal");
-        }
-        const std::string baseDir = "GameData/Global/Player/";
-        if (meshPath.empty()) meshPath = baseDir + "Player.obj";
-        if (texPath.empty()) texPath = baseDir + "Player_texture.png";
-        mesh = skeletal
-            ? oz::MeshCache::Instance().GetSkeletal(meshPath, texPath, baseDir, true)
-            : oz::MeshCache::Instance().GetStatic(meshPath, texPath, baseDir, true);
-        if (mesh && mesh->Valid())
-            OZ_INFO("Remote players: using mesh '%s'", meshPath.c_str());
-        else
-            OZ_WARN("Remote players: no model '%s' — using placeholder capsule", meshPath.c_str());
-    }
-    return mesh;
-}
-
 // Per-remote-player animation state (playback lives outside the shared mesh).
 struct RemoteAnimState {
     net::NetVec3 last{0, 0, 0};
@@ -333,9 +312,13 @@ struct RemoteAnimState {
 
 void DrawRemotePlayers3D() {
     if (!g_network_enabled || !g_client.is_connected()) return;
-    auto mesh = RemotePlayerMesh();
-    auto* skel = dynamic_cast<oz::SkeletalMesh*>(mesh.get());
-    const bool animated = skel && skel->ClipCount() > 0;
+
+    // Shared player character (Player def model, else the Player convention).
+    // STUB: falls back to the primitive capsule when no model loads.
+    auto& pm = oz::PlayerModel::Instance();
+    oz::Mesh* mesh = pm.Get();
+    oz::SkeletalMesh* skel = pm.Skeletal();
+    const bool animated = skel != nullptr;
     const EntityDef* pdef = LightningEntityRegistry::Instance().Find("Player");
     const float dt = GetFrameTime();
 
@@ -343,10 +326,17 @@ void DrawRemotePlayers3D() {
     const auto& players = g_client.remote_players();
     for (const auto& rp : players) {
         if (!rp.active) continue;
-        Vector3 pos = {rp.position.x, rp.position.y, rp.position.z};
+        // rp.position is the sender's camera (eye) position; draw from the feet
+        // so remote bodies rest on the ground instead of floating at eye level.
+        float eyeH = (rp.stance == net::STANCE_CROUCH)
+                   ? g_playerMovement.CrouchEyeHeight
+                   : g_playerMovement.StandEyeHeight;
+        Vector3 pos = {rp.position.x, rp.position.y - eyeH, rp.position.z};
         Color col = unpack_color(rp.color_packed);
 
-        if (mesh && mesh->Valid()) {
+        if (mesh) {
+            int clip = -1;
+            float clipTime = 0.0f;
             if (animated) {
                 RemoteAnimState& a = anim[rp.player_id];
                 float dx = rp.position.x - a.last.x;
@@ -357,18 +347,23 @@ void DrawRemotePlayers3D() {
                     : skel->FindClip(pdef ? pdef->animIdle : "");
                 if (wanted < 0) wanted = 0;
                 if (wanted != a.clip) { a.clip = wanted; a.time = 0.0f; }
-                a.time += dt;
+                a.time += dt * (rp.stance == net::STANCE_SPRINT ? 1.5f : 1.0f);
                 a.last = rp.position;
                 a.hasLast = true;
-                skel->ApplyPose(a.clip, a.time);
+                clip = a.clip;
+                clipTime = a.time;
             }
             oz::MeshTransform mt;
             mt.position = pos;
             mt.yaw = rp.yaw * RAD2DEG;
-            mt.scale = {1.0f, 1.0f, 1.0f};
-            mesh->Draw(mt, {0});
+            // Replicated crouch: squash the model from the feet so it reads as
+            // a lowered stance (static stub - no skeletal crouch clip yet).
+            float yScale = (rp.stance == net::STANCE_CROUCH) ? 0.65f : 1.0f;
+            mt.scale = {1.0f, yScale, 1.0f};
+            pm.DrawInstance(mt, {0}, clip, clipTime);
         } else {
-            const float height = 8.0f, radius = 1.5f;
+            const float height = (rp.stance == net::STANCE_CROUCH) ? 4.5f : 8.0f;
+            const float radius = 1.5f;
             DrawCylinder(pos, radius, radius, height, 8, col);
             DrawSphere({pos.x, pos.y + height + 1.0f, pos.z}, 1.2f, col);
         }
@@ -698,6 +693,39 @@ static void HandleConsoleInput() {
 // ---- Inventory Overlay (Diablo I style TODO: -> Should be derived into PlayerUiHandler) ----
 static int g_invSelectedBpSlot = -1;
 
+// Consume one backpack item and apply its effect. Returns true if it was used.
+static bool UseBackpackItem(int slot) {
+    if (slot < 0 || slot >= BACKPACK_SLOTS) return false;
+    int itemId = gInventory.backpack[slot].itemId;
+    if (itemId < 0 || gInventory.backpack[slot].quantity <= 0) return false;
+    const ItemDBEntry* def = GetItemDef(itemId);
+    if (!def) return false;
+
+    auto& lem = LightningEntityManager::Instance();
+    switch (def->category) {
+        case ItemCategory::HEALTH_VIAL:
+            lem.SetPlayerHealth(fminf(lem.GetPlayerMaxHealth(),
+                                      lem.GetPlayerHealth() + (float)def->value));
+            break;
+        case ItemCategory::MANA_VIAL:
+            lem.SetPlayerMana(fminf(lem.GetPlayerMaxMana(),
+                                    lem.GetPlayerMana() + (float)def->value));
+            break;
+        case ItemCategory::ENERGY_CRYSTAL:
+            lem.SetPlayerPsychicEnergy(fminf(lem.GetPlayerMaxPsychicEnergy(),
+                                             lem.GetPlayerPsychicEnergy() + (float)def->value));
+            break;
+        case ItemCategory::COIN:
+            gInventory.coins += def->value;
+            break;
+        default:
+            return false; // no on-the-spot use effect
+    }
+    gInventory.RemoveFromBackpack(slot);
+    OmegaTechTextSystem.Write(std::string("Used ") + def->name);
+    return true;
+}
+
 static void DrawInventoryOverlay() {
     const int sw = GetScreenWidth();
     const int sh = GetScreenHeight();
@@ -722,8 +750,8 @@ static void DrawInventoryOverlay() {
     DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
 
     const char* equipLabels[EQUIP_SLOT_COUNT] = {
-        "Helmet", "Armor", "Legs", "Boots",
-        "Jewelry 1", "Jewelry 2", "Accessory 1", "Accessory 2"
+        "Armor", "Jewelry 1", "Jewelry 2", "Helmet",
+        "Boots", "Legs", "Accessory 1", "Accessory 2"
     };
 
     auto& lem = LightningEntityManager::Instance();
@@ -732,6 +760,14 @@ static void DrawInventoryOverlay() {
         bool owned = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->owned);
         Color c = owned ? WHITE : (Color){80, 80, 80, 255};
         Color bg = owned ? (Color){40, 50, 45, 255} : (Color){20, 25, 20, 255};
+
+        Rectangle eqRect = {(float)ex, (float)ey, (float)slotW, (float)slotH};
+        bool eqHover = CheckCollisionPointRec(GetMousePosition(), eqRect);
+        if (eqHover && owned) {
+            c = (Color){120, 200, 255, 255};
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+                lem.EquipmentUnequip(i);
+        }
 
         DrawRectangle(ex, ey, slotW, slotH, bg);
         DrawRectangleLines(ex, ey, slotW, slotH, c);
@@ -763,9 +799,18 @@ static void DrawInventoryOverlay() {
             int qty = gInventory.backpack[idx].quantity;
             bool hasItem = itemId >= 0 && qty > 0;
 
+            Rectangle cellRect = {(float)cx, (float)cy, (float)cellSize, (float)cellSize};
+            bool hover = CheckCollisionPointRec(GetMousePosition(), cellRect);
+            if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+                g_invSelectedBpSlot = hasItem ? idx : -1;
+            if (hover && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && hasItem) {
+                if (UseBackpackItem(idx)) { itemId = -1; qty = 0; hasItem = false; }
+            }
+
             Color bgC = hasItem ? (Color){40, 40, 55, 255} : (Color){15, 15, 20, 255};
             Color borderC = hasItem ? WHITE : (Color){50, 50, 50, 255};
 
+            if (hover) borderC = (Color){120, 200, 255, 255};
             if (g_invSelectedBpSlot == idx) {
                 borderC = (Color){255, 255, 0, 255};
             }
@@ -805,6 +850,48 @@ static void DrawInventoryOverlay() {
                     }
                 }
             }
+        }
+    }
+
+    // Keyboard navigation over the backpack (arrows move, Enter uses)
+    {
+        int sel = g_invSelectedBpSlot;
+        int row = (sel >= 0) ? (sel / BACKPACK_COLS) : 0;
+        int col = (sel >= 0) ? (sel % BACKPACK_COLS) : 0;
+        bool moved = false;
+        if (IsKeyPressed(KEY_RIGHT)) { col = (col + 1) % BACKPACK_COLS; moved = true; }
+        if (IsKeyPressed(KEY_LEFT))  { col = (col + BACKPACK_COLS - 1) % BACKPACK_COLS; moved = true; }
+        if (IsKeyPressed(KEY_DOWN))  { row = (row + 1) % BACKPACK_ROWS; moved = true; }
+        if (IsKeyPressed(KEY_UP))    { row = (row + BACKPACK_ROWS - 1) % BACKPACK_ROWS; moved = true; }
+        if (moved) g_invSelectedBpSlot = row * BACKPACK_COLS + col;
+        if (IsKeyPressed(KEY_ENTER) && g_invSelectedBpSlot >= 0)
+            UseBackpackItem(g_invSelectedBpSlot);
+    }
+
+    // Hover tooltip for backpack items
+    {
+        Vector2 mp = GetMousePosition();
+        for (int index = 0; index < BACKPACK_SLOTS; index++) {
+            int row = index / BACKPACK_COLS, col = index % BACKPACK_COLS;
+            Rectangle r = {(float)(bx + col * (cellSize + cellGap)),
+                           (float)(by + row * (cellSize + cellGap)),
+                           (float)cellSize, (float)cellSize};
+            if (!CheckCollisionPointRec(mp, r)) continue;
+            int itemId = gInventory.backpack[index].itemId;
+            if (itemId < 0) break;
+            const ItemDBEntry* def = GetItemDef(itemId);
+            if (!def) break;
+            int nameW = MeasureText(def->name, 13);
+            int descW = MeasureText(def->description, 11);
+            int tw = (nameW > descW ? nameW : descW) + 16;
+            int tipX = (int)mp.x + 14, tipY = (int)mp.y + 14;
+            if (tipX + tw > sw) tipX = sw - tw - 4;
+            if (tipY + 42 > sh) tipY = sh - 46;
+            DrawRectangle(tipX, tipY, tw, 42, (Color){10, 10, 20, 240});
+            DrawRectangleLines(tipX, tipY, tw, 42, (Color){210, 180, 90, 255});
+            DrawText(def->name, tipX + 8, tipY + 5, 13, WHITE);
+            DrawText(def->description, tipX + 8, tipY + 23, 11, LIGHTGRAY);
+            break;
         }
     }
 
@@ -870,7 +957,7 @@ static void DrawInventoryOverlay() {
     }
 
     // Controls hint
-    DrawText("TAB: close  |  CLICK item to use  |  E: pickup  |  ^: console",
+    DrawText("TAB: close  |  Left-click select  |  Right-click / ENTER use  |  E: pickup  |  K: skills  |  ^: console",
              px + 20, py + panel_h - 22, 12, DARKGRAY);
 }
 
@@ -1056,11 +1143,27 @@ int main(int argc, char** argv){
             }
         }
 
+        // K key toggles the ethereal (angelic) skill tree
+        if (IsKeyPressed(KEY_K)) {
+            if (!g_consoleOpen) {
+                ShowSkillTree = !ShowSkillTree;
+                if (ShowSkillTree) {
+                    ShowInventory = false;
+                    ShowCursor();
+                    EnableCursor();
+                } else {
+                    HideCursor();
+                    DisableCursor();
+                }
+            }
+        }
+
         // Tab key toggles inventory
         if (IsKeyPressed(KEY_TAB)) {
             if (!g_consoleOpen) {
                 ShowInventory = !ShowInventory;
                 if (ShowInventory) {
+                    ShowSkillTree = false;
                     ShowCursor();
                     EnableCursor();
                 } else {
@@ -1083,7 +1186,7 @@ int main(int argc, char** argv){
             if (pauseKeyNow && !pauseKeyWasDown) {
                 g_gamePaused = !g_gamePaused;
                 if (g_gamePaused) { ShowCursor(); EnableCursor(); }
-                else if (!ShowSettings && !ShowInventory && !g_consoleOpen) { HideCursor(); DisableCursor(); }
+                else if (!ShowSettings && !ShowInventory && !ShowSkillTree && !g_consoleOpen) { HideCursor(); DisableCursor(); }
             }
             pauseKeyWasDown = pauseKeyNow;
         }
@@ -1205,13 +1308,18 @@ int main(int argc, char** argv){
         g_playerMovement.OldY = OmegaTechData.MainCamera.position.y;
         g_playerMovement.OldZ = OmegaTechData.MainCamera.position.z;
 
-        // Save Y so we can override raylib's built-in Space/Shift vertical movement
+        // Save Y so the vertical physics below can own it (the horizontal
+        // controller never touches Y).
         float savedCamY = OmegaTechData.MainCamera.position.y;
 
-        if (!ShowSettings && !ShowInventory && !g_consoleOpen){
-            for (int i = 0 ; i <= OmegaTechData.CameraSpeed; i ++){
-                UpdateCamera(&OmegaTechData.MainCamera, CAMERA_FIRST_PERSON);
-            }
+        // Custom first-person controller: mouse look + WASD at a speed derived
+        // from the player entity's authored movement_speed, with hold-Shift
+        // sprint and hold-Ctrl crouch.
+        {
+            bool uiBlocked = ShowSettings || ShowInventory || ShowSkillTree || g_consoleOpen;
+            float moveSpeedScalar = LightningEntityManager::Instance().GetPlayerMovementSpeed();
+            g_playerMovement.UpdateLookAndMove(
+                OmegaTechData.MainCamera, GetFrameTime(), moveSpeedScalar, uiBlocked);
         }
 
         // Fixed 60 Hz timestep for movement physics (zone/water/jump/gravity).
@@ -1288,14 +1396,22 @@ int main(int argc, char** argv){
             const float dt = kMoveDt;
 
             if (g_playerMovement.isNoClip) {
-                // Noclip: let raylib control Y natively (space up / shift down)
+                // Noclip: direct vertical control (Space up / Ctrl down)
+                float vy = 0.0f;
+                if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
+                if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
+                OmegaTechData.MainCamera.position.y += vy * g_playerMovement.BaseSpeed * 1.5f * dt;
             } else if (g_playerMovement.isFlying) {
-                // Flying: let raylib control Y, no terrain snap
+                // Flying: direct vertical control, no terrain snap
+                float vy = 0.0f;
+                if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
+                if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
+                OmegaTechData.MainCamera.position.y += vy * g_playerMovement.BaseSpeed * 1.5f * dt;
             } else if (g_playerMovement.inWater) {
                 // Water: restore Y, reduced gravity, dampen fall
                 OmegaTechData.MainCamera.position.y = savedCamY;
 
-                if (IsKeyPressed(KEY_SPACE) && !g_consoleOpen && !ShowInventory) {
+                if (IsKeyPressed(KEY_SPACE) && !g_consoleOpen && !ShowInventory && !ShowSkillTree) {
                     g_playerMovement.velocityY = 5.0f; // swim upward
                 }
 
@@ -1308,7 +1424,7 @@ int main(int argc, char** argv){
                 // Normal / grounded: restore Y
                 OmegaTechData.MainCamera.position.y = savedCamY;
 
-                if (IsKeyPressed(KEY_SPACE) && g_playerMovement.onGround && !g_consoleOpen && !ShowInventory) {
+                if (IsKeyPressed(KEY_SPACE) && g_playerMovement.onGround && !g_consoleOpen && !ShowInventory && !ShowSkillTree) {
                     g_playerMovement.velocityY = 8.0f;
                     g_playerMovement.onGround = false;
                 }
@@ -1323,7 +1439,7 @@ int main(int argc, char** argv){
         }
 
         // Weapon fire AFTER camera so left-click does not disrupt movement
-        if (!ShowInventory && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        if (!ShowInventory && !ShowSkillTree && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
             EntityInstance* wep = LightningEntityManager::Instance().SelectedEntity();
             if (wep && wep->def && wep->def->type == EntityType::WEAPON) {
                 FireWeapon();
@@ -1331,7 +1447,7 @@ int main(int argc, char** argv){
         }
 
         // ADS / Zoom (right-click)
-        g_adsActive = !ShowInventory && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
+        g_adsActive = !ShowInventory && !ShowSkillTree && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
 
         // Recoil recovery
         const float RECOIL_DECAY = 0.82f;
@@ -1424,8 +1540,11 @@ int main(int argc, char** argv){
             Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
             float yaw = atan2f(fwd.x, fwd.z);
             float pitch = asinf(fwd.y);
+            uint8_t stance = g_playerMovement.isCrouching ? net::STANCE_CROUCH
+                           : (g_playerMovement.isSprinting ? net::STANCE_SPRINT
+                                                           : net::STANCE_STAND);
             g_client.update(cam.position.x, cam.position.y, cam.position.z,
-                            yaw, pitch);
+                            yaw, pitch, stance);
 
             if (g_client.is_connected()) {
                 LightningEntityManager::Instance().SetPlayerLevel(g_client.get_level());
@@ -1542,11 +1661,16 @@ int main(int argc, char** argv){
             DrawInventoryOverlay();
         }
 
+        // Ethereal skill tree overlay
+        if (ShowSkillTree) {
+            oz::skilltree::DrawOverlay(ShowSkillTree);
+        }
+
         // Console overlay (always on top)
         DrawConsole();
 
         // Crosshair
-        if (!ShowInventory && !g_consoleOpen) {
+        if (!ShowInventory && !ShowSkillTree && !g_consoleOpen) {
             int cx = GetScreenWidth() / 2;
             int cy = GetScreenHeight() / 2;
             int gap = (g_adsActive ? 2 : 5) + (int)(g_crosshairBloom * (g_adsActive ? 0.3f : 1.0f));

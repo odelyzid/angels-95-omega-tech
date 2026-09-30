@@ -20,6 +20,7 @@ enum class EntityType : uint8_t {
     MESH_SKELETAL,
     PARTICLE_EMITTER,
     WIND_ZONE,
+    SKILL,
     UNKNOWN
 };
 
@@ -37,6 +38,7 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::MESH_SKELETAL:   return "Mesh.Skeletal";
         case EntityType::PARTICLE_EMITTER:return "ParticleEmitter";
         case EntityType::WIND_ZONE:       return "WindZone";
+        case EntityType::SKILL:           return "skill";
         default:                          return "unknown";
     }
 }
@@ -54,6 +56,7 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "Mesh.Skeletal") return EntityType::MESH_SKELETAL;
     if (n == "ParticleEmitter") return EntityType::PARTICLE_EMITTER;
     if (n == "WindZone")      return EntityType::WIND_ZONE;
+    if (n == "skill")         return EntityType::SKILL;
     return EntityType::UNKNOWN;
 }
 
@@ -100,6 +103,9 @@ struct EntityDef {
     std::string animReturn;
     std::string animDeath;
     float animSpeed = 1.0f;
+    // Movement speed multiplier authored per entity (`movement_speed = 1.4`).
+    // Applied to the player's base walk speed; reserved for NPC/remote use too.
+    float movementSpeed = 1.0f;
 
     // Player stat defaults (used when spawning "Player" entity)
     float defaultHealth = 100.0f;

@@ -447,14 +447,23 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                         break;
                 }
             } else if (edef && (edef->type == EntityType::WEAPON ||
+                                edef->type == EntityType::ARMOR ||
                                 edef->type == EntityType::CONSUMABLE ||
                                 edef->type == EntityType::UPGRADE)) {
-                int instIdx = LightningEntityManager::Instance().Spawn(edef->name);
-                if (instIdx >= 0) {
-                    for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
-                        if (LightningEntityManager::Instance().HotbarAt(s) < 0) {
-                            LightningEntityManager::Instance().HotbarAssign(s, instIdx);
-                            break;
+                auto& lem = LightningEntityManager::Instance();
+                // Armor/upgrade defs with an authored equip_slot are equipped
+                // directly; everything else goes to the first empty hotbar slot.
+                if ((edef->type == EntityType::ARMOR || edef->type == EntityType::UPGRADE) &&
+                    lem.AutoEquip(edef)) {
+                    // equipped
+                } else {
+                    int instIdx = lem.Spawn(edef->name);
+                    if (instIdx >= 0) {
+                        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
+                            if (lem.HotbarAt(s) < 0) {
+                                lem.HotbarAssign(s, instIdx);
+                                break;
+                            }
                         }
                     }
                 }

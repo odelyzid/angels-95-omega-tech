@@ -467,6 +467,64 @@ static int test_multi_despawn_cycles() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_equipment_slot_name() {
+    TEST("EquipmentSlotFromName maps authored names");
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("armor"), 0);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("helmet"), 3);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("boots"), 4);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("accessory1"), 6);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("\"jewelry2\""), 2);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("weapon"), -1);
+    CHECK_EQ(LightningEntityManager::EquipmentSlotFromName("nonsense"), -1);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_auto_equip_and_defense() {
+    TEST("AutoEquip places armor in its slot and defense sums");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef helm;
+    helm.name = "test_helmet";
+    helm.type = EntityType::ARMOR;
+    helm.stats.strings["equip_slot"] = "\"helmet\"";
+    helm.stats.floats["defense"] = 10.0f;
+    reg.Register(helm);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    CHECK(em.AutoEquip(reg.Find("test_helmet")));
+    int idx = em.EquipmentAt(3);
+    CHECK(idx >= 0);
+    CHECK(em.Get(idx) != nullptr);
+    CHECK_EQ((int)em.GetPlayerDefense(), 10);
+
+    em.EquipmentUnequip(3);
+    CHECK_EQ(em.EquipmentAt(3), -1);
+    CHECK_EQ((int)em.GetPlayerDefense(), 0);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_respec_skills() {
+    TEST("RespecSkills clears unlocked nodes");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef sk;
+    sk.name = "test_respec_skill";
+    sk.type = EntityType::SKILL;
+    sk.stats.floats["cost"] = 20.0f;
+    sk.stats.strings["cost_type"] = "mana";
+    sk.stats.floats["max_health_bonus"] = 10.0f;
+    reg.Register(sk);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    em.UnlockSkill("test_respec_skill");
+    CHECK(em.IsSkillUnlocked("test_respec_skill"));
+    CHECK_EQ((int)em.UnlockedSkills().size(), 1);
+    em.RespecSkills();
+    CHECK(!em.IsSkillUnlocked("test_respec_skill"));
+    CHECK_EQ((int)em.UnlockedSkills().size(), 0);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningEntityManager Tests\n");
     fprintf(stdout, "============================\n");
@@ -498,6 +556,9 @@ int main() {
     failures += test_reload_selected();
     failures += test_reload_no_magazine();
     failures += test_reload_full_ammo();
+    failures += test_equipment_slot_name();
+    failures += test_auto_equip_and_defense();
+    failures += test_respec_skills();
 
     fprintf(stdout, "============================\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

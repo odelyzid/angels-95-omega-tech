@@ -95,6 +95,13 @@ struct NetworkMessage {
 };
 #pragma pack(pop)
 
+// Player stance, replicated so remote clients can render crouch/sprint.
+enum PlayerStance : uint8_t {
+    STANCE_STAND  = 0,
+    STANCE_CROUCH = 1,
+    STANCE_SPRINT = 2
+};
+
 struct PlayerUpdateData {
     uint32_t player_id;  // 0 for client→server; server fills when relaying
     NetVec3 position;
@@ -106,6 +113,7 @@ struct PlayerUpdateData {
     int level;
     int xp;
     int inventory[5]; // Objects 1-5 ownership flags
+    uint8_t stance;   // net::PlayerStance of the sender (crouch/sprint)
 };
 
 struct PickupCollectData {

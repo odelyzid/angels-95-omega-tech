@@ -528,6 +528,7 @@ static int test_parse_mesh_skeletal() {
             anim_return = "Walk"
             anim_death = "Die"
             anim_speed = 1.25
+            movement_speed = 1.4
         }
     )";
     EntityDef def = LightningScriptParser::Parse(ozls, "test_mesh_skeletal.ozls");
@@ -541,6 +542,7 @@ static int test_parse_mesh_skeletal() {
     CHECK(def.animReturn == "Walk");
     CHECK(def.animDeath == "Die");
     CHECK_APROX(def.animSpeed, 1.25f, 0.001f);
+    CHECK_APROX(def.movementSpeed, 1.4f, 0.001f);
     PASS(); return 0; END_TEST();
 }
 
@@ -575,6 +577,29 @@ static int test_parse_wind_zone() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_parse_skill() {
+    TEST("parse skill entity (ethereal tree)");
+    std::string ozls = R"(
+        entity "angelic_might" : skill {
+            stats {
+                cost = 25
+                cost_type = mana
+                tier = 1
+                col = 0
+                requires = none
+                max_health_bonus = 25
+            }
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_skill.ozls");
+    CHECK(def.name == "angelic_might");
+    CHECK(def.type == EntityType::SKILL);
+    CHECK_APROX(def.stats.floats["cost"], 25.0f, 0.001f);
+    CHECK(def.stats.strings["cost_type"] == "mana");
+    CHECK_APROX(def.stats.floats["max_health_bonus"], 25.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptParser Tests:\n");
     int failures = 0;
@@ -604,6 +629,7 @@ int main() {
     failures += test_parse_mesh_skeletal();
     failures += test_parse_mesh_static_and_quoted_clip();
     failures += test_parse_wind_zone();
+    failures += test_parse_skill();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

@@ -1,0 +1,17 @@
+// Ethereal / angelic skill tree — tier-2 node (client-only stub).
+entity "ethereal_step" : skill {
+    stats {
+        cost = 30
+        cost_type = mana
+        tier = 2
+        col = 1
+        row = 0
+        requires = angelic_might
+        move_speed_bonus = 0.15
+    }
+    actions {
+        on_unlock {
+            msg "Ethereal Step unlocked: +15% movement speed."
+        }
+    }
+}

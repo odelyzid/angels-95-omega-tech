@@ -57,6 +57,14 @@ public:
     void EquipmentClear();                      // despawns all equipped
     int  EquipmentFindFreeSlot() const;         // first empty slot, or -1
 
+    // Map an authored `equip_slot` string (e.g. "helmet") to a slot index, or -1.
+    static int EquipmentSlotFromName(const std::string& name);
+    // Spawn an armor/upgrade def and assign it to its authored equip_slot.
+    // Returns false when the def has no usable equip_slot.
+    bool AutoEquip(const EntityDef* def);
+    // Summed `defense` of all equipped items (incoming-damage mitigation).
+    float GetPlayerDefense() const;
+
     // Returns the model pointer from the cache by index
     void* GetModel(int idx) const;
     void* GetTexture(int idx) const;
@@ -114,6 +122,16 @@ public:
     void  SetPlayerXP(int v);
     int   GetPlayerXPToNext() const;
     void  SetPlayerXPToNext(int v);
+    // Authored walk-speed multiplier from the Player entity def (`movement_speed`).
+    float GetPlayerMovementSpeed() const;
+
+    // --- Skills (ethereal / angelic tree) ---
+    bool IsSkillUnlocked(const std::string& name) const;
+    void UnlockSkill(const std::string& name);
+    const std::vector<std::string>& UnlockedSkills() const { return m_unlockedSkills; }
+    // Refund every unlocked node (cost back to mana/psychic, bonuses removed)
+    // and clear the tree so it can be re-specced.
+    void RespecSkills();
 
     // --- Script result routing (read by host after Update) ---
     const std::string& PendingMessage() const { return m_pendingMessage; }
@@ -159,6 +177,9 @@ private:
     // Player entity index (set during Init)
     int m_playerEntityIndex = -1;
 
+    // Unlocked ethereal skill node names (persisted in TF.sav).
+    std::vector<std::string> m_unlockedSkills;
+
     // Cached model/texture/icon handles
     struct CachedResource {
         int type = 0; // 0=unused, 1=model, 2=texture
@@ -189,6 +210,9 @@ private:
     void UncacheResource(int idx);
     void UnloadAllResources();
     void PruneSoundCache();
+
+    // Sum a numeric stat over all equipped items (`key`, e.g. "max_health_bonus").
+    float EquipmentStatSum(const char* key) const;
 
     // Drain an instance's pending script side-effects (sound/msg/stats/pickup spawn)
     void ApplyEntityScriptEffects(EntityInstance& inst);

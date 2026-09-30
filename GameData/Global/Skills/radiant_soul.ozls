@@ -1,0 +1,18 @@
+// Ethereal / angelic skill tree — tier-3 capstone (client-only stub).
+entity "radiant_soul" : skill {
+    stats {
+        cost = 50
+        cost_type = psychic_energy
+        tier = 3
+        col = 0
+        row = 0
+        requires = ethereal_step
+        max_mana_bonus = 30
+        max_psychic_energy_bonus = 50
+    }
+    actions {
+        on_unlock {
+            msg "Radiant Soul: +30 max mana, +50 psychic energy."
+        }
+    }
+}

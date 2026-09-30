@@ -149,6 +149,12 @@ if (Test-Path $pawnDir) {
     Run-OzPack "OZTX" $pawnDir "$OUT_TEX\pawn.oztex"
 }
 
+# --- Player character model (Global/Player: *.glb + textures) ---
+$playerDir = "$GAMEDATA\Global\Player"
+if (Test-Path $playerDir) {
+    Run-OzPack "OZPK" $playerDir "$OUT\player.ozpak"
+}
+
 # --- Title/menu art + music ---
 $titleDir = "$GAMEDATA\Global\Title"
 if (Test-Path $titleDir) {
@@ -159,6 +165,12 @@ if (Test-Path $titleDir) {
 $animsDir = "$GAMEDATA\Global\Anims"
 if (Test-Path $animsDir) {
     Run-OzPack "OZPK" $animsDir "$OUT\anims.ozpak"
+}
+
+# --- Ethereal / angelic skill tree nodes (Global/Skills: *.ozls) ---
+$skillsDir = "$GAMEDATA\Global\Skills"
+if (Test-Path $skillsDir) {
+    Run-OzPack "OZPK" $skillsDir "$OUT\skills.ozpak"
 }
 
 Write-Step "=== Packaging Worlds ==="

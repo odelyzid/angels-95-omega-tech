@@ -1,0 +1,16 @@
+// Ethereal / angelic skill tree — tier-1 root node (client-only stub).
+entity "angelic_might" : skill {
+    stats {
+        cost = 25
+        cost_type = mana
+        tier = 1
+        col = 0
+        row = 0
+        max_health_bonus = 25
+    }
+    actions {
+        on_unlock {
+            msg "Angelic Might unlocked: +25 max health."
+        }
+    }
+}

@@ -39,7 +39,7 @@ void OmegaClient::disconnect() {
 }
 
 void OmegaClient::update(float cam_x, float cam_y, float cam_z,
-                         float cam_yaw, float cam_pitch) {
+                         float cam_yaw, float cam_pitch, uint8_t stance) {
     m_client.update();
 
     if (!m_client.is_connected()) return;
@@ -56,6 +56,7 @@ void OmegaClient::update(float cam_x, float cam_y, float cam_z,
     pud.level = m_level;
     pud.xp = m_xp;
     memset(pud.inventory, 0, sizeof(pud.inventory));
+    pud.stance = stance;
 
     net::NetworkMessage msg;
     msg.magic = net::MAGIC;
@@ -362,6 +363,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                     rp.yaw = pud.yaw;
                     rp.pitch = pud.pitch;
                     rp.health = pud.health;
+                    rp.stance = pud.stance;
                     rp.active = true;
                     found = true;
                     break;
@@ -374,6 +376,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 rp.yaw = pud.yaw;
                 rp.pitch = pud.pitch;
                 rp.health = pud.health;
+                rp.stance = pud.stance;
                 rp.active = true;
                     rp.color_packed = id_to_color_packed(pud.player_id);
                 m_remote_players.push_back(rp);

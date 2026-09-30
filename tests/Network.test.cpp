@@ -49,6 +49,21 @@ static void test_player_update_data_size() {
     else printf("FAIL: exceeds MAX_MESSAGE_SIZE\n");
 }
 
+// Stance (crouch/sprint) must survive the wire copy used for relay.
+static void test_player_update_stance() {
+    test_count++;
+    printf("  TEST PlayerUpdateData stance... ");
+    net::PlayerUpdateData pud{};
+    pud.stance = net::STANCE_CROUCH;
+    net::PlayerUpdateData copy{};
+    std::memcpy(&copy, &pud, sizeof(pud));
+    bool ok = (copy.stance == net::STANCE_CROUCH) &&
+              (net::STANCE_STAND == 0) &&
+              (net::STANCE_SPRINT == 2);
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: stance not preserved\n");
+}
+
 static void test_is_valid_ip() {
     test_count++;
     printf("  TEST is_valid_ip valid... ");
@@ -213,6 +228,7 @@ int main() {
     test_message_type_string();
     test_message_type_string_unknown();
     test_player_update_data_size();
+    test_player_update_stance();
     test_is_valid_ip();
     test_is_valid_ip_invalid();
     test_find_free_port();

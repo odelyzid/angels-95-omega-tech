@@ -1,3 +1,4 @@
+#pragma once
 // Objects.hpp removed — migrated to LightningEntityManager
 
 using namespace std;

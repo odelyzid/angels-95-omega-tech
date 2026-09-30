@@ -830,7 +830,11 @@ void UpdateEntitiesSim(float dt)
         float damage = 0;
         if (g_damageCooldown <= 0.0f && PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
         {
-            LightningEntityManager::Instance().SetPlayerHealth(std::max(0.0f, LightningEntityManager::Instance().GetPlayerHealth() - damage));
+            // Equipped armor mitigates incoming damage (diminishing returns).
+            auto& lem = LightningEntityManager::Instance();
+            float defense = lem.GetPlayerDefense();
+            float mitigated = damage * (100.0f / (100.0f + std::max(0.0f, defense)));
+            lem.SetPlayerHealth(std::max(0.0f, lem.GetPlayerHealth() - mitigated));
             g_damageCooldown = 1.0f;
             if (OmegaTechData.PanicCounter != 240)
                 OmegaTechData.PanicCounter += 2;
@@ -1331,7 +1335,8 @@ if (inSkyZone)
     // OZONE brush collision - chunk-accelerated query
     {
         Vector3 cp = OmegaTechData.MainCamera.position;
-        float playerFeet = cp.y - PLAYER_EYE_HEIGHT;
+        // Effective eye height shrinks while crouching (dynamic player stance)
+        float playerFeet = cp.y - g_playerMovement.EyeHeight;
         auto &chunkMgr = OzoneLoader::Instance().GetChunkManager();
         std::vector<int> nearIndices;
         chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
@@ -1373,9 +1378,9 @@ if (inSkyZone)
         if (hmY > -50000.0f && hmY <= cp.y + 0.1f)
         {
 
-            if (cp.y <= hmY + PLAYER_EYE_HEIGHT + 0.1f)
+            if (cp.y <= hmY + g_playerMovement.EyeHeight + 0.1f)
             {
-                OmegaTechData.MainCamera.position.y = hmY + PLAYER_EYE_HEIGHT;
+                OmegaTechData.MainCamera.position.y = hmY + g_playerMovement.EyeHeight;
                 g_playerMovement.velocityY = 0.0f;
                 g_playerMovement.onGround = true;
             }
@@ -1408,9 +1413,9 @@ if (inSkyZone)
             if (brushTop > -50000.0f)
             {
 
-                if (cp.y <= brushTop + PLAYER_EYE_HEIGHT + 0.1f)
+                if (cp.y <= brushTop + g_playerMovement.EyeHeight + 0.1f)
                 {
-                    OmegaTechData.MainCamera.position.y = brushTop + PLAYER_EYE_HEIGHT;
+                    OmegaTechData.MainCamera.position.y = brushTop + g_playerMovement.EyeHeight;
                     g_playerMovement.velocityY = 0.0f;
                     g_playerMovement.onGround = true;
                 }
@@ -1714,8 +1719,8 @@ if (inSkyZone)
                                 ? OzoneLoader::Instance().SampleHeightmapY(g_portalSpawnPos.x, g_portalSpawnPos.z)
                                 : -99999.0f;
             if (groundY > -50000.0f &&
-                OmegaTechData.MainCamera.position.y < groundY + PLAYER_EYE_HEIGHT)
-                OmegaTechData.MainCamera.position.y = groundY + PLAYER_EYE_HEIGHT;
+                OmegaTechData.MainCamera.position.y < groundY + g_playerMovement.EyeHeight)
+                OmegaTechData.MainCamera.position.y = groundY + g_playerMovement.EyeHeight;
             OmegaTechData.MainCamera.target.x += OmegaTechData.MainCamera.position.x - oldPos.x;
             OmegaTechData.MainCamera.target.y += OmegaTechData.MainCamera.position.y - oldPos.y;
             OmegaTechData.MainCamera.target.z += OmegaTechData.MainCamera.position.z - oldPos.z;

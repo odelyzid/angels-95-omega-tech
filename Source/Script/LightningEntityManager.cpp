@@ -6,6 +6,7 @@
 #include "../Pawn/OzPawnSystem.hpp"
 #endif
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -844,6 +845,54 @@ int LightningEntityManager::EquipmentFindFreeSlot() const {
     return -1;
 }
 
+// Authored `equip_slot` names -> slot indices (order matches EquipSlotType).
+int LightningEntityManager::EquipmentSlotFromName(const std::string& raw) {
+    std::string s = raw;
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        s = s.substr(1, s.size() - 2);
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    if (s == "armor")      return 0;
+    if (s == "jewelry1")   return 1;
+    if (s == "jewelry2")   return 2;
+    if (s == "helmet")     return 3;
+    if (s == "boots")      return 4;
+    if (s == "legs")       return 5;
+    if (s == "accessory1") return 6;
+    if (s == "accessory2") return 7;
+    return -1;
+}
+
+bool LightningEntityManager::AutoEquip(const EntityDef* def) {
+    if (!def) return false;
+    auto it = def->stats.strings.find("equip_slot");
+    if (it == def->stats.strings.end()) return false;
+    int slot = EquipmentSlotFromName(it->second);
+    if (slot < 0) return false;
+    int inst = Spawn(def->name);
+    if (inst < 0) return false;
+    EquipmentAssign(slot, inst);
+    OZ_INFO("Equip: '%s' -> slot %d", def->name.c_str(), slot);
+    return true;
+}
+
+float LightningEntityManager::EquipmentStatSum(const char* key) const {
+    float sum = 0.0f;
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        int idx = m_equipment[s];
+        if (idx < 0 || idx >= (int)m_instances.size()) continue;
+        const EntityDef* def = m_instances[idx].def;
+        if (!def) continue;
+        auto it = def->stats.floats.find(key);
+        if (it != def->stats.floats.end()) sum += it->second;
+    }
+    return sum;
+}
+
+float LightningEntityManager::GetPlayerDefense() const {
+    return EquipmentStatSum("defense");
+}
+
 // ---------------------------------------------------------------------------
 // Player stat accessors
 // ---------------------------------------------------------------------------
@@ -860,15 +909,21 @@ void LightningEntityManager::SetPlayerStat(const std::string& name, float val) {
 }
 
 float LightningEntityManager::GetPlayerHealth() const { return GetPlayerStat("health", 100.0f); }
-float LightningEntityManager::GetPlayerMaxHealth() const { return GetPlayerStat("max_health", 100.0f); }
+float LightningEntityManager::GetPlayerMaxHealth() const {
+    return GetPlayerStat("max_health", 100.0f) + EquipmentStatSum("max_health_bonus");
+}
 void LightningEntityManager::SetPlayerHealth(float v) { SetPlayerStat("health", v); }
 
 float LightningEntityManager::GetPlayerMana() const { return GetPlayerStat("mana", 0.0f); }
-float LightningEntityManager::GetPlayerMaxMana() const { return GetPlayerStat("max_mana", 100.0f); }
+float LightningEntityManager::GetPlayerMaxMana() const {
+    return GetPlayerStat("max_mana", 100.0f) + EquipmentStatSum("max_mana_bonus");
+}
 void LightningEntityManager::SetPlayerMana(float v) { SetPlayerStat("mana", v); }
 
 float LightningEntityManager::GetPlayerPsychicEnergy() const { return GetPlayerStat("psychic_energy", 0.0f); }
-float LightningEntityManager::GetPlayerMaxPsychicEnergy() const { return GetPlayerStat("max_psychic_energy", 100.0f); }
+float LightningEntityManager::GetPlayerMaxPsychicEnergy() const {
+    return GetPlayerStat("max_psychic_energy", 100.0f) + EquipmentStatSum("max_psychic_energy_bonus");
+}
 void LightningEntityManager::SetPlayerPsychicEnergy(float v) { SetPlayerStat("psychic_energy", v); }
 
 int LightningEntityManager::GetPlayerLevel() const { return (int)GetPlayerStat("level", 1.0f); }
@@ -879,6 +934,87 @@ void LightningEntityManager::SetPlayerXP(int v) { SetPlayerStat("xp", (float)v);
 
 int LightningEntityManager::GetPlayerXPToNext() const { return (int)GetPlayerStat("xp_to_next", 100.0f); }
 void LightningEntityManager::SetPlayerXPToNext(int v) { SetPlayerStat("xp_to_next", (float)v); }
+
+float LightningEntityManager::GetPlayerMovementSpeed() const {
+    float speed = 1.0f;
+    if (m_playerEntityIndex >= 0 && m_playerEntityIndex < (int)m_instances.size()) {
+        const EntityDef* d = m_instances[m_playerEntityIndex].def;
+        if (d && d->movementSpeed > 0.0f) speed = d->movementSpeed;
+    }
+    // Unlocked ethereal skills may carry a movement bonus.
+    for (const auto& s : m_unlockedSkills) {
+        const EntityDef* d = LightningEntityRegistry::Instance().Find(s);
+        if (!d) continue;
+        auto it = d->stats.floats.find("move_speed_bonus");
+        if (it != d->stats.floats.end()) speed += it->second;
+    }
+    // Equipped items may also carry a movement bonus.
+    speed += EquipmentStatSum("move_speed_bonus");
+    return speed;
+}
+
+// ---------------------------------------------------------------------------
+// Skills — unlocked ethereal/angelic tree nodes (client-side, persisted in sav)
+// ---------------------------------------------------------------------------
+bool LightningEntityManager::IsSkillUnlocked(const std::string& name) const {
+    for (const auto& s : m_unlockedSkills)
+        if (s == name) return true;
+    return false;
+}
+
+void LightningEntityManager::UnlockSkill(const std::string& name) {
+    if (name.empty() || IsSkillUnlocked(name)) return;
+    m_unlockedSkills.push_back(name);
+
+    // Apply one-time stat bonuses declared by the skill node.
+    const EntityDef* d = LightningEntityRegistry::Instance().Find(name);
+    if (!d) return;
+    auto applyBonus = [&](const char* statKey, const char* targetStat) {
+        auto it = d->stats.floats.find(statKey);
+        if (it != d->stats.floats.end())
+            SetPlayerStat(targetStat, GetPlayerStat(targetStat, 0.0f) + it->second);
+    };
+    applyBonus("max_health_bonus", "max_health");
+    applyBonus("max_mana_bonus", "max_mana");
+    applyBonus("max_psychic_energy_bonus", "max_psychic_energy");
+    applyBonus("health_bonus", "health");
+}
+
+void LightningEntityManager::RespecSkills() {
+    if (m_unlockedSkills.empty()) return;
+
+    float refundMana = 0.0f, refundEnergy = 0.0f;
+    for (const auto& name : m_unlockedSkills) {
+        const EntityDef* d = LightningEntityRegistry::Instance().Find(name);
+        if (!d) continue;
+        // Undo the one-time stat bonuses (mirrors UnlockSkill).
+        auto sub = [&](const char* statKey, const char* target) {
+            auto it = d->stats.floats.find(statKey);
+            if (it != d->stats.floats.end())
+                SetPlayerStat(target, GetPlayerStat(target, 0.0f) - it->second);
+        };
+        sub("max_health_bonus", "max_health");
+        sub("max_mana_bonus", "max_mana");
+        sub("max_psychic_energy_bonus", "max_psychic_energy");
+        sub("health_bonus", "health");
+
+        auto cit = d->stats.floats.find("cost");
+        float cost = (cit != d->stats.floats.end()) ? cit->second : 0.0f;
+        auto tit = d->stats.strings.find("cost_type");
+        std::string ct = (tit != d->stats.strings.end()) ? tit->second : "mana";
+        if (ct.size() >= 2 && ct.front() == '"' && ct.back() == '"')
+            ct = ct.substr(1, ct.size() - 2);
+        if (ct == "psychic_energy") refundEnergy += cost;
+        else                        refundMana += cost;
+    }
+
+    m_unlockedSkills.clear();
+    SetPlayerHealth(std::min(GetPlayerHealth(), GetPlayerMaxHealth()));
+    SetPlayerMana(std::min(GetPlayerMana() + refundMana, GetPlayerMaxMana()));
+    SetPlayerPsychicEnergy(std::min(GetPlayerPsychicEnergy() + refundEnergy,
+                                    GetPlayerMaxPsychicEnergy()));
+    OZ_INFO("Respec: refunded %.0f mana, %.0f psychic energy", refundMana, refundEnergy);
+}
 
 // ---------------------------------------------------------------------------
 // ResolveScriptStat — external stat provider for script $name tokens.
@@ -973,6 +1109,13 @@ std::string LightningEntityManager::SerializeState() const {
     for (int s = 0; s < EQUIP_SLOT_COUNT; s++) dumpFlags("e", s, m_equipment[s]);
     if (m_playerEntityIndex >= 0) dumpFlags("p", 0, m_playerEntityIndex);
     result += "|";
+    // Unlocked ethereal skill node names.
+    result += "skills=";
+    for (size_t i = 0; i < m_unlockedSkills.size(); i++) {
+        if (i > 0) result += ",";
+        result += m_unlockedSkills[i];
+    }
+    result += "|";
     return result;
 }
 
@@ -1043,6 +1186,30 @@ bool LightningEntityManager::DeserializeState(const std::string& data) {
                             m_instances[idx].ctx.SetFlag(flagIdx, val);
                     }
                 }
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+    }
+
+    // Restore unlocked ethereal skill node names.
+    {
+        size_t p = data.find("skills=");
+        if (p != std::string::npos) {
+            p += 7;
+            size_t end = data.find('|', p);
+            if (end == std::string::npos) end = data.size();
+            std::string section = data.substr(p, end - p);
+            size_t start = 0;
+            m_unlockedSkills.clear();
+            while (start < section.size()) {
+                size_t comma = section.find(',', start);
+                std::string name = (comma == std::string::npos)
+                    ? section.substr(start)
+                    : section.substr(start, comma - start);
+                while (!name.empty() && (name[0] == ' ' || name[0] == '\t')) name.erase(0, 1);
+                while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+                if (!name.empty()) UnlockSkill(name);
                 if (comma == std::string::npos) break;
                 start = comma + 1;
             }
