@@ -1,5 +1,6 @@
 #include "Data.hpp"
 #include "Log.hpp"
+#include "Physics/PlayerPhysics.hpp"
 #include "Client/JoinUri.hpp"
 #include "Renderer/OzAssetMapper.hpp"
 #include "Audio/DspReverb.hpp"
@@ -65,6 +66,77 @@ void SaveGame();
 void DrawRemotePlayers3D();
 
 #include "Renderer/CombatFX.hpp"
+
+// ---------------------------------------------------------------------------
+// OzoneCollisionQuery — adapter that feeds OzoneLoader's chunked collision
+// volumes / heightmap into the oz::physics::PlayerPhysics module, keeping the
+// module independent of the world loader.
+// ---------------------------------------------------------------------------
+namespace oz {
+namespace physics {
+
+class OzoneCollisionQuery : public PlayerPhysics::CollisionQuery {
+public:
+    GroundSample SampleGround(float x, float z, float feetY) override {
+        auto& ozLoader = OzoneLoader::Instance();
+        // Heightmap first: only when its surface is at or below the player's
+        // feet — underground areas (tunnels) must fall through to brush-top
+        // support instead of being teleported to the surface.
+        float hmY = ozLoader.HasHeightmap()
+                        ? ozLoader.SampleHeightmapY(x, z)
+                        : -99999.0f;
+        if (hmY > kNoGroundY && hmY <= feetY + kGroundEpsilon)
+            return GroundSample{hmY, true};
+
+        // Fallback: stand on top of OZONE brush primitives (chunk-accelerated)
+        float brushTop = -99999.0f;
+        auto& chunkMgr = ozLoader.GetChunkManager();
+        std::vector<int> nearIndices;
+        chunkMgr.GetVolumesNear(x, z, nearIndices);
+        auto& vols = ozLoader.GetCollisionVolumes();
+        for (int idx : nearIndices) {
+            if (idx < 0 || idx >= (int)vols.size())
+                continue;
+            auto& vol = vols[idx];
+            if (x >= vol.aabb.min.x && x <= vol.aabb.max.x &&
+                z >= vol.aabb.min.z && z <= vol.aabb.max.z)
+            {
+                float top = vol.aabb.max.y;
+                if (top > brushTop && top <= feetY + kGroundEpsilon)
+                    brushTop = top;
+            }
+        }
+        if (brushTop > kNoGroundY)
+            return GroundSample{brushTop, true};
+        return GroundSample{0.0f, false};
+    }
+
+    bool OverlapsObstacle(const BoundingBox& player, float feetY) override {
+        auto& ozLoader = OzoneLoader::Instance();
+        auto& chunkMgr = ozLoader.GetChunkManager();
+        std::vector<int> nearIndices;
+        chunkMgr.GetVolumesNear(player.min.x, player.max.x, nearIndices);
+        auto& vols = ozLoader.GetCollisionVolumes();
+        for (int idx : nearIndices) {
+            if (idx >= 0 && idx < (int)vols.size() &&
+                CheckCollisionBoxes(player, vols[idx].aabb))
+            {
+                // Floors/surfaces the player stands on are not obstacles.
+                if (vols[idx].aabb.max.y <= feetY + kGroundEpsilon)
+                    continue;
+                // The heightmap is the ground: support comes from the ground
+                // clamp, not the obstacle test.
+                if (vols[idx].isHeightmap)
+                    continue;
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+} // namespace physics
+} // namespace oz
 
 class EngineData
 {
@@ -316,42 +388,11 @@ void LoadLaunchConfig()
 
 void UpdateLightSources()
 {
-    float dt = GetFrameTime();
-    float cameraPos[3] = {OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z};
-
-    SetShaderValue(OmegaTechData.Lights, OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
-
-    // Submit PawnSystem lights via LitLightning_Update
-    auto &pawnLights = PawnSystem::Instance().GetLights();
-    LitLightning_Update(pawnLights, OmegaTechData.Lights, OmegaTechData.MainCamera, dt);
-
-    // One-shot diagnostic: confirm the world lights made it into the shader.
-    static size_t s_lastLightCount = (size_t)-1;
-    if (pawnLights.size() != s_lastLightCount) {
-        s_lastLightCount = pawnLights.size();
-        OZ_INFO("Lighting: worldLights=%zu shader=%d", pawnLights.size(), OmegaTechData.Lights.id);
-    }
-
-    // Directional camera fill, used ONLY when the world declares no active
-    // lights of its own. A full-white headlight otherwise washed the lit scene
-    // out (everything fullbright) and hid the world lights' colours — the editor
-    // never submits one and looks correct.
-    bool anyActiveLight = false;
-    for (const auto& l : pawnLights)
-        if (l.active) { anyActiveLight = true; break; }
-    if (!anyActiveLight) {
-        OmegaTechData.GameLights[0].position = OmegaTechData.MainCamera.position;
-        OmegaTechData.GameLights[0].target = {OmegaTechData.MainCamera.target.x, OmegaTechData.MainCamera.target.y - 5, OmegaTechData.MainCamera.target.z};
-        OmegaTechData.GameLights[0].type = LIGHT_DIRECTIONAL;
-        OmegaTechData.GameLights[0].enabled = true;
-        OmegaTechData.GameLights[0].intensity = 0.4f;
-        UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[0]);
-    }
-
-    // Update uTime for GPU light animation
-    static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");
-    float timeVal = (float)GetTime();
-    SetShaderValue(OmegaTechData.Lights, uTimeLoc, &timeVal, SHADER_UNIFORM_FLOAT);
+    // Lighting now lives in Renderer/LitLightning (LitLightning_UpdateFrame).
+    // Kept as a thin engine-side adapter that supplies the engine globals.
+    LitLightning_UpdateFrame(PawnSystem::Instance().GetLights(), OmegaTechData.Lights,
+                             OmegaTechData.MainCamera, OmegaTechData.GameLights[0],
+                             GetFrameTime());
 }
 
 void DrawLights()
@@ -1354,103 +1395,30 @@ if (inSkyZone)
 
     OzoneLoader::Instance().DrawWorldGeometry(OmegaTechData.MainCamera);
 
-    // OZONE brush collision - chunk-accelerated query
+    // OZONE brush collision — chunk-accelerated query, delegated to the
+    // physics module via the adapter below.
     {
+        oz::physics::OzoneCollisionQuery q;
         Vector3 cp = OmegaTechData.MainCamera.position;
         // Effective eye height shrinks while crouching (dynamic player stance)
         float playerFeet = cp.y - g_playerMovement.EyeHeight;
-        auto &chunkMgr = OzoneLoader::Instance().GetChunkManager();
-        std::vector<int> nearIndices;
-        chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
-        auto &vols = OzoneLoader::Instance().GetCollisionVolumes();
-        for (int idx : nearIndices)
-        {
-            if (idx >= 0 && idx < (int)vols.size() &&
-                CheckCollisionBoxes(g_playerMovement.PlayerBounds, vols[idx].aabb))
-            {
-                // Skip volumes whose top is at or below the player's feet —
-                // these are floors/surfaces the player stands on, not obstacles.
-                if (vols[idx].aabb.max.y <= playerFeet + 0.1f)
-                    continue;
-                // The heightmap is the ground: support comes from the ground
-                // clamp below. Its tall AABB would otherwise freeze the player
-                // mid-air above the terrain (restore cancels gravity).
-                if (vols[idx].isHeightmap)
-                    continue;
-                ObjectCollision = true;
-                break;
-            }
-        }
+        if (oz::physics::PlayerPhysics().TestObstacleOverlap(g_playerMovement.PlayerBounds,
+                                                             playerFeet, q))
+            ObjectCollision = true;
     }
 
-    // OZONE ground clamp Ã¢â‚¬â€ OZONE heightmap first, then brush primitives
-    // (only when WDL heightmap and ClipBox didn't already provide ground)
+    // OZONE ground clamp -- delegated to the physics module (heightmap first,
+    // then brush primitives, as supplied by the adapter).
     if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
     {
-        Vector3 cp = OmegaTechData.MainCamera.position;
-
-        // Check OZONE-loaded heightmap
-        auto &ozLoader = OzoneLoader::Instance();
-        float hmY = ozLoader.HasHeightmap()
-                        ? ozLoader.SampleHeightmapY(cp.x, cp.z)
-                        : -99999.0f;
-        // Only treat the heightmap as ground when its surface is at or below
-        // the player's feet — underground areas (tunnels) must fall through to
-        // brush-top support instead of being teleported to the surface.
-        if (hmY > -50000.0f && hmY <= cp.y + 0.1f)
-        {
-
-            if (cp.y <= hmY + g_playerMovement.EyeHeight + 0.1f)
-            {
-                OmegaTechData.MainCamera.position.y = hmY + g_playerMovement.EyeHeight;
-                g_playerMovement.velocityY = 0.0f;
-                g_playerMovement.onGround = true;
-            }
-            else
-            {
-                g_playerMovement.onGround = false;
-            }
-        }
-        else
-        {
-            // Fallback: stand on top of OZONE brush primitives (chunk-accelerated)
-            float brushTop = -99999.0f;
-            auto &chunkMgr = ozLoader.GetChunkManager();
-            std::vector<int> nearIndices;
-            chunkMgr.GetVolumesNear(cp.x, cp.z, nearIndices);
-            auto &vols = ozLoader.GetCollisionVolumes();
-            for (int idx : nearIndices)
-            {
-                if (idx < 0 || idx >= (int)vols.size())
-                    continue;
-                auto &vol = vols[idx];
-                if (cp.x >= vol.aabb.min.x && cp.x <= vol.aabb.max.x &&
-                    cp.z >= vol.aabb.min.z && cp.z <= vol.aabb.max.z)
-                {
-                    float top = vol.aabb.max.y;
-                    if (top > brushTop && top <= cp.y + 0.1f)
-                        brushTop = top;
-                }
-            }
-            if (brushTop > -50000.0f)
-            {
-
-                if (cp.y <= brushTop + g_playerMovement.EyeHeight + 0.1f)
-                {
-                    OmegaTechData.MainCamera.position.y = brushTop + g_playerMovement.EyeHeight;
-                    g_playerMovement.velocityY = 0.0f;
-                    g_playerMovement.onGround = true;
-                }
-                else
-                {
-                    g_playerMovement.onGround = false;
-                }
-            }
-            else
-            {
-                g_playerMovement.onGround = false;
-            }
-        }
+        oz::physics::OzoneCollisionQuery q;
+        oz::physics::PlayerPhysics pphys;
+        oz::physics::PlayerPhysics::Motion motion;
+        motion.onGround = g_playerMovement.onGround;
+        motion.velocityY = g_playerMovement.velocityY;
+        pphys.ClampToGround(OmegaTechData.MainCamera, motion, g_playerMovement.EyeHeight, q);
+        g_playerMovement.onGround = motion.onGround;
+        g_playerMovement.velocityY = motion.velocityY;
     }
 
     UpdatePlayer();
@@ -1536,14 +1504,13 @@ if (inSkyZone)
         oz::ViewModel::Instance().Update(GetFrameTime());
         oz::ViewModel::Instance().Draw(OmegaTechData.MainCamera, OmegaTechData.Lights);
     }
+    // Collision rollback - delegated to the physics module.
     if (ObjectCollision)
     {
-        if (!g_playerMovement.isNoClip)
-        {
-            OmegaTechData.MainCamera.position.x = g_playerMovement.OldX;
-            OmegaTechData.MainCamera.position.y = g_playerMovement.OldY;
-            OmegaTechData.MainCamera.position.z = g_playerMovement.OldZ;
-        }
+        oz::physics::PlayerPhysics().RestorePosition(
+            OmegaTechData.MainCamera,
+            g_playerMovement.OldX, g_playerMovement.OldY, g_playerMovement.OldZ,
+            g_playerMovement.isNoClip);
         ObjectCollision = false;
     }
 

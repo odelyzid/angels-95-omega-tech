@@ -1,0 +1,19 @@
+entity "zone_sky_0" : skyzone {
+    fog_color = (0.55, 0.50, 0.55)
+    fog_density = 0.0025
+    ambient_light = (0.45, 0.42, 0.50)
+    skybox = "GameData/Global/sky/sky_evening.dds"
+    actions {
+        on_enter {
+            set_fog 0.55 0.50 0.55 0.0025
+            set_ambient 0.45 0.42 0.50
+            set_skybox "GameData/Global/sky/sky_evening.dds"
+            say "CitadelRuins - hold the courtyard, watch the towers"
+        }
+        on_exit {
+            restore_fog
+            restore_skybox
+            say "Left CitadelRuins sky zone"
+        }
+    }
+}

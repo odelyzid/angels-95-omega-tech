@@ -21,6 +21,8 @@ enum class EntityType : uint8_t {
     PARTICLE_EMITTER,
     WIND_ZONE,
     SKILL,
+    // Declarative UI/HUD layer (data + hooks); drawn by C++ (AngelPlayer).
+    GAMEUI,
     UNKNOWN
 };
 
@@ -39,6 +41,7 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::PARTICLE_EMITTER:return "ParticleEmitter";
         case EntityType::WIND_ZONE:       return "WindZone";
         case EntityType::SKILL:           return "skill";
+        case EntityType::GAMEUI:          return "GameUI";
         default:                          return "unknown";
     }
 }
@@ -57,6 +60,7 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "ParticleEmitter") return EntityType::PARTICLE_EMITTER;
     if (n == "WindZone")      return EntityType::WIND_ZONE;
     if (n == "skill")         return EntityType::SKILL;
+    if (n == "GameUI")        return EntityType::GAMEUI;
     return EntityType::UNKNOWN;
 }
 

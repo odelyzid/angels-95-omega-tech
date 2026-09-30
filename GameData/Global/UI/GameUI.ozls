@@ -1,0 +1,20 @@
+// GameUI — declarative HUD/UI layer for the AngelPlayer.
+//
+// Data + hooks only: LightningScript cannot draw or call C++, so the C++
+// InventoryBehaviour / PlayerController read these stats and the `texture` key
+// and perform all rendering and input handling. `on_tick` is executed once per
+// frame by LightningEntityManager::Update.
+entity "GameUI" : GameUI {
+    texture = "GameData/Global/TextBar.png"
+    stats {
+        hud_scale = 1.0
+        hud_x = 0
+        show_pos_debug = 0
+    }
+    actions {
+        on_tick {
+            # Reserved: script-driven UI state may set $vars / $flags here,
+            # which the C++ HUD reads back each frame.
+        }
+    }
+}

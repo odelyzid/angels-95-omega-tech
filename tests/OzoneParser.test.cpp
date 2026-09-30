@@ -194,6 +194,51 @@ static void test_mesh_wind_flag() {
     else printf("FAIL: size=%zu wind=%d\n", e.size(), e.size() ? (int)e[0].meshWind : -1);
 }
 
+static void test_zone_physics_kwargs() {
+    test_count++;
+    printf("  TEST zone physics kwargs... ");
+    auto e = OzoneParser::parse_string(
+        "zone water -8 -8 0 8 8 2 1 gravity=14 jump=6.5 terminal=45 "
+        "water_gravity=5 water_drag=0.9 swim_up=4 ladder_speed=7 fly_mult=2 "
+        "name=zone_water_0\n");
+    auto& p = e[0];
+    bool ok = e.size() == 1 && p.type == OzonePrimitiveType::ENTITY_ZONE
+        && p.entitySubType == "water"
+        && p.name == "zone_water_0"
+        && p.args.size() == 7                     // bounds + intensity
+        && p.hasPhysics
+        && p.physics.gravity == 14.0f
+        && p.physics.jumpSpeed == 6.5f
+        && p.physics.terminalVelocity == 45.0f
+        && p.physics.waterGravity == 5.0f
+        && p.physics.waterDrag == 0.9f
+        && p.physics.swimUpSpeed == 4.0f
+        && p.physics.ladderSpeed == 7.0f
+        && p.physics.flySpeedMult == 2.0f;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: type=%d args=%zu hasPhysics=%d g=%f\n",
+                e.size() ? (int)p.type : -1, e.size() ? p.args.size() : 0,
+                e.size() ? (int)p.hasPhysics : -1,
+                e.size() ? p.physics.gravity : -1.0f);
+}
+
+static void test_zone_default_physics() {
+    test_count++;
+    printf("  TEST zone without physics kwargs keeps defaults... ");
+    auto e = OzoneParser::parse_string(
+        "zone water -3 30 -8 3 36 -2 1 name=acidpool\n");
+    auto& p = e[0];
+    bool ok = e.size() == 1 && p.type == OzonePrimitiveType::ENTITY_ZONE
+        && !p.hasPhysics
+        && p.physics.gravity == 20.0f
+        && p.physics.jumpSpeed == 8.0f
+        && p.physics.ladderSpeed == 6.0f;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: hasPhysics=%d g=%f\n",
+                e.size() ? (int)p.hasPhysics : -1,
+                e.size() ? p.physics.gravity : -1.0f);
+}
+
 int main() {
     printf("OzoneParser tests:\n");
     test_portal();
@@ -209,6 +254,8 @@ int main() {
     test_mesh_wind_flag();
     test_mesh_animfile();
     test_mixed_document();
+    test_zone_physics_kwargs();
+    test_zone_default_physics();
 
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;

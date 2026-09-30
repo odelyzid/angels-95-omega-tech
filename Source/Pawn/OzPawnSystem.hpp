@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include "../Renderer/LitLightning.hpp"
 #include "../Renderer/Mesh/MeshCache.hpp"
+#include "../Physics/PhysicsInfo.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -281,6 +282,7 @@ struct ZoneVolumeNode {
     std::string name;        // logical name for LightningScript zone lookups
     GameplaySoundProfile soundProfile; // game-type-specific audio profile
     ZoneEnvOverrides envOverrides; // environment overrides (fog, ambient, reverb)
+    oz::physics::PhysicsInfo physics; // per-zone physics overrides (named kwargs)
 };
 
 // ZonePortal — connects two zones / two LEVELS (enable zone transitions + campaigns)

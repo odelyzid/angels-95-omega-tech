@@ -6,6 +6,7 @@
 #include <sstream>
 #include <fstream>
 #include <cstdint>
+#include "../Physics/PhysicsInfo.hpp"
 
 // Standalone .ozone parser - no raylib dependency.
 // Parses the OZONE text format used by the OzWorld editor.
@@ -53,6 +54,8 @@ struct OzonePrimitive {
     float animSpeed = 1.0f;         // GameEngine.Mesh.Skeletal: playback speed
     bool pathLoop = false;          // GameEngine.PathNode: loop to first node
     bool meshWind = false;          // GameEngine.Mesh.*: foliage wind-affection flag
+    bool hasPhysics = false;        // zones: PhysicsInfo kwargs were authored
+    oz::physics::PhysicsInfo physics; // zones: overrides (defaults when !hasPhysics)
 };
 
 class OzoneParser {

@@ -9,11 +9,17 @@
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityDef.hpp"
 #include "Pawn/OzPawnSystem.hpp"
+#include "Pawn/AngelPlayer/GameUi.hpp"
+#include "Pawn/AngelPlayer/InventoryBehaviour.hpp"
+#include "Pawn/AngelPlayer/WeaponBehaviour.hpp"
+#include "Pawn/AngelPlayer/PlayerController.hpp"
+#include "Pawn/PickupPawns.hpp"
 #include "Renderer/CombatFX.hpp"
 #include "Renderer/Mesh/MeshCache.hpp"
 #include "Renderer/ViewModel.hpp"
 #include "Renderer/PlayerModel.hpp"
 #include "Menu/SkillTree.hpp"
+#include "UI/UiHandler.hpp"
 #include <cmath>
 #include <memory>
 #include <cstdlib>
@@ -74,73 +80,6 @@ static void RelocateToInstallRoot() {
     }
 }
 
-#ifdef _WIN32
-// ---------------------------------------------------------------------------
-// Native Win32 menu bar — replaces the old raygui F2 menu
-// Window subclass intercepts WM_COMMAND from menus before raylib's WndProc
-// ---------------------------------------------------------------------------
-
-#define IDM_FILE_LOAD   1001
-#define IDM_FILE_SAVE   1002
-#define IDM_FILE_QUIT   1003
-#define IDM_SETTINGS    2001
-#define IDM_ABOUT       3001
-
-static WNDPROC g_originalWndProc = nullptr;
-
-static LRESULT CALLBACK ClientWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_COMMAND) {
-        switch (LOWORD(wParam)) {
-            case IDM_FILE_LOAD:
-                SetSceneId = OmegaTechData.LevelIndex;
-                SetSceneFlag = true;
-                return 0;
-            case IDM_FILE_SAVE:
-                SaveGame();
-                return 0;
-            case IDM_FILE_QUIT:
-                CloseWindow();
-                return 0;
-            case IDM_SETTINGS:
-                ShowSettings = !ShowSettings;
-                if (ShowSettings) { ShowCursor(); EnableCursor(); }
-                else { HideCursor(); DisableCursor(); }
-                return 0;
-            case IDM_ABOUT:
-                MessageBoxA(NULL,
-                    "Angels95 v1.0\nOzWorld GameEngine Engine\nBased on OmegaTech\nTribeWarez 2026",
-                    "About Angels95", MB_OK | MB_ICONINFORMATION);
-                return 0;
-        }
-    }
-    return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
-}
-
-//TODO: Move into UI Handler
-static void CreateNativeMenuBar() {
-    HWND hWnd = (HWND)GetWindowHandle();
-    if (!hWnd) return;
-
-    // Subclass the raylib window so we intercept WM_COMMAND from menus
-    g_originalWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ClientWndProc);
-
-    HMENU hMenuBar = CreateMenu();
-    HMENU hFileMenu = CreatePopupMenu();
-    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_LOAD, "&Load World...");
-    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_SAVE, "&Save Game");
-    AppendMenuA(hFileMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hFileMenu, MF_STRING, IDM_FILE_QUIT, "&Quit");
-    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hFileMenu, "&File");
-    HMENU hSettingsMenu = CreatePopupMenu();
-    AppendMenuA(hSettingsMenu, MF_STRING, IDM_SETTINGS, "&Developer Settings...");
-    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hSettingsMenu, "&Settings");
-    HMENU hAboutMenu = CreatePopupMenu();
-    AppendMenuA(hAboutMenu, MF_STRING, IDM_ABOUT, "&About Angels95...");
-    AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)hAboutMenu, "&?");
-    SetMenu(hWnd, hMenuBar);
-}
-#endif // _WIN32
-
 static OmegaClient g_client;
 static bool g_network_enabled = false;
 static bool ShowInventory = false;
@@ -167,128 +106,8 @@ static bool ApplyJoinTarget(const char* value)
     return true;
 }
 
-// Recoil & crosshair state
-static float g_recoilPitch = 0.0f;
-static float g_recoilYaw = 0.0f;
-static float g_crosshairBloom = 0.0f;
-static bool g_adsActive = false;
+// Recoil & crosshair state now owned by AngelPlayer::WeaponBehaviour.
 
-
-// ---------------------------------------------------------------------------
-// HUD: draw player stats bars (always visible) 
-// TODO: move into PlayerController / InventoryBehaviourController
-// ---------------------------------------------------------------------------
-static void DrawPlayerHUD() {
-    const int sw = GetScreenWidth();
-    const int sh = GetScreenHeight();
-    const int bar_w = 220;
-    const int bar_h = 14;
-    const int pad = 6;
-    int x = pad;
-    int y = pad;
-
-    // Level
-    DrawText(TextFormat("Lv.%d", LightningEntityManager::Instance().GetPlayerLevel()), x, y, 14, WHITE);
-    y += 18;
-
-    // XP bar
-    int xp_w = bar_w - 40;
-    DrawText("XP", x, y, 12, LIGHTGRAY);
-    int xpToNext = LightningEntityManager::Instance().GetPlayerXPToNext();
-    if (xpToNext > 0) {
-        int xp = LightningEntityManager::Instance().GetPlayerXP();
-        float xp_pct = (float)xp / xpToNext;
-        DrawRectangle(x + 30, y, xp_w, bar_h, (Color){30, 30, 30, 255});
-        DrawRectangle(x + 30, y, (int)(xp_pct * xp_w), bar_h, SKYBLUE);
-        DrawText(TextFormat("%d/%d", xp, xpToNext),
-                 x + 34, y + 1, 10, WHITE);
-    }
-    y += bar_h + pad;
-
-    // Health bar
-    float hpMax = LightningEntityManager::Instance().GetPlayerMaxHealth();
-    float hp = LightningEntityManager::Instance().GetPlayerHealth();
-    float hp_pct = (hpMax > 0) ? (hp / hpMax) : 0;
-    DrawText(TextFormat("HP %d/%d", (int)hp, (int)hpMax),
-             x, y, 12, WHITE);
-    DrawRectangle(x, y + 14, bar_w, bar_h, (Color){50, 10, 10, 255});
-    DrawRectangle(x, y + 14, (int)(hp_pct * bar_w), bar_h, RED);
-    y += 14 + bar_h + pad;
-
-    // Mana bar
-    float mpMax = LightningEntityManager::Instance().GetPlayerMaxMana();
-    float mp = LightningEntityManager::Instance().GetPlayerMana();
-    float mp_pct = (mpMax > 0) ? (mp / mpMax) : 0;
-    DrawText(TextFormat("MP %d/%d", (int)mp, (int)mpMax),
-             x, y, 12, WHITE);
-    DrawRectangle(x, y + 14, bar_w, bar_h, (Color){10, 10, 50, 255});
-    DrawRectangle(x, y + 14, (int)(mp_pct * bar_w), bar_h, BLUE);
-    y += 14 + bar_h + pad;
-
-    // Psychic Energy bar
-    float peMax = LightningEntityManager::Instance().GetPlayerMaxPsychicEnergy();
-    float pe = LightningEntityManager::Instance().GetPlayerPsychicEnergy();
-    float pe_pct = (peMax > 0) ? (pe / peMax) : 0;
-    DrawText(TextFormat("PE %d/%d", (int)pe, (int)peMax),
-             x, y, 12, WHITE);
-    DrawRectangle(x, y + 14, bar_w, bar_h, (Color){40, 10, 50, 255});
-    DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
-    y += 14 + bar_h + pad;
-       // TODO: move to PlayerController InventoryBehavoiurCOntroller
-    // Current selected item/weapon (from EntityManager hotbar)
-    {
-        auto& lem = LightningEntityManager::Instance();
-        EntityInstance* selEnt = lem.SelectedEntity();
-        int selSlot = lem.SelectedSlot() + 1;
-        const char* label = "Empty";
-        if (selEnt && selEnt->def)
-            label = selEnt->def->name.c_str();
-        DrawText(TextFormat("Slot %d: %s", selSlot, label),
-                 x, y, 12, YELLOW);
-        y += 16;
-        // Ammo display for weapons
-        if (selEnt && selEnt->def && selEnt->def->type == EntityType::WEAPON) {
-            auto ait = selEnt->runtimeStats.find("ammo");
-            auto mit = selEnt->runtimeStats.find("magazine");
-            if (ait != selEnt->runtimeStats.end() && mit != selEnt->runtimeStats.end()) {
-                Color ammoCol = (ait->second <= 0.0f) ? RED : WHITE;
-                DrawText(TextFormat("Ammo: %.0f/%.0f", ait->second, mit->second),
-                         x, y, 12, ammoCol);
-                y += 16;
-            }
-        }
-    }
-
-    // Weapon fire indicator (brief pulse)
-    static double lastFireTime = 0;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        lastFireTime = GetTime();
-    }
-    if (GetTime() - lastFireTime < 0.15) {
-        DrawText("FIRE", x, y, 20, RED);
-    }
-
-    // Movement stance indicator (sprint / crouch)
-    if (g_playerMovement.isCrouching)
-        DrawText("CROUCH", pad, sh - 46, 16, (Color){120, 200, 255, 255});
-    else if (g_playerMovement.isSprinting)
-        DrawText("SPRINT", pad, sh - 46, 16, (Color){255, 210, 120, 255});
-
-    // Coordinates (top-right)
-    Camera3D& cam = OmegaTechData.MainCamera;
-    float yaw = -atan2f(cam.target.x - cam.position.x, cam.target.z - cam.position.z) * RAD2DEG;
-    float pitch = asinf((cam.target.y - cam.position.y) /
-        Vector3Distance(cam.position, cam.target)) * RAD2DEG;
-    int rx = sw - 280;
-    DrawText(TextFormat("Pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z),
-             rx, 10, 14, LIGHTGRAY);
-    DrawText(TextFormat("Rot: %.0f %.0f", yaw, pitch),
-             rx, 28, 14, LIGHTGRAY);
-    if ((OmegaTechData.Ticker % 60) == 0) {
-        fprintf(stderr, "POS: %.1f %.1f %.1f  ROT: %.0f %.0f\n",
-                cam.position.x, cam.position.y, cam.position.z, yaw, pitch);
-    }
-}
 
 static Color unpack_color(uint32_t packed) {
     return (Color){
@@ -377,99 +196,6 @@ void DrawRemotePlayers3D() {
 }
 
 
-
-// ---------------------------------------------------------------------------
-// Read a stat from the selected weapon entity
-   // TODO: move to PlayerController / Weapon.WeaponBehaviourController
-// ---------------------------------------------------------------------------
-static float SelectedWeaponStat(const std::string& key, float defVal) {
-    EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
-    if (!ent || !ent->def) return defVal;
-    auto dit = ent->def->stats.floats.find(key);
-    return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
-}
-
-// ---------------------------------------------------------------------------
-// Fire weapon helper — delegates to LightningEntityManager
-   // TODO: move to PlayerController / Weapon.WeaponBehaviourController
-// ---------------------------------------------------------------------------
-static void FireWeapon() {
-    Camera3D& cam = OmegaTechData.MainCamera;
-    Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
-    Vector3 origin = Vector3Add(cam.position, Vector3Scale(forward, 2.0f));
-
-    int result = LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
-    if (result < 0) return; // didn't fire
-
-    oz::ViewModel::Instance().TriggerFire();
-
-    // Muzzle flash
-    CombatFX::Instance().ArmMuzzleFlash(origin, 0.12f);
-
-    // Apply recoil
-    float recoilKick = SelectedWeaponStat("recoil", result > 0 ? 2.0f : 1.0f);
-    g_recoilPitch += -recoilKick + (float)(rand() % 100 - 50) / 100.0f * recoilKick * 0.3f;
-    g_recoilYaw += (float)(rand() % 100 - 50) / 100.0f * recoilKick * 0.2f;
-    g_crosshairBloom += recoilKick * 1.5f;
-
-    bool isMelee = (result == 0);
-    float damage = SelectedWeaponStat("damage", 10.0f);
-    float reach = isMelee ? SelectedWeaponStat("reach", 3.0f) : 0.0f;
-
-    // Send to server
-    if (g_network_enabled && g_client.is_connected()) {
-        if (isMelee) {
-            // Melee: range check against network NPCs
-            int hitIdx = -1, hitPart = -1;
-            float hitDist = 1e9f;
-            const auto& cnpc = g_client.npcs();
-            for (size_t i = 0; i < cnpc.size(); i++) {
-                if (!cnpc[i].active) continue;
-                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
-                Vector3 toNpc = Vector3Subtract(np, origin);
-                float t = Vector3DotProduct(toNpc, forward);
-                if (t < 0 || t > reach) continue;
-                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
-                float d = Vector3Distance(closest, np);
-                if (d < 2.0f && t < hitDist) {
-                    hitDist = t;
-                    hitIdx = static_cast<int>(i);
-                    hitPart = cnpc[i].partition_index;
-                }
-            }
-            if (hitIdx >= 0) {
-                g_client.send_npc_damage(0, hitIdx, hitPart, (int)damage);
-            }
-        } else {
-            // Ranged: send weapon fire + raycast hit
-            g_client.send_weapon_fire(
-                origin.x, origin.y, origin.z,
-                forward.x, forward.y, forward.z,
-                1, (int)damage);
-
-            int hitIdx = -1, hitPart = -1;
-            float hitDist = 1e9f;
-            const auto& cnpc = g_client.npcs();
-            for (size_t i = 0; i < cnpc.size(); i++) {
-                if (!cnpc[i].active) continue;
-                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
-                Vector3 toNpc = Vector3Subtract(np, origin);
-                float t = Vector3DotProduct(toNpc, forward);
-                if (t < 0) continue;
-                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
-                float d = Vector3Distance(closest, np);
-                if (d < 2.0f && t < hitDist) {
-                    hitDist = t;
-                    hitIdx = static_cast<int>(i);
-                    hitPart = cnpc[i].partition_index;
-                }
-            }
-            if (hitIdx >= 0) {
-                g_client.send_npc_damage(0, hitIdx, hitPart, (int)damage);
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Inventory overlay (draw when Tab pressed)
@@ -693,277 +419,6 @@ static void HandleConsoleInput() {
     }
 }
 
-// ---- Inventory Overlay (Diablo I style TODO: -> Should be derived into PlayerUiHandler) ----
-static int g_invSelectedBpSlot = -1;
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-// Consume one backpack item and apply its effect. Returns true if it was used.
-static bool UseBackpackItem(int slot) {
-    if (slot < 0 || slot >= BACKPACK_SLOTS) return false;
-    int itemId = gInventory.backpack[slot].itemId;
-    if (itemId < 0 || gInventory.backpack[slot].quantity <= 0) return false;
-    const ItemDBEntry* def = GetItemDef(itemId);
-    if (!def) return false;
-
-    auto& lem = LightningEntityManager::Instance();
-    switch (def->category) {
-        case ItemCategory::HEALTH_VIAL:
-            lem.SetPlayerHealth(fminf(lem.GetPlayerMaxHealth(),
-                                      lem.GetPlayerHealth() + (float)def->value));
-            break;
-        case ItemCategory::MANA_VIAL:
-            lem.SetPlayerMana(fminf(lem.GetPlayerMaxMana(),
-                                    lem.GetPlayerMana() + (float)def->value));
-            break;
-        case ItemCategory::ENERGY_CRYSTAL:
-            lem.SetPlayerPsychicEnergy(fminf(lem.GetPlayerMaxPsychicEnergy(),
-                                             lem.GetPlayerPsychicEnergy() + (float)def->value));
-            break;
-        case ItemCategory::COIN:
-            gInventory.coins += def->value;
-            break;
-        default:
-            return false; // no on-the-spot use effect
-    }
-    gInventory.RemoveFromBackpack(slot);
-    OmegaTechTextSystem.Write(std::string("Used ") + def->name);
-    return true;
-}
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-static void DrawInventoryOverlay() {
-    const int sw = GetScreenWidth();
-    const int sh = GetScreenHeight();
-    const int panel_w = 720;
-    const int panel_h = 520;
-    const int px = (sw - panel_w) / 2;
-    const int py = (sh - panel_h) / 2;
-
-    DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 160});
-    DrawRectangle(px, py, panel_w, panel_h, (Color){25, 25, 35, 245});
-    DrawRectangleLines(px, py, panel_w, panel_h, (Color){180, 180, 200, 255});
-
-    DrawText("INVENTORY", px + 15, py + 10, 22, WHITE);
-    DrawText(TextFormat("Coins: %d", gInventory.coins), px + panel_w - 150, py + 14, 16, GOLD);
-
-    int ex = px + 20;
-    int ey = py + 50;
-    int slotH = 38;
-    int slotW = 150;
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-    // === EQUIPMENT (left side) ===
-    DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
-
-    const char* equipLabels[EQUIP_SLOT_COUNT] = {
-        "Armor", "Jewelry 1", "Jewelry 2", "Helmet",
-        "Boots", "Legs", "Accessory 1", "Accessory 2"
-    };
-
-    auto& lem = LightningEntityManager::Instance();
-    for (int i = 0; i < EQUIP_SLOT_COUNT; i++) {
-        int idx = lem.EquipmentAt(i);
-        bool owned = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->owned);
-        Color c = owned ? WHITE : (Color){80, 80, 80, 255};
-        Color bg = owned ? (Color){40, 50, 45, 255} : (Color){20, 25, 20, 255};
-
-        Rectangle eqRect = {(float)ex, (float)ey, (float)slotW, (float)slotH};
-        bool eqHover = CheckCollisionPointRec(GetMousePosition(), eqRect);
-        if (eqHover && owned) {
-            c = (Color){120, 200, 255, 255};
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-                lem.EquipmentUnequip(i);
-        }
-
-        DrawRectangle(ex, ey, slotW, slotH, bg);
-        DrawRectangleLines(ex, ey, slotW, slotH, c);
-        DrawText(equipLabels[i], ex + 6, ey + 12, 12, c);
-
-        if (owned && lem.Get(idx)->iconIdx >= 0) {
-            Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
-            if (iconTex && iconTex->id > 0)
-                DrawTextureEx(*iconTex, (Vector2){(float)ex + slotW - 34, (float)ey + 2}, 0, 1.5f, WHITE);
-        }
-        ey += slotH + 4;
-    }
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-    // === BACKPACK (right side) -> Legacy ===
-    int bx = px + 190;
-    int by = py + 50;
-    int cellSize = 52;
-    int cellGap = 4;
-
-    DrawText("BACKPACK", bx, by - 18, 12, LIGHTGRAY);
-
-    for (int row = 0; row < BACKPACK_ROWS; row++) {
-        for (int col = 0; col < BACKPACK_COLS; col++) {
-            int idx = row * BACKPACK_COLS + col;
-            int cx = bx + col * (cellSize + cellGap);
-            int cy = by + row * (cellSize + cellGap);
-
-            int itemId = gInventory.backpack[idx].itemId;
-            int qty = gInventory.backpack[idx].quantity;
-            bool hasItem = itemId >= 0 && qty > 0;
-
-            Rectangle cellRect = {(float)cx, (float)cy, (float)cellSize, (float)cellSize};
-            bool hover = CheckCollisionPointRec(GetMousePosition(), cellRect);
-            if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-                g_invSelectedBpSlot = hasItem ? idx : -1;
-            if (hover && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && hasItem) {
-                if (UseBackpackItem(idx)) { itemId = -1; qty = 0; hasItem = false; }
-            }
-
-            Color bgC = hasItem ? (Color){40, 40, 55, 255} : (Color){15, 15, 20, 255};
-            Color borderC = hasItem ? WHITE : (Color){50, 50, 50, 255};
-
-            if (hover) borderC = (Color){120, 200, 255, 255};
-            if (g_invSelectedBpSlot == idx) {
-                borderC = (Color){255, 255, 0, 255};
-            }
-
-            DrawRectangle(cx, cy, cellSize, cellSize, bgC);
-            DrawRectangleLines(cx, cy, cellSize, cellSize, borderC);
-
-            if (hasItem) {
-                const ItemDBEntry* def = GetItemDef(itemId);
-                if (def) {
-                    Texture2D* icon = nullptr;
-                    const char* iconAlias = nullptr;
-                    switch (def->category) {
-                        case ItemCategory::HEALTH_VIAL:    iconAlias = "HealthVial"; break;
-                        case ItemCategory::MANA_VIAL:      iconAlias = "ManaVial"; break;
-                        case ItemCategory::ENERGY_CRYSTAL: iconAlias = "EnergyCrystal"; break;
-                        case ItemCategory::KEY:            iconAlias = "Key"; break;
-                        case ItemCategory::COIN:           iconAlias = "Coin"; break;
-                        case ItemCategory::POWERUP:        iconAlias = "Powerup"; break;
-                        default: break;
-                    }
-                    if (iconAlias) {
-                        Texture2D t = AssetMapper::Instance().GetTexture(iconAlias);
-                        if (t.id > 0) {
-                            static Texture2D s_cachedIcon = t;
-                            s_cachedIcon = t;
-                            icon = &s_cachedIcon;
-                        }
-                    }
-                    if (icon && icon->id > 0) {
-                        float scale = (float)cellSize / (float)icon->width * 0.7f;
-                        DrawTextureEx(*icon, (Vector2){(float)cx + 6, (float)cy + 4}, 0, scale, WHITE);
-                    }
-                    // Quantity text
-                    if (qty > 1) {
-                        DrawText(TextFormat("%d", qty), cx + cellSize - 20, cy + cellSize - 16, 12, WHITE);
-                    }
-                }
-            }
-        }
-    }
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-    // Keyboard navigation over the backpack (arrows move, Enter uses)
-    {
-        int sel = g_invSelectedBpSlot;
-        int row = (sel >= 0) ? (sel / BACKPACK_COLS) : 0;
-        int col = (sel >= 0) ? (sel % BACKPACK_COLS) : 0;
-        bool moved = false;
-        if (IsKeyPressed(KEY_RIGHT)) { col = (col + 1) % BACKPACK_COLS; moved = true; }
-        if (IsKeyPressed(KEY_LEFT))  { col = (col + BACKPACK_COLS - 1) % BACKPACK_COLS; moved = true; }
-        if (IsKeyPressed(KEY_DOWN))  { row = (row + 1) % BACKPACK_ROWS; moved = true; }
-        if (IsKeyPressed(KEY_UP))    { row = (row + BACKPACK_ROWS - 1) % BACKPACK_ROWS; moved = true; }
-        if (moved) g_invSelectedBpSlot = row * BACKPACK_COLS + col;
-        if (IsKeyPressed(KEY_ENTER) && g_invSelectedBpSlot >= 0)
-            UseBackpackItem(g_invSelectedBpSlot);
-    }
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-    // Hover tooltip for backpack items
-    {
-        Vector2 mp = GetMousePosition();
-        for (int index = 0; index < BACKPACK_SLOTS; index++) {
-            int row = index / BACKPACK_COLS, col = index % BACKPACK_COLS;
-            Rectangle r = {(float)(bx + col * (cellSize + cellGap)),
-                           (float)(by + row * (cellSize + cellGap)),
-                           (float)cellSize, (float)cellSize};
-            if (!CheckCollisionPointRec(mp, r)) continue;
-            int itemId = gInventory.backpack[index].itemId;
-            if (itemId < 0) break;
-            const ItemDBEntry* def = GetItemDef(itemId);
-            if (!def) break;
-            int nameW = MeasureText(def->name, 13);
-            int descW = MeasureText(def->description, 11);
-            int tw = (nameW > descW ? nameW : descW) + 16;
-            int tipX = (int)mp.x + 14, tipY = (int)mp.y + 14;
-            if (tipX + tw > sw) tipX = sw - tw - 4;
-            if (tipY + 42 > sh) tipY = sh - 46;
-            DrawRectangle(tipX, tipY, tw, 42, (Color){10, 10, 20, 240});
-            DrawRectangleLines(tipX, tipY, tw, 42, (Color){210, 180, 90, 255});
-            DrawText(def->name, tipX + 8, tipY + 5, 13, WHITE);
-            DrawText(def->description, tipX + 8, tipY + 23, 11, LIGHTGRAY);
-            break;
-        }
-    }
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
-    // === STATS (between equipment and backpack) ===
-    int sx = px + 530;
-    int sy = py + 50;
-    DrawText("STATS", sx, sy - 18, 12, LIGHTGRAY);
-
-    sy += 4;
-    DrawText(TextFormat("Level: %d", LightningEntityManager::Instance().GetPlayerLevel()), sx, sy, 14, WHITE); sy += 22;
-    DrawText(TextFormat("XP: %d/%d", LightningEntityManager::Instance().GetPlayerXP(), LightningEntityManager::Instance().GetPlayerXPToNext()), sx, sy, 14, WHITE); sy += 22;
-
-    float hpInv = LightningEntityManager::Instance().GetPlayerHealth();
-    float hpMaxInv = LightningEntityManager::Instance().GetPlayerMaxHealth();
-    DrawRectangle(sx, sy, 150, 10, (Color){50, 0, 0, 255});
-    float hpPct = hpMaxInv > 0 ? hpInv / hpMaxInv : 0;
-    DrawRectangle(sx, sy, (int)(150 * hpPct), 10, RED);
-    DrawText(TextFormat("HP: %.0f/%.0f", hpInv, hpMaxInv), sx + 1, sy + 12, 12, RED); sy += 28;
-
-    float mpInv = LightningEntityManager::Instance().GetPlayerMana();
-    float mpMaxInv = LightningEntityManager::Instance().GetPlayerMaxMana();
-    DrawRectangle(sx, sy, 150, 10, (Color){0, 0, 50, 255});
-    float mpPct = mpMaxInv > 0 ? mpInv / mpMaxInv : 0;
-    DrawRectangle(sx, sy, (int)(150 * mpPct), 10, BLUE);
-    DrawText(TextFormat("MP: %.0f/%.0f", mpInv, mpMaxInv), sx + 1, sy + 12, 12, BLUE); sy += 28;
-
-    float peInv = LightningEntityManager::Instance().GetPlayerPsychicEnergy();
-    float peMaxInv = LightningEntityManager::Instance().GetPlayerMaxPsychicEnergy();
-    DrawRectangle(sx, sy, 150, 10, (Color){30, 0, 30, 255});
-    float pePct = peMaxInv > 0 ? peInv / peMaxInv : 0;
-    DrawRectangle(sx, sy, (int)(150 * pePct), 10, PURPLE);
-    DrawText(TextFormat("PE: %.0f/%.0f", peInv, peMaxInv), sx + 1, sy + 12, 12, PURPLE);
-
-    // Selected item info
-    if (g_invSelectedBpSlot >= 0) {
-        int itemId = gInventory.backpack[g_invSelectedBpSlot].itemId;
-        if (itemId >= 0) {
-            const ItemDBEntry* def = GetItemDef(itemId);
-            if (def) {
-                DrawText(def->name, sx, sy + 40, 14, WHITE);
-                DrawText(def->description, sx, sy + 58, 12, LIGHTGRAY);
-            }
-        }
-    }
-
-    // Hotbar preview at bottom (from EntityManager)
-    int hx = px + 20;
-    int hy = py + panel_h - 48;
-    DrawText("HOTBAR:", hx, hy, 12, DARKGRAY);
-    hx += 60;
-    for (int i = 0; i < LightningEntityManager::HOTBAR_SIZE && i < 8; i++) {
-        int idx = lem.HotbarAt(i);
-        bool hasItem = (idx >= 0 && lem.Get(idx) && lem.Get(idx)->def);
-        Color c = hasItem ? WHITE : (Color){50, 50, 50, 255};
-        DrawRectangle(hx, hy, 32, 32, (Color){20, 20, 30, 255});
-        DrawRectangleLines(hx, hy, 32, 32, c);
-        if (hasItem && lem.Get(idx)->iconIdx >= 0) {
-            Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);
-            if (iconTex && iconTex->id > 0)
-                DrawTextureEx(*iconTex, (Vector2){(float)hx + 4, (float)hy + 4}, 0, 1.0f, WHITE);
-        }
-        hx += 36;
-    }
-
-    // Controls hint
-    DrawText("TAB: close  |  Left-click select  |  Right-click / ENTER use  |  E: pickup  |  K: skills  |  ^: console",
-             px + 20, py + panel_h - 22, 12, DARKGRAY);
-}
-
 int main(int argc, char** argv){
     RelocateToInstallRoot();
 
@@ -1020,9 +475,27 @@ int main(int argc, char** argv){
     ApplyMasterVolume();
 
     OmegaTechInit();
-#ifdef _WIN32
-    CreateNativeMenuBar();
-#endif
+    GameUi::Instance().Init();
+    InventoryBehaviour::Instance().SetMessageSink([](const std::string& msg) {
+        OmegaTechTextSystem.Write(msg);
+    });
+    InventoryBehaviour::Instance().SetFeedbackSink([]() {
+        if (OmegaTechSoundData.UIClick.frameCount > 0)
+            PlaySound(OmegaTechSoundData.UIClick);
+    });
+    WeaponBehaviour::Instance().SetClient(&g_client, &g_network_enabled);
+    PickupPawns::Instance().SetClient(&g_client);
+    oz::ui::CreateNativeMenuBar({
+        []() { SetSceneId = OmegaTechData.LevelIndex; SetSceneFlag = true; },
+        []() { SaveGame(); },
+        []() { CloseWindow(); },
+        []() {
+            ShowSettings = !ShowSettings;
+            if (ShowSettings) { ShowCursor(); EnableCursor(); }
+            else { HideCursor(); DisableCursor(); }
+        },
+        []() { oz::ui::ShowAboutDialog(); },
+    });
     PlaySplashScreen();
 
     static bool g_returnToMenu = false;
@@ -1037,25 +510,8 @@ int main(int argc, char** argv){
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     g_client.set_on_item_collected([](int item_id, int quantity) {
-        const char* name = "unknown";
-        const ItemDBEntry* def = GetItemDef(item_id);
-        if (def) name = def->name;
-        OmegaTechTextSystem.Write(TextFormat("Collected: %s x%d", name, quantity));
-        if (item_id == 13) {
-            gInventory.coins += quantity;
-        } else if (item_id == 1) {
-            float curHp = LightningEntityManager::Instance().GetPlayerHealth();
-            LightningEntityManager::Instance().SetPlayerHealth(std::min(curHp + 25.0f, LightningEntityManager::Instance().GetPlayerMaxHealth()));
-        } else if (item_id == 2) {
-            float curMp = LightningEntityManager::Instance().GetPlayerMana();
-            LightningEntityManager::Instance().SetPlayerMana(std::min(curMp + 25.0f, LightningEntityManager::Instance().GetPlayerMaxMana()));
-        } else if (item_id > 0) {
-            gInventory.AddToBackpack(item_id, quantity);
-        }
-        if (OmegaTechSoundData.UIClick.frameCount > 0)
-            PlaySound(OmegaTechSoundData.UIClick);
+        InventoryBehaviour::Instance().OnItemCollected(item_id, quantity);
     });
 
     g_client.set_on_player_hurt([](int damage, float remaining_health) {
@@ -1064,27 +520,10 @@ int main(int argc, char** argv){
             !IsSoundPlaying(OmegaTechSoundData.Death))
             PlaySound(OmegaTechSoundData.Death);
     });
-   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
+
     // Weapon pickup granted by the server (item_id 15) — add to hotbar.
     g_client.set_on_weapon_collected([](const char* weapon_def_name) {
-        auto& registry = LightningEntityRegistry::Instance();
-        auto& lem = LightningEntityManager::Instance();
-        const EntityDef* def = registry.Find(weapon_def_name);
-        if (!def) {
-            OZ_WARN("Weapon collect: unknown def '%s' — falling back to automag", weapon_def_name);
-            def = registry.Find("automag");
-            if (!def) return;
-        }
-        int instIdx = lem.Spawn(def->name);
-        if (instIdx < 0) return;
-        bool assigned = false;
-        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
-            if (lem.HotbarAt(s) < 0) { lem.HotbarAssign(s, instIdx); assigned = true; break; }
-        }
-        if (assigned) OmegaTechTextSystem.Write(TextFormat("Picked up weapon: %s", def->name.c_str()));
-        else { OZ_WARN("Hotbar full — weapon %s lost", def->name.c_str()); lem.Despawn(instIdx); }
-        if (OmegaTechSoundData.UIClick.frameCount > 0)
-            PlaySound(OmegaTechSoundData.UIClick);
+        InventoryBehaviour::Instance().OnWeaponCollected(weapon_def_name);
     });
 
     // Ammo changes (fire/reload) are reported to the server for remote sync.
@@ -1145,36 +584,7 @@ int main(int argc, char** argv){
                 DisableCursor();
             }
         }
-   // TODO: move to PlayerController
-        // K key toggles the ethereal (angelic) skill tree
-        if (IsKeyPressed(KEY_K)) {
-            if (!g_consoleOpen) {
-                ShowSkillTree = !ShowSkillTree;
-                if (ShowSkillTree) {
-                    ShowInventory = false;
-                    ShowCursor();
-                    EnableCursor();
-                } else {
-                    HideCursor();
-                    DisableCursor();
-                }
-            }
-        }
-   // TODO: move to PlayerController
-        // Tab key toggles inventory
-        if (IsKeyPressed(KEY_TAB)) {
-            if (!g_consoleOpen) {
-                ShowInventory = !ShowInventory;
-                if (ShowInventory) {
-                    ShowSkillTree = false;
-                    ShowCursor();
-                    EnableCursor();
-                } else {
-                    HideCursor();
-                    DisableCursor();
-                }
-            }
-        }
+        PlayerController::Instance().HandleKeyToggles(ShowInventory, ShowSkillTree, g_consoleOpen);
 
         // Console input processing
         if (g_consoleOpen) {
@@ -1244,61 +654,11 @@ int main(int argc, char** argv){
             continue;
         }
 
-           // TODO: move to PlayerController
         // Game-over overlay when player has died 3 times
-        if (OmegaTechData.Deaths >= 3) {
-            int sw = GetScreenWidth(), sh = GetScreenHeight();
-            DrawRectangle(0, 0, sw, sh, (Color){0,0,0,200});
-
-            const char* gameOverText = "GAME OVER";
-            int fontSize = 48;
-            int textW = MeasureText(gameOverText, fontSize);
-            DrawText(gameOverText, (sw - textW) / 2, sh / 2 - 100, fontSize, RED);
-
-            DrawText("You have perished three times...",
-                     (sw - MeasureText("You have perished three times...", 16)) / 2,
-                     sh / 2 - 40, 16, LIGHTGRAY);
-
-            const char* labels[] = {"Restart", "Main Menu"};
-            int btnCount = 2;
-            int btnW = 220, btnH = 50, gap = 10;
-            int totalH = btnCount * btnH + (btnCount - 1) * gap;
-            int startY = sh / 2 + 10;
-
-            for (int i = 0; i < btnCount; i++) {
-                int bx = (sw - btnW) / 2;
-                int by = startY + i * (btnH + gap);
-                Rectangle r = {(float)bx, (float)by, (float)btnW, (float)btnH};
-                bool hover = CheckCollisionPointRec(GetMousePosition(), r);
-                bool clicked = hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-
-                Texture2D tex = clicked ? OmegaTechData.BtnClicked :
-                                hover ? OmegaTechData.BtnHover : OmegaTechData.BtnNormal;
-                if (tex.id > 0) {
-                    DrawTexturePro(tex,
-                        (Rectangle){0,0,(float)tex.width,(float)tex.height},
-                        r, (Vector2){0,0}, 0, WHITE);
-                } else {
-                    DrawRectangleRec(r, (Color){80,20,20,220});
-                    DrawRectangleLinesEx(r, 2, (Color){180,60,60,255});
-                }
-                DrawText(labels[i], bx + (btnW - MeasureText(labels[i], 18)) / 2,
-                         by + (btnH - 18) / 2, 18, WHITE);
-
-                if (clicked) {
-                    if (i == 0) {
-                        OmegaTechData.Deaths = 1;
-                        ShowCursor();
-                        EnableCursor();
-                        LoadWorld();
-                        HideCursor();
-                        DisableCursor();
-                    } else if (i == 1) {
-                        g_returnToMenu = true;
-                    }
-                }
-            }
-
+        if (PlayerController::Instance().DrawGameOver(OmegaTechData.Deaths,
+                OmegaTechData.BtnClicked, OmegaTechData.BtnHover, OmegaTechData.BtnNormal,
+                g_returnToMenu,
+                []() { LoadWorld(); })) {
             EndDrawing();
             continue;
         }
@@ -1330,19 +690,12 @@ int main(int argc, char** argv){
         // Discrete 1/60s steps, at most 4 per render frame, with leftover time
         // carried across frames so the sim advances at a constant 60 Hz cadence
         // regardless of render FPS.
-        static double s_move_accumulator = 0.0;
-        static constexpr double kMoveTickS = 1.0 / 60.0;
-        s_move_accumulator += GetFrameTime();
-        int move_steps = 0;
-        while (s_move_accumulator >= kMoveTickS && move_steps < 4) {
-            s_move_accumulator -= kMoveTickS;
-            ++move_steps;
-        }
-        if (move_steps >= 4 && s_move_accumulator >= kMoveTickS)
-            s_move_accumulator = 0.0; // drift guard
-        const float kMoveDt = static_cast<float>(kMoveTickS);
+        int move_steps = PlayerController::Instance().ConsumeMoveSteps(GetFrameTime());
+        const float kMoveDt = PlayerController::MoveDeltaSeconds();
 
         // --- Zone volume detection + movement effects (uses pre-computed player region) ---
+        // --- Zone volume detection + movement effects (uses pre-computed player region) ---
+        oz::physics::PhysicsInfo zonePhysics; // defaults; overridden per zone
         for (int s = 0; s < move_steps; ++s) {
         {
             const float dt = kMoveDt;
@@ -1356,6 +709,10 @@ int main(int argc, char** argv){
             g_playerMovement.inWater = false;
 
             if (activeZone) {
+                // Per-zone authored physics overrides (falls back to defaults
+                // for worlds that do not export gravity= style kwargs).
+                zonePhysics = activeZone->physics;
+
                 ZoneType zt = activeZone->zoneType;
                 // Skip zones already handled elsewhere
                 if (zt != ZoneType::ZONE_SKY && zt != ZoneType::ZONE_GAMEPLAY_SOUND) {
@@ -1377,9 +734,9 @@ int main(int argc, char** argv){
                         g_playerMovement.velocityY = 0.0f;
                         g_playerMovement.onGround = false;
                         if (IsKeyDown(KEY_W))
-                            OmegaTechData.MainCamera.position.y += 6.0f * dt;
+                            OmegaTechData.MainCamera.position.y += activeZone->physics.ladderSpeed * dt;
                         if (IsKeyDown(KEY_S))
-                            OmegaTechData.MainCamera.position.y -= 6.0f * dt;
+                            OmegaTechData.MainCamera.position.y -= activeZone->physics.ladderSpeed * dt;
                         break;
                     case ZoneType::ZONE_REVERB:
                         // Placeholder: reverb DSP will be applied via audio system
@@ -1393,90 +750,28 @@ int main(int argc, char** argv){
             }
         }
         }
-                // TODO: move to PlayerController
-        // ---  Jump / Fly / Noclip Y management ---
+        // --- Jump / Fly / Noclip Y management ---
+        const bool verticalBlocked = g_consoleOpen || ShowInventory || ShowSkillTree;
         for (int s = 0; s < move_steps; ++s) {
-        {
-            const float dt = kMoveDt;
-
-            if (g_playerMovement.isNoClip) {
-                // Noclip: direct vertical control (Space up / Ctrl down)
-                float vy = 0.0f;
-                if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
-                if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
-                OmegaTechData.MainCamera.position.y += vy * g_playerMovement.BaseSpeed * 1.5f * dt;
-            } else if (g_playerMovement.isFlying) {
-                // Flying: direct vertical control, no terrain snap
-                float vy = 0.0f;
-                if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
-                if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
-                OmegaTechData.MainCamera.position.y += vy * g_playerMovement.BaseSpeed * 1.5f * dt;
-            } else if (g_playerMovement.inWater) {
-                // Water: restore Y, reduced gravity, dampen fall
-                OmegaTechData.MainCamera.position.y = savedCamY;
-
-                if (IsKeyPressed(KEY_SPACE) && !g_consoleOpen && !ShowInventory && !ShowSkillTree) {
-                    g_playerMovement.velocityY = 5.0f; // swim upward
-                }
-
-                if (!g_playerMovement.onGround) {
-                    g_playerMovement.velocityY += -8.0f * dt; // reduced gravity
-                    g_playerMovement.velocityY *= 0.95f;      // water drag
-                    OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;
-                }
-            } else {
-                // Normal / grounded: restore Y
-                OmegaTechData.MainCamera.position.y = savedCamY;
-
-                if (IsKeyPressed(KEY_SPACE) && g_playerMovement.onGround && !g_consoleOpen && !ShowInventory && !ShowSkillTree) {
-                    g_playerMovement.velocityY = 8.0f;
-                    g_playerMovement.onGround = false;
-                }
-
-                // Gravity 
-                // TODO: move to collision
-                if (!g_playerMovement.onGround) {
-                    g_playerMovement.velocityY += -20.0f * dt;
-                    OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;
-                }
-            }
+            PlayerController::Instance().UpdateVertical(kMoveDt, OmegaTechData.MainCamera,
+                                                        savedCamY, verticalBlocked, zonePhysics);
         }
-        }
+
+        const bool uiBlocking = ShowInventory || ShowSkillTree || g_consoleOpen;
 
         // Weapon fire AFTER camera so left-click does not disrupt movement
-        if (!ShowInventory && !ShowSkillTree && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            EntityInstance* wep = LightningEntityManager::Instance().SelectedEntity();
-            if (wep && wep->def && wep->def->type == EntityType::WEAPON) {
-                FireWeapon();
-            }
-        }
+        WeaponBehaviour::Instance().HandleInput(uiBlocking, OmegaTechData.MainCamera);
 
         // ADS / Zoom (right-click)
-        g_adsActive = !ShowInventory && !ShowSkillTree && !g_consoleOpen && IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
+        WeaponBehaviour::Instance().SetAdsActive(!uiBlocking && IsMouseButtonDown(MOUSE_BUTTON_RIGHT));
 
-        // Recoil recovery
-        const float RECOIL_DECAY = 0.82f;
-        g_recoilPitch *= RECOIL_DECAY;
-        g_recoilYaw *= RECOIL_DECAY;
-        g_crosshairBloom *= (g_adsActive ? 0.75f : 0.90f);
-        if (fabs(g_recoilPitch) < 0.01f) g_recoilPitch = 0.0f;
-        if (fabs(g_recoilYaw) < 0.01f) g_recoilYaw = 0.0f;
-        if (g_crosshairBloom < 0.1f) g_crosshairBloom = 0.0f;
-
-        // Apply recoil to camera target
-        if (g_recoilPitch != 0.0f || g_recoilYaw != 0.0f) {
-            Camera3D& cam = OmegaTechData.MainCamera;
-            Vector3 forward = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
-            Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, {0, 1, 0}));
-            cam.target = Vector3Add(cam.target, Vector3Scale({0, 1, 0}, g_recoilPitch * 0.1f));
-            cam.target = Vector3Add(cam.target, Vector3Scale(right, g_recoilYaw * 0.1f));
-        }
+        // Recoil recovery + camera application
+        WeaponBehaviour::Instance().Update(OmegaTechData.MainCamera);
 
         left_click_was_down = left_click_now;
 
         OmegaInputController.UpdateInputs();
-        
-        // TODO: Legacy Function -> Refactor into Renderer/LitLightning.hpp
+
         UpdateLightSources();
 
         if (Direction == 1)
@@ -1598,41 +893,17 @@ int main(int argc, char** argv){
                     }
                 }
 
-                // Auto-collect when walking over a pickup (also E); throttle requests 
-                // TODO: also should be moved to be handled by PickupPawns
-                {
-                    static double last_collect_try = 0.0;
-                    double t = GetTime();
-                    bool want = IsKeyPressed(KEY_E) || (t - last_collect_try > 0.35);
-                    if (want) {
-                        const auto& pickups = g_client.pickups();
-                        Vector3 cp = OmegaTechData.MainCamera.position;
-                        float nearest_dist = IsKeyPressed(KEY_E) ? 5.0f : 2.0f;
-                        int nearest_pickup = -1;
-                        int nearest_world = 0;
-                        for (const auto& p : pickups) {
-                            if (!p.active) continue;
-                            float dx = p.position.x - cp.x;
-                            float dy = p.position.y - cp.y;
-                            float dz = p.position.z - cp.z;
-                            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-                            if (dist < nearest_dist) {
-                                nearest_dist = dist;
-                                nearest_pickup = p.id;
-                                nearest_world = p.world_index;
-                            }
-                        }
-                        if (nearest_pickup >= 0) {
-                            g_client.send_pickup_collect(nearest_pickup, nearest_world, nullptr);
-                            last_collect_try = t;
-                        }
-                    }
-                }
+                // Auto-collect when walking over a pickup (also E) — handled
+                // by PickupPawns (networked pickups only; throttled internally).
+                PickupPawns::Instance().Update(IsKeyPressed(KEY_E),
+                                               OmegaTechData.MainCamera.position,
+                                               GetTime());
             }
         }
 
         // HUD: player stats (always visible)
-        DrawPlayerHUD();
+        InventoryBehaviour::Instance().DrawHud(OmegaTechData.MainCamera, OmegaTechData.Ticker,
+                                               g_playerMovement.isCrouching, g_playerMovement.isSprinting);
 
         // Screen flash on pickup collect (fades out)
         {
@@ -1663,7 +934,7 @@ int main(int argc, char** argv){
 
         // Inventory overlay
         if (ShowInventory) {
-            DrawInventoryOverlay();
+            InventoryBehaviour::Instance().DrawOverlay();
         }
 
         // Ethereal skill tree overlay
@@ -1678,7 +949,8 @@ int main(int argc, char** argv){
         if (!ShowInventory && !ShowSkillTree && !g_consoleOpen) {
             int cx = GetScreenWidth() / 2;
             int cy = GetScreenHeight() / 2;
-            int gap = (g_adsActive ? 2 : 5) + (int)(g_crosshairBloom * (g_adsActive ? 0.3f : 1.0f));
+            const bool ads = WeaponBehaviour::Instance().AdsActive();
+            int gap = (ads ? 2 : 5) + (int)(WeaponBehaviour::Instance().CrosshairBloom() * (ads ? 0.3f : 1.0f));
             int len = 12;
             Color col = {255, 255, 255, 180};
             DrawLine(cx - gap - len, cy, cx - gap, cy, col);

@@ -29,8 +29,11 @@ static ZoneType ParseZoneType(std::string name) {
     if (name == "ladder") return ZoneType::ZONE_LADDER;
     if (name == "sky") return ZoneType::ZONE_SKY;
     if (name == "reverb") return ZoneType::ZONE_REVERB;
-    if (name == "gameplay_sound") return ZoneType::ZONE_GAMEPLAY_SOUND;
-    return ZoneType::ZONE_WATER;
+    // Editor writes "sound" for gameplay-sound zones; accept both spellings so
+    // exported worlds round-trip back to ZONE_GAMEPLAY_SOUND.
+    if (name == "gameplay_sound" || name == "sound")
+        return ZoneType::ZONE_GAMEPLAY_SOUND;
+    return ZoneType::ZONE_WATER;   // default
 }
 
 static bool LoadOzoneEntity(const OzonePrimitive& prim,
@@ -90,11 +93,15 @@ static bool LoadOzoneEntity(const OzonePrimitive& prim,
                     node.envOverrides.ambG = (int)prim.args[14];
                     node.envOverrides.ambB = (int)prim.args[15];
                     node.envOverrides.ambIntensity = prim.args[16];
-                    if (prim.args.size() >= 18) {
+                    // Reverb args: 18 args => reverbMix only (decay keeps its
+                    // default); 19 args => mix + decay (off-by-one fixed).
+                    if (prim.args.size() >= 18)
                         node.envOverrides.reverbMix = prim.args[17];
+                    if (prim.args.size() >= 19)
                         node.envOverrides.reverbDecay = prim.args[18];
-                    }
                 }
+                // Per-zone physics overrides (named kwargs; absent = defaults)
+                node.physics = prim.physics;
                 pawns.AddZone(node);
 
                 // For sky zones, also register a SkyZoneNode

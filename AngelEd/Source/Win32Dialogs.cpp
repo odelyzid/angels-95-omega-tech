@@ -1060,8 +1060,8 @@ PawnTreeNode BuildPawnTree() {
     playerBranch.isExpanded = false;
     playerBranch.typeTag = "category";
     PawnTreeNode omegaPlayer;
-    omegaPlayer.label = "OmegaPlayer";
-    omegaPlayer.defName = "OmegaPlayer";  // Special: not in defs
+    omegaPlayer.label = "AngelPlayer";
+    omegaPlayer.defName = "AngelPlayer";  // Special: not in defs
     omegaPlayer.typeTag = "playerstart";
     playerBranch.children.push_back(omegaPlayer);
     pawnBranch.children.push_back(playerBranch);
@@ -3632,6 +3632,14 @@ static const int ID_PP_RESPAWN  = 419;   // pickup instance
 static const int ID_PP_ZONETYPE = 420;   // zone combo
 static const int ID_PP_ZONEINT  = 421;   // zone intensity
 static const int ID_PP_ZONENAME = 422;   // zone script-hook name
+static const int ID_PP_ZONEGRAV    = 423; // zone gravity (PhysicsInfo)
+static const int ID_PP_ZONEJUMP    = 424; // zone jump speed
+static const int ID_PP_ZONETERM    = 425; // zone terminal velocity
+static const int ID_PP_ZONEWGRAV   = 426; // zone water gravity
+static const int ID_PP_ZONEWDRAG   = 427; // zone water drag
+static const int ID_PP_ZONESWIM    = 428; // zone swim-up speed
+static const int ID_PP_ZONELADDER  = 429; // zone ladder speed
+static const int ID_PP_ZONEFLYMULT = 430; // zone fly/noclip speed multiplier
 static const int ID_PP_PORTALWORLD = 423;
 static const int ID_PP_PSPAWNX  = 424;
 static const int ID_PP_PSPAWNY  = 425;
@@ -3869,6 +3877,16 @@ static void PopulatePropertiesPanel(HWND hwnd) {
         y += rowH;
         addField(L"Intensity:", ID_PP_ZONEINT, g_editorPanels.propZoneIntensity);
         addTextField(L"Name:", ID_PP_ZONENAME, g_editorPanels.propZoneName);
+        // Per-zone physics overrides (round-trip through the OZONE export)
+        addSection("Physics");
+        addField(L"Gravity:", ID_PP_ZONEGRAV, g_editorPanels.propZoneGravity);
+        addField(L"Jump:", ID_PP_ZONEJUMP, g_editorPanels.propZoneJump);
+        addField(L"Terminal:", ID_PP_ZONETERM, g_editorPanels.propZoneTerminal);
+        addField(L"Water Gravity:", ID_PP_ZONEWGRAV, g_editorPanels.propZoneWaterGravity);
+        addField(L"Water Drag:", ID_PP_ZONEWDRAG, g_editorPanels.propZoneWaterDrag);
+        addField(L"Swim Up:", ID_PP_ZONESWIM, g_editorPanels.propZoneSwimUp);
+        addField(L"Ladder Speed:", ID_PP_ZONELADDER, g_editorPanels.propZoneLadderSpeed);
+        addField(L"Fly Mult:", ID_PP_ZONEFLYMULT, g_editorPanels.propZoneFlyMult);
     } else if (selType == 8) { // PORTAL
         addSection("Destination");
         addTextField(L"Target World:", ID_PP_PORTALWORLD, g_editorPanels.propPortalWorld);
@@ -4053,8 +4071,16 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.propHealth = readFloat(ID_PP_HEALTH, g_editorPanels.propHealth);
             g_editorPanels.propSpeed = readFloat(ID_PP_SPEED, g_editorPanels.propSpeed);
             g_editorPanels.propRespawnTime = readFloat(ID_PP_RESPAWN, g_editorPanels.propRespawnTime);
-            g_editorPanels.propZoneIntensity = readFloat(ID_PP_ZONEINT, g_editorPanels.propZoneIntensity);
-            g_editorPanels.propZoneName = readString(ID_PP_ZONENAME, g_editorPanels.propZoneName);
+    g_editorPanels.propZoneIntensity = readFloat(ID_PP_ZONEINT, g_editorPanels.propZoneIntensity);
+    g_editorPanels.propZoneName = readString(ID_PP_ZONENAME, g_editorPanels.propZoneName);
+    g_editorPanels.propZoneGravity = readFloat(ID_PP_ZONEGRAV, g_editorPanels.propZoneGravity);
+    g_editorPanels.propZoneJump = readFloat(ID_PP_ZONEJUMP, g_editorPanels.propZoneJump);
+    g_editorPanels.propZoneTerminal = readFloat(ID_PP_ZONETERM, g_editorPanels.propZoneTerminal);
+    g_editorPanels.propZoneWaterGravity = readFloat(ID_PP_ZONEWGRAV, g_editorPanels.propZoneWaterGravity);
+    g_editorPanels.propZoneWaterDrag = readFloat(ID_PP_ZONEWDRAG, g_editorPanels.propZoneWaterDrag);
+    g_editorPanels.propZoneSwimUp = readFloat(ID_PP_ZONESWIM, g_editorPanels.propZoneSwimUp);
+    g_editorPanels.propZoneLadderSpeed = readFloat(ID_PP_ZONELADDER, g_editorPanels.propZoneLadderSpeed);
+    g_editorPanels.propZoneFlyMult = readFloat(ID_PP_ZONEFLYMULT, g_editorPanels.propZoneFlyMult);
             g_editorPanels.propPortalWorld = readString(ID_PP_PORTALWORLD, g_editorPanels.propPortalWorld);
             g_editorPanels.propPortalSpawn[0] = readFloat(ID_PP_PSPAWNX, g_editorPanels.propPortalSpawn[0]);
             g_editorPanels.propPortalSpawn[1] = readFloat(ID_PP_PSPAWNY, g_editorPanels.propPortalSpawn[1]);
@@ -4203,11 +4229,19 @@ void ShowPropertiesPanel(bool show) {
         } else if (g_editorPanels.propsTargetType == 6) { // ZONE
             for (auto& z : PawnSystem::Instance().GetZones()) {
                 if ((int)z.id == g_editorPanels.propsTargetIndex) {
-                    g_editorPanels.propZoneType = (int)z.zoneType;
-                    if (g_editorPanels.propZoneType > 4) g_editorPanels.propZoneType = 0;
-                    g_editorPanels.propZoneIntensity = z.intensity;
-                    g_editorPanels.propZoneName = z.name;
-                    if (!z.name.empty()) fillDefBlock(z.name, "");
+            g_editorPanels.propZoneType = (int)z.zoneType;
+            if (g_editorPanels.propZoneType > 4) g_editorPanels.propZoneType = 0;
+            g_editorPanels.propZoneIntensity = z.intensity;
+            g_editorPanels.propZoneName = z.name;
+            g_editorPanels.propZoneGravity = z.physics.gravity;
+            g_editorPanels.propZoneJump = z.physics.jumpSpeed;
+            g_editorPanels.propZoneTerminal = z.physics.terminalVelocity;
+            g_editorPanels.propZoneWaterGravity = z.physics.waterGravity;
+            g_editorPanels.propZoneWaterDrag = z.physics.waterDrag;
+            g_editorPanels.propZoneSwimUp = z.physics.swimUpSpeed;
+            g_editorPanels.propZoneLadderSpeed = z.physics.ladderSpeed;
+            g_editorPanels.propZoneFlyMult = z.physics.flySpeedMult;
+            if (!z.name.empty()) fillDefBlock(z.name, "");
                     break;
                 }
             }

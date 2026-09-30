@@ -93,6 +93,10 @@ static EditorSelection g_hoverSel;  // mouse hover (yellow)
 // Right-click state: drag vs click detection
 static bool g_rbDown = false;
 static Vector2 g_rbDownPos{0,0};
+// Left-click state: pick fires on release so a held drag (e.g. moving a
+// placement ghost) is not mistaken for a selection click.
+static bool g_lbDown = false;
+static Vector2 g_lbDownPos{0,0};
 
 static RayCollision RaycastTestBrushes(Ray ray, EditorSelection& out) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
@@ -422,20 +426,23 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
     EditorLog("Gizmo snapped to %s idx=%d", sel.name.c_str(), sel.index);
 }
 
-static void EditorPickEntity() {
+// toggleOffSame: left-click toggles a repeat pick off (deselect); right-click
+// must NOT toggle, otherwise right-clicking the already-selected entity would
+// deselect it instead of opening its context menu.
+static void EditorPickEntity(bool toggleOffSame = true) {
     Vector2 mousePos = GetMousePosition();
     EditorSelection prevSel = g_sel;
 
     if (EditorRaycastAt(mousePos, g_sel)) {
         // Toggle: clicking the same entity deselects
-        if (g_sel.type == prevSel.type && g_sel.index == prevSel.index) {
+        if (toggleOffSame && g_sel.type == prevSel.type && g_sel.index == prevSel.index) {
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;
             return;
         }
         // Clicking a different zone while one is selected = deselect
-        if (prevSel.type != SelType::NONE && g_sel.type == SelType::ZONE) {
+        if (toggleOffSame && prevSel.type != SelType::NONE && g_sel.type == SelType::ZONE) {
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;
@@ -500,6 +507,8 @@ static void DeleteSelectedEntity() {
         PawnSystem::Instance().RemoveWindZone(g_sel.index);
     }
     g_sel = { SelType::NONE, -1, "", {0,0,0} };
+    g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+    OmegaTechEditor.DrawModel = false; // drop the gizmo so picking isn't gated
 }
 
 static void DuplicateSelectedEntity() {
@@ -1092,6 +1101,16 @@ static void ExportToOzone(std::ostream& output) {
         // Script-hook name (name= kwarg; consumed by the loader, not an arg index)
         if (!zone.name.empty())
             output << " name=" << zone.name;
+        // Per-zone physics overrides (named kwargs; absent = engine defaults)
+        auto& ph = zone.physics;
+        output << " gravity="   << ph.gravity
+               << " jump="      << ph.jumpSpeed
+               << " terminal="  << ph.terminalVelocity
+               << " water_gravity=" << ph.waterGravity
+               << " water_drag="    << ph.waterDrag
+               << " swim_up="   << ph.swimUpSpeed
+               << " ladder_speed="  << ph.ladderSpeed
+               << " fly_mult="  << ph.flySpeedMult;
         output << "\n";
     }
 
@@ -1723,7 +1742,9 @@ int main(int argc, char **argv){
             g_hoverFrameCounter++;
             if (g_hoverFrameCounter >= 4) {
                 g_hoverFrameCounter = 0;
-                if (_inViewport && !OmegaTechEditor.DrawModel) {
+                // Hover is a read-only probe: it must not depend on DrawModel
+                // (the gizmo/placement-ghost flag).
+                if (_inViewport) {
                     g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
                     EditorHoverEntity();
                 } else {
@@ -1756,12 +1777,28 @@ int main(int argc, char **argv){
                 }
             }
         }
-        // Left-click: select entity (red highlight) — suppressed while editing verts
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !OmegaTechEditor.DrawModel &&
-            !g_editorPanels.animEditVerts) {
+        // Left-click: select entity (red highlight) — suppressed while editing verts.
+        // The pick fires on RELEASE, not press, so holding LMB to drag a placement
+        // ghost still works: a drag cancels the pick via the movement threshold.
+        // Picking is deliberately independent of DrawModel — DrawModel only means
+        // "a gizmo/placement ghost is drawn". Gating picks on it made the viewport
+        // unselectable whenever a placement ghost was active with nothing selected
+        // (e.g. after using the CSG toolbox), with no way to recover via Escape.
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            g_lbDown = true;
+            g_lbDownPos = GetMousePosition();
+        }
+        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && g_lbDown) {
+            Vector2 delta = GetMouseDelta();
+            if (fabsf(delta.x) > 3.0f || fabsf(delta.y) > 3.0f) g_lbDown = false;
+        }
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && g_lbDown) {
+            g_lbDown = false;
             Vector2 mp = GetMousePosition();
-            if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f)
+            if (!g_editorPanels.animEditVerts && g_placeMode != PlaceMode::TERRAIN &&
+                mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
                 EditorPickEntity();
+            }
         }
 
         // TERRAIN brush: raise/lower heightmap cells (TERRAIN mode, left mouse)
@@ -1831,9 +1868,10 @@ int main(int argc, char **argv){
             g_rbDown = true;
             g_rbDownPos = GetMousePosition();
         }
-        // Only apply drag threshold when in placement mode (DrawModel);
-        // otherwise any right-click is a context menu click regardless of tiny movement.
-        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && g_rbDown && OmegaTechEditor.DrawModel) {
+        // A right-drag cancels the context menu. This must not depend on
+        // DrawModel: the menu has to open whenever the user right-clicks an
+        // entity in the viewport.
+        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && g_rbDown) {
             Vector2 delta = GetMouseDelta();
             if (fabsf(delta.x) > 3.0f || fabsf(delta.y) > 3.0f) g_rbDown = false;
         }
@@ -1842,8 +1880,10 @@ int main(int argc, char **argv){
             // Re-check viewport bounds with fresh cursor position
             Vector2 _mp_rel = GetMousePosition();
             bool _inVpRel = (_mp_rel.x >= (float)GetStatsSidebarWidth() && _mp_rel.y >= 28.0f);
-            if (_inVpRel && !OmegaTechEditor.DrawModel) {
-                EditorPickEntity();
+            // Pick without the left-click toggle so right-clicking the already
+            // selected entity opens its menu instead of deselecting it.
+            if (_inVpRel) {
+                EditorPickEntity(false);
                 if (g_sel.type != SelType::NONE) {
                     // Native Win32 context menu with TPM_RETURNCMD (avoids WM_COMMAND routing issues)
                     #ifdef _WIN32
@@ -3029,6 +3069,15 @@ int main(int argc, char **argv){
                                 if (sky.name == oldName) sky.name = g_editorPanels.propZoneName;
                             zone.name = g_editorPanels.propZoneName;
                         }
+                        // Per-zone physics overrides (exported by ExportToOzone)
+                        zone.physics.gravity = g_editorPanels.propZoneGravity;
+                        zone.physics.jumpSpeed = g_editorPanels.propZoneJump;
+                        zone.physics.terminalVelocity = g_editorPanels.propZoneTerminal;
+                        zone.physics.waterGravity = g_editorPanels.propZoneWaterGravity;
+                        zone.physics.waterDrag = g_editorPanels.propZoneWaterDrag;
+                        zone.physics.swimUpSpeed = g_editorPanels.propZoneSwimUp;
+                        zone.physics.ladderSpeed = g_editorPanels.propZoneLadderSpeed;
+                        zone.physics.flySpeedMult = g_editorPanels.propZoneFlyMult;
                         break;
                     }
                 }
@@ -3761,6 +3810,9 @@ int main(int argc, char **argv){
                               (int)brush.op, primType, center.x, center.y, center.z, size.x, size.y, size.z);
                 }
             }
+            // Placing via the toolbox is done — drop the ghost so the viewport
+            // returns to normal selection (Enter does the same for the ghost).
+            if (g_sel.type == SelType::NONE) OmegaTechEditor.DrawModel = false;
             g_editorPanels.actionCsgCommitNow = -1;
         }
         if (g_editorPanels.actionRefreshBrowser) {
@@ -3935,8 +3987,11 @@ int main(int argc, char **argv){
         if (IsKeyPressed(KEY_F11)) ToggleFullscreen();  // supersedes old F11 handling
         if (IsKeyPressed(KEY_F12)) ToggleEnvPanel();
 
-        // Selection shortcuts
-        if (IsKeyPressed(KEY_ESCAPE) && g_sel.type != SelType::NONE) {
+        // Selection shortcuts. Escape must also cancel an active placement ghost
+        // (DrawModel true with nothing selected), otherwise there is no keyboard
+        // way out of placement mode.
+        if (IsKeyPressed(KEY_ESCAPE) &&
+            (g_sel.type != SelType::NONE || OmegaTechEditor.DrawModel)) {
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;

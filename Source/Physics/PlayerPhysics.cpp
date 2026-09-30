@@ -1,0 +1,82 @@
+#include "PlayerPhysics.hpp"
+
+namespace oz {
+namespace physics {
+
+bool PlayerPhysics::TestObstacleOverlap(const BoundingBox& player, float feetY,
+                                        CollisionQuery& q) {
+    return q.OverlapsObstacle(player, feetY);
+}
+
+void PlayerPhysics::ClampToGround(Camera3D& cam, Motion& motion, float eyeHeight,
+                                  CollisionQuery& q) {
+    GroundSample ground = q.SampleGround(cam.position.x, cam.position.z, cam.position.y - eyeHeight);
+    if (!ground.valid) {
+        motion.onGround = false;
+        return;
+    }
+    if (cam.position.y <= ground.y + eyeHeight + kGroundEpsilon) {
+        cam.position.y = ground.y + eyeHeight;
+        motion.velocityY = 0.0f;
+        motion.onGround = true;
+    } else {
+        motion.onGround = false;
+    }
+}
+
+void PlayerPhysics::UpdateFlyVertical(Camera3D& cam, float baseSpeed, const PhysicsInfo& phys,
+                                      float dt, bool allowUp, bool allowDown) {
+    (void)allowUp;
+    (void)allowDown;
+    float vy = 0.0f;
+    if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
+    if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
+    cam.position.y += vy * baseSpeed * phys.flySpeedMult * dt;
+}
+
+void PlayerPhysics::UpdateWaterVertical(Camera3D& cam, Motion& motion, float savedCamY,
+                                        float eyeHeight, bool swimBlocked,
+                                        const PhysicsInfo& phys, float dt) {
+    (void)eyeHeight;
+    cam.position.y = savedCamY;
+
+    if (IsKeyPressed(KEY_SPACE) && !swimBlocked)
+        motion.velocityY = phys.swimUpSpeed;
+
+    if (!motion.onGround) {
+        motion.velocityY += -phys.waterGravity * dt; // reduced gravity
+        motion.velocityY *= phys.waterDrag;          // water drag
+        cam.position.y += motion.velocityY * dt;
+    }
+}
+
+void PlayerPhysics::UpdateGroundVertical(Camera3D& cam, Motion& motion, float savedCamY,
+                                         bool jumpBlocked, const PhysicsInfo& phys, float dt) {
+    cam.position.y = savedCamY;
+
+    if (IsKeyPressed(KEY_SPACE) && motion.onGround && !jumpBlocked) {
+        motion.velocityY = phys.jumpSpeed;
+        motion.onGround = false;
+    }
+
+    if (!motion.onGround) {
+        // Gravity
+        motion.velocityY += -phys.gravity * dt;
+        // Terminal velocity clamp (bounds the free-fall speed)
+        if (motion.velocityY < -phys.terminalVelocity)
+            motion.velocityY = -phys.terminalVelocity;
+        cam.position.y += motion.velocityY * dt;
+    }
+}
+
+void PlayerPhysics::RestorePosition(Camera3D& cam, float oldX, float oldY, float oldZ,
+                                    bool isNoClip) {
+    if (!isNoClip) {
+        cam.position.x = oldX;
+        cam.position.y = oldY;
+        cam.position.z = oldZ;
+    }
+}
+
+} // namespace physics
+} // namespace oz

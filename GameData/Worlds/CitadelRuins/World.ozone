@@ -1,0 +1,39 @@
+# OZONE world exported from AngelEd
+# Format: ozone v1.0
+
+add box 0 0 -2 80 0.5 80 0 texScaleU=8 texScaleV=8
+add box 0 0 -1.5 6 2 40 0 texScaleU=16 texScaleV=16
+add box -15 0 -1.5 20 2 6 0 texScaleU=16 texScaleV=16
+add box 0 0 -0.25 30 0.5 30 0 texScaleU=8 texScaleV=8
+add box 0 15.25 3 30 6.5 0.5 0 texScaleU=16 texScaleV=16
+add box 0 -15.25 3 30 6.5 0.5 0 texScaleU=16 texScaleV=16
+add box -15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
+add box 15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
+add box -10 10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
+add box 10 10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
+add box -10 -10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
+add box 10 -10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
+add cyl -6 6 2.5 0.6 0.6 5 16 0
+add cyl 6 6 2.5 0.6 0.6 5 16 0
+add cyl -6 -6 2.5 0.6 0.6 5 16 0
+add cyl 6 -6 2.5 0.6 0.6 5 16 0
+add box 0 0 0.5 4 1.5 4 0 texScaleU=16 texScaleV=16
+add box -4 3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
+add box 4 -3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
+
+# Entities
+playerstart 0 -13 0 0
+playerstart 0 13 0 180
+pickup HealthVial 0 -15 -1.25 25
+pickup rifle_01 -10 10 6.5 20
+pickup pistol_01 10 10 6.5 30
+pickup Medkit 0 0 0.5 45
+npc Skaarj -12 -12 0
+npc Skaarj 12 -12 0
+light point 10 10 7.5 100 150 255 1 12
+light point 0 0 5.5 255 240 200 1 25
+light point -10 10 7.5 100 150 255 1 12
+zone sky -100 -100 -30 100 100 80 1 name=zone_sky_0 gravity=20 jump=8 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
+levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/sky_evening.dds
+
+# End of OZONE export

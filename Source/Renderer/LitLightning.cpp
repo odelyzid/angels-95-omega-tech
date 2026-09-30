@@ -130,3 +130,43 @@ void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D
         UpdateLightValues(shader, dummy);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Full per-frame lighting pass (previously Core.hpp UpdateLightSources)
+// ---------------------------------------------------------------------------
+void LitLightning_UpdateFrame(std::vector<LightNode>& lights, Shader shader,
+                              Camera3D camera, Light& fallbackDirectional, float dt) {
+    float cameraPos[3] = { camera.position.x, camera.position.y, camera.position.z };
+
+    SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+
+    // Submit world/pawn lights
+    LitLightning_Update(lights, shader, camera, dt);
+
+    // One-shot diagnostic: confirm the world lights made it into the shader.
+    static size_t s_lastLightCount = (size_t)-1;
+    if (lights.size() != s_lastLightCount) {
+        s_lastLightCount = lights.size();
+        OZ_INFO("Lighting: worldLights=%zu shader=%d", lights.size(), shader.id);
+    }
+
+    // Directional camera fill, used ONLY when the world declares no active
+    // lights of its own. A full-white headlight otherwise washed the lit scene
+    // out and hid the world lights' colours.
+    bool anyActiveLight = false;
+    for (const auto& l : lights)
+        if (l.active) { anyActiveLight = true; break; }
+    if (!anyActiveLight) {
+        fallbackDirectional.position = camera.position;
+        fallbackDirectional.target = { camera.target.x, camera.target.y - 5, camera.target.z };
+        fallbackDirectional.type = LIGHT_DIRECTIONAL;
+        fallbackDirectional.enabled = true;
+        fallbackDirectional.intensity = 0.4f;
+        UpdateLightValues(shader, fallbackDirectional);
+    }
+
+    // Update uTime for GPU light animation
+    static int uTimeLoc = GetShaderLocation(shader, "uTime");
+    float timeVal = (float)GetTime();
+    SetShaderValue(shader, uTimeLoc, &timeVal, SHADER_UNIFORM_FLOAT);
+}

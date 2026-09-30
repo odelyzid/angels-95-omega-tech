@@ -138,7 +138,9 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             }
         } else if (type_name == "zone") {
             prim.type = OzonePrimitiveType::ENTITY_ZONE;
-            // zone zonetype minX minY minZ maxX maxY maxZ [intensity] [fog...] [name=label]
+            // zone zonetype minX minY minZ maxX maxY maxZ [intensity] [fog...]
+            //     [gravity=] [jump=] [terminal=] [water_gravity=] [water_drag=]
+            //     [swim_up=] [ladder_speed=] [fly_mult=] [name=label]
             if (ls >> prim.entitySubType) {
                 std::string s;
                 while (ls >> s) {
@@ -146,8 +148,36 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
                         prim.name = s.substr(5);
                         continue;
                     }
-                    try { prim.args.push_back(std::stof(s)); }
-                    catch (...) { break; }
+                    try {
+                        prim.args.push_back(std::stof(s));
+                        continue;
+                    } catch (...) {}
+                    // Per-zone physics overrides (named kwargs; absent = defaults)
+                    if (s.rfind("gravity=", 0) == 0 ||
+                        s.rfind("jump=", 0) == 0 ||
+                        s.rfind("terminal=", 0) == 0 ||
+                        s.rfind("water_gravity=", 0) == 0 ||
+                        s.rfind("water_drag=", 0) == 0 ||
+                        s.rfind("swim_up=", 0) == 0 ||
+                        s.rfind("ladder_speed=", 0) == 0 ||
+                        s.rfind("fly_mult=", 0) == 0) {
+                        size_t eq = s.find('=');
+                        float v = std::stof(s.substr(eq + 1));
+                        std::string key = s.substr(0, eq + 1);
+                        prim.hasPhysics = true;
+                        if (key == "gravity=")          prim.physics.gravity = v;
+                        else if (key == "jump=")        prim.physics.jumpSpeed = v;
+                        else if (key == "terminal=")    prim.physics.terminalVelocity = v;
+                        else if (key == "water_gravity=") prim.physics.waterGravity = v;
+                        else if (key == "water_drag=")  prim.physics.waterDrag = v;
+                        else if (key == "swim_up=")     prim.physics.swimUpSpeed = v;
+                        else if (key == "ladder_speed=") prim.physics.ladderSpeed = v;
+                        else if (key == "fly_mult=")    prim.physics.flySpeedMult = v;
+                        continue;
+                    }
+                    // Unknown token: stop parsing the rest of the line (parity
+                    // with the old behaviour for non-numeric tokens).
+                    break;
                 }
             }
         } else if (type_name == "npc") {

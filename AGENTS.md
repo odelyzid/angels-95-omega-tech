@@ -70,13 +70,16 @@ lists internet master URLs (http:// or https://), read by
 
 ## Source layout (condensed)
 Full tree: `Wiki/Engine-Overview.md`. Key modules:
-- Rendering/loop: `Source/Main.cpp`, `Source/Core.hpp`, `Source/Renderer/` (LitLightning, EngineBillboard, TextSystem), `Source/Renderer/raygui/`, `Source/Renderer/rlights/`, `System/Shaders/`.
+Full tree: `Wiki/Engine-Overview.md`. Key modules:
+- Rendering/loop: `Source/Main.cpp`, `Source/Core.hpp`, `Source/Renderer/` (LitLightning `LitLightning_UpdateFrame` owns the per-frame lighting pass, EngineBillboard, TextSystem), `Source/Renderer/raygui/`, `Source/Renderer/rlights/`, `System/Shaders/`.
 - Networking: `Source/Server/Network/Network.cpp/.hpp` (UDP, `#pragma pack(push,1)`), `Source/Client/Client.cpp`, `Source/Server/Master/` (AngelMaster daemon, `MasterClient` uplink, `MasterProtocol`/`MasterHttp`/`MasterList` helpers), `Source/Menu/InternetBrowser.hpp` (client browser).
 - Server: `Source/Server/` (Server.cpp, GameState, OzoneParser).
-- Script/entities: `Source/Script/` (LightningScript parser/context; EntityRegistry scans `*.ozls` in GameData + packages; EntityManager).
-- Pawn/world: `Source/Pawn/` (OzPawnSystem, Items/Entities/Objects/Player), `Source/Physics/` (OzBsp, WorldChunk), `Source/OzOzoneLoader.*`.
+- Script/entities: `Source/Script/` (LightningScript parser/context; EntityRegistry scans `*.ozls` in GameData + packages; EntityManager; `GameUI` EntityType is a data+hook-only declarative HUD layer).
+- Player: `Source/Pawn/AngelPlayer/` (GameUi bridge, InventoryBehaviour HUD/overlay + item/weapon collect hooks, WeaponBehaviour fire/recoil/ADS, PlayerController toggles/vertical/game-over) and `Source/Pawn/PickupPawns.*` (networked-pickup collect loop only).
+- Pawn/world: `Source/Pawn/` (OzPawnSystem, Items/Entities/Objects/Player, PickupPawns), `Source/Physics/` (OzBsp, WorldChunk, PlayerPhysics + PhysicsInfo), `Source/OzOzoneLoader.*`.
 - Packaging: `Source/Package/` (OzPackage, PackageAssetLoader, OzAssetMapper), `Source/OzPack.cpp`.
 - Audio: `Source/Audio/`; video: `Source/Renderer/plmpeg/`; particles: `Source/Particle/`.
+- Platform UI: `Source/UI/UiHandler.*` (Win32 native menu bar behind `oz::ui::CreateNativeMenuBar(callbacks)`; no-op off Windows).
 
 ## Package system (OzPackage)
 - Extensions + magic: `.ozpak`/OZPK (generic: models/scripts/shaders), `.oztex`/OZTX (textures), `.ozsnd`/OZSD (sounds), `.ozmux`/OZMX (music), `.ozone`/OZWN (worlds).
@@ -87,7 +90,7 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 ## World format (OZONE) - sole source of truth
 - The legacy WDL format and its fallback loader have been **removed**. OZONE + the LightningScript/Pawn entity system are the only world source of truth. A missing `GameData/Worlds/<Name>/World.ozone` is a hard error.
 - Primitive ops: `add`/`sub`/`intersect` + primitives `box cyl sph pyr pln`. Per-brush kwargs: `flags=N`, `texScaleU/V`, `texOffsetU/V`, `texPath=`.
-- Entities: `playerstart`, `pickup`, `zone` (zones are scripted by sibling `<name>.ozls` skyzone files), `npc`, `light` (point/spot/directional). Z-up axis.
+- Entities: `playerstart`, `pickup`, `zone` (zones are scripted by sibling `<name>.ozls` skyzone files; support per-zone physics kwargs `gravity=`, `jump=`, `terminal=`, `water_gravity=`, `water_drag=`, `swim_up=`, `ladder_speed=`, `fly_mult=` overriding `oz::physics::PhysicsInfo`), `npc`, `light` (point/spot/directional). Z-up axis.
 - Export from AngelEd: `ExportToOzone()` in `AngelEd/Source/Main.cpp`. Reference: `GameData/Worlds/*/World.ozone`.
 - Shared I/O helpers: `Source/PPGIO.hpp` (`LoadFile`, `WSplitValue`, `WReadValue`, `ToFloat`; save/config parsing only).
 - World subdirs: `Models/`, `Music/`.
@@ -145,7 +148,7 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 - Shipped weapons: `GameData/Global/gun/{Pistol_01,Rifle_01,etheral_waver,automag,flux_carbine,selenite_blade}`. `pistol_01`/`rifle_01` are ranged; `etheral_waver` is a melee sword. Map pickups use these names (`pickup pistol_01` / `pickup rifle_01` / `pickup etheral_waver`).
 - **FBX art pipeline:** raylib can't load `.fbx`, so `tools/convert_fbx.ps1` runs FBX2glTF (auto-downloaded to `tools/FBX2glTF.exe`, gitignored) to make `.glb` beside each FBX, then `tools/merge_glb_anims.py` folds the separate `<Name>_Fire/_Reload/_BasePose` animation GLBs into `<Name>.glb` as named clips (Fire/Reload) and synthesizes an `Idle` hold clip from the bind pose. Both are idempotent; commit the `.glb` outputs.
 - **Per-weapon projectiles:** weapon `stats` may set `projectile_mesh` (path to a model, e.g. `Projectiles.glb`), `projectile_submesh` (mesh index for the caliber), `projectile_scale`, `projectile_color=(r,g,b)`. `FireSelectedWeapon` stamps these onto the `ProjectileNode`; `PawnSystem::DrawProjectiles(camera, shader)` draws the submesh (`oz::Mesh::DrawSubmesh`) with a tracer. Client-side visual only.
-- **First-person view-model:** `Source/Renderer/ViewModel.*` draws the selected weapon attached to the camera (client-only, in `Core.hpp DrawWorld`). Weapon `stats` keys: `viewmodel_mesh`, `viewmodel_texture`, `viewmodel_offset=(x,y,z)` (camera space, z forward), `viewmodel_rot=(x,y,z)`, `viewmodel_scale`, `recoil`. Clips `Idle`/`Fire`/`Reload` come from the merged GLB (`oz::SkeletalMesh`); one-shots return to Idle, plus a procedural recoil kick / reload dip. Firing `Main.cpp FireWeapon()` and the R key trigger the clips.
+- **First-person view-model:** `Source/Renderer/ViewModel.*` draws the selected weapon attached to the camera (client-only, in `Core.hpp DrawWorld`). Weapon `stats` keys: `viewmodel_mesh`, `viewmodel_texture`, `viewmodel_offset=(x,y,z)` (camera space, z forward), `viewmodel_rot=(x,y,z)`, `viewmodel_scale`, `recoil`. Clips `Idle`/`Fire`/`Reload` come from the merged GLB (`oz::SkeletalMesh`); one-shots return to Idle, plus a procedural recoil kick / reload dip. Firing is `Pawn/AngelPlayer/WeaponBehaviour.cpp FireWeapon()` and the R key trigger the clips.
 
 ## Editor state (verified as of b58)
 - Win32 native panels + raylib viewport. Dynamic file scanning of `GameData/` + packages. Reads `System/AngelEd.ini`.

@@ -1,6 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "raymath.h"
+#include "rlights/rlights.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -60,8 +61,15 @@ struct LightNode {
 // ---------------------------------------------------------------------------
 
 // Update all active lights: animate dynamics, sort by distance, submit to shader
-// Called once per frame from UpdateLightSources()
 void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D camera, float dt);
+
+// Full per-frame lighting pass: uploads the camera view uniform, submits
+// `lights` via LitLightning_Update, applies a directional camera fill light
+// only when no world light is active, and advances the uTime uniform.
+// `fallbackDirectional` is the headlight slot (engine GameLight[0]).
+// Called once per frame from UpdateLightSources().
+void LitLightning_UpdateFrame(std::vector<LightNode>& lights, Shader shader,
+                              Camera3D camera, Light& fallbackDirectional, float dt);
 
 // Animate a dynamic light based on its effect type and phase/period
 void LitLightning_Animate(LightNode& node, float dt);

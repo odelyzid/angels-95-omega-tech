@@ -600,6 +600,25 @@ static int test_parse_skill() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_parse_gameui() {
+    TEST("parse GameUI entity type (declarative HUD)");
+    std::string ozls = R"(
+        entity "GameUI" : GameUI {
+            texture = "GameData/Global/TextBar.png"
+            stats {
+                hud_scale = 1.5
+                hud_x = 0
+            }
+        }
+    )";
+    EntityDef def = LightningScriptParser::Parse(ozls, "test_gameui.ozls");
+    CHECK(def.name == "GameUI");
+    CHECK(def.type == EntityType::GAMEUI);
+    CHECK(def.texture == "GameData/Global/TextBar.png");
+    CHECK_APROX(def.stats.floats["hud_scale"], 1.5f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptParser Tests:\n");
     int failures = 0;
@@ -630,6 +649,7 @@ int main() {
     failures += test_parse_mesh_static_and_quoted_clip();
     failures += test_parse_wind_zone();
     failures += test_parse_skill();
+    failures += test_parse_gameui();
     fprintf(stdout, "\n%d/%d tests passed.\n", tests_passed, tests_total);
     return failures;
 }

@@ -145,6 +145,15 @@ struct EditorPanelState {
     int   propZoneType = 0;         // ZoneType index (0=water 1=ladder 2=sky 3=reverb 4=sound)
     float propZoneIntensity = 1;
     std::string propZoneName;       // zone script-hook name
+    // Per-zone physics overrides (mirrors oz::physics::PhysicsInfo)
+    float propZoneGravity = 20.0f;
+    float propZoneJump = 8.0f;
+    float propZoneTerminal = 60.0f;
+    float propZoneWaterGravity = 8.0f;
+    float propZoneWaterDrag = 0.95f;
+    float propZoneSwimUp = 5.0f;
+    float propZoneLadderSpeed = 6.0f;
+    float propZoneFlyMult = 1.5f;
     std::string propPortalWorld;    // portal target world
     float propPortalSpawn[3] = {0,0,0};
     bool  propPortalBidir = true;

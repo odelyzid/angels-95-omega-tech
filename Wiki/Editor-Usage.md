@@ -119,7 +119,7 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 
 ### Pawn Manager
 - Hierarchical **tree view** of all actor types:
-  - **PlayerPawn** > OmegaPlayer (player start)
+  - **PlayerPawn** > AngelPlayer (player start)
   - **EnemyPawn** > registered NPC defs (Walker, Skaarj, Brute, Floater, etc.)
   - **InventoryPawn** > Pickups (from LightningScript registry) + Weapons
   - **Volume & Node Markers** > PlayerStartNode, EmitterNodes (Sound/Music), ZoneVolumeNode types (Water/Ladder/Sky/Reverb/GameplaySound)
