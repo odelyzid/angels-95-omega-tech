@@ -286,7 +286,7 @@ portal EngineTest -80 -3 0 -76 5 8 0 12 2 bidir
 # West Approach
 pickup HealthVial -65 5 3
 pickup ManaVial -60 -10 3
-pickup automag -55 15 2
+pickup pistol_01 -55 15 2
 
 # Entry Hall
 pickup HealthVial 0 8 3
@@ -299,9 +299,10 @@ pickup HealthVial 5 45 3
 pickup Powerup 0 48 3
 
 # Armory
-pickup automag 22 27 2
+pickup pistol_01 22 27 2
 pickup Coin 28 33 0
-pickup flux_carbine 32 27 2
+pickup rifle_01 32 27 2
+pickup etheral_waver 26 30 2
 
 # Shrine
 pickup EnergyCrystal -25 30 3

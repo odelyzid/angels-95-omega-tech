@@ -1,9 +1,9 @@
 #pragma once
 #include "raylib.h"
-#include "../raygui/raygui.h"
+#include "../Renderer/raygui/raygui.h"
 #include "../Network/Network.hpp"
 #include "InternetBrowser.hpp"
-#include "../Master/MasterList.hpp"
+#include "../Client/MasterList.hpp"
 #include <string>
 #include <vector>
 #include <cstring>
@@ -79,9 +79,8 @@ static std::vector<WorldEntry> ScanWorlds() {
             std::string dirName = entry.path().filename().string();
             // Skip non-world directories (they won't have world data)
             if (dirName == "Legacy") continue;
-            std::string wdl = entry.path().string() + "/World.wdl";
             std::string oz  = entry.path().string() + "/World.ozone";
-            if ((fs::exists(wdl) || fs::exists(oz)) && dirName != "." && dirName != "..") {
+            if (fs::exists(oz) && dirName != "." && dirName != "..") {
                 bool dup = false;
                 for (auto& w : worlds) if (w.dirName == dirName) { dup = true; break; }
                 if (!dup) worlds.push_back({dirName, dirName});

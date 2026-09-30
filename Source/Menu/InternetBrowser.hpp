@@ -8,8 +8,8 @@
 // All network work happens off the render thread; the menu calls Refresh() to
 // start and Update() each frame to pick up results.
 
-#include "../Master/MasterProtocol.hpp"
-#include "../Master/MasterHttp.hpp"
+#include "../Network/MasterProtocol.hpp"
+#include "../Network/MasterHttp.hpp"
 
 #include <atomic>
 #include <mutex>

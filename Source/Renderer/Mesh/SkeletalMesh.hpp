@@ -23,6 +23,9 @@ public:
     // Case-insensitive exact match, then substring; -1 when not found.
     int FindClip(const std::string& name) const;
 
+    // Clip length (keyframes / fps). fps defaults to 30 (raylib has no fps).
+    float ClipSeconds(int index, float fps = 30.0f) const;
+
     // Apply a looping pose at `timeSeconds` (default 30 fps keyframe rate).
     // No-op when the clip index is invalid or the skeleton does not match.
     void ApplyPose(int clipIndex, float timeSeconds, float fps = 30.0f) const;

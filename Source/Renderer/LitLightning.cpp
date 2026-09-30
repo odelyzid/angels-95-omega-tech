@@ -1,5 +1,5 @@
 #include "LitLightning.hpp"
-#include "../rlights/rlights.h"
+#include "rlights/rlights.h"
 #include "../Log.hpp"
 #include <cmath>
 

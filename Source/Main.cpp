@@ -1,8 +1,9 @@
 #include "Core.hpp"
 #include "Log.hpp"
+#include "Menu/SettingsMenu.hpp"
 #include "ClientSettings.hpp"
-#include "JoinUri.hpp"
-#include "ProtocolHandler.hpp"
+#include "Client/JoinUri.hpp"
+#include "Client/ProtocolHandler.hpp"
 #include "Client/Client.hpp"
 #include "Script/LightningEntityManager.hpp"
 #include "Script/LightningEntityRegistry.hpp"
@@ -10,6 +11,7 @@
 #include "Pawn/OzPawnSystem.hpp"
 #include "Renderer/CombatFX.hpp"
 #include "Renderer/Mesh/MeshCache.hpp"
+#include "Renderer/ViewModel.hpp"
 #include <cmath>
 #include <memory>
 #include <cstdlib>
@@ -401,6 +403,8 @@ static void FireWeapon() {
     int result = LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
     if (result < 0) return; // didn't fire
 
+    oz::ViewModel::Instance().TriggerFire();
+
     // Muzzle flash
     CombatFX::Instance().ArmMuzzleFlash(origin, 0.12f);
 
@@ -543,9 +547,7 @@ static void ExecuteConsoleCommand(const char* cmd) {
             // Check if the world exists
             char worldPath[512];
             snprintf(worldPath, sizeof(worldPath), "GameData/Worlds/%s/World.ozone", name);
-            char wdlPath[512];
-            snprintf(wdlPath, sizeof(wdlPath), "GameData/Worlds/%s/World.wdl", name);
-            if (IsPathFile(worldPath) || IsPathFile(wdlPath)) {
+            if (IsPathFile(worldPath)) {
                 strncpy(g_world_to_load, name, sizeof(g_world_to_load) - 1);
                 g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
                 OZ_INFO("World switch: %s -> %s", g_world_to_load, name);
@@ -563,9 +565,8 @@ static void ExecuteConsoleCommand(const char* cmd) {
             for (auto& entry : fs::directory_iterator("GameData/Worlds")) {
                 if (entry.is_directory()) {
                     std::string dirName = entry.path().filename().string();
-                    std::string wdl = entry.path().string() + "/World.wdl";
                     std::string oz  = entry.path().string() + "/World.ozone";
-                    if (IsPathFile(wdl.c_str()) || IsPathFile(oz.c_str()))
+                    if (IsPathFile(oz.c_str()))
                         OZ_INFO("  %s", dirName.c_str());
                 }
             }
@@ -1406,12 +1407,8 @@ int main(int argc, char** argv){
         }
         // LightningScript dynamic hotbar
         LightningEntityManager::Instance().DrawHotbar();
+        if (IsKeyPressed(KEY_R)) oz::ViewModel::Instance().TriggerReload();
         LightningEntityManager::Instance().HandleInput();
-
-        if (ParticlesEnabled){
-            OmegaTechData.RainParticles.Update(0,0);
-            OmegaTechData.RainParticles.TriggerEffect({0,0} , RainEffect);
-        }
 
         if (FPSEnabled){
             DrawFPS(0,0);

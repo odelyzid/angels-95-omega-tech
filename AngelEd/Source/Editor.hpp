@@ -1,7 +1,7 @@
 #include "PPGIO.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Renderer/EngineBillboard.hpp"
-#include "../../Source/OzOzoneLoader.hpp"
+#include "../../Source/World/OzOzoneLoader.hpp"
 #include "../../Source/Script/LightningEntityRegistry.hpp"
 #include <cstring>
 #include <cmath>
@@ -21,8 +21,6 @@ class Editor{
         Camera3D PreviewCamera = {0}; 
         LightingMode ViewMode = LightingMode::LIT;
         char Path[512] = {};
-        wstring WorldData;
-        wstring OtherData;
         // Environmental settings
         Color FogColor = {200, 200, 210, 255};
         float FogDensity = 0.02f;
@@ -215,8 +213,6 @@ void Init(){
     OTEditor.PreviewCamera.fovy = 45.0f;                                
     OTEditor.PreviewCamera.projection = CAMERA_PERSPECTIVE;         
 
-    OTEditor.WorldData = LoadFile(TextFormat("%s/World.wdl", OTEditor.Path));
-
     Target = LoadRenderTexture(320 , 200);
 
     // Initialize lit fog shader for editor
@@ -300,223 +296,6 @@ void Init(){
 static int ScriptTimer = 0;
 static float X, Y, Z, S, Rotation, W, H, L;
 bool NextCollision = false;
-
-void CacheWDL()
-{
-    wstring WData = OTEditor.WorldData;
-    OTEditor.OtherData = L"";
-    CachedModelCounter = 0;
-    CachedCollisionCounter = 0;
-    NextCollision = false;
-
-    for (int i = 0; i <= MaxCachedModels - 1; i++)
-    {
-        CachedModels[i].Init();
-        CachedCollision[i].Init();
-    }
-
-    for (int i = 0; i <= GetWDLSize(OTEditor.WorldData, L""); i++)
-    {
-        if (CachedModelCounter == MaxCachedModels) break;
-
-        wstring Instruction = WSplitValue(WData, i);
-
-        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 8) == L"HeightMap")
-        {
-            if (WReadValue(Instruction, 0, 8) != L"HeightMap")
-                CachedModels[CachedModelCounter].ModelId = int(ToFloat(WReadValue(Instruction, 5, 6)));
-            else
-                CachedModels[CachedModelCounter].ModelId = -1;
-            
-            CachedModels[CachedModelCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedModels[CachedModelCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedModels[CachedModelCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedModels[CachedModelCounter].S = ToFloat(WSplitValue(WData, i + 4));
-            CachedModels[CachedModelCounter].R = ToFloat(WSplitValue(WData, i + 5));
-            if (NextCollision) { CachedModels[CachedModelCounter].Collision = true; NextCollision = false; }
-            CachedModelCounter++;
-        }
-
-        if (WReadValue(Instruction, 0, 8) == L"Collision")
-        {
-            CachedModels[CachedModelCounter].ModelId = -2;
-            CachedModels[CachedModelCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedModels[CachedModelCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedModels[CachedModelCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedModels[CachedModelCounter].S = ToFloat(WSplitValue(WData, i + 4));
-            CachedModels[CachedModelCounter].R = ToFloat(WSplitValue(WData, i + 5));
-        }
-
-        if (WReadValue(Instruction, 0, 11) == L"AdvCollision")
-        {
-            CachedCollision[CachedCollisionCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedCollision[CachedCollisionCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedCollision[CachedCollisionCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedCollision[CachedCollisionCounter].W = ToFloat(WSplitValue(WData, i + 6));
-            CachedCollision[CachedCollisionCounter].H = ToFloat(WSplitValue(WData, i + 7));
-            CachedCollision[CachedCollisionCounter].L = ToFloat(WSplitValue(WData, i + 8));
-            CachedCollisionCounter ++;
-        }
-
-        if (WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script")
-        {
-            OTEditor.OtherData += Instruction + L":" +
-                WSplitValue(WData, i + 1) + L":" + WSplitValue(WData, i + 2) + L":" +
-                WSplitValue(WData, i + 3) + L":" + WSplitValue(WData, i + 4) + L":" +
-                WSplitValue(WData, i + 5) + L":";
-            if (WReadValue(Instruction, 0, 6) == L"ClipBox" || WReadValue(Instruction, 0, 11) == L"AdvCollision") {
-                OTEditor.OtherData += WSplitValue(WData, i + 6) + L":" + WSplitValue(WData, i + 7) + L":" + WSplitValue(WData, i + 8) + L":";
-                i += 3;
-            }
-            i += 5;
-            continue;
-        }
-
-        if (Instruction == L"C") { NextCollision = true; }
-    }
-}
-
-void CWDLProcess()
-{
-    for (int i = 0; i <= CachedCollisionCounter; i++)
-    {
-        X = CachedCollision[i].X; Y = CachedCollision[i].Y; Z = CachedCollision[i].Z;
-        W = CachedCollision[i].W; H = CachedCollision[i].H; L = CachedCollision[i].L;
-        DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, PURPLE);
-    }
-    
-    for (int i = 0; i <= CachedModelCounter; i++)
-    {
-        X = CachedModels[i].X; Y = CachedModels[i].Y; Z = CachedModels[i].Z;
-        S = CachedModels[i].S; Rotation = CachedModels[i].R;
-
-        if (CachedModels[i].Collision) DrawCubeWires({X, Y, Z}, S, S, S, RED);
-
-        if (OTEditor.MainCamera.position.z - 1000 < Z && OTEditor.MainCamera.position.z + 1000 > Z)
-        {
-            if (OTEditor.MainCamera.position.x - 1000 < X && OTEditor.MainCamera.position.x + 1000 > X)
-            {
-                int mid = CachedModels[i].ModelId;
-                if (mid == -2) {
-                    DrawCubeWires({X, Y, Z}, S, S, S, RED);
-                } else if (mid == -1) {
-                    DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
-                } else if (mid > 0) {
-                    LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
-                    if (lm) DrawModelEx(lm->model, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
-                }
-            }
-        }
-    }
-}
-
-void WDLProcess()
-{
-    wstring WData = OTEditor.OtherData;
-    int Size = GetWDLSize(OTEditor.OtherData, L"");
-    bool Render = false;
-    bool FoundPlatform = false;
-    float PlatformHeight = 0.0f;
-
-    for (int i = 0; i <= Size; i++)
-    {
-        wstring Instruction = WSplitValue(WData, i);
-        if (Instruction == L"C") { NextCollision = true; }
-
-        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 1) == L"NE" ||
-            WReadValue(Instruction, 0, 6) == L"ClipBox" ||
-            WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" ||
-            WReadValue(Instruction, 0, 8) == L"HeightMap" || WReadValue(Instruction, 0, 8) == L"Collision" ||
-            WReadValue(Instruction, 0, 11) == L"AdvCollision" ||
-            WReadValue(Instruction, 0, 6) == L"Pickup" || WReadValue(Instruction, 0, 5) == L"Spawn" ||
-            WReadValue(Instruction, 0, 3) == L"NPC" || WReadValue(Instruction, 0, 5) == L"Light")
-        {
-            X = ToFloat(WSplitValue(WData, i + 1));
-            Y = ToFloat(WSplitValue(WData, i + 2));
-            Z = ToFloat(WSplitValue(WData, i + 3));
-            S = ToFloat(WSplitValue(WData, i + 4));
-            Rotation = ToFloat(WSplitValue(WData, i + 5));
-            if (OTEditor.MainCamera.position.z - 1000 < Z && OTEditor.MainCamera.position.z + 1000 > Z &&
-                OTEditor.MainCamera.position.x - 1000 < X && OTEditor.MainCamera.position.x + 1000 > X)
-                Render = true;
-        }
-
-        if (Render)
-        {
-            if (WReadValue(Instruction, 0, 4) == L"Model")
-            {
-                int Identifier = ToFloat(WReadValue(Instruction, 5, 6));
-                LoadedModel* lm = WDLModels.GetModelByWDLId(Identifier);
-                if (lm) DrawModelEx(lm->model, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, WHITE);
-            }
-
-            if (Instruction == L"Collision") DrawCubeWires({X, Y, Z}, S, S, S, RED);
-            if (WReadValue(Instruction, 0, 5) == L"Script") DrawCubeWires({X, Y, Z}, S, S, S, YELLOW);
-            if (WReadValue(Instruction, 0, 6) == L"Pickup") {
-                Camera3D cam = OTEditor.MainCamera;
-                std::wstring typeField = WSplitValue(WData, i + 1);
-                std::string pickupName;
-                try {
-                    int oldType = std::stoi(typeField);
-                    static const char* legacyMap[] = {"HealthVial","ManaVial","EnergyCrystal","Key","Coin","Powerup"};
-                    if (oldType >= 0 && oldType < 6) pickupName = legacyMap[oldType];
-                } catch (...) {
-                    pickupName = std::string(typeField.begin(), typeField.end());
-                }
-                if (!pickupName.empty()) {
-                    EngineBillboard::DrawPickup(cam, pickupName.c_str(), {X, Y, Z}, 0.8f);
-                } else {
-                    DrawCubeWires({X, Y, Z}, 0.5f, 0.5f, 0.5f, GREEN);
-                }
-            }
-            if (WReadValue(Instruction, 0, 5) == L"Spawn") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "PlayerStart", {X, Y + 0.5f, Z}, 1.2f);
-            }
-            if (WReadValue(Instruction, 0, 3) == L"NPC") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "PawnNode", {X, Y + 1.0f, Z}, 1.5f);
-            }
-            if (WReadValue(Instruction, 0, 5) == L"Light") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "Light", {X, Y + 0.5f, Z}, 1.0f);
-            }
-            if (WReadValue(Instruction, 0, 5) == L"Sound") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "Sound", {X, Y + 0.5f, Z}, 1.0f);
-            }
-            if (WReadValue(Instruction, 0, 5) == L"Music") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "Music", {X, Y + 0.5f, Z}, 1.0f);
-            }
-            if (WReadValue(Instruction, 0, 8) == L"ZoneInfo") {
-                EngineBillboard::Draw(OTEditor.MainCamera, "ZoneInfo", {X, Y + 0.5f, Z}, 1.0f);
-            }
-        }
-
-        if (Instruction == L"ClipBox") {
-            W = ToFloat(WSplitValue(WData, i + 6));
-            H = ToFloat(WSplitValue(WData, i + 7));
-            L = ToFloat(WSplitValue(WData, i + 8));
-            DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H - 5, L}}, PURPLE);
-            i += 3;
-        }
-        if (Instruction == L"AdvCollision") {
-            if (Render) {
-                W = ToFloat(WSplitValue(WData, i + 6));
-                H = ToFloat(WSplitValue(WData, i + 7));
-                L = ToFloat(WSplitValue(WData, i + 8));
-                DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, PURPLE);
-            }
-            i += 3;
-        }
-        if (Instruction == L"HeightMap") {
-            WDLModels.HeightMapPosition.x = X;
-            WDLModels.HeightMapPosition.y = Y;
-            WDLModels.HeightMapPosition.z = Z;
-            WDLModels.HeightMapScale = S;
-            DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, 1, 0}, 0, {S, S, S}, WHITE);
-        }
-
-        if (!NextCollision) i += 5;
-        Render = false;
-    }
-}
 
 class InEditor{
     public:

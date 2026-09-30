@@ -12,7 +12,7 @@ Launch `System\AngelEd.exe`. The editor opens with:
 
 ## File Formats
 
-Supports both WDL (`.wdl`) and OZONE (`.ozone`) world formats. Open/Save dialogs accept both. OZONE export includes CSG brush geometry and entity definitions in a combined plain-text format.
+Supports the OZONE (`.ozone`) world format. Open/Save dialogs accept `.ozone`. OZONE export includes CSG brush geometry and entity definitions in a combined plain-text format.
 
 ## Menu Bar Reference
 
@@ -128,7 +128,7 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 - **Refresh** reloads the tree from current definitions
 
 ### Script Manager
-- Lists `.ps`/`.wdl`/`.ozone` files from `GameData/` and packages
+- Lists `.ozone` files from `GameData/` and packages
 - Double-click to view file info and path
 
 ### Zone Properties / Environment Settings
@@ -200,7 +200,7 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 
 ## World Saving
 
-Worlds are saved in WDL or OZONE text format stored in `OTEditor.WorldData`. OZONE export includes CSG brush primitives, heightmap, and all entity types (player starts, pickups, NPCs, zones, emitters) with per-zone environment overrides.
+Worlds are saved in OZONE text format. OZONE export includes CSG brush primitives, heightmap, and all entity types (player starts, pickups, NPCs, zones, emitters) with per-zone environment overrides.
 
 ## Known Limitations
 

@@ -58,6 +58,16 @@ public:
     // Bind the shader to every material slot and draw at the transform.
     virtual void Draw(const MeshTransform& t, Shader litShader);
 
+    // Draw a single submesh (by model mesh index) with a diffuse tint. Used for
+    // picking one projectile out of a multi-mesh model.
+    void DrawSubmesh(int index, const MeshTransform& t, Shader litShader, Color tint = WHITE);
+
+    // Draw every submesh with an explicit world matrix. Used by the view-model
+    // so the weapon inherits the camera's full orientation (pitch + yaw + roll).
+    void DrawMatrix(const Matrix& transform, Shader litShader);
+
+    int MeshCount() const { return m_valid ? m_model.meshCount : 0; }
+
     bool Valid() const { return m_valid; }
     Model& GetModel() { return m_model; }
     const Model& GetModel() const { return m_model; }

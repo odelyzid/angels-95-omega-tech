@@ -12,14 +12,13 @@ Angels95/
     WindowsCompat.hpp     # Win32/raylib name collision fixes (CloseWindow, etc.)
     Log.cpp/.hpp          # Logging system
     IniConfig.hpp         # INI config file reader
-    PPGIO.hpp             # WDL format I/O helpers
+    PPGIO.hpp             # Save/config I/O helpers
     OzOzoneLoader.cpp/.hpp # OZONE world format loader
     OzPack.cpp            # Standalone packer/unpacker CLI tool
-    Editor.hpp            # Shared editor integration header
+    WorldState.hpp        # Scene/camera transition + toggle-flag state
 
     Server/
       Server.cpp          # Dedicated server, HTTP API on :8080
-      WDLParser.cpp/.hpp  # WDL world format parser (standalone, no raylib)
       OzoneParser.cpp/.hpp # OZONE format parser (standalone)
       GameState.cpp/.hpp  # Server-side world state, NPCs, pickups
 
@@ -92,7 +91,7 @@ Angels95/
       Editor.hpp            # Editor state, camera, lighting, cached models
       Win32Dialogs.cpp/.hpp # Win32 native panels (Model Browser, Texture, etc.)
       EditorIcons.cpp/.hpp  # Toolbar icon loader (AngelEd/UI/*.bmp)
-      PPGIO.hpp             # WDL I/O helpers (shared with Source/)
+      PPGIO.hpp             # Save/config I/O helpers (shared with Source/)
       raygui/               # Bundled raygui (dark.h, raygui.c/.h)
     UI/                     # 45 toolbar icon .bmp files
     Makefile                # Separate editor Makefile
@@ -100,11 +99,9 @@ Angels95/
   GameData/                 # Loose assets, worlds, saves
     Worlds/
       <WorldName>/
-        World.wdl           # World description (WDL format)
+        World.ozone         # World description (OZONE format)
         Models/             # .obj files, textures, heightmap
-        Scripts/            # WDL script files
         Music/              # Background music
-        NoiseEmitter/       # Ambient sound emitters
     Global/
       PawnDefs/*.cfg        # Data-driven NPC definitions
     Saves/                  # Binary save files (gitignored)
@@ -130,7 +127,7 @@ Every target is compiled and linked with a single `g++` command. Flags: `-O3 --s
 Included early in any file that touches both raylib and `winsock2.h`. Renames conflicting Windows symbols (`CloseWindow`, `ShowCursor`, `Rectangle`, `DrawText`) before `#include <windows.h>`, then `#undef`s them.
 
 ### using namespace std
-Used in `PPGIO.hpp`, `Data.hpp`, `Encoder.hpp`, `TextSystem.hpp`, `ParasiteScriptData.hpp`.
+Used in `PPGIO.hpp`, `Data.hpp`, `TextSystem.hpp`.
 
 ### #pragma pack(push,1)
 Used for all network packet structs to ensure binary compatibility between client and server.

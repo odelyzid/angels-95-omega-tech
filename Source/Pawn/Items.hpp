@@ -77,7 +77,7 @@ static const ItemDBEntry ItemDB[ITEM_DB_SIZE] = {
 
 inline const ItemDBEntry* GetItemDef(int id) {
     for (int i = 0; i < ITEM_DB_SIZE; i++)
-        if (ItemDB[i].id == id) return &ItemDB[i];
+        if (ItemDB[i].name && ItemDB[i].id == id) return &ItemDB[i];
     return nullptr;
 }
 
@@ -135,6 +135,7 @@ struct InventorySystem {
     int SummonItem(const char* name) {
         for (int i = 0; i < ITEM_DB_SIZE; i++) {
             const char* n = ItemDB[i].name;
+            if (!n) continue; // uninitialized tail entries
             // Compare lowercase
             const char* a = name;
             const char* b = n;

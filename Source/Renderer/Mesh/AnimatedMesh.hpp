@@ -1,6 +1,6 @@
 #pragma once
 #include "Mesh.hpp"
-#include "../../Anim/OzAnimFormat.hpp"
+#include "../../Package/Anim/OzAnimFormat.hpp"
 #include <vector>
 #include <string>
 

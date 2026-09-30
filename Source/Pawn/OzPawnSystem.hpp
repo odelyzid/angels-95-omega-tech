@@ -216,6 +216,13 @@ struct ProjectileNode {
     int ownerId = -1;          // pawn or player id that fired it
     bool active = true;
     Texture2D* sprite = nullptr; // optional trail/glow texture
+    // Optional per-weapon projectile visual (model + submesh), resolved by
+    // FireSelectedWeapon from the weapon def's stats.
+    std::string meshPath;      // resolved model path (empty = sphere/tracer)
+    std::string texturePath;   // optional diffuse texture
+    int   submesh = 0;         // mesh index within meshPath's model
+    float scale = 0.05f;       // world scale
+    Color tint{255, 200, 50, 255};
 };
 
 // Pickup node - collectible items in the world
@@ -387,7 +394,7 @@ public:
     // Projectile nodes
     int SpawnProjectile(const ProjectileNode& node);
     void UpdateProjectiles(float dt);
-    void DrawProjectiles(Camera3D& camera);
+    void DrawProjectiles(Camera3D& camera, Shader litShader = {0});
     void ClearProjectiles();
     std::vector<ProjectileNode>& GetProjectiles() { return m_projectiles; }
     const std::vector<ProjectileNode>& GetProjectiles() const { return m_projectiles; }

@@ -25,7 +25,7 @@ struct ClientNPC {
     int state = 0;     // NpcState as int
     int health = 100;
     bool active = true;
-    char npc_type[32] = {0}; // pawn def name (e.g. "Walker"), from server
+    char npc_type[32] = {0}; // pawn def name (e.g. .Walker.), from server
 };
 
 // Client-side pickup representation

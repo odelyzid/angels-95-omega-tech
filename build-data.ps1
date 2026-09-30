@@ -175,7 +175,6 @@ Get-ChildItem "$GAMEDATA\Worlds" -Directory | ForEach-Object {
 
     # Package world file(s) as .ozone (or .ozwn)
     $worldFile = "$GAMEDATA\Worlds\$worldName\World.ozone"
-    $wdlFile   = "$GAMEDATA\Worlds\$worldName\World.wdl"
     if (Test-Path $worldFile) {
         Run-OzPack "OZWN" "$GAMEDATA\Worlds\$worldName" "$OUT_ZONES\world_${worldName}.ozone"
     }

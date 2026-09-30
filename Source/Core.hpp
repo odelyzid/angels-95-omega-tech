@@ -1,20 +1,20 @@
-﻿#include "Data.hpp"
+#include "Data.hpp"
 #include "Log.hpp"
-#include "JoinUri.hpp"
-#include "Package/OzAssetMapper.hpp"
+#include "Client/JoinUri.hpp"
+#include "Renderer/OzAssetMapper.hpp"
 #include "Audio/DspReverb.hpp"
-#include "OzOzoneLoader.hpp"
+#include "World/OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
 #include "Package/PackageAssetLoader.hpp"
-#include "Master/MasterList.hpp"
+#include "Client/MasterList.hpp"
 #include "Renderer/EngineBillboard.hpp"
+#include "Renderer/ViewModel.hpp"
 #include "Particle/OzParticleSimulationManager.hpp"
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityManager.hpp"
 
 #include "raymath.h"
-#include "rlights/rlights.h"
-#include "Custom/OTCustom.hpp"
+#include "Renderer/rlights/rlights.h"
 
 #include <cmath>
 #include <cstring>
@@ -28,14 +28,6 @@ bool g_showCollisionDebug = false;
 char g_world_to_load[256] = "EngineTest";
 char g_world_dir_override[256] = "";
 bool g_skipMenu = false;
-
-// WDL token bake state (see BakeWDLTokens/EnsureWDLTokensBaked below) — the
-// colon-delimited world text is split into tokens once and cached so the
-// per-frame WDLProcess walk avoids re-tokenizing with WSplitValue each time.
-static std::vector<wstring> g_wdlTokens;
-static size_t g_wdlBakedWorldLen = (size_t)-1;
-static size_t g_wdlBakedOtherLen = (size_t)-1;
-static size_t g_wdlBakedExtraLen = (size_t)-1;
 
 // Portal transitions (campaign system) — set by the portal trigger in
 // UpdateEntities, consumed right after LoadWorld() repositions the player.
@@ -70,12 +62,8 @@ int SetServerJoinPort = 27015;
 
 void LoadSave();
 void SaveGame();
-void UpdateCustom();
-void CacheWDL();
-float SampleHeightmapGroundY(float px, float pz);
 void DrawRemotePlayers3D();
 
-#include "ParticleDemon/ParticleDemon.hpp"
 #include "Renderer/CombatFX.hpp"
 
 class EngineData
@@ -93,7 +81,6 @@ public:
     Shader WindShader;   // Lighting.vs + wind displacement (foliage)
     Light GameLights[MAX_LIGHTS];
 
-    ParticleSystem RainParticles;
     Texture HomeScreen;
     Texture PauseHeading;
     Texture BtnNormal;
@@ -109,7 +96,6 @@ public:
     int CameraSpeed = 1;
     int RenderRadius = 800;
     int Deaths;
-    bool UseCachedRenderer = false;
     int BadPreformaceCounter = 0;
     bool SkyboxEnabled = false;
     int Ending = 0;
@@ -127,267 +113,6 @@ public:
 };
 
 EngineData OmegaTechData;
-
-void LoadEntitiesFromWDL()
-{
-    wstring WData = WorldData;
-    int Size = GetWDLSize(WorldData, L"");
-
-    for (int i = 0; i <= Size; i++)
-    {
-        wstring Instruction = WSplitValue(WData, i);
-
-        if (Instruction.empty() || Instruction[0] == L'#')
-            continue;
-
-        // Pickup: "Pickup:typeName:X:Y:Z:S:R:" (old format: integer index at field 1)
-        if (Instruction.substr(0, 6) == L"Pickup")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 2));
-            float y = ToFloat(WSplitValue(WData, i + 3));
-            float z = ToFloat(WSplitValue(WData, i + 4));
-            wstring typeField = WSplitValue(WData, i + 1);
-            std::string typeName;
-            try
-            {
-                int legacyIdx = std::stoi(typeField);
-                static const char *legacyMap[] = {"HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"};
-                if (legacyIdx >= 0 && legacyIdx < 6)
-                    typeName = legacyMap[legacyIdx];
-            }
-            catch (...)
-            {
-                typeName = std::string(typeField.begin(), typeField.end());
-            }
-            PickupNode node;
-            node.position = {x, y, z};
-            // Snap pickup to ground height if floating
-            if (WDLModels.HeightMapReady) {
-                float groundY = SampleHeightmapGroundY(x, z);
-                if (groundY > -99990.0f && y > groundY + 1.0f)
-                    node.position.y = groundY + 0.5f;
-            }
-            node.typeName = typeName;
-            PawnSystem::Instance().AddPickup(node);
-            i += 6;
-            continue;
-        }
-        // Spawn: "Spawn:X:Y:Z:S:Rotation"
-        else if (Instruction.substr(0, 5) == L"Spawn")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            float yaw = ToFloat(WSplitValue(WData, i + 5));
-            PlayerStartNode node;
-            node.position = {x, y, z};
-            node.yaw = yaw;
-            PawnSystem::Instance().AddPlayerStart(node);
-            i += 5;
-            continue;
-        }
-        // NPC: "NPC<ClassName>:X:Y:Z:S:Rotation" or "NPC:X:Y:Z:S:Rotation:ClassName"
-        else if (Instruction.substr(0, 3) == L"NPC")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            string className;
-            if (Instruction.size() > 3)
-                className = string(Instruction.begin() + 3, Instruction.end());
-            else
-                className = string(WSplitValue(WData, i + 6).begin(), WSplitValue(WData, i + 6).end());
-            PawnSystem::Instance().Spawn({x, y, z}, className.c_str());
-            i += 5;
-            continue;
-        }
-        // Light: "Light:X:Y:Z:R:G:B:I:Rad:T:E:"
-        else if (Instruction == L"Light")
-        {
-            LightNode node;
-            node.active = true;
-            node.position.x = ToFloat(WSplitValue(WData, i + 1));
-            node.position.y = ToFloat(WSplitValue(WData, i + 2));
-            node.position.z = ToFloat(WSplitValue(WData, i + 3));
-            node.color.r = (unsigned char)ToFloat(WSplitValue(WData, i + 4));
-            node.color.g = (unsigned char)ToFloat(WSplitValue(WData, i + 5));
-            node.color.b = (unsigned char)ToFloat(WSplitValue(WData, i + 6));
-            node.color.a = 255;
-            node.intensity = ToFloat(WSplitValue(WData, i + 7));
-            node.radius = ToFloat(WSplitValue(WData, i + 8));
-            int typeVal = (int)ToFloat(WSplitValue(WData, i + 9));
-            node.type = (typeVal == 1) ? LitLightType::DIRECTIONAL : (typeVal == 2) ? LitLightType::SPOT : LitLightType::POINT;
-            node.effect = (LitLightEffect)(int)ToFloat(WSplitValue(WData, i + 10));
-            PawnSystem::Instance().AddLight(node);
-            i += 10;
-            continue;
-        }
-        // Sound: "Sound:X:Y:Z:S:Rotation"
-        else if (Instruction.substr(0, 5) == L"Sound")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            EmitterNode node;
-            node.position = {x, y, z};
-            node.type = EmitterType::SOUND;
-            PawnSystem::Instance().AddEmitter(node);
-            i += 5;
-            continue;
-        }
-        // Music: "Music:X:Y:Z:S:Rotation"
-        else if (Instruction.substr(0, 5) == L"Music")
-        {
-            float x = ToFloat(WSplitValue(WData, i + 1));
-            float y = ToFloat(WSplitValue(WData, i + 2));
-            float z = ToFloat(WSplitValue(WData, i + 3));
-            EmitterNode node;
-            node.position = {x, y, z};
-            node.type = EmitterType::MUSIC;
-            PawnSystem::Instance().AddEmitter(node);
-            i += 5;
-            continue;
-        }
-        // ZoneInfo — unified: "ZoneInfo:type:minX:minY:minZ:maxX:maxY:maxZ:intensity:"
-        // legacy fallback: "ZoneInfo:X:Y:Z:S:Rotation:W:H:L:TypeName"
-        else if (Instruction.substr(0, 8) == L"ZoneInfo")
-        {
-            ZoneVolumeNode node;
-            wstring firstField = WSplitValue(WData, i + 1);
-            // Type embedded in the instruction token ("ZoneInfoLadder:...") = legacy format
-            bool legacy = Instruction.size() > 8;
-            if (!legacy)
-            {
-                try
-                {
-                    size_t parsed = 0;
-                    std::stof(firstField, &parsed);
-                    legacy = parsed == firstField.size(); // fully numeric -> legacy client format
-                }
-                catch (...) { legacy = false; }
-            }
-
-            if (!legacy)
-            {
-                // Unified parser format
-                string zoneTypeName(firstField.begin(), firstField.end());
-                float minX = ToFloat(WSplitValue(WData, i + 2));
-                float minY = ToFloat(WSplitValue(WData, i + 3));
-                float minZ = ToFloat(WSplitValue(WData, i + 4));
-                float maxX = ToFloat(WSplitValue(WData, i + 5));
-                float maxY = ToFloat(WSplitValue(WData, i + 6));
-                float maxZ = ToFloat(WSplitValue(WData, i + 7));
-                float intensity = ToFloat(WSplitValue(WData, i + 8));
-                if (intensity <= 0.0f) intensity = 1.0f;
-                ZoneType zt = ZoneType::ZONE_WATER;
-                if (zoneTypeName == "ladder" || zoneTypeName == "Ladder" || zoneTypeName == "1")
-                    zt = ZoneType::ZONE_LADDER;
-                else if (zoneTypeName == "sky" || zoneTypeName == "Sky" || zoneTypeName == "2")
-                    zt = ZoneType::ZONE_SKY;
-                else if (zoneTypeName == "reverb" || zoneTypeName == "Reverb" || zoneTypeName == "3")
-                    zt = ZoneType::ZONE_REVERB;
-                else if (zoneTypeName == "sound" || zoneTypeName == "Sound" || zoneTypeName == "4")
-                    zt = ZoneType::ZONE_GAMEPLAY_SOUND;
-                node.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
-                node.zoneType = zt;
-                node.intensity = intensity;
-                PawnSystem::Instance().AddZone(node);
-                i += 8;
-            }
-            else
-            {
-                // Legacy client format
-                float x = ToFloat(WSplitValue(WData, i + 1));
-                float y = ToFloat(WSplitValue(WData, i + 2));
-                float z = ToFloat(WSplitValue(WData, i + 3));
-                float w = ToFloat(WSplitValue(WData, i + 6));
-                float h = ToFloat(WSplitValue(WData, i + 7));
-                float l = ToFloat(WSplitValue(WData, i + 8));
-                string zoneTypeName;
-                if (Instruction.size() > 8)
-                    zoneTypeName = string(Instruction.begin() + 8, Instruction.end());
-                else
-                    zoneTypeName = string(WSplitValue(WData, i + 9).begin(), WSplitValue(WData, i + 9).end());
-                ZoneType zt = ZoneType::ZONE_WATER;
-                if (zoneTypeName == "Ladder")
-                    zt = ZoneType::ZONE_LADDER;
-                else if (zoneTypeName == "Sky")
-                    zt = ZoneType::ZONE_SKY;
-                else if (zoneTypeName == "Reverb")
-                    zt = ZoneType::ZONE_REVERB;
-                node.bounds = {{x, y, z}, {w, h, l}};
-                node.zoneType = zt;
-                PawnSystem::Instance().AddZone(node);
-                i += 9;
-            }
-            continue;
-        }
-        // Portal: "Portal:targetWorld:minX:minY:minZ:maxX:maxY:maxZ:[spawnX:spawnY:spawnZ:[bidir]]"
-        else if (Instruction.substr(0, 6) == L"Portal")
-        {
-            wstring wtgt = WSplitValue(WData, i + 1);
-            string targetWorld(wtgt.begin(), wtgt.end());
-            float minX = ToFloat(WSplitValue(WData, i + 2));
-            float minY = ToFloat(WSplitValue(WData, i + 3));
-            float minZ = ToFloat(WSplitValue(WData, i + 4));
-            float maxX = ToFloat(WSplitValue(WData, i + 5));
-            float maxY = ToFloat(WSplitValue(WData, i + 6));
-            float maxZ = ToFloat(WSplitValue(WData, i + 7));
-            ZonePortal portal;
-            portal.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
-            portal.targetWorld = targetWorld;
-            // Optional spawn point (defaults to volume center floor)
-            wstring sx = WSplitValue(WData, i + 8);
-            if (!sx.empty())
-            {
-                portal.targetSpawn = {ToFloat(sx),
-                                      ToFloat(WSplitValue(WData, i + 9)),
-                                      ToFloat(WSplitValue(WData, i + 10))};
-                wstring bidir = WSplitValue(WData, i + 11);
-                if (!bidir.empty())
-                    portal.bidirectional = ToFloat(bidir) != 0.0f;
-            }
-            else
-            {
-                portal.targetSpawn = {minX + (maxX - minX) * 0.5f, minY, minZ + (maxZ - minZ) * 0.5f};
-            }
-            PawnSystem::Instance().AddPortal(portal);
-            i += 11;
-            continue;
-        }
-        // LevelInfo: "LevelInfo:gameType:maxPlayers:respawnTime:timeLimitEnabled:timeLimitMinutes:scoreLimit:friendlyFire:skyboxPath:"
-        else if (Instruction.substr(0, 9) == L"LevelInfo")
-        {
-            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
-            s.gameType = (int)ToFloat(WSplitValue(WData, i + 1));
-            s.maxPlayers = (int)ToFloat(WSplitValue(WData, i + 2));
-            s.respawnTime = ToFloat(WSplitValue(WData, i + 3));
-            s.timeLimitEnabled = ToFloat(WSplitValue(WData, i + 4)) != 0.0f;
-            s.timeLimitMinutes = ToFloat(WSplitValue(WData, i + 5));
-            s.scoreLimit = (int)ToFloat(WSplitValue(WData, i + 6));
-            s.friendlyFire = ToFloat(WSplitValue(WData, i + 7)) != 0.0f;
-            wstring wsky = WSplitValue(WData, i + 8);
-            s.skyboxPath = string(wsky.begin(), wsky.end());
-            i += 8;
-            continue;
-        }
-        // Particles: "Particles:type:density:speed:r:g:b:windX:windZ:"
-        else if (Instruction.substr(0, 9) == L"Particles")
-        {
-            LevelSettings& s = PawnSystem::Instance().GetWorldInfo().settings;
-            s.particleType = (int)ToFloat(WSplitValue(WData, i + 1));
-            s.particleDensity = ToFloat(WSplitValue(WData, i + 2));
-            s.particleSpeed = ToFloat(WSplitValue(WData, i + 3));
-            s.particleR = (int)ToFloat(WSplitValue(WData, i + 4));
-            s.particleG = (int)ToFloat(WSplitValue(WData, i + 5));
-            s.particleB = (int)ToFloat(WSplitValue(WData, i + 6));
-            s.particleWindX = ToFloat(WSplitValue(WData, i + 7));
-            s.particleWindZ = ToFloat(WSplitValue(WData, i + 8));
-            i += 8;
-            continue;
-        }
-    }
-}
 
 bool LoadFlag = false;
 
@@ -430,8 +155,7 @@ auto LoadWorld()
         // (assets live in GameData/Worlds/<name>/) or a direct file path (editor
         // playtest passes --world <path>; assets then live beside the file).
         std::string worldLoad = g_world_to_load;
-        bool directWorldPath = worldLoad.find(".ozone") != std::string::npos ||
-                               worldLoad.find(".wdl") != std::string::npos;
+        bool directWorldPath = worldLoad.find(".ozone") != std::string::npos;
         std::string assetPrefix;
         if (directWorldPath) {
             size_t slash = worldLoad.find_last_of("/\\");
@@ -442,126 +166,16 @@ auto LoadWorld()
             assetPrefix = std::string("GameData/Worlds/") + worldLoad + "/";
         }
 
-        for (int ne = 1; ne <= 3; ne++)
-        {
-            std::string nePath = assetPrefix + "NoiseEmitter/NE" + std::to_string(ne) + ".mp3";
-            const char* path = nePath.c_str();
-            auto getStream = [&](Music& ms) {
-                if (IsPathFile(path)) {
-                    StopMusicStream(ms);
-                    UnloadMusicStream(ms);
-                    ms = LoadMusicStream(path);
-                } else {
-                    UnloadMusicStream(ms);
-                }
-            };
-            if (ne == 1) getStream(OmegaTechSoundData.NESound1);
-            else if (ne == 2) getStream(OmegaTechSoundData.NESound2);
-            else getStream(OmegaTechSoundData.NESound3);
-        }
-
         // World skybox: filesystem first, then packages (resolves "Skybox.png"
         // inside the world's .ozone container in packaged builds)
         {
-            if (WDLModels.Skybox.id > 0)
-                UnloadTexture(WDLModels.Skybox);
-            WDLModels.Skybox = LoadTextureWithFallback(TextFormat("%sModels/Skybox.png", assetPrefix.c_str()));
-            OmegaTechData.SkyboxEnabled = (WDLModels.Skybox.id > 0);
+            if (WorldModels.Skybox.id > 0)
+                UnloadTexture(WorldModels.Skybox);
+            WorldModels.Skybox = LoadTextureWithFallback(TextFormat("%sModels/Skybox.png", assetPrefix.c_str()));
+            OmegaTechData.SkyboxEnabled = (WorldModels.Skybox.id > 0);
             if (OmegaTechData.SkyboxEnabled)
                 OZ_INFO("World skybox: loaded %sModels/Skybox.png", assetPrefix.c_str());
         }
-
-        if (IsPathFile(TextFormat("%sScripts/Launch.ps", assetPrefix.c_str())))
-        {
-            ParasiteScriptInit();
-            LoadScript(TextFormat("%sScripts/Launch.ps", assetPrefix.c_str()));
-            for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
-            {
-                CycleInstruction();
-                ParasiteScriptCoreData.LineCounter++;
-            }
-        }
-
-        if (WDLModels.HeightMapImage.data)
-        {
-            UnloadImage(WDLModels.HeightMapImage);
-            WDLModels.HeightMapImage = (Image){0};
-        }
-        WDLModels.HeightMapReady = false;
-
-        if (IsPathFile(TextFormat("%sModels/HeightMap.png", assetPrefix.c_str())))
-        {
-            WDLModels.HeightMapTexture = LoadTexture(TextFormat("%sModels/HeightMapTexture.png", assetPrefix.c_str()));
-            WDLModels.HeightMapImage = LoadImage(TextFormat("%sModels/HeightMap.png", assetPrefix.c_str()));
-            WDLModels.HeightMapReady = (WDLModels.HeightMapImage.data != nullptr);
-            if (WDLModels.HeightMapReady)
-            {
-                ImageFormat(&WDLModels.HeightMapImage, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
-                int X = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 0);
-                int Y = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 1);
-                int Z = PullConfigValue(TextFormat("%sModels/HeightMapConfig.conf", assetPrefix.c_str()), 2);
-                WDLModels.HeightMapSize = (Vector3){(float)X, (float)Y, (float)Z};
-                Mesh Mesh1 = GenMeshHeightmap(WDLModels.HeightMapImage, WDLModels.HeightMapSize);
-                OZ_INFO("HeightMap: world=%d size=(%d,%d,%d) mesh=(v=%d t=%d) tex=%d img=%dx%d",
-                        OmegaTechData.LevelIndex, X, Y, Z, Mesh1.vertexCount, Mesh1.triangleCount,
-                        WDLModels.HeightMapTexture.id,
-                        WDLModels.HeightMapImage.width, WDLModels.HeightMapImage.height);
-                WDLModels.HeightMap = LoadModelFromMesh(Mesh1);
-                if (WDLModels.HeightMap.materialCount > 0)
-                {
-                    WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.HeightMapTexture;
-                    WDLModels.HeightMap.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-                }
-            }
-        }
-        else
-        {
-            OZ_INFO("HeightMap: world=%d not found (no heightmap)", OmegaTechData.LevelIndex);
-        }
-
-        for (int mid = 1; mid <= GameModels::MAX_WDL_MODELS; mid++)
-        {
-            char modelPath[256], texPath[256];
-            snprintf(modelPath, sizeof(modelPath), "%sModels/Model%d.obj", assetPrefix.c_str(), mid);
-            snprintf(texPath, sizeof(texPath), "%sModels/Model%dTexture.png", assetPrefix.c_str(), mid);
-            if (IsPathFile(modelPath))
-            {
-                WDLModels.wdlModels[mid] = LoadModel(modelPath);
-                WDLModels.wdlModelTextures[mid] = LoadTexture(texPath);
-                if (WDLModels.wdlModels[mid].materialCount > 0)
-                {
-                    WDLModels.wdlModels[mid].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = WDLModels.wdlModelTextures[mid];
-                    WDLModels.wdlModels[mid].materials[0].shader = OmegaTechData.Lights;
-                }
-            }
-            else
-            {
-                if (WDLModels.wdlModels[mid].meshCount != 0)
-                    UnloadModel(WDLModels.wdlModels[mid]);
-                if (WDLModels.wdlModelTextures[mid].id != 0)
-                    UnloadTexture(WDLModels.wdlModelTextures[mid]);
-            }
-        }
-
-        bool isDirectWdl = (strstr(g_world_to_load, ".wdl") != nullptr);
-        if (isDirectWdl)
-        {
-            WorldData = LoadFile(g_world_to_load);
-            OtherWDLData = L"";
-            CacheWDL();
-        }
-        else
-        {
-            WorldData = L"";
-            WorldData = LoadFile(TextFormat("%sWorld.wdl", assetPrefix.c_str()));
-            OtherWDLData = L"";
-            CacheWDL();
-        }
-
-        // Force the WDL token bake to refresh for the new world text
-        g_wdlBakedWorldLen = (size_t)-1;
-        g_wdlBakedOtherLen = (size_t)-1;
-        g_wdlBakedExtraLen = (size_t)-1;
 
         // Clear all existing entities before loading new world
         PawnSystem::Instance().ClearLights();
@@ -581,7 +195,8 @@ auto LoadWorld()
         CombatFX::Instance().ClearAll();
         if (g_skySideTex.id > 0) { UnloadTexture(g_skySideTex); g_skySideTex = {0}; }
 
-        if (!isDirectWdl)
+        // The ONLY world source of truth: the OZONE container. A missing
+        // World.ozone is a hard error (the legacy WDL fallback is gone).
         {
             char ozonePath[512];
             if (strstr(g_world_to_load, ".ozone") != nullptr)
@@ -591,11 +206,7 @@ auto LoadWorld()
             if (IsPathFile(ozonePath))
                 OzoneLoader::Instance().LoadFile(ozonePath);
             else
-                LoadEntitiesFromWDL();
-        }
-        else
-        {
-            LoadEntitiesFromWDL();
+                OZ_ERROR("LoadWorld: missing world '%s' (no World.ozone; WDL fallback removed)", ozonePath);
         }
 
         // Apply level metadata (LevelInfo/Particles) after entities are loaded
@@ -606,8 +217,8 @@ auto LoadWorld()
                 Texture2D newSky = LoadTextureWithFallback(s.skyboxPath.c_str());
                 if (newSky.id > 0)
                 {
-                    if (WDLModels.Skybox.id > 0) UnloadTexture(WDLModels.Skybox);
-                    WDLModels.Skybox = newSky;
+                    if (WorldModels.Skybox.id > 0) UnloadTexture(WorldModels.Skybox);
+                    WorldModels.Skybox = newSky;
                     OmegaTechData.SkyboxEnabled = true;
                     OZ_INFO("LevelInfo: skybox '%s'", s.skyboxPath.c_str());
                 }
@@ -784,7 +395,6 @@ void OmegaTechInit()
     OZ_INFO("GameData/Worlds exists: %d", (int)fs::exists("GameData/Worlds"));
     OZ_INFO("System/Data/Zones exists: %d", (int)fs::exists("System/Data/Zones"));
     LoadLaunchConfig();
-    ParasiteScriptTFlagWipe();
 
     GuiLoadStyleDark();
 
@@ -993,8 +603,8 @@ void OmegaTechInit()
             if (rIdx >= 0) {
                 Model* m = LightningEntityManager::Instance().GetModelByResourceIdx(rIdx);
                 if (m && m->meshes) {
-                    WDLModels.objectModels[o] = *m;
-                    WDLModels.objectModelsLoaded[o] = true;
+                    WorldModels.objectModels[o] = *m;
+                    WorldModels.objectModelsLoaded[o] = true;
                 }
             }
         }
@@ -1127,161 +737,6 @@ void PlayHomeScreen()
 float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
 bool NextCollision = false;
 
-void CacheWDL()
-{
-    wstring WData = WorldData;
-
-    OtherWDLData = L"";
-
-    CachedModelCounter = 0;
-    CachedCollisionCounter = 0;
-
-    bool NextCollision = false;
-
-    for (int i = 0; i <= MaxCachedModels - 1; i++)
-    {
-        CachedModels[i].Init();
-        CachedCollision[i].Init();
-    }
-
-    for (int i = 0; i <= GetWDLSize(WorldData, L""); i++)
-    {
-
-        if (CachedModelCounter == MaxCachedModels)
-            break;
-
-        wstring Instruction = WSplitValue(WData, i);
-
-        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 8) == L"HeightMap")
-        {
-            if (WReadValue(Instruction, 0, 8) != L"HeightMap")
-            {
-                CachedModels[CachedModelCounter].ModelId = int(ToFloat(WReadValue(Instruction, 5, 6)));
-            }
-            else
-            {
-                CachedModels[CachedModelCounter].ModelId = -1;
-            }
-
-            CachedModels[CachedModelCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedModels[CachedModelCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedModels[CachedModelCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedModels[CachedModelCounter].S = ToFloat(WSplitValue(WData, i + 4));
-            CachedModels[CachedModelCounter].R = ToFloat(WSplitValue(WData, i + 5));
-
-            if (NextCollision)
-            {
-                CachedModels[CachedModelCounter].Collision = true;
-                NextCollision = false;
-            }
-
-            CachedModelCounter++;
-        }
-
-        if (WReadValue(Instruction, 0, 8) == L"Collision")
-        {
-            CachedModels[CachedModelCounter].ModelId = -2;
-            CachedModels[CachedModelCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedModels[CachedModelCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedModels[CachedModelCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedModels[CachedModelCounter].S = ToFloat(WSplitValue(WData, i + 4));
-            CachedModels[CachedModelCounter].R = ToFloat(WSplitValue(WData, i + 5));
-        }
-
-        if (WReadValue(Instruction, 0, 11) == L"AdvCollision")
-        {
-            CachedCollision[CachedCollisionCounter].X = ToFloat(WSplitValue(WData, i + 1));
-            CachedCollision[CachedCollisionCounter].Y = ToFloat(WSplitValue(WData, i + 2));
-            CachedCollision[CachedCollisionCounter].Z = ToFloat(WSplitValue(WData, i + 3));
-            CachedCollision[CachedCollisionCounter].W = ToFloat(WSplitValue(WData, i + 6));
-            CachedCollision[CachedCollisionCounter].H = ToFloat(WSplitValue(WData, i + 7));
-            CachedCollision[CachedCollisionCounter].L = ToFloat(WSplitValue(WData, i + 8));
-            CachedCollisionCounter++;
-        }
-
-        if (WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script") // Dont Cache Dynamic Objs
-        {
-            OtherWDLData += WSplitValue(WData, i) + L":" + WSplitValue(WData, i + 1) + L":" + WSplitValue(WData, i + 2) + L":" + WSplitValue(WData, i + 3) + L":" + WSplitValue(WData, i + 4) + L":" + WSplitValue(WData, i + 5) + L":";
-        }
-
-        if (Instruction == L"C")
-        {
-            NextCollision = true;
-        }
-    }
-}
-
-void CWDLProcess()
-{
-    for (int i = 0; i <= CachedCollisionCounter; i++)
-    {
-        X = CachedCollision[i].X;
-        Y = CachedCollision[i].Y;
-        Z = CachedCollision[i].Z;
-        W = CachedCollision[i].W;
-        H = CachedCollision[i].H;
-        L = CachedCollision[i].L;
-
-        if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z))
-        {
-            if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X))
-            {
-                if (CheckCollisionBoxSphere((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2, OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2, OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2}, 1.0))
-                {
-                    ObjectCollision = true;
-                    if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
-                    {
-                        PlaySound(OmegaTechSoundData.CollisionSound);
-                    }
-                }
-            }
-        }
-    }
-
-    for (int i = 0; i <= CachedModelCounter; i++)
-    {
-        X = CachedModels[i].X;
-        Y = CachedModels[i].Y;
-        Z = CachedModels[i].Z;
-        S = CachedModels[i].S;
-        Rotation = CachedModels[i].R;
-
-        if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z))
-        {
-            if (CachedModels[i].ModelId == -1 || (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X))
-            {
-
-                int mid = CachedModels[i].ModelId;
-                if (mid == -2)
-                {
-                    if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
-                    {
-                        ObjectCollision = true;
-                        if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
-                            PlaySound(OmegaTechSoundData.CollisionSound);
-                    }
-                }
-                else if (mid == -1)
-                {
-                    DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                }
-                else if (mid >= 1 && mid <= GameModels::MAX_WDL_MODELS && WDLModels.wdlModels[mid].meshCount > 0)
-                {
-                    DrawModelEx(WDLModels.wdlModels[mid], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-                }
-                if (CachedModels[i].Collision)
-                {
-                    BoundingBox ModelBox = {{(X - S), (Y - S), (Z - S)}, {(X + S), (Y + S), (Z + S)}};
-                    if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, ModelBox))
-                    {
-                        ObjectCollision = true;
-                    }
-                }
-            }
-        }
-    }
-}
-
 float GetDistance(float x1, float y1, float x2, float y2)
 {
     float dx = x2 - x1;
@@ -1296,411 +751,6 @@ int FlipNumber(int num)
     return i - num;
 }
 
-// Sample heightmap at world XZ location, returns terrain-surface Y or -99999
-float SampleHeightmapGroundY(float px, float pz)
-{
-    if (!WDLModels.HeightMapReady || WDLModels.HeightMapImage.data == 0)
-        return -99999.0f;
-
-    Vector3 o = WDLModels.HeightMapPosition;
-    float scale = WDLModels.HeightMapScale;
-    float sx = WDLModels.HeightMapSize.x * scale;
-    float sz = WDLModels.HeightMapSize.z * scale;
-    int iw = WDLModels.HeightMapImage.width;
-    int ih = WDLModels.HeightMapImage.height;
-    if (iw < 1 || ih < 1)
-        return -99999.0f;
-
-    float hx = (px - o.x) / sx;
-    float hz = (pz - o.z) / sz;
-    float fx = hx * (float)(iw - 1);
-    float fz = hz * (float)(ih - 1);
-    int ix = (int)fx;
-    int iz = (int)fz;
-    if (ix < 0 || ix >= iw - 1 || iz < 0 || iz >= ih - 1)
-        return o.y;
-    float tx = fx - ix;
-    float tz = fz - iz;
-    uint8_t *p = (uint8_t *)WDLModels.HeightMapImage.data;
-    float h00 = p[iz * iw + ix] / 255.0f;
-    float h10 = p[iz * iw + ix + 1] / 255.0f;
-    float h01 = p[(iz + 1) * iw + ix] / 255.0f;
-    float h11 = p[(iz + 1) * iw + ix + 1] / 255.0f;
-    float ht = h00 * (1 - tx) * (1 - tz) + h10 * tx * (1 - tz) + h01 * (1 - tx) * tz + h11 * tx * tz;
-    return o.y + ht * WDLModels.HeightMapSize.y * scale;
-}
-
-// ---- WDL token bake ----
-// The colon-delimited world text (WorldData/OtherWDLData + dynamic
-// ExtraWDLInstructions) is split into tokens ONCE and cached, so WDLProcess
-// walks a token vector instead of calling WSplitValue (O(n) per call) over
-// the whole string every frame. Rebuilt lazily when a source string changes.
-void BakeWDLTokens()
-{
-    const wstring base = OmegaTechData.UseCachedRenderer ? OtherWDLData : WorldData;
-    const size_t extraLen = ExtraWDLInstructions.size();
-    wstring combined;
-    combined.reserve(base.size() + extraLen);
-    combined += base;
-    combined += ExtraWDLInstructions;
-
-    g_wdlTokens.clear();
-    g_wdlTokens.reserve(combined.size() / 2 + 1);
-    wstring cur;
-    for (size_t i = 0; i < combined.size(); i++)
-    {
-        if (combined[i] == L':')
-        {
-            g_wdlTokens.push_back(cur);
-            cur.clear();
-        }
-        else
-        {
-            cur += combined[i];
-        }
-    }
-    g_wdlTokens.push_back(cur);
-
-    g_wdlBakedWorldLen = WorldData.size();
-    g_wdlBakedOtherLen = OtherWDLData.size();
-    g_wdlBakedExtraLen = extraLen;
-}
-
-void EnsureWDLTokensBaked()
-{
-    if (g_wdlBakedWorldLen == WorldData.size() &&
-        g_wdlBakedOtherLen == OtherWDLData.size() &&
-        g_wdlBakedExtraLen == ExtraWDLInstructions.size())
-        return;
-    BakeWDLTokens();
-}
-
-const wstring& WdlToken(int index)
-{
-    static const wstring emptyToken;
-    if (index < 0 || index >= (int)g_wdlTokens.size())
-        return emptyToken;
-    return g_wdlTokens[index];
-}
-
-void WDLProcess()
-{
-    EnsureWDLTokensBaked();
-    int Size = (int)g_wdlTokens.size() - 1;
-
-    bool Render = false;
-    bool FoundPlatform = false;
-    float PlatformHeight = 0.0f;
-
-    for (int i = 0; i <= Size; i++)
-    {
-        wstring Instruction = WdlToken(i);
-
-        if (Instruction == L"C")
-        {
-            NextCollision = true;
-        }
-
-        if (WReadValue(Instruction, 0, 4) == L"Model" || WReadValue(Instruction, 0, 1) == L"NE" || WReadValue(Instruction, 0, 6) == L"ClipBox" || WReadValue(Instruction, 0, 5) == L"Object" || WReadValue(Instruction, 0, 5) == L"Script" || WReadValue(Instruction, 0, 8) == L"HeightMap" || WReadValue(Instruction, 0, 8) == L"Collision" || WReadValue(Instruction, 0, 11) == L"AdvCollision" ||
-            WReadValue(Instruction, 0, 5) == L"Spawn" ||
-            WReadValue(Instruction, 0, 3) == L"NPC" || WReadValue(Instruction, 0, 5) == L"Light" ||
-            WReadValue(Instruction, 0, 5) == L"Sound" || WReadValue(Instruction, 0, 5) == L"Music" ||
-            WReadValue(Instruction, 0, 8) == L"ZoneInfo")
-        {
-
-            X = ToFloat(WdlToken(i + 1));
-            Y = ToFloat(WdlToken(i + 2));
-            Z = ToFloat(WdlToken(i + 3));
-            S = ToFloat(WdlToken(i + 4));
-
-            Rotation = ToFloat(WdlToken(i + 5));
-
-            if (OmegaTechData.MainCamera.position.z - OmegaTechData.RenderRadius < Z && OmegaTechData.MainCamera.position.z + OmegaTechData.RenderRadius > Z)
-            {
-                if (OmegaTechData.MainCamera.position.x - OmegaTechData.RenderRadius < X && OmegaTechData.MainCamera.position.x + OmegaTechData.RenderRadius > X)
-                {
-                    Render = true;
-
-                    if (Instruction == L"NE1")
-                    {
-                        if (!IsMusicStreamPlaying(OmegaTechSoundData.NESound1))
-                            PlayMusicStream(OmegaTechSoundData.NESound1);
-                    }
-                    if (Instruction == L"NE2")
-                    {
-                        if (!IsMusicStreamPlaying(OmegaTechSoundData.NESound2))
-                            PlayMusicStream(OmegaTechSoundData.NESound2);
-                    }
-                    if (Instruction == L"NE3")
-                    {
-                        if (!IsMusicStreamPlaying(OmegaTechSoundData.NESound3))
-                            PlayMusicStream(OmegaTechSoundData.NESound3);
-                    }
-                }
-            }
-        }
-        else
-        {
-            if (Instruction == L"NE1")
-            {
-                StopMusicStream(OmegaTechSoundData.NESound1);
-            }
-            if (Instruction == L"NE2")
-            {
-                StopMusicStream(OmegaTechSoundData.NESound2);
-            }
-            if (Instruction == L"NE3")
-            {
-                StopMusicStream(OmegaTechSoundData.NESound3);
-            }
-        }
-
-        if (Render)
-        {
-            if (WReadValue(Instruction, 0, 4) == L"Model")
-            {
-                int Identifier = ToFloat(WReadValue(Instruction, 5, 6));
-                if (Identifier >= 1 && Identifier <= GameModels::MAX_WDL_MODELS && WDLModels.wdlModels[Identifier].meshCount > 0)
-                    DrawModelEx(WDLModels.wdlModels[Identifier], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            }
-
-            if (NextCollision)
-            {
-                BoundingBox ModelBox = {{(X - S), (Y - S), (Z - S)}, {(X + S), (Y + S), (Z + S)}};
-                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, ModelBox))
-                {
-                    ObjectCollision = true;
-                }
-                NextCollision = false;
-            }
-
-            int AudioValue = 0;
-
-            if (Instruction == L"NE1")
-            {
-                AudioValue = FlipNumber(GetDistance(X, Z, OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.z));
-                if (AudioValue > 0 && AudioValue < 100)
-                    SetMusicVolume(OmegaTechSoundData.NESound1, float(AudioValue) / 100.0f);
-                else
-                {
-                    SetMusicVolume(OmegaTechSoundData.NESound1, 0);
-                }
-            }
-            if (Instruction == L"NE2")
-            {
-                AudioValue = FlipNumber(GetDistance(X, Z, OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.z));
-                if (AudioValue > 0 && AudioValue < 100)
-                    SetMusicVolume(OmegaTechSoundData.NESound2, float(AudioValue) / 100.0f);
-                else
-                {
-                    SetMusicVolume(OmegaTechSoundData.NESound2, 0);
-                }
-            }
-            if (Instruction == L"NE3")
-            {
-                AudioValue = FlipNumber(GetDistance(X, Z, OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.z));
-                if (AudioValue > 0 && AudioValue < 100)
-                    SetMusicVolume(OmegaTechSoundData.NESound3, float(AudioValue) / 100.0f);
-                else
-                {
-                    SetMusicVolume(OmegaTechSoundData.NESound3, 0);
-                }
-            }
-
-            if (Instruction == L"Object1" && WDLModels.objectModelsLoaded[0])
-                DrawModelEx(WDLModels.objectModels[0], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object2" && WDLModels.objectModelsLoaded[1])
-                DrawModelEx(WDLModels.objectModels[1], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object3" && WDLModels.objectModelsLoaded[2])
-                DrawModelEx(WDLModels.objectModels[2], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object4" && WDLModels.objectModelsLoaded[3])
-                DrawModelEx(WDLModels.objectModels[3], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-            if (Instruction == L"Object5" && WDLModels.objectModelsLoaded[4])
-                DrawModelEx(WDLModels.objectModels[4], {X, Y, Z}, {0, Rotation, 0}, Rotation, {S, S, S}, FadeColor);
-
-            if (Instruction == L"Collision")
-            { // Collision
-                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
-                {
-                    ObjectCollision = true;
-                }
-
-                if (Debug)
-                {
-                    if (ObjectCollision)
-                    {
-                        DrawCubeWires({X, Y, Z}, S, S, S, GREEN);
-                    }
-                    else
-                    {
-                        DrawCubeWires({X, Y, Z}, S, S, S, RED);
-                    }
-                }
-                if (ObjectCollision)
-                {
-                    if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
-                    {
-                        PlaySound(OmegaTechSoundData.CollisionSound);
-                    }
-                }
-            }
-
-            if (WReadValue(Instruction, 0, 5) == L"Script")
-            {
-                if (CheckCollisionBoxes(g_playerMovement.PlayerBounds, (BoundingBox){(Vector3){X, Y, Z}, (Vector3){X + S, Y + S, Z + S}}))
-                {
-                    ObjectCollision = true;
-                    if (ScriptTimer == 0)
-                    {
-                        ParasiteScriptInit();
-                        LoadScript(TextFormat("GameData/Worlds/%s/Scripts/Script%i.ps", g_world_dir_override[0] ? g_world_dir_override : g_world_to_load, int(ToFloat(WReadValue(Instruction, 6, Instruction.size() - 1)))));
-
-                        for (int x = 0; x <= ParasiteScriptCoreData.ProgramSize; x++)
-                        {
-                            CycleInstruction();
-                            ParasiteScriptCoreData.LineCounter++;
-                        }
-
-                        ScriptTimer = 180;
-                    }
-                }
-
-                if (Debug)
-                {
-                    if (ObjectCollision)
-                    {
-                        DrawCubeWires({X, Y, Z}, S, S, S, GREEN);
-                    }
-                    else
-                    {
-                        DrawCubeWires({X, Y, Z}, S, S, S, YELLOW);
-                    }
-                }
-            }
-        }
-        if (Instruction == L"ClipBox")
-        {
-
-            W = ToFloat(WdlToken(i + 6));
-            H = ToFloat(WdlToken(i + 7));
-            L = ToFloat(WdlToken(i + 8));
-
-            if (CheckCollisionBoxSphere(
-                    (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
-                    {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2,
-                     OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2,
-                     OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2},
-                    1.0))
-            {
-                PlatformHeight = H;
-                FoundPlatform = true;
-            }
-
-            if (Debug)
-                DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H - 5, L}}, PURPLE);
-
-            i += 3;
-        }
-        if (Instruction == L"AdvCollision")
-        { // Collision
-
-            if (Render)
-            {
-                W = ToFloat(WdlToken(i + 6));
-                H = ToFloat(WdlToken(i + 7));
-                L = ToFloat(WdlToken(i + 8));
-
-                if (CheckCollisionBoxSphere(
-                        (BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}},
-                        {OmegaTechData.MainCamera.position.x + g_playerMovement.Width / 2,
-                         OmegaTechData.MainCamera.position.y - g_playerMovement.Height / 2,
-                         OmegaTechData.MainCamera.position.z - g_playerMovement.Width / 2},
-                        1.0))
-                    ObjectCollision = true;
-
-                if (Debug)
-                {
-                    if (ObjectCollision)
-                    {
-                        DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, GREEN);
-                    }
-                    else
-                    {
-                        DrawBoundingBox((BoundingBox){(Vector3){X, Y, Z}, (Vector3){W, H, L}}, PURPLE);
-                    }
-                }
-
-                if (ObjectCollision)
-                {
-                    if (!IsSoundPlaying(OmegaTechSoundData.CollisionSound))
-                    {
-                        PlaySound(OmegaTechSoundData.CollisionSound);
-                    }
-                }
-            }
-
-            i += 3;
-        }
-
-        if (Instruction == L"HeightMap")
-        {
-            WDLModels.HeightMapPosition.x = X;
-            WDLModels.HeightMapPosition.y = Y;
-            WDLModels.HeightMapPosition.z = Z;
-            WDLModels.HeightMapScale = S;
-            DrawModelEx(WDLModels.HeightMap, {X, Y, Z}, {0, 1, 0}, 0, {S, S, S}, WHITE);
-        }
-
-        if (!NextCollision)
-        {
-            i += 5;
-        }
-
-        Render = false;
-    }
-
-    // Stand on heightmap terrain (preferred) or ClipBox platforms
-    // Skipped when flying or noclipping Ã¢â‚¬â€ player controls Y manually
-    if (!g_playerMovement.isFlying && !g_playerMovement.isNoClip)
-    {
-        float groundY = SampleHeightmapGroundY(
-            OmegaTechData.MainCamera.position.x,
-            OmegaTechData.MainCamera.position.z);
-        if (groundY > -50000.0f)
-        {
-
-            // Only snap if at or below ground (allows jumping above terrain)
-            if (OmegaTechData.MainCamera.position.y <= groundY + PLAYER_EYE_HEIGHT + 0.1f)
-            {
-                OmegaTechData.MainCamera.position.y = groundY + PLAYER_EYE_HEIGHT;
-                g_playerMovement.velocityY = 0.0f;
-                g_playerMovement.onGround = true;
-            }
-            else
-            {
-                g_playerMovement.onGround = false;
-            }
-        }
-        else if (FoundPlatform)
-        {
-
-            if (OmegaTechData.MainCamera.position.y <= PlatformHeight + PLAYER_EYE_HEIGHT + 0.1f)
-            {
-                OmegaTechData.MainCamera.position.y = PlatformHeight + PLAYER_EYE_HEIGHT;
-                g_playerMovement.velocityY = 0.0f;
-                g_playerMovement.onGround = true;
-            }
-            else
-            {
-                g_playerMovement.onGround = false;
-            }
-        }
-        else
-        {
-            g_playerMovement.onGround = false;
-        }
-    }
-}
 
 void UpdateEntitiesSim(float dt)
 {
@@ -1860,13 +910,6 @@ void UpdatePlayer()
     g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
 }
 
-void UpdateNoiseEmitters()
-{
-    UpdateMusicStream(OmegaTechSoundData.NESound1);
-    UpdateMusicStream(OmegaTechSoundData.NESound2);
-    UpdateMusicStream(OmegaTechSoundData.NESound3);
-}
-
 void SaveGame()
 {
     wstring TFlags = L"";
@@ -1911,10 +954,6 @@ void SaveGame()
     wofstream Outfile1;
     Outfile1.open("GameData/Saves/POS.sav");
     Outfile1 << Position;
-
-    wofstream Outfile2;
-    Outfile2.open("GameData/Saves/Script.sav");
-    Outfile2 << ExtraWDLInstructions;
 }
 
 void LoadSave()
@@ -2006,8 +1045,6 @@ void LoadSave()
             SetCameraPos = {0.0f, 10.0f, 0.0f};
         }
     }
-
-    ExtraWDLInstructions = LoadFile("GameData/Saves/Script.sav");
 }
 
 // Sweep every active projectile one frame-step ahead and test against OZONE
@@ -2091,14 +1128,14 @@ void DrawWorld()
         // is authoritative; a zone's authored skybox is only used when the level
         // defines none. Previously the zone texture always won, so a saved
         // levelinfo skybox appeared to be ignored inside sky zones.
-        if (WDLModels.Skybox.id > 0 && OmegaTechData.SkyboxEnabled) {
-            capTex = WDLModels.Skybox;
+        if (WorldModels.Skybox.id > 0 && OmegaTechData.SkyboxEnabled) {
+            capTex = WorldModels.Skybox;
         } else if (inSkyZone) {
             SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
             if (sky && sky->skyboxTex.id > 0)
                 capTex = sky->skyboxTex;
-            else if (WDLModels.Skybox.id > 0)
-                capTex = WDLModels.Skybox;
+            else if (WorldModels.Skybox.id > 0)
+                capTex = WorldModels.Skybox;
         }
         // Sides use an authored side texture when available; otherwise reuse the
         // cap texture so the sky renders all around (previously they drew a flat
@@ -2289,18 +1326,6 @@ if (inSkyZone)
         UpdateMusicStream(OmegaTechSoundData.BackgroundMusic);
     }
 
-    UpdateNoiseEmitters();
-
-    if (!OmegaTechData.UseCachedRenderer)
-    {
-        WDLProcess();
-    }
-    else
-    {
-        CWDLProcess();
-        WDLProcess();
-    }
-
     OzoneLoader::Instance().DrawWorldGeometry(OmegaTechData.MainCamera);
 
     // OZONE brush collision - chunk-accelerated query
@@ -2440,7 +1465,7 @@ if (inSkyZone)
     // remote players all live here so they render inside the 3D camera pass.
     {
         CombatFX::Instance().Update(GetFrameTime());
-        PawnSystem::Instance().DrawProjectiles(OmegaTechData.MainCamera);
+        PawnSystem::Instance().DrawProjectiles(OmegaTechData.MainCamera, OmegaTechData.Lights);
         CombatFX::Instance().Draw3D(OmegaTechData.MainCamera);
         DrawRemotePlayers3D();
     }
@@ -2479,6 +1504,10 @@ if (inSkyZone)
         PawnSystem::Instance().DrawAll(OmegaTechData.MainCamera, OmegaTechData.Lights);
         PawnSystem::Instance().DrawEntities(OmegaTechData.MainCamera, OmegaTechData.Lights, OmegaTechData.WindShader);
         DrawLightFlares(OmegaTechData.MainCamera);
+
+        // First-person weapon view-model (drawn on top of the world).
+        oz::ViewModel::Instance().Update(GetFrameTime());
+        oz::ViewModel::Instance().Draw(OmegaTechData.MainCamera, OmegaTechData.Lights);
     }
     if (ObjectCollision)
     {
@@ -2567,9 +1596,9 @@ if (inSkyZone)
                             UnloadTexture(sky->skyboxTex);
                         sky->skyboxTex = newSky;
                     }
-                    if (WDLModels.Skybox.id > 0)
-                        UnloadTexture(WDLModels.Skybox);
-                    WDLModels.Skybox = newSky;
+                    if (WorldModels.Skybox.id > 0)
+                        UnloadTexture(WorldModels.Skybox);
+                    WorldModels.Skybox = newSky;
                     OmegaTechData.SkyboxEnabled = true;
                 } else {
                     OZ_WARN("LightningScript: skybox '%s' not found", path.c_str());
@@ -2666,8 +1695,6 @@ if (inSkyZone)
         }
     }
 
-    UpdateCustom();
-
     EndMode3D();
     EndTextureMode();
 
@@ -2681,13 +1708,11 @@ if (inSkyZone)
             // preserving view direction.
             Vector3 oldPos = OmegaTechData.MainCamera.position;
             OmegaTechData.MainCamera.position = g_portalSpawnPos;
-            // Never arrive under the terrain: lift the camera to the highest
-            // ground surface (WDL or OZONE heightmap) at this XZ when the raw
-            // spawn sits below grade.
-            float groundY = fmaxf(SampleHeightmapGroundY(g_portalSpawnPos.x, g_portalSpawnPos.z),
-                                  OzoneLoader::Instance().HasHeightmap()
-                                      ? OzoneLoader::Instance().SampleHeightmapY(g_portalSpawnPos.x, g_portalSpawnPos.z)
-                                      : -99999.0f);
+            // Never arrive under the terrain: lift the camera to the OZONE
+            // heightmap surface at this XZ when the raw spawn sits below grade.
+            float groundY = OzoneLoader::Instance().HasHeightmap()
+                                ? OzoneLoader::Instance().SampleHeightmapY(g_portalSpawnPos.x, g_portalSpawnPos.z)
+                                : -99999.0f;
             if (groundY > -50000.0f &&
                 OmegaTechData.MainCamera.position.y < groundY + PLAYER_EYE_HEIGHT)
                 OmegaTechData.MainCamera.position.y = groundY + PLAYER_EYE_HEIGHT;

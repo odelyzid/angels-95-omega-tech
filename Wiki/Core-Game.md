@@ -135,7 +135,7 @@ Three binary save files in `GameData/Saves/` (all `.gitignore`d):
 |---|---|
 | `TF.sav` | Toggle flags + object ownership (100 flags) |
 | `POS.sav` | Player position + level |
-| `Script.sav` | Dynamic WDL script state |
+| `Script.sav` | (obsolete) removed with the legacy WDL system |
 
 ## Pause Menu
 

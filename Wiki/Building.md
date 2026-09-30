@@ -93,7 +93,6 @@ make test_context        # LightningScriptContext tests
 make test_registry       # LightningEntityRegistry tests
 make test_entity_manager # LightningEntityManager lifecycle + ammo/reload/melee tests
 make test_pawn_system    # OzPawnSystem CRUD + projectile collision tests
-make test_wdl_parser     # WDL parser classification tests
 make test_network        # Network packet serialization + find_free_port tests
 make test_game_state     # GameState projectile simulation + AMMO pickup tests
 ```

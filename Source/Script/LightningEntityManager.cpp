@@ -8,6 +8,28 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+
+// Resolve a def-relative asset path (mirrors oz::ResolveMeshAsset without
+// pulling the raylib Mesh layer into this TU / the headless tests).
+static std::string ResolveDefPath(const std::string& baseDir, const std::string& rel) {
+    if (rel.empty()) return rel;
+    if (rel.rfind("GameData/", 0) == 0 || rel.rfind("GameData\\", 0) == 0) return rel;
+    bool absolute = (rel.size() > 1 && rel[1] == ':') || rel[0] == '/' || rel[0] == '\\';
+    if (absolute) return rel;
+    if (!baseDir.empty()) {
+        std::string dir = baseDir;
+        if (dir.back() != '/' && dir.back() != '\\') dir += '/';
+        std::string cand = dir + rel;
+        if (IsPathFile(cand.c_str())) return cand;
+    }
+    return rel;
+}
+
+static std::string DefSourceDir(const std::string& sourcePath) {
+    size_t s = sourcePath.find_last_of("/\\");
+    return (s == std::string::npos) ? std::string() : sourcePath.substr(0, s + 1);
+}
 
 // ---------------------------------------------------------------------------
 // FireSelectedWeapon — spawn projectiles (ranged) or swing-check (melee)
@@ -75,6 +97,25 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     float spreadDeg = readStat("spread", 0.0f);
     float fireRate = readStat("fire_rate", 0.25f);
 
+    // Per-weapon projectile visual (model + submesh + tint), resolved from stats.
+    std::string defDir = DefSourceDir(ent->def->sourcePath);
+    std::string projMesh, projTex;
+    {
+        auto it = ent->def->stats.strings.find("projectile_mesh");
+        if (it != ent->def->stats.strings.end()) projMesh = ResolveDefPath(defDir, it->second);
+        auto itt = ent->def->stats.strings.find("projectile_texture");
+        if (itt != ent->def->stats.strings.end()) projTex = ResolveDefPath(defDir, itt->second);
+    }
+    int projSub = (int)readStat("projectile_submesh", 0.0f);
+    float projScale = readStat("projectile_scale", 0.05f);
+    float projCol[3] = {1.0f, 0.8f, 0.3f};
+    {
+        auto it = ent->def->stats.vec3s.find("projectile_color");
+        if (it != ent->def->stats.vec3s.end()) {
+            projCol[0] = it->second[0]; projCol[1] = it->second[1]; projCol[2] = it->second[2];
+        }
+    }
+
     // Ammo check
     float magazine = readStat("magazine", 0.0f);
     if (magazine > 0.0f) {
@@ -132,6 +173,13 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         p.lifetime = lifetime;
         p.speed = projectileSpeed;
         p.ownerId = -1;
+        p.meshPath = projMesh;
+        p.texturePath = projTex;
+        p.submesh = projSub;
+        p.scale = projScale;
+        p.tint = Color{(unsigned char)(projCol[0] * 255.0f),
+                       (unsigned char)(projCol[1] * 255.0f),
+                       (unsigned char)(projCol[2] * 255.0f), 255};
         PawnSystem::Instance().SpawnProjectile(p);
     }
 #endif
@@ -350,6 +398,10 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
         return -1;
     }
 
+    OZ_INFO("[CHAIN] LEM::Spawn def='%s' type=%d mesh='%s' tex='%s' icon='%s'",
+            def->name.c_str(), (int)def->type, def->mesh.c_str(), def->texture.c_str(),
+            def->icon.c_str());
+
     EntityInstance inst;
     inst.def = def;
 
@@ -357,6 +409,8 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
     if (!def->mesh.empty()) inst.modelIdx = CacheModel(def->mesh);
     if (!def->texture.empty()) inst.textureIdx = CacheTexture(def->texture);
     if (!def->icon.empty()) inst.iconIdx = CacheTexture(def->icon);
+    OZ_INFO("[CHAIN] LEM::Spawn cached model=%d tex=%d icon=%d",
+            inst.modelIdx, inst.textureIdx, inst.iconIdx);
 
     // Initialize runtime stats from def
     for (auto& [k, v] : def->stats.floats)
@@ -396,7 +450,7 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
     m_instances.push_back(std::move(inst));
 
     int idx = (int)m_instances.size() - 1;
-    OZ_INFO("LightningEntityManager: spawned '%s' at index %d", def->name.c_str(), idx);
+    OZ_INFO("[CHAIN] LEM::Spawn done '%s' index=%d", def->name.c_str(), idx);
     return idx;
 }
 
@@ -453,6 +507,7 @@ void LightningEntityManager::RunAction(EntityInstance* inst, const std::string& 
 // Hotbar
 // ---------------------------------------------------------------------------
 void LightningEntityManager::HotbarAssign(int slot, int instanceIndex) {
+    OZ_INFO("[CHAIN] LEM::HotbarAssign slot=%d inst=%d", slot, instanceIndex);
     if (slot < 0 || slot >= HOTBAR_SIZE) return;
     int oldIdx = m_hotbar[slot];
     if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
@@ -460,6 +515,7 @@ void LightningEntityManager::HotbarAssign(int slot, int instanceIndex) {
     m_hotbar[slot] = instanceIndex;
     if (instanceIndex >= 0 && instanceIndex < (int)m_instances.size())
         RunAction(&m_instances[instanceIndex], "on_equip");
+    OZ_INFO("[CHAIN] LEM::HotbarAssign done slot=%d inst=%d", slot, instanceIndex);
 }
 
 void LightningEntityManager::HotbarSwap(int slotA, int slotB) {
@@ -474,6 +530,7 @@ int LightningEntityManager::HotbarAt(int slot) const {
 
 void LightningEntityManager::SelectSlot(int slot) {
     if (slot < 0 || slot >= HOTBAR_SIZE) return;
+    OZ_INFO("[CHAIN] LEM::SelectSlot slot=%d", slot);
     int oldIdx = m_hotbar[m_selectedSlot];
     if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
         RunAction(&m_instances[oldIdx], "on_unequip");
@@ -481,12 +538,20 @@ void LightningEntityManager::SelectSlot(int slot) {
     int newIdx = m_hotbar[slot];
     if (newIdx >= 0 && newIdx < (int)m_instances.size())
         RunAction(&m_instances[newIdx], "on_equip");
+    OZ_INFO("[CHAIN] LEM::SelectSlot done slot=%d inst=%d", slot, newIdx);
 }
 
 EntityInstance* LightningEntityManager::SelectedEntity() const {
     int idx = m_hotbar[m_selectedSlot];
-    if (idx < 0 || idx >= (int)m_instances.size()) return nullptr;
-    return const_cast<EntityInstance*>(&m_instances[idx]);
+    EntityInstance* e = (idx >= 0 && idx < (int)m_instances.size())
+        ? const_cast<EntityInstance*>(&m_instances[idx]) : nullptr;
+    static int s_lastIdx = -2;
+    if (idx != s_lastIdx) {
+        OZ_INFO("[CHAIN] LEM::SelectedEntity slot=%d idx=%d def=%s", m_selectedSlot, idx,
+                (e && e->def) ? e->def->name.c_str() : "(none)");
+        s_lastIdx = idx;
+    }
+    return e;
 }
 
 // ---------------------------------------------------------------------------

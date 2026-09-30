@@ -40,7 +40,7 @@ add cyl 0 0 2 5 5 0.5 16 0
 playerstart -90 0 0 90
 pickup HealthVial -80 0 3 30
 pickup ManaVial -75 5 3 30
-pickup automag -70 0 2 30
+pickup pistol_01 -70 0 2 30
 pickup Key -85 -5 0 30
 pickup Coin -70 10 0 30
 pickup HealthVial 0 25 3 30

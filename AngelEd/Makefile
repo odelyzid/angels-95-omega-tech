@@ -69,23 +69,26 @@ $(BUILD_DIR)/EditorIcons.o: Source/EditorIcons.cpp Source/EditorIcons.hpp | $(BU
 $(BUILD_DIR)/OzPawnSystem.o: ../Source/Pawn/OzPawnSystem.cpp ../Source/Pawn/OzPawnSystem.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Pawn/OzPawnSystem.cpp -o $@
 
-$(BUILD_DIR)/OzOzoneLoader.o: ../Source/OzOzoneLoader.cpp ../Source/OzOzoneLoader.hpp ../Source/Server/OzoneParser.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/OzOzoneLoader.cpp -o $@
+$(BUILD_DIR)/OzOzoneLoader.o: ../Source/World/OzOzoneLoader.cpp ../Source/World/OzOzoneLoader.hpp ../Source/World/OzoneParser.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/OzOzoneLoader.cpp -o $@
+
+$(BUILD_DIR)/OzoneFrustum.o: ../Source/World/OzoneFrustum.cpp ../Source/World/OzoneFrustum.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/OzoneFrustum.cpp -o $@
+
+$(BUILD_DIR)/OzoneHeightmap.o: ../Source/World/OzoneHeightmap.cpp ../Source/World/OzOzoneLoader.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/OzoneHeightmap.cpp -o $@
 
 $(BUILD_DIR)/OzBsp.o: ../Source/Physics/OzBsp.cpp ../Source/Physics/OzBsp.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/OzBsp.cpp -o $@
 
-$(BUILD_DIR)/WDLParser.o: ../Source/Server/WDLParser.cpp ../Source/Server/WDLParser.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/Server/WDLParser.cpp -o $@
-
-$(BUILD_DIR)/OzoneParser.o: ../Source/Server/OzoneParser.cpp ../Source/Server/OzoneParser.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/Server/OzoneParser.cpp -o $@
+$(BUILD_DIR)/OzoneParser.o: ../Source/World/OzoneParser.cpp ../Source/World/OzoneParser.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/OzoneParser.cpp -o $@
 
 $(BUILD_DIR)/Log.o: ../Source/Log.cpp ../Source/Log.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Log.cpp -o $@
 
-$(BUILD_DIR)/OzAssetMapper.o: ../Source/Package/OzAssetMapper.cpp ../Source/Package/OzAssetMapper.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/Package/OzAssetMapper.cpp -o $@
+$(BUILD_DIR)/OzAssetMapper.o: ../Source/Renderer/OzAssetMapper.cpp ../Source/Renderer/OzAssetMapper.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/OzAssetMapper.cpp -o $@
 
 # miniz (C compile; g++ would mangle symbols vs the extern "C" prototypes)
 $(BUILD_DIR)/miniz.o: ../Source/miniz/miniz.c ../Source/miniz/miniz.h | $(BUILD_DIR)
@@ -106,20 +109,20 @@ $(BUILD_DIR)/SkeletalMesh.o: ../Source/Renderer/Mesh/SkeletalMesh.cpp ../Source/
 $(BUILD_DIR)/MeshCache.o: ../Source/Renderer/Mesh/MeshCache.cpp ../Source/Renderer/Mesh/MeshCache.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/MeshCache.cpp -o $@
 
-$(BUILD_DIR)/OzAnimFormat.o: ../Source/Anim/OzAnimFormat.cpp ../Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/Anim/OzAnimFormat.cpp -o $@
+$(BUILD_DIR)/OzAnimFormat.o: ../Source/Package/Anim/OzAnimFormat.cpp ../Source/Package/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Package/Anim/OzAnimFormat.cpp -o $@
 
-$(BUILD_DIR)/AnimatedMesh.o: ../Source/Renderer/Mesh/AnimatedMesh.cpp ../Source/Renderer/Mesh/AnimatedMesh.hpp ../Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/AnimatedMesh.o: ../Source/Renderer/Mesh/AnimatedMesh.cpp ../Source/Renderer/Mesh/AnimatedMesh.hpp ../Source/Package/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/Mesh/AnimatedMesh.cpp -o $@
 
 $(BUILD_DIR)/OzParticleSimulationManager.o: ../Source/Particle/OzParticleSimulationManager.cpp ../Source/Particle/OzParticleSimulationManager.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Particle/OzParticleSimulationManager.cpp -o $@
 
-$(BUILD_DIR)/rlights.o: ../Source/rlights/rlights.cpp ../Source/rlights/rlights.h | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c ../Source/rlights/rlights.cpp -o $@
+$(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Renderer/rlights/rlights.h | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/rlights/rlights.cpp -o $@
 
-CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzBsp.o \
-             $(BUILD_DIR)/WDLParser.o $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
+CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
+             $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \
              $(BUILD_DIR)/MeshCache.o $(BUILD_DIR)/AnimatedMesh.o $(BUILD_DIR)/OzAnimFormat.o \
              $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o

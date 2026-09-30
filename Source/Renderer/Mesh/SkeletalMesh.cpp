@@ -57,6 +57,14 @@ int SkeletalMesh::FindClip(const std::string& name) const {
     return -1;
 }
 
+float SkeletalMesh::ClipSeconds(int index, float fps) const {
+    if (index < 0 || index >= m_animCount) return 0.0f;
+    int frames = OZ_ANIM_KEYFRAME_COUNT(m_anims[index]);
+    if (frames <= 0) return 0.0f;
+    if (fps <= 0.0f) fps = 30.0f;
+    return (float)frames / fps;
+}
+
 void SkeletalMesh::ApplyPose(int clipIndex, float timeSeconds, float fps) const {
     if (!m_valid || clipIndex < 0 || clipIndex >= m_animCount) return;
     const ModelAnimation& anim = m_anims[clipIndex];

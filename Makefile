@@ -41,13 +41,13 @@ SERVER_FLAGS := -O3 --std=c++20 $(RAYLIB_INC)
 
 BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
-          raygui.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o \
+          raygui.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzPawnSystem.o \
           OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
           LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
-          OzParticleSimulationManager.o rlights.o)
+          ViewModel.o OzParticleSimulationManager.o rlights.o)
 
 .PHONY: all clean test
 all: OTENGINE AngelServ AngelMaster ozpack
@@ -56,20 +56,12 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # 1. Compile Main Game Logic
-$(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp Source/Parasite/*.hpp Source/Package/*.hpp Source/Pawn/*.hpp Source/Renderer/*.hpp Source/Audio/*.hpp Source/Menu/*.hpp Source/Master/*.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp Source/Package/*.hpp Source/Pawn/*.hpp Source/Renderer/*.hpp Source/Audio/*.hpp Source/Menu/*.hpp Source/Server/Master/*.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Main.cpp -o $@
 
-# 2. Compile Custom Engine code (statically linked)
-$(BUILD_DIR)/OTCustom.o: Source/Custom/OTCustom.cpp Source/Custom/OTCustom.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Custom/OTCustom.cpp -o $@
-
-# 3. Compile the asset Encoder
-$(BUILD_DIR)/Encoder.o: Source/Encoder/Encoder.cpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Encoder/Encoder.cpp -o $@
-
 # 4. Compile raygui helper
-$(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
-	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o $@
+$(BUILD_DIR)/raygui.o: Source/Renderer/raygui/raygui.c | $(BUILD_DIR)
+	$(COMP) -fpermissive $(CFLAGS) -c Source/Renderer/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o $@
 
 # 4b. Compile miniz (public-domain zlib substitute used by OzPackage).
 # Must be compiled as C (gcc): g++ would C++-mangle the definitions while
@@ -90,8 +82,8 @@ $(BUILD_DIR)/Client.o: Source/Client/Client.cpp Source/Client/Client.hpp | $(BUI
 	$(COMP) $(CFLAGS) -c Source/Client/Client.cpp -o $@
 
 # 5d. Compile the Oz* subsystem modules
-$(BUILD_DIR)/OzAssetMapper.o: Source/Package/OzAssetMapper.cpp Source/Package/OzAssetMapper.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Package/OzAssetMapper.cpp -o $@
+$(BUILD_DIR)/OzAssetMapper.o: Source/Renderer/OzAssetMapper.cpp Source/Renderer/OzAssetMapper.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/OzAssetMapper.cpp -o $@
 
 $(BUILD_DIR)/OzPawnSystem.o: Source/Pawn/OzPawnSystem.cpp Source/Pawn/OzPawnSystem.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Pawn/OzPawnSystem.cpp -o $@
@@ -110,26 +102,35 @@ $(BUILD_DIR)/MeshCache.o: Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mes
 	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/MeshCache.cpp -o $@
 
 # 5d-anim. Vertex-keyframe (morph) animation format + runtime mesh
-$(BUILD_DIR)/OzAnimFormat.o: Source/Anim/OzAnimFormat.cpp Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Anim/OzAnimFormat.cpp -o $@
+$(BUILD_DIR)/OzAnimFormat.o: Source/Package/Anim/OzAnimFormat.cpp Source/Package/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Package/Anim/OzAnimFormat.cpp -o $@
 
-$(BUILD_DIR)/AnimatedMesh.o: Source/Renderer/Mesh/AnimatedMesh.cpp Source/Renderer/Mesh/AnimatedMesh.hpp Source/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/AnimatedMesh.o: Source/Renderer/Mesh/AnimatedMesh.cpp Source/Renderer/Mesh/AnimatedMesh.hpp Source/Package/Anim/OzAnimFormat.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Renderer/Mesh/AnimatedMesh.cpp -o $@
+
+$(BUILD_DIR)/ViewModel.o: Source/Renderer/ViewModel.cpp Source/Renderer/ViewModel.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/ViewModel.cpp -o $@
 
 # 5d-particle. Isolated ParticleEmitter simulation
 $(BUILD_DIR)/OzParticleSimulationManager.o: Source/Particle/OzParticleSimulationManager.cpp Source/Particle/OzParticleSimulationManager.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Particle/OzParticleSimulationManager.cpp -o $@
 
-$(BUILD_DIR)/rlights.o: Source/rlights/rlights.cpp Source/rlights/rlights.h | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/rlights/rlights.cpp -o $@
+$(BUILD_DIR)/rlights.o: Source/Renderer/rlights/rlights.cpp Source/Renderer/rlights/rlights.h | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/rlights/rlights.cpp -o $@
 
 # 5i. OzOzoneLoader (OzWorld format loader)
-$(BUILD_DIR)/OzOzoneLoader.o: Source/OzOzoneLoader.cpp Source/OzOzoneLoader.hpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/OzOzoneLoader.cpp -o $@
+$(BUILD_DIR)/OzOzoneLoader.o: Source/World/OzOzoneLoader.cpp Source/World/OzOzoneLoader.hpp Source/World/OzoneParser.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/World/OzOzoneLoader.cpp -o $@
+
+$(BUILD_DIR)/OzoneFrustum.o: Source/World/OzoneFrustum.cpp Source/World/OzoneFrustum.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/World/OzoneFrustum.cpp -o $@
+
+$(BUILD_DIR)/OzoneHeightmap.o: Source/World/OzoneHeightmap.cpp Source/World/OzOzoneLoader.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/World/OzoneHeightmap.cpp -o $@
 
 # 5e. Compile OzoneParser (used by both client and server)
-$(BUILD_DIR)/OzoneParser.o: Source/Server/OzoneParser.cpp Source/Server/OzoneParser.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Server/OzoneParser.cpp -o $@
+$(BUILD_DIR)/OzoneParser.o: Source/World/OzoneParser.cpp Source/World/OzoneParser.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/World/OzoneParser.cpp -o $@
 
 # 5f. Compile CSG/BSP processor
 $(BUILD_DIR)/OzBsp.o: Source/Physics/OzBsp.cpp Source/Physics/OzBsp.hpp | $(BUILD_DIR)
@@ -162,19 +163,19 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o OTCustom.o Encoder.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o)
+OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o OzParticleSimulationManager.o rlights.o)
 	$(COMP) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Network/Network.hpp Source/Server/WDLParser.hpp Source/Server/OzoneParser.hpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp Source/Master/MasterClient.hpp Source/Master/MasterProtocol.hpp Source/Master/MasterHttp.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzBsp.o $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/WDLParser.cpp Source/Server/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
+AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/Server/ServerInternal.hpp Source/Network/Network.hpp Source/World/OzoneParser.hpp Source/World/OzoneParser.cpp Source/Server/Master/MasterClient.hpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/World/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS)
 
 # 7b. Build AngelMaster (standalone master server, no raylib)
-AngelMaster: $(BUILD_DIR)/Log.o Source/Master/Master.cpp Source/Master/MasterProtocol.hpp Source/Master/MasterHttp.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Log.o Source/Master/Master.cpp -o AngelMaster$(EXE) $(SERVER_LIBS)
+AngelMaster: $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp -o AngelMaster$(EXE) $(SERVER_LIBS)
 
 # 8. Build OzPack (standalone packer/unpacker, no raylib)
 ozpack: Source/OzPack.cpp Source/Package/OzPackage.hpp Source/miniz/miniz.h $(BUILD_DIR)/miniz.o
@@ -194,31 +195,28 @@ test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEnt
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Log.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
-test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Package/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp
+test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Log.cpp Source/Renderer/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Package/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS)
 
-test_wdl_parser: tests/WDLParser.test.cpp Source/Server/WDLParser.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
-
-test_ozone_parser: tests/OzoneParser.test.cpp Source/Server/OzoneParser.cpp
+test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
-test_join_uri: tests/JoinUri.test.cpp Source/JoinUri.hpp
+test_join_uri: tests/JoinUri.test.cpp Source/Client/JoinUri.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/JoinUri.test.cpp -o $@
 
-test_master: tests/Master.test.cpp Source/Master/MasterProtocol.hpp
+test_master: tests/Master.test.cpp Source/Network/MasterProtocol.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/Master.test.cpp -o $@
 
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ $(SERVER_LIBS)
 
-test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Server/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
+test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/World/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(SERVER_LIBS)
 
-test_ozanim: tests/OzAnim.test.cpp Source/Anim/OzAnimFormat.cpp
+test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -233,9 +231,6 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo ""
 	@echo "=== OzPawnSystem Tests ==="
 	-./test_pawn_system
-	@echo ""
-	@echo "=== WDLParser Tests ==="
-	-./test_wdl_parser
 	@echo ""
 	@echo "=== OzoneParser Tests ==="
 	-./test_ozone_parser
@@ -256,4 +251,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_ozanim
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_wdl_parser test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim

@@ -181,10 +181,11 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Main.cpp -o Main.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Package/OzAssetMapper.cpp -o OzAssetMapper.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/OzOzoneLoader.cpp -o OzOzoneLoader.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Server/OzoneParser.cpp -o OzoneParser.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Server/WDLParser.cpp -o WDLParser.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/OzAssetMapper.cpp -o OzAssetMapper.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/World/OzOzoneLoader.cpp -o OzOzoneLoader.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/World/OzoneFrustum.cpp -o OzoneFrustum.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/World/OzoneHeightmap.cpp -o OzoneHeightmap.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/World/OzoneParser.cpp -o OzoneParser.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Log.cpp -o Log.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Physics/OzBsp.cpp -o OzBsp.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Physics/WorldChunk.cpp -o WorldChunk.o
@@ -192,10 +193,10 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/Mesh.cpp -o Mesh.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/SkeletalMesh.cpp -o SkeletalMesh.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/MeshCache.cpp -o MeshCache.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Anim/OzAnimFormat.cpp -o OzAnimFormat.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Package/Anim/OzAnimFormat.cpp -o OzAnimFormat.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/Mesh/AnimatedMesh.cpp -o AnimatedMesh.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Particle/OzParticleSimulationManager.cpp -o OzParticleSimulationManager.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/rlights/rlights.cpp -o rlights.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Renderer/rlights/rlights.cpp -o rlights.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptParser.cpp -o LightningScriptParser.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningEntityRegistry.cpp -o LightningEntityRegistry.o
@@ -203,7 +204,7 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneParser.o WDLParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

@@ -1,5 +1,5 @@
 // JoinUri deep-link parsing tests - standalone, no raylib dependency
-#include "../Source/JoinUri.hpp"
+#include "../Source/Client/JoinUri.hpp"
 #include <cstdio>
 #include <string>
 

@@ -1,5 +1,6 @@
 #include "Mesh.hpp"
 #include "../../Package/PackageAssetLoader.hpp"
+#include "raymath.h"
 #include <cstddef>
 
 namespace oz {
@@ -102,6 +103,42 @@ void Mesh::Draw(const MeshTransform& t, Shader litShader) {
     }
 
     DrawModelEx(m_model, t.position, {0.0f, 1.0f, 0.0f}, t.yaw, t.scale, WHITE);
+}
+
+void Mesh::DrawSubmesh(int index, const MeshTransform& t, Shader litShader, Color tint) {
+    if (!m_valid || index < 0 || index >= m_model.meshCount || m_model.materialCount <= 0) return;
+
+    int matIdx = 0;
+    if (m_model.meshMaterial && index < m_model.materialCount)
+        matIdx = m_model.meshMaterial[index];
+    if (matIdx < 0 || matIdx >= m_model.materialCount) matIdx = 0;
+    Material& mat = m_model.materials[matIdx];
+
+    if (litShader.id > 0) {
+        mat.shader = litShader;
+    } else if ((size_t)matIdx < m_baseShaders.size()) {
+        mat.shader = m_baseShaders[(size_t)matIdx];
+    }
+    mat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
+
+    Matrix matScale = MatrixScale(t.scale.x, t.scale.y, t.scale.z);
+    Matrix matRot   = MatrixRotateY(t.yaw * DEG2RAD);
+    Matrix matTrans = MatrixTranslate(t.position.x, t.position.y, t.position.z);
+    Matrix transform = MatrixMultiply(MatrixMultiply(matScale, matRot), matTrans);
+    DrawMesh(m_model.meshes[index], mat, transform);
+}
+
+void Mesh::DrawMatrix(const Matrix& transform, Shader litShader) {
+    if (!m_valid || m_model.meshCount <= 0 || m_model.materialCount <= 0) return;
+    for (int i = 0; i < m_model.materialCount; i++) {
+        if (litShader.id > 0) m_model.materials[i].shader = litShader;
+        else if ((size_t)i < m_baseShaders.size()) m_model.materials[i].shader = m_baseShaders[(size_t)i];
+    }
+    for (int i = 0; i < m_model.meshCount; i++) {
+        int mi = m_model.meshMaterial ? m_model.meshMaterial[i] : 0;
+        if (mi < 0 || mi >= m_model.materialCount) mi = 0;
+        DrawMesh(m_model.meshes[i], m_model.materials[mi], transform);
+    }
 }
 
 } // namespace oz

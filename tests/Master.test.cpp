@@ -1,7 +1,7 @@
 // Master-protocol tests — standalone, no raylib/socket dependency.
 // Covers heartbeat encode/decode, sanitization, JSON list round-trip and
 // expiry so the wire contract between AngelMaster / AngelServ / client holds.
-#include "../Source/Master/MasterProtocol.hpp"
+#include "../Source/Network/MasterProtocol.hpp"
 #include <cstdio>
 #include <string>
 #include <vector>

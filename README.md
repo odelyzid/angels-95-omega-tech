@@ -8,7 +8,7 @@ worlds, collect power-ups, level up, and fight NPCs alongside other connected
 players.
 
 Built on [raylib](https://www.raylib.com/) 5.5 with PS1-inspired retro
-aesthetics, a custom **OZONE** world format (with legacy **WDL** support), a
+aesthetics, a custom **OZONE** world format, a
 **LightningScript** entity-scripting language, a Win32-native level editor
 (`AngelEd`), and a dedicated standalone server (`AngelServ`) with no raylib
 dependency.
@@ -24,7 +24,7 @@ Current release: **b56**.
   runs headless on Linux or Windows.
 - **CSG worlds** — `OZONE` primitive brush format (`add`/`sub`/`intersect`,
   box/cyl/sph/pyr/pln), per-brush `texScale*`/`texOffset*`/`texPath` and
-  `name=` zone labels; legacy text `WDL` worlds also load.
+  `name=` zone labels.
 - **LightningScript entities** — data-driven `.ozls` definitions for items,
   pickups, weapons, NPCs, and scripted sky/zone triggers (`on_enter`,
   `on_tick`, `on_collect`, …) with actions like `heal`, `damage`, `msg`,
@@ -49,7 +49,7 @@ Current release: **b56**.
 | Architecture, source tree, key classes | [Engine Overview](Wiki/Engine-Overview.md) |
 | AngelEd editor panels and workflow | [Editor Usage](Wiki/Editor-Usage.md) |
 | LightningScript scripting reference | [LightningScript](Wiki/LightningScript.md) |
-| WDL / OZONE world format | [World Format](Wiki/World-Format-WDL.md) |
+| OZONE world format | [World Format](Wiki/World-Format-OZONE.md) |
 | Build instructions, prerequisites, CI | [Building](Wiki/Building.md) |
 | Gap analysis and priorities | [Engine Roadmap](Wiki/Engine-Roadmap.md) |
 
@@ -167,7 +167,7 @@ make test   # builds + runs all suites, continues past failures
 ```
 
 Standalone tests (no framework) land in the repo root as executables.
-Suites: parser, context, registry, entity_manager, pawn_system, wdl_parser,
+Suites: parser, context, registry, entity_manager, pawn_system,
 ozone_parser, network, game_state. Single suites: `make test_parser`, etc.
 
 ---

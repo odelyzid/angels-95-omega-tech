@@ -1,6 +1,6 @@
 #pragma once
-#include "raygui/raygui.h"
-#include  "raygui/dark.h"
+#include "Renderer/raygui/raygui.h"
+#include  "Renderer/raygui/dark.h"
 #include "Log.hpp"
 #include <cstddef>
 
@@ -45,117 +45,6 @@ static inline void ApplyTextureFilter(Texture2D tex) {
     SetTextureFilter(tex, fm);
 }
 
-void ToggleSettings(){
-    if (ShowSettings){
-        ShowSettings = false;
-        HideCursor(); 
-        DisableCursor();  
-    }
-    else {
-        ShowSettings = true;
-        ShowCursor();
-        EnableCursor();
-    }
-}
-
-void UpdateSettings(){
-    if (ShowSettings){
-        static int s_filterDropdown = -1;
-        if (GuiWindowBox((Rectangle){ 20, 20, 360, 520 }, "Angels95 Developer Settings")) {
-            ShowSettings = false;
-            HideCursor();
-            DisableCursor();
-            return;
-        }
-        int x = 40, y = 50, w = 100, h = 30, gap = 5;
-
-        // Row 1 - Debug / HeadBob / PixelShader toggle
-        if (GuiButton((Rectangle){ x, y, w, h }, "Toggle Debug")) Debug = !Debug;
-        if (GuiButton((Rectangle){ x + w + gap, y, w, h }, "Toggle H.B.")) HeadBob = !HeadBob;
-        if (GuiButton((Rectangle){ x + (w + gap) * 2, y, w, h }, "Toggle P.S.")) PixelShader = !PixelShader;
-
-        // Row 2 - Particles / FPS / Log
-        y += h + gap;
-        if (GuiButton((Rectangle){ x, y, w, h }, "Particles")) ParticlesEnabled = !ParticlesEnabled;
-        if (GuiButton((Rectangle){ x + w + gap, y, w, h }, "Show FPS")) FPSEnabled = !FPSEnabled;
-        if (GuiButton((Rectangle){ x + (w + gap) * 2, y, w, h }, "Log")) ShowLogWindow = !ShowLogWindow;
-
-        // Row 3 - VSync / Jitter toggle
-        y += h + gap;
-        if (GuiButton((Rectangle){ x, y, w, h }, "VSync .T")){
-            if (IsWindowState(FLAG_VSYNC_HINT)){
-                ClearWindowState(FLAG_VSYNC_HINT);
-            }
-            else {
-                SetConfigFlags(FLAG_VSYNC_HINT);
-            }
-        }
-        if (GuiButton((Rectangle){ x + w + gap, y, w, h }, "Jitter")) JitterEnabled = !JitterEnabled;
-        if (GuiButton((Rectangle){ x + (w + gap) * 2, y, w, h }, "Fog")) FogEnabled = !FogEnabled;
-
-        // Log window
-        if (ShowLogWindow){
-            if (GuiWindowBox((Rectangle){ 380, 20, 500, 500 }, "Log Output")) {
-                ShowLogWindow = false;
-            }
-            int log_line_y = 50;
-            for (const auto& ll : Log::get_buffer()) {
-                if (log_line_y > 500) break;
-                Color c = RAYWHITE;
-                DrawText(ll.text, 390, log_line_y, 12, c);
-                log_line_y += 16;
-            }
-        }
-
-        // --- Texture filter group ---
-        y += h + gap + 5;
-        GuiGroupBox((Rectangle){ x, y, 320, 100 }, "Texture Filter");
-        y += 18;
-        GuiLabel((Rectangle){ x + 5, y, 100, 20 }, "Mode:");
-        Rectangle filterRect = { x + 60, y, 200, 22 };
-        if (GuiDropdownBox(filterRect, "Point (Nearest);Bilinear;Trilinear;Aniso x4;Aniso x8;Aniso x16", &TextureFilterMode, s_filterDropdown == 0)){
-            s_filterDropdown = (s_filterDropdown == 0) ? -1 : 0;
-        }
-
-        // --- Pixelation group ---
-        y += 30;
-        GuiGroupBox((Rectangle){ x, y, 320, 70 }, "Pixelation");
-        y += 18;
-        GuiLabel((Rectangle){ x + 5, y, 50, 20 }, "Size:");
-        PixelSize = GuiSlider((Rectangle){ x + 55, y, 200, 20 }, "1", "32", PixelSize, 1.0f, 32.0f);
-
-        // --- Jitter group ---
-        y += 28;
-        GuiGroupBox((Rectangle){ x, y, 320, 70 }, "Vertex Jitter");
-        y += 18;
-        GuiLabel((Rectangle){ x + 5, y, 50, 20 }, "Intensity:");
-        JitterIntensity = GuiSlider((Rectangle){ x + 65, y, 195, 20 }, "0", "10", JitterIntensity, 0.0f, 10.0f);
-
-        // --- Resolution scale group ---
-        y += 30;
-        GuiGroupBox((Rectangle){ x, y, 320, 80 }, "Resolution Scale");
-        y += 18;
-        Rectangle sliderRect = { x + 5, y, 250, 20 };
-        ResolutionScale = GuiSlider(sliderRect, "Scale", TextFormat("%.2f", ResolutionScale), ResolutionScale, 0.0f, 3.0f);
-        y += 28;
-        if (GuiButton((Rectangle){ x + 5, y, 120, 22 }, "Set Resolution")){
-            UnloadRenderTexture(Target);
-            Target = LoadRenderTexture(int(1280 * ResolutionScale), int(720 * ResolutionScale));
-        }
-
-        // --- Window size group ---
-        y += 30;
-        GuiGroupBox((Rectangle){ x, y, 320, 50 }, "Window Size");
-        y += 18;
-        int bw = 55, bgap = 5;
-        if (GuiButton((Rectangle){ x + 5, y, bw, 24 }, "480p")){ ConfigWindowWidth = 640;  ConfigWindowHeight = 480;  SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
-        if (GuiButton((Rectangle){ x + 10 + bw, y, bw, 24 }, "720p")){ ConfigWindowWidth = 1280; ConfigWindowHeight = 720; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
-        if (GuiButton((Rectangle){ x + 15 + bw*2, y, bw, 24 }, "1080p")){ ConfigWindowWidth = 1920; ConfigWindowHeight = 1080; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
-        if (GuiButton((Rectangle){ x + 20 + bw*3, y, bw, 24 }, "1440p")){ ConfigWindowWidth = 2560; ConfigWindowHeight = 1440; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
-        if (GuiButton((Rectangle){ x + 25 + bw*4, y, bw, 24 }, "4k")){ ConfigWindowWidth = 3840; ConfigWindowHeight = 2160; SetWindowSize(ConfigWindowWidth, ConfigWindowHeight); }
-    }
-}
-
 bool MenuSettings = false;
 
 bool Spinner003EditMode = false;
@@ -178,52 +67,3 @@ static inline void ApplyMasterVolume() {
     SetMasterVolume(MuteToggle ? 0.0f : v / 100.0f);
 }
 
-void ShowMenuSetiings(){
-    Rectangle LayoutRecs[15] = {
-        (Rectangle){ 72, 85, 120, 24 },
-        (Rectangle){ 62, 115, 391, 419 },
-        (Rectangle){ 71, 145, 374, 200 },
-        (Rectangle){ 94, 186, 120, 24 },
-        (Rectangle){ 172, 237, 120, 24 },
-        (Rectangle){ 171, 278, 120, 24 },
-        (Rectangle){ 311, 258, 120, 24 },
-        (Rectangle){ 325, 176, 88, 24 },
-        (Rectangle){ 325, 214, 88, 24 },
-        (Rectangle){ 336, 399, 88, 24 },
-        (Rectangle){ 182, 407, 120, 16 },
-        (Rectangle){ 72, 361, 374, 85 },
-        (Rectangle){ 73, 452, 120, 24 },
-        (Rectangle){ 74, 486, 146, 26 },
-        (Rectangle){ 268, 475, 140, 28 },
-    };
-    GuiWindowBox(LayoutRecs[1], "Settings");
-    GuiLabel(LayoutRecs[0], "Angels95 Settings");
-    GuiPanel(LayoutRecs[2], "Window");
-    if (GuiButton(LayoutRecs[3], "Toggle Fullscreen")) ToggleFullscreen(); 
-    VSYNCToggle = GuiToggle(LayoutRecs[7], "VSync", VSYNCToggle);
-    MXAAToggle = GuiToggle(LayoutRecs[8], "MXAA x4", MXAAToggle);
-
-    GuiPanel(LayoutRecs[11], "Audio");
-    MuteToggle = GuiToggle(LayoutRecs[9], "Mute Audio", MuteToggle);
-    AudioSlider = GuiSlider(LayoutRecs[10], "Audio Volume", NULL, AudioSlider, 0, 100);
-
-    GuiLabel(LayoutRecs[12], "ANGELS95 ");
-    GuiLabel(LayoutRecs[13], "TribeWarez 2025");
-    GuiLabel(LayoutRecs[14], "@EC, JF , ZT , NC , LC");
-
-    if (VSYNCToggle){
-        SetConfigFlags(FLAG_VSYNC_HINT);
-    }
-    else {
-        ClearWindowState(FLAG_VSYNC_HINT);
-    }
-
-    if (MXAAToggle){
-        SetConfigFlags(FLAG_MSAA_4X_HINT);
-    }
-    else {
-        ClearWindowState(FLAG_MSAA_4X_HINT);
-    }
-    ApplyMasterVolume();
-    
-}

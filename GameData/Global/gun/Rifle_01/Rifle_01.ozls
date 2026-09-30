@@ -1,0 +1,32 @@
+entity "rifle_01" : weapon {
+    mesh = "Fbx_Files/Rifle_01.glb"
+    texture = "Textures/Rifle_01_Albedo.png"
+    icon = "Textures/Rifle_01_silhouette.png"
+    stats {
+        damage = 20
+        fire_rate = 0.12
+        projectile_speed = 70.0
+        projectile_lifetime = 2.4
+        projectile_count = 1
+        spread = 1.2
+        magazine = 30
+        reload_time = 1.9
+        recoil = 2.2
+        projectile_mesh = GameData/Global/gun/Projectiles/FbxFile/Projectiles.glb
+        projectile_submesh = 4
+        projectile_scale = 4.0
+        projectile_color = (0.6, 1.0, 0.4)
+        viewmodel_offset = (0.3, -0.22, 0.6)
+        viewmodel_rot = (0, 90, 0)
+        viewmodel_scale = 1.0
+        viewmodel_fov = 60.0
+    }
+    actions {
+        on_fire {
+            set_cooldown 0.12
+        }
+        on_reload {
+            say "Reloading rifle..."
+        }
+    }
+}

@@ -1,5 +1,5 @@
 // OzAnim vertex-keyframe format tests — standalone, no raylib dependency.
-#include "../Source/Anim/OzAnimFormat.hpp"
+#include "../Source/Package/Anim/OzAnimFormat.hpp"
 #include <cstdio>
 #include <cmath>
 

@@ -1,5 +1,5 @@
 ﻿#include "OzPawnSystem.hpp"
-#include "../Package/OzAssetMapper.hpp"
+#include "../Renderer/OzAssetMapper.hpp"
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Renderer/EngineBillboard.hpp"
 #include "../Renderer/CombatFX.hpp"
@@ -319,11 +319,23 @@ void PawnSystem::UpdateProjectiles(float dt) {
         m_projectiles.end());
 }
 
-void PawnSystem::DrawProjectiles(Camera3D& camera) {
+void PawnSystem::DrawProjectiles(Camera3D& camera, Shader litShader) {
     for (auto& p : m_projectiles) {
         if (!p.active) continue;
+        // Per-weapon projectile visual: draw the configured model submesh when
+        // available, else fall back to a glowing tracer sphere.
+        if (!p.meshPath.empty()) {
+            auto mesh = oz::MeshCache::Instance().GetStatic(p.meshPath, p.texturePath, "", true);
+            if (mesh) {
+                oz::MeshTransform t;
+                t.position = p.position;
+                t.scale = {p.scale, p.scale, p.scale};
+                mesh->DrawSubmesh(p.submesh, t, litShader, p.tint);
+                continue;
+            }
+        }
         // Draw as small glowing spheres
-        Color c = {255, 200, 50, 255};
+        Color c = p.tint;
         float radius = 0.3f;
         DrawSphere(p.position, radius, c);
         // Tracer streak along the travel direction

@@ -37,7 +37,7 @@ on a fix before publicly disclosing the issue.
 ## Scope
 
 In scope: `AngelServ` (UDP/hTTP/XML handling, GameState), client/server
-packet parsing, `OzoneParser`/`WDLParser` (malformed map files), `OzPack`.
+packet parsing, `OzoneParser` (malformed map files), `OzPack`.
 
 Out of scope: modified binaries, third-party dependencies (raylib, raygui,
 pl_mpeg), and locally-invented or deliberately malformed content used
@@ -46,6 +46,6 @@ offline in single-player/editor contexts.
 ## Safe handling notes
 
 - The server binds game data from `GameData/`; only serve trusted worlds.
-- Save files (`*.sav`) and formats parsed by `OzoneParser`/`WDLParser` are
+- Save files (`*.sav`) and formats parsed by `OzoneParser` are
   treated as untrusted input where possible — report any crash/corruption
   triggered by malformed files as a vulnerability.

@@ -25,21 +25,6 @@ float ToFloat(wstring Data)
 }
 
 
-int GetWDLSize(wstring WData , wstring Extra)
-{
-    int Out = 0;
-    wstring Data = WData + Extra;
-    for (int i = 0; i <= WData.size() + Extra.size(); i++)
-    {
-        if (Data[i] == ':')
-        {
-            Out++;
-        }
-    }
-    return Out;
-}
-
-
 
 // Weird Optimizations
 static wstring ReadValueOut = L"";

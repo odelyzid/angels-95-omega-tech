@@ -1,5 +1,5 @@
 #include "GameState.hpp"
-#include "OzoneParser.hpp"
+#include "../World/OzoneParser.hpp"
 #include "../Log.hpp"
 #include <cmath>
 #include <cstring>

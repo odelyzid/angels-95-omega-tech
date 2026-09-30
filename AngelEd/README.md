@@ -1,4 +1,4 @@
-﻿# OTEditor
+# OTEditor
 
 OTEditor is a Windows level editor for the OmegaTech / Angels95 game engine. It combines Win32 native panels with a raylib 3D viewport for creating and editing game worlds.
 
@@ -12,7 +12,7 @@ OTEditor is a Windows level editor for the OmegaTech / Angels95 game engine. It 
 - **Pawn Manager** — Spawn and configure NPCs (Walker, Skaarj, Brute, Floater)
 - **Texture Manager** — Manage world textures
 - **Sound Manager** — Configure world sounds
-- **Script Manager** — Edit WDL scripts
+- **Script Manager** — Edit LightningScript (`.ozls`) entities
 
 ### 3D Viewport
 - Real-time raylib rendering
@@ -20,9 +20,8 @@ OTEditor is a Windows level editor for the OmegaTech / Angels95 game engine. It 
 - Model preview with texture mapping
 - Grid snapping and coordinate display
 
-### World Formats
-- **WDL** — World Description Language (colon-delimited plain text)
-- **OZONE** — Editor binary format with embedded textures
+### World Format
+- **OZONE** — plain-text world format with CSG brush primitives and entities
 
 ## Prerequisites
 
@@ -58,8 +57,8 @@ Both scripts produce `System/oz_editor.exe` along with INI files and launch scri
    ```
 
 2. Open a world:
-   - File → Open → Select `GameData/Worlds/<WorldName>/World.wdl`
-   - Or drag-and-drop a `.wdl` file onto the executable
+   - File → Open → Select `GameData/Worlds/<WorldName>/World.ozone`
+   - Or drag-and-drop a `.ozone` file onto the executable
 
 3. Edit the world:
    - Use the menu bar to toggle panels
@@ -68,8 +67,7 @@ Both scripts produce `System/oz_editor.exe` along with INI files and launch scri
    - Spawn NPCs via Pawn Manager
 
 4. Save the world:
-   - File → Save (writes `World.wdl`)
-   - File → Save As OZONE (writes `World.ozone`)
+   - File → Save (writes `World.ozone`)
 
 ## Configuration
 
@@ -89,7 +87,7 @@ Height=900
 
 - **Entry point:** `OTEditor/Source/Main.cpp`
 - **Win32 dialogs:** `OTEditor/Source/Win32Dialogs.cpp` — uses `HWND` handles stored as `void*` for cross-platform compat
-- **Editor state:** `OTEditor/Source/Editor.hpp` — WDL cache, models, placement modes
+- **Editor state:** `OTEditor/Source/Editor.hpp` — world cache, models, placement modes
 - **Engine integration:** Links `oz_pawn_system.o`, `oz_ozone_loader.o`, `OzoneParser.o`
 
 ## License

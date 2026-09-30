@@ -9,7 +9,7 @@ docs:
 - [`Wiki/Building.md`](Wiki/Building.md) — build prerequisites and usage.
 - [`Wiki/Engine-Overview.md`](Wiki/Engine-Overview.md) — architecture and layout.
 - [`Wiki/LightningScript.md`](Wiki/LightningScript.md) — the scripting language.
-- [`Wiki/World-Format-WDL.md`](Wiki/World-Format-WDL.md) — WDL + OZONE formats.
+- [`Wiki/World-Format-OZONE.md`](Wiki/World-Format-OZONE.md) — WDL + OZONE formats.
 
 ## Getting started
 

@@ -6,8 +6,8 @@
 #include <utility>
 #include <algorithm>
 
-#include "raygui/raygui.h"
-#include "raygui/dark.h"
+#include "../../Source/Renderer/raygui/raygui.h"
+#include "../../Source/Renderer/raygui/dark.h"
 using namespace std;
 
 wstring LoadFile(const char *Path)

@@ -51,6 +51,8 @@ std::shared_ptr<Mesh> MeshCache::GetInternal(const std::string& key, const std::
     auto it = m_cache.find(key);
     if (it != m_cache.end()) return it->second;
 
+    OZ_INFO("[CHAIN] MeshCache miss key='%s' (creating)", key.c_str());
+
     std::shared_ptr<Mesh> mesh;
     if (skeletal) {
         auto sm = std::make_shared<SkeletalMesh>();

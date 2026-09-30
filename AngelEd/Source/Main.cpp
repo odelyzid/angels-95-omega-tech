@@ -13,12 +13,11 @@
 #include "Win32Dialogs.hpp"
 #include "EditorIcons.hpp"
 #include "../../Source/IniConfig.hpp"
-#include "../../Source/OzOzoneLoader.hpp"
+#include "../../Source/World/OzOzoneLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
-#include "../../Source/Anim/OzAnimFormat.hpp"
+#include "../../Source/Package/Anim/OzAnimFormat.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
-#include "../../Source/Server/WDLParser.hpp"
-#include "../../Source/Server/OzoneParser.hpp"
+#include "../../Source/World/OzoneParser.hpp"
 #include "../../Source/Physics/OzBsp.hpp"
 #include "../../Source/Renderer/LitLightning.hpp"
 #ifdef _WIN32
@@ -499,19 +498,6 @@ static void DeleteSelectedEntity() {
         PawnSystem::Instance().RemovePathNode(g_sel.index);
     } else if (g_sel.type == SelType::WINDZONE) {
         PawnSystem::Instance().RemoveWindZone(g_sel.index);
-    } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
-        int mid = CachedModels[g_sel.index].ModelId;
-        wstring line = L"Model" + to_wstring(mid) + L":" +
-            to_wstring(CachedModels[g_sel.index].X) + L":" +
-            to_wstring(CachedModels[g_sel.index].Y) + L":" +
-            to_wstring(CachedModels[g_sel.index].Z) + L":" +
-            to_wstring(CachedModels[g_sel.index].S) + L":" +
-            to_wstring(CachedModels[g_sel.index].R) + L":";
-        size_t pos = OTEditor.WorldData.find(line);
-        if (pos != wstring::npos) {
-            OTEditor.WorldData.erase(pos, line.size());
-            CacheWDL();
-        }
     }
     g_sel = { SelType::NONE, -1, "", {0,0,0} };
 }
@@ -619,18 +605,6 @@ static void DuplicateSelectedEntity() {
             clone.bounds.max.x += offset.x; clone.bounds.max.z += offset.z;
             PawnSystem::Instance().AddWindZone(clone);
         }
-    } else if (g_sel.type == SelType::MODEL && g_sel.index >= 0 && g_sel.index < CachedModelCounter) {
-        int mid = CachedModels[g_sel.index].ModelId;
-        float nx = CachedModels[g_sel.index].X + offset.x;
-        float nz = CachedModels[g_sel.index].Z + offset.z;
-        wstring newLine = L"Model" + to_wstring(mid) + L":" +
-            to_wstring(nx) + L":" +
-            to_wstring(CachedModels[g_sel.index].Y) + L":" +
-            to_wstring(nz) + L":" +
-            to_wstring(CachedModels[g_sel.index].S) + L":" +
-            to_wstring(CachedModels[g_sel.index].R) + L":";
-        OTEditor.WorldData += newLine;
-        CacheWDL();
     }
 }
 
@@ -748,9 +722,6 @@ static void StopSoundPreview() {
 
 static void ClearScene() {
     StopSoundPreview();
-    OTEditor.WorldData.clear();
-    OTEditor.OtherData.clear();
-    CacheWDL();
     OzoneLoader::Instance().Unload();
     auto& pawns = PawnSystem::Instance();
     pawns.DespawnAll();
@@ -768,87 +739,9 @@ static void ClearScene() {
     OmegaTechEditor.DrawModel = false;
 }
 
-static ZoneType ParseWDLZoneType(std::string name) {
-    std::transform(name.begin(), name.end(), name.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    if (name == "ladder" || name == "1") return ZoneType::ZONE_LADDER;
-    if (name == "sky" || name == "2") return ZoneType::ZONE_SKY;
-    if (name == "reverb" || name == "3") return ZoneType::ZONE_REVERB;
-    return ZoneType::ZONE_WATER;
-}
-
 static const char* LegacyPickupType(int idx) {
     static const char* map[] = {"HealthVial","ManaVial","EnergyCrystal","Key","Coin","Powerup"};
     return (idx >= 0 && idx < 6) ? map[idx] : nullptr;
-}
-
-static void SyncWDLNodes() {
-    auto& pawns = PawnSystem::Instance();
-    pawns.DespawnAll();
-    pawns.ClearPlayerStarts();
-    pawns.ClearPickups();
-    pawns.ClearZones();
-    pawns.ClearPortals();
-
-    std::string content(OTEditor.WorldData.begin(), OTEditor.WorldData.end());
-    for (const auto& element : WDLParser::parse_string(content)) {
-        if (element.type == WDLElementType::SPAWN && element.args.size() >= 3) {
-            pawns.AddPlayerStart({0, {element.args[0], element.args[1], element.args[2]}, element.yaw});
-        } else if (element.type == WDLElementType::PICKUP && element.args.size() >= 3) {
-            PickupNode node;
-            node.position = {element.args[0], element.args[1], element.args[2]};
-            node.typeName = element.pickupType;
-            try {
-                int legacyIdx = std::stoi(node.typeName);
-                const char* mapped = LegacyPickupType(legacyIdx);
-                if (mapped) node.typeName = mapped;
-            } catch (...) {
-                // already a string name, use as-is
-            }
-            pawns.AddPickup(node);
-        } else if (element.type == WDLElementType::NPC && element.args.size() >= 3) {
-            pawns.Spawn({element.args[0], element.args[1], element.args[2]}, element.entityType.c_str());
-        } else if (element.type == WDLElementType::ZONE_INFO && element.args.size() >= 6) {
-            ZoneVolumeNode node;
-            node.bounds = {{element.args[0], element.args[1], element.args[2]},
-                           {element.args[3], element.args[4], element.args[5]}};
-            node.zoneType = ParseWDLZoneType(element.zoneType);
-            node.intensity = element.intensity;
-            pawns.AddZone(node);
-        } else if (element.type == WDLElementType::PORTAL && element.args.size() >= 6) {
-            ZonePortal portal;
-            portal.bounds = {{element.args[0], element.args[1], element.args[2]},
-                             {element.args[3], element.args[4], element.args[5]}};
-            portal.targetWorld = element.entityType;
-            if (element.args.size() >= 9)
-                portal.targetSpawn = {element.args[6], element.args[7], element.args[8]};
-            if (element.args.size() >= 10)
-                portal.bidirectional = element.args[9] != 0.0f;
-            pawns.AddPortal(portal);
-        } else if (element.type == WDLElementType::LEVEL_INFO && element.args.size() >= 7) {
-            LevelMetadata meta = GetLevelMetadata();
-            meta.gameType = (GameType)(int)element.args[0];
-            meta.maxPlayers = (int)element.args[1];
-            meta.respawnTime = element.args[2];
-            meta.timeLimitEnabled = element.args[3] != 0.0f;
-            meta.timeLimitMinutes = element.args[4];
-            meta.scoreLimit = (int)element.args[5];
-            meta.friendlyFire = element.args[6] != 0.0f;
-            meta.skyboxTexturePath = element.entityType;
-            SetLevelMetadata(meta);
-        } else if (element.type == WDLElementType::PARTICLES && element.args.size() >= 8) {
-            LevelMetadata meta = GetLevelMetadata();
-            meta.particleType = (ParticleType)(int)element.args[0];
-            meta.particleDensity = element.args[1];
-            meta.particleSpeed = element.args[2];
-            meta.particleColorR = (int)element.args[3];
-            meta.particleColorG = (int)element.args[4];
-            meta.particleColorB = (int)element.args[5];
-            meta.particleWindX = element.args[6];
-            meta.particleWindZ = element.args[7];
-            SetLevelMetadata(meta);
-        }
-    }
 }
 
 static bool LoadWorldDocument(const fs::path& path) {
@@ -925,21 +818,9 @@ static bool LoadWorldDocument(const fs::path& path) {
         }
         return ok;
     }
-    if (extension != ".wdl") return false;
-
-    // Reload models from the new world's Models/ directory
-    WDLModels.LoadModels(OTEditor.Path);
-    {
-        std::vector<std::string> names;
-        for (int i = 0; i < WDLModels.GetModelCount(); i++)
-            if (WDLModels.GetModelName(i)) names.push_back(WDLModels.GetModelName(i));
-        SetTextureTargetNames(names);
-    }
-
-    OTEditor.WorldData = LoadFile(path.string().c_str());
-    CacheWDL();
-    SyncWDLNodes();
-    return true;
+    // OZONE-only editor: any non-.ozone world format is unsupported.
+    EditorLog("Unsupported world format '%s' (OZONE-only editor)", extension.c_str());
+    return false;
 }
 
 static const char* WDLZoneTypeName(ZoneType t) {
@@ -1324,14 +1205,7 @@ static bool SaveWorldDocument(const fs::path& path) {
         return true;
     }
 
-    if (ext != ".wdl") return false;
-    std::wofstream output(path);
-    if (!output.is_open()) return false;
-    output << OTEditor.WorldData;
-    if (g_documentPath.extension() == ".ozone") AppendOzoneEntities(output);
-    g_documentPath = path;
-    SetWorldDirectory(path.parent_path());
-    return true;
+    return false;
 }
 
 static void FileNew() {
@@ -1419,12 +1293,6 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
                 std::string worldArg;
                 if (ext == ".ozone") {
                     worldArg = g_documentPath.string();
-                } else {
-                    std::string tempPath = "System/Cache/editor_test.wdl";
-                    std::wstring wstr = OTEditor.WorldData;
-                    std::string wd(wstr.begin(), wstr.end());
-                    std::ofstream f(tempPath);
-                    if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
                 }
                 if (!worldArg.empty()) {
                     if (IsPathFile("System/Angels95.exe")) {
@@ -1654,7 +1522,7 @@ int main(int argc, char **argv){
     // Load editor toolbar icons
     EditorIcons::Instance().Load();
 
-    g_documentPath = argc > 1 && argv[1] ? fs::path(argv[1]) : fs::path("../GameData/World.wdl");
+    g_documentPath = argc > 1 && argv[1] ? fs::path(argv[1]) : fs::path("../GameData/World.ozone");
     SetWorldDirectory(g_documentPath.parent_path());
 
     // Load INI config
@@ -1681,7 +1549,6 @@ int main(int argc, char **argv){
             if (WDLModels.GetModelName(i)) names.push_back(WDLModels.GetModelName(i));
         SetTextureTargetNames(names);
     }
-    CacheWDL();
 
     // Load pawn definitions from config files (data-driven)
     {
@@ -1768,7 +1635,6 @@ int main(int argc, char **argv){
     if (argc > 1 && argv[1]) {
         LoadWorldDocument(g_documentPath);
     } else {
-        SyncWDLNodes();
         fs::path ozonePath = g_documentPath.parent_path() / "World.ozone";
         if (fs::exists(ozonePath)) OzoneLoader::Instance().LoadFile(ozonePath.string().c_str());
     }
@@ -2223,9 +2089,6 @@ int main(int argc, char **argv){
 
         DrawGrid(1000, 10.0f);
 
-        CWDLProcess();
-        WDLProcess();
-
         // OZONE world geometry
         OzoneLoader::Instance().Draw(OTEditor.MainCamera);
 
@@ -2594,18 +2457,10 @@ int main(int argc, char **argv){
             // Commit placement
             if (IsKeyPressed(KEY_ENTER) || DoubleClick)
             {
-                wstring WDLCommand;
                 if (g_placeMode == PlaceMode::MODEL) {
-                    if (CollisionToggle) WDLCommand += L":C:";
                     if (EMID > 0) {
-                        if (EMID != 100) {
-                            WDLCommand += (EMID < 100 ? L"Model" : L"Script") + to_wstring(EMID < 100 ? EMID : EMID - 100) + L":";
-                        } else {
-                            WDLCommand += L"Collision:";
-                        }
-                        WDLCommand += to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                                      to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
-                                      to_wstring(OmegaTechEditor.R) + L":";
+                        // Legacy WDL Model/Collision placement is removed; OZONE
+                        // primitives (EMID >= 200) are committed below.
                     } else {
                         if (EMID == 0) {
                             // Model Browser selection → GameEngine.Mesh.* entity.
@@ -2631,30 +2486,14 @@ int main(int argc, char **argv){
                                 EditorLog("Place model: select a model in the Model Browser first");
                             }
                         }
-                        if (EMID == -1) {
-                            WDLCommand += L"AdvCollision:" +
-                                to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                                to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
-                                to_wstring(OmegaTechEditor.R) + L":" + to_wstring(OmegaTechEditor.W) + L":" +
-                                to_wstring(OmegaTechEditor.H) + L":" + to_wstring(OmegaTechEditor.L) + L":";
-                        }
-                        if (EMID == -2) {
-                            WDLCommand += L"ClipBox:" +
-                                to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                                to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
-                                to_wstring(OmegaTechEditor.R) + L":" + to_wstring(OmegaTechEditor.W) + L":" +
-                                to_wstring(OmegaTechEditor.H) + L":" + to_wstring(OmegaTechEditor.L) + L":";
-                        }
                     }
                 } else if (g_placeMode == PlaceMode::PICKUP) {
-                    WDLCommand += L"Pickup:" + wstring(OmegaTechEditor.ActivePickupName.begin(), OmegaTechEditor.ActivePickupName.end()) + L":" +
-                        to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                        to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" +
-                        to_wstring(OmegaTechEditor.R) + L":";
+                    PickupNode node;
+                    node.position = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                    node.typeName = OmegaTechEditor.ActivePickupName;
+                    PawnSystem::Instance().AddPickup(node);
+                    EditorLog("Placed pickup '%s'", node.typeName.c_str());
                 } else if (g_placeMode == PlaceMode::NODE) {
-                    // Unified WDL node formats:
-                    //   ZoneInfo:type:minX:minY:minZ:maxX:maxY:maxZ:intensity:
-                    //   Portal:targetWorld:minX:minY:minZ:maxX:maxY:maxZ:spawnX:spawnY:spawnZ:bidir:
                     if (OmegaTechEditor.ActiveNodeType == EditorNodeType::ZONE) {
                         float hw = fmaxf(OmegaTechEditor.W, 1) * 0.5f;
                         float hh = fmaxf(OmegaTechEditor.H, 1) * 0.5f;
@@ -2662,9 +2501,6 @@ int main(int argc, char **argv){
                         float minX = OmegaTechEditor.X - hw, maxX = OmegaTechEditor.X + hw;
                         float minY = OmegaTechEditor.Y - hh, maxY = OmegaTechEditor.Y + hh;
                         float minZ = OmegaTechEditor.Z - hd, maxZ = OmegaTechEditor.Z + hd;
-                        WDLCommand += L"ZoneInfo:water:" +
-                            to_wstring(minX) + L":" + to_wstring(minY) + L":" + to_wstring(minZ) + L":" +
-                            to_wstring(maxX) + L":" + to_wstring(maxY) + L":" + to_wstring(maxZ) + L":1:";
                         ZoneVolumeNode node;
                         node.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
                         node.zoneType = ZoneType::ZONE_WATER;
@@ -2679,10 +2515,6 @@ int main(int argc, char **argv){
                         float minZ = OmegaTechEditor.Z - hd, maxZ = OmegaTechEditor.Z + hd;
                         std::string target(g_editorPanels.portalTargetWorld);
                         if (target.empty()) target = "EngineTest";
-                        wstring wTarget(target.begin(), target.end());
-                        WDLCommand += L"Portal:" + wTarget + L":" +
-                            to_wstring(minX) + L":" + to_wstring(minY) + L":" + to_wstring(minZ) + L":" +
-                            to_wstring(maxX) + L":" + to_wstring(maxY) + L":" + to_wstring(maxZ) + L":0:20:0:1:";
                         ZonePortal portal;
                         portal.bounds = {{minX, minY, minZ}, {maxX, maxY, maxZ}};
                         portal.targetWorld = target;
@@ -2690,27 +2522,21 @@ int main(int argc, char **argv){
                         portal.bidirectional = true;
                         PawnSystem::Instance().AddPortal(portal);
                         RefreshLevelList();
-                    } else {
-                        wstring nodePrefix;
-                        switch (OmegaTechEditor.ActiveNodeType) {
-                            case EditorNodeType::SPAWN: nodePrefix = L"Spawn:";   break;
-                            case EditorNodeType::NPC:   nodePrefix = L"NPC:";     break;
-                            case EditorNodeType::LIGHT: nodePrefix = L"Light:";   break;
-                            default: nodePrefix = L"Spawn:"; break;
-                        }
-                        // Node format: type:subtype:x:y:z:0:0:
-                        WDLCommand += nodePrefix + to_wstring((int)OmegaTechEditor.ActiveNodeType) + L":" +
-                            to_wstring(OmegaTechEditor.X) + L":" + to_wstring(OmegaTechEditor.Y) + L":" +
-                            to_wstring(OmegaTechEditor.Z) + L":0:0:";
+                    } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::SPAWN) {
+                        PlayerStartNode node;
+                        node.position = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                        node.yaw = OmegaTechEditor.R;
+                        PawnSystem::Instance().AddPlayerStart(node);
+                    } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::NPC) {
+                        PawnSystem::Instance().Spawn(
+                            {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z}, "Walker");
+                    } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::LIGHT) {
+                        LightNode node;
+                        node.position = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                        PawnSystem::Instance().AddLight(node);
                     }
                 }
 
-                {
-                    std::wstring wstr(WDLCommand);
-                    std::string cmd(wstr.begin(), wstr.end());
-                    EditorLog("Placed: %s", cmd.c_str());
-                }
-                OTEditor.WorldData += WDLCommand;
                 OmegaTechEditor.DrawModel = false;
 
                 // CSG: register brush renderable for OZONE primitives (EMID >= 200).
@@ -2750,7 +2576,6 @@ int main(int argc, char **argv){
                     }
                 }
 
-                CacheWDL();
             }
 
             // Tool modes (toolbar Cam/Move/Scale/Rotate) while placing:
@@ -2937,12 +2762,6 @@ int main(int argc, char **argv){
                         std::string worldArg;
                         if (ext == ".ozone") {
                             worldArg = g_documentPath.string();
-                        } else {
-                            std::string tempPath = "System/Cache/editor_test.wdl";
-                            std::wstring wstr = OTEditor.WorldData;
-                            std::string wd(wstr.begin(), wstr.end());
-                            std::ofstream f(tempPath);
-                            if (f.is_open()) { f << wd; f.close(); worldArg = tempPath; }
                         }
                         if (!worldArg.empty()) {
                             std::string cmd = "start \"\" System\\Angels95.exe --world \"" + worldArg + "\" --world-dir " + worldDir;
@@ -3194,24 +3013,6 @@ int main(int argc, char **argv){
                         }
                         break;
                     }
-                }
-            } else if (tgtType == SelType::MODEL && tgtIdx >= 0 && tgtIdx < CachedModelCounter) {
-                int mid = CachedModels[tgtIdx].ModelId;
-                wstring oldLine = L"Model" + to_wstring(mid) + L":" +
-                    to_wstring(CachedModels[tgtIdx].X) + L":" +
-                    to_wstring(CachedModels[tgtIdx].Y) + L":" +
-                    to_wstring(CachedModels[tgtIdx].Z) + L":" +
-                    to_wstring(CachedModels[tgtIdx].S) + L":" +
-                    to_wstring(CachedModels[tgtIdx].R) + L":";
-                wstring newLine = L"Model" + to_wstring(mid) + L":" +
-                    to_wstring(px) + L":" + to_wstring(py) + L":" +
-                    to_wstring(pz) + L":" +
-                    to_wstring(g_editorPanels.propScale) + L":" +
-                    to_wstring(prot) + L":";
-                size_t pos = OTEditor.WorldData.find(oldLine);
-                if (pos != wstring::npos) {
-                    OTEditor.WorldData.replace(pos, oldLine.size(), newLine);
-                    CacheWDL();
                 }
             } else if (tgtType == SelType::SPAWN) {
                 auto& starts = PawnSystem::Instance().GetPlayerStarts();
@@ -4050,11 +3851,9 @@ int main(int argc, char **argv){
         if (!g_editorPanels.actionLevelListOpen.empty()) {
             std::string worldName = g_editorPanels.actionLevelListOpen;
             g_editorPanels.actionLevelListOpen.clear();
-            fs::path wdl = fs::path("GameData/Worlds") / worldName / "World.wdl";
             fs::path ozone = fs::path("GameData/Worlds") / worldName / "World.ozone";
-            if (!fs::exists(wdl)) wdl = fs::path("../GameData/Worlds") / worldName / "World.wdl";
             if (!fs::exists(ozone)) ozone = fs::path("../GameData/Worlds") / worldName / "World.ozone";
-            fs::path target = fs::exists(wdl) ? wdl : ozone;
+            fs::path target = ozone;
             if (fs::exists(target)) {
                 g_pendingOpenPath = target;
                 EditorLog("LevelList: opening world '%s'", worldName.c_str());
@@ -4074,14 +3873,6 @@ int main(int argc, char **argv){
             portal.targetSpawn = {0, 20, 0};
             portal.bidirectional = true;
             PawnSystem::Instance().AddPortal(portal);
-            // Persist into WDL text immediately so Save picks it up
-            std::wstring cmd = L"Portal:" + std::wstring(target.begin(), target.end()) +
-                L":" + to_wstring(portal.bounds.min.x) + L":" + to_wstring(portal.bounds.min.y) + L":" +
-                to_wstring(portal.bounds.min.z) + L":" + to_wstring(portal.bounds.max.x) + L":" +
-                to_wstring(portal.bounds.max.y) + L":" + to_wstring(portal.bounds.max.z) +
-                L":0:20:0:1:";
-            OTEditor.WorldData += cmd;
-            CacheWDL();
             g_editorPanels.portalTargetWorld = target;
             RefreshPortalList();
             RefreshLevelList();

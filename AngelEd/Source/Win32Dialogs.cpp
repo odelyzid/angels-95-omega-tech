@@ -5,7 +5,7 @@
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "../../Source/Script/LightningEntityRegistry.hpp"
-#include "../../Source/OzOzoneLoader.hpp"
+#include "../../Source/World/OzOzoneLoader.hpp"
 #include "Win32Dialogs.hpp"
 #include <windows.h>
 #include <shellapi.h>
@@ -956,8 +956,8 @@ static bool ChooseWorldFile(bool save, std::string& outPath) {
     dialog.hwndOwner = g_hRaylibWnd;
     dialog.lpstrFile = path;
     dialog.nMaxFile = MAX_PATH;
-    dialog.lpstrFilter = save ? L"World Files (*.wdl;*.ozone)\0*.wdl;*.ozone\0WDL World (*.wdl)\0*.wdl\0OZONE World (*.ozone)\0*.ozone\0\0"
-                               : L"World Files (*.wdl;*.ozone)\0*.wdl;*.ozone\0WDL World (*.wdl)\0*.wdl\0OZONE World (*.ozone)\0*.ozone\0\0";
+    dialog.lpstrFilter = save ? L"OZONE World (*.ozone)\0*.ozone\0\0"
+                              : L"OZONE World (*.ozone)\0*.ozone\0\0";
     dialog.lpstrDefExt = save ? L"wdl" : nullptr;
     dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
     if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return false;
@@ -2013,8 +2013,7 @@ static void ScanAvailableWorlds() {
             if (!entry.is_directory()) continue;
             std::string name = entry.path().filename().string();
             if (name == "Legacy") continue; // nested legacy world dump
-            if (fs::exists(entry.path() / "World.wdl") ||
-                fs::exists(entry.path() / "World.ozone")) {
+            if (fs::exists(entry.path() / "World.ozone")) {
                 // avoid duplicates when both roots resolve to the same tree
                 bool dup = false;
                 for (const auto& w : g_availableWorlds) if (w == name) { dup = true; break; }
@@ -3480,12 +3479,9 @@ static void BuildLevelList() {
         LevelListEntry e;
         e.world = g_availableWorlds[i];
         e.isCurrent = (e.world == current);
-        fs::path wdl = fs::path("GameData/Worlds") / e.world / "World.wdl";
         fs::path ozone = fs::path("GameData/Worlds") / e.world / "World.ozone";
-        if (!fs::exists(wdl)) wdl = fs::path("../GameData/Worlds") / e.world / "World.wdl";
         if (!fs::exists(ozone)) ozone = fs::path("../GameData/Worlds") / e.world / "World.ozone";
-        if (fs::exists(wdl)) { e.format = "WDL"; ScanPortalTargets(wdl, targets[i]); }
-        else if (fs::exists(ozone)) { e.format = "OZONE"; ScanPortalTargets(ozone, targets[i]); }
+        if (fs::exists(ozone)) { e.format = "OZONE"; ScanPortalTargets(ozone, targets[i]); }
         e.portalsOut = (int)targets[i].size();
         g_levelList.push_back(e);
     }
