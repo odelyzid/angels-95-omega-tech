@@ -207,6 +207,14 @@ auto LoadWorld()
                 OzoneLoader::Instance().LoadFile(ozonePath);
             else
                 OZ_ERROR("LoadWorld: missing world '%s' (no World.ozone; WDL fallback removed)", ozonePath);
+
+            // Re-assert the lit-fog shader on the freshly loaded world geometry.
+            // The loader assigns it per-material when building brushes, but if
+            // the shader was (re)loaded or the materials ended up with the
+            // default shader the client rendered the world fullbright. The
+            // editor already re-applies it after load; the client must too.
+            if (OmegaTechData.Lights.id > 0)
+                OzoneLoader::Instance().SetLitFogShader(OmegaTechData.Lights);
         }
 
         // Apply level metadata (LevelInfo/Particles) after entities are loaded
@@ -311,20 +319,34 @@ void UpdateLightSources()
     float dt = GetFrameTime();
     float cameraPos[3] = {OmegaTechData.MainCamera.position.x, OmegaTechData.MainCamera.position.y, OmegaTechData.MainCamera.position.z};
 
-    // Light[0] = directional headlight (attached to camera)
-    OmegaTechData.GameLights[0].position = OmegaTechData.MainCamera.position;
-    OmegaTechData.GameLights[0].target = {OmegaTechData.MainCamera.target.x, OmegaTechData.MainCamera.target.y - 5, OmegaTechData.MainCamera.target.z};
-    OmegaTechData.GameLights[0].enabled = true;
-    OmegaTechData.GameLights[0].type = LIGHT_DIRECTIONAL;
-
     SetShaderValue(OmegaTechData.Lights, OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
     // Submit PawnSystem lights via LitLightning_Update
     auto &pawnLights = PawnSystem::Instance().GetLights();
     LitLightning_Update(pawnLights, OmegaTechData.Lights, OmegaTechData.MainCamera, dt);
 
-    // Re-submit the headlight on top (index 0)
-    UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[0]);
+    // One-shot diagnostic: confirm the world lights made it into the shader.
+    static size_t s_lastLightCount = (size_t)-1;
+    if (pawnLights.size() != s_lastLightCount) {
+        s_lastLightCount = pawnLights.size();
+        OZ_INFO("Lighting: worldLights=%zu shader=%d", pawnLights.size(), OmegaTechData.Lights.id);
+    }
+
+    // Directional camera fill, used ONLY when the world declares no active
+    // lights of its own. A full-white headlight otherwise washed the lit scene
+    // out (everything fullbright) and hid the world lights' colours — the editor
+    // never submits one and looks correct.
+    bool anyActiveLight = false;
+    for (const auto& l : pawnLights)
+        if (l.active) { anyActiveLight = true; break; }
+    if (!anyActiveLight) {
+        OmegaTechData.GameLights[0].position = OmegaTechData.MainCamera.position;
+        OmegaTechData.GameLights[0].target = {OmegaTechData.MainCamera.target.x, OmegaTechData.MainCamera.target.y - 5, OmegaTechData.MainCamera.target.z};
+        OmegaTechData.GameLights[0].type = LIGHT_DIRECTIONAL;
+        OmegaTechData.GameLights[0].enabled = true;
+        OmegaTechData.GameLights[0].intensity = 0.4f;
+        UpdateLightValues(OmegaTechData.Lights, OmegaTechData.GameLights[0]);
+    }
 
     // Update uTime for GPU light animation
     static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");

@@ -43,6 +43,16 @@ public:
     float CrouchEyeHeight = 1.2f;
     float EyeHeight = PLAYER_EYE_HEIGHT; // current, smoothed toward the stance
 
+    // --- Authoritative look state ---
+    // Owned here (not re-derived from camera.target every frame) so that the
+    // vertical physics — which moves position but not target — can never pitch
+    // the view. Re-synced from the camera on first use or when something else
+    // changes the camera's facing (respawn / portal / SetCamera), detected by a
+    // large direction mismatch.
+    float Yaw = 0.0f;
+    float Pitch = 0.0f;
+    bool LookInit = false;
+
     float OldX = 0.0f, OldY = 0.0f, OldZ = 0.0f;
 
     BoundingBox PlayerBounds;
@@ -66,24 +76,29 @@ public:
 
         if (inputBlocked) return;
 
-        // --- Look: yaw/pitch derived from the live camera each frame so that
-        //     portal / SetCamera / respawn teleports are respected. ---
-        Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
-        float yaw = atan2f(fwd.x, fwd.z);
-        float pitch = asinf(fmaxf(-1.0f, fminf(1.0f, fwd.y)));
+        // Re-sync the authoritative look when the camera's facing changed
+        // externally (first frame, teleport, respawn). Vertical drift from the
+        // jump/gravity code is tiny, so it stays below the mismatch threshold.
+        Vector3 camDir = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+        Vector3 lookDir = {cosf(Pitch) * sinf(Yaw), sinf(Pitch), cosf(Pitch) * cosf(Yaw)};
+        if (!LookInit || Vector3DotProduct(camDir, lookDir) < 0.9f) {
+            Yaw = atan2f(camDir.x, camDir.z);
+            Pitch = asinf(fmaxf(-1.0f, fminf(1.0f, camDir.y)));
+            LookInit = true;
+        }
 
         Vector2 md = GetMouseDelta();
-        yaw += md.x * MouseSensitivity;
-        pitch -= md.y * MouseSensitivity;
+        Yaw -= md.x * MouseSensitivity;
+        Pitch -= md.y * MouseSensitivity;
 
         // Gamepad right stick look (raylib's first-person camera provided this)
         float lookX = GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_X);
         float lookY = GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_Y);
-        if (fabsf(lookX) > 0.15f) yaw += lookX * 2.4f * dt;
-        if (fabsf(lookY) > 0.15f) pitch -= lookY * 1.8f * dt;
+        if (fabsf(lookX) > 0.15f) Yaw -= lookX * 2.4f * dt;
+        if (fabsf(lookY) > 0.15f) Pitch -= lookY * 1.8f * dt;
 
-        if (pitch > 1.5533f) pitch = 1.5533f;   // clamp ~89 degrees
-        if (pitch < -1.5533f) pitch = -1.5533f;
+        if (Pitch > 1.5533f) Pitch = 1.5533f;   // clamp ~89 degrees
+        if (Pitch < -1.5533f) Pitch = -1.5533f;
 
         // --- Move input relative to yaw ---
         float f = 0.0f, r = 0.0f;
@@ -103,8 +118,9 @@ public:
         if (isSprinting) speed *= SprintMultiplier;
         if (isCrouching) speed *= CrouchMultiplier;
 
-        Vector3 forward = {sinf(yaw), 0.0f, cosf(yaw)};
-        Vector3 right   = {cosf(yaw), 0.0f, -sinf(yaw)};
+        Vector3 forward = {sinf(Yaw), 0.0f, cosf(Yaw)};
+        // Right-hand strafe: cross(forward, up) for a Y-up camera.
+        Vector3 right   = {-cosf(Yaw), 0.0f, sinf(Yaw)};
         Vector3 move = {forward.x * f + right.x * r, 0.0f, forward.z * f + right.z * r};
         float dist = speed * dt;
 
@@ -117,8 +133,8 @@ public:
             cam.position.z += move.z * s;
         }
 
-        // Rebuild the look target from the final yaw/pitch.
-        Vector3 dir = {cosf(pitch) * sinf(yaw), sinf(pitch), cosf(pitch) * cosf(yaw)};
+        // Rebuild the look target from the owned yaw/pitch.
+        Vector3 dir = {cosf(Pitch) * sinf(Yaw), sinf(Pitch), cosf(Pitch) * cosf(Yaw)};
         cam.target = Vector3Add(cam.position, Vector3Scale(dir, LookDistance));
     }
 

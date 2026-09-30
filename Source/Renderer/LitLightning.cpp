@@ -64,6 +64,7 @@ static Light BuildRLight(const LightNode& node, Shader shader, int index) {
     light.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", index));
     light.intensityLoc = GetShaderLocation(shader, TextFormat("lights[%i].intensity", index));
     light.radiusLoc = GetShaderLocation(shader, TextFormat("lights[%i].radius", index));
+    light.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", index));
 
     return light;
 }
@@ -119,6 +120,12 @@ void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D
         Light dummy = {0};
         dummy.enabledLoc = GetShaderLocation(shader, TextFormat("lights[%i].enabled", i));
         dummy.typeLoc = GetShaderLocation(shader, TextFormat("lights[%i].type", i));
+        dummy.positionLoc = GetShaderLocation(shader, TextFormat("lights[%i].position", i));
+        dummy.targetLoc = GetShaderLocation(shader, TextFormat("lights[%i].target", i));
+        dummy.colorLoc = GetShaderLocation(shader, TextFormat("lights[%i].color", i));
+        dummy.intensityLoc = GetShaderLocation(shader, TextFormat("lights[%i].intensity", i));
+        dummy.radiusLoc = GetShaderLocation(shader, TextFormat("lights[%i].radius", i));
+        dummy.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", i));
         dummy.enabled = false;
         UpdateLightValues(shader, dummy);
     }

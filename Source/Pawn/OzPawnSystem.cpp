@@ -419,6 +419,7 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
             if (itemId == 0) {
                 // Fallback: scan ItemDB by name
                 for (int i = 0; i < ITEM_DB_SIZE; i++) {
+                    if (!ItemDB[i].name) continue; // uninitialized tail entries
                     std::string dbName(ItemDB[i].name);
                     // Remove spaces for comparison: "Health Vial" -> "HealthVial"
                     dbName.erase(std::remove(dbName.begin(), dbName.end(), ' '), dbName.end());

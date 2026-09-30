@@ -116,6 +116,7 @@ static LRESULT CALLBACK ClientWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
     return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
 }
 
+//TODO: Move into UI Handler
 static void CreateNativeMenuBar() {
     HWND hWnd = (HWND)GetWindowHandle();
     if (!hWnd) return;
@@ -175,7 +176,7 @@ static bool g_adsActive = false;
 
 // ---------------------------------------------------------------------------
 // HUD: draw player stats bars (always visible) 
-// TODO: move into PlayerUiHandler
+// TODO: move into PlayerController / InventoryBehaviourController
 // ---------------------------------------------------------------------------
 static void DrawPlayerHUD() {
     const int sw = GetScreenWidth();
@@ -233,7 +234,7 @@ static void DrawPlayerHUD() {
     DrawRectangle(x, y + 14, bar_w, bar_h, (Color){40, 10, 50, 255});
     DrawRectangle(x, y + 14, (int)(pe_pct * bar_w), bar_h, PURPLE);
     y += 14 + bar_h + pad;
-
+       // TODO: move to PlayerController InventoryBehavoiurCOntroller
     // Current selected item/weapon (from EntityManager hotbar)
     {
         auto& lem = LightningEntityManager::Instance();
@@ -379,6 +380,7 @@ void DrawRemotePlayers3D() {
 
 // ---------------------------------------------------------------------------
 // Read a stat from the selected weapon entity
+   // TODO: move to PlayerController / Weapon.WeaponBehaviourController
 // ---------------------------------------------------------------------------
 static float SelectedWeaponStat(const std::string& key, float defVal) {
     EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
@@ -389,6 +391,7 @@ static float SelectedWeaponStat(const std::string& key, float defVal) {
 
 // ---------------------------------------------------------------------------
 // Fire weapon helper — delegates to LightningEntityManager
+   // TODO: move to PlayerController / Weapon.WeaponBehaviourController
 // ---------------------------------------------------------------------------
 static void FireWeapon() {
     Camera3D& cam = OmegaTechData.MainCamera;
@@ -692,7 +695,7 @@ static void HandleConsoleInput() {
 
 // ---- Inventory Overlay (Diablo I style TODO: -> Should be derived into PlayerUiHandler) ----
 static int g_invSelectedBpSlot = -1;
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
 // Consume one backpack item and apply its effect. Returns true if it was used.
 static bool UseBackpackItem(int slot) {
     if (slot < 0 || slot >= BACKPACK_SLOTS) return false;
@@ -725,7 +728,7 @@ static bool UseBackpackItem(int slot) {
     OmegaTechTextSystem.Write(std::string("Used ") + def->name);
     return true;
 }
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
 static void DrawInventoryOverlay() {
     const int sw = GetScreenWidth();
     const int sh = GetScreenHeight();
@@ -745,7 +748,7 @@ static void DrawInventoryOverlay() {
     int ey = py + 50;
     int slotH = 38;
     int slotW = 150;
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // === EQUIPMENT (left side) ===
     DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
 
@@ -780,7 +783,7 @@ static void DrawInventoryOverlay() {
         }
         ey += slotH + 4;
     }
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // === BACKPACK (right side) -> Legacy ===
     int bx = px + 190;
     int by = py + 50;
@@ -852,7 +855,7 @@ static void DrawInventoryOverlay() {
             }
         }
     }
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // Keyboard navigation over the backpack (arrows move, Enter uses)
     {
         int sel = g_invSelectedBpSlot;
@@ -867,7 +870,7 @@ static void DrawInventoryOverlay() {
         if (IsKeyPressed(KEY_ENTER) && g_invSelectedBpSlot >= 0)
             UseBackpackItem(g_invSelectedBpSlot);
     }
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // Hover tooltip for backpack items
     {
         Vector2 mp = GetMousePosition();
@@ -894,7 +897,7 @@ static void DrawInventoryOverlay() {
             break;
         }
     }
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // === STATS (between equipment and backpack) ===
     int sx = px + 530;
     int sy = py + 50;
@@ -1034,7 +1037,7 @@ int main(int argc, char** argv){
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     g_client.set_on_item_collected([](int item_id, int quantity) {
         const char* name = "unknown";
         const ItemDBEntry* def = GetItemDef(item_id);
@@ -1061,7 +1064,7 @@ int main(int argc, char** argv){
             !IsSoundPlaying(OmegaTechSoundData.Death))
             PlaySound(OmegaTechSoundData.Death);
     });
-
+   // TODO: move to PlayerController / InventoryBehaviourController -> .ozls Pawn.GameEngine.UI.GameUI
     // Weapon pickup granted by the server (item_id 15) — add to hotbar.
     g_client.set_on_weapon_collected([](const char* weapon_def_name) {
         auto& registry = LightningEntityRegistry::Instance();
@@ -1142,7 +1145,7 @@ int main(int argc, char** argv){
                 DisableCursor();
             }
         }
-
+   // TODO: move to PlayerController
         // K key toggles the ethereal (angelic) skill tree
         if (IsKeyPressed(KEY_K)) {
             if (!g_consoleOpen) {
@@ -1157,7 +1160,7 @@ int main(int argc, char** argv){
                 }
             }
         }
-
+   // TODO: move to PlayerController
         // Tab key toggles inventory
         if (IsKeyPressed(KEY_TAB)) {
             if (!g_consoleOpen) {
@@ -1241,6 +1244,7 @@ int main(int argc, char** argv){
             continue;
         }
 
+           // TODO: move to PlayerController
         // Game-over overlay when player has died 3 times
         if (OmegaTechData.Deaths >= 3) {
             int sw = GetScreenWidth(), sh = GetScreenHeight();
@@ -1389,7 +1393,7 @@ int main(int argc, char** argv){
             }
         }
         }
-
+                // TODO: move to PlayerController
         // ---  Jump / Fly / Noclip Y management ---
         for (int s = 0; s < move_steps; ++s) {
         {
@@ -1429,7 +1433,8 @@ int main(int argc, char** argv){
                     g_playerMovement.onGround = false;
                 }
 
-                // Gravity
+                // Gravity 
+                // TODO: move to collision
                 if (!g_playerMovement.onGround) {
                     g_playerMovement.velocityY += -20.0f * dt;
                     OmegaTechData.MainCamera.position.y += g_playerMovement.velocityY * dt;

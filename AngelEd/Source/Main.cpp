@@ -1042,12 +1042,30 @@ static void ExportToOzone(std::ostream& output) {
     for (auto& light : pawns.GetLights()) {
         if (!light.active) continue;
         Vector3 p = zup(light.position);
-        const char* type = (light.type == LitLightType::SPOT) ? "spot" :
-                           (light.type == LitLightType::DIRECTIONAL) ? "directional" : "point";
-        output << "light " << type << " " << p.x << " " << p.y << " " << p.z
-               << " " << light.color.r << " " << light.color.g << " " << light.color.b
-               << " " << light.intensity << " " << light.radius;
-        if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
+        Vector3 t = zup(light.target);
+        // Color components are unsigned char — stream them as integers, never as
+        // raw bytes (a raw byte >= 0x80 corrupts the UTF-8 text file and breaks
+        // the client's numeric light parser).
+        int r = (int)light.color.r, g = (int)light.color.g, b = (int)light.color.b;
+        if (light.type == LitLightType::DIRECTIONAL) {
+            // directional tx ty tz r g b intensity [flare] [corona]
+            output << "light directional " << t.x << " " << t.y << " " << t.z
+                   << " " << r << " " << g << " " << b << " " << light.intensity;
+        } else if (light.type == LitLightType::SPOT) {
+            // spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect] [flare] [corona]
+            output << "light spot " << p.x << " " << p.y << " " << p.z
+                   << " " << t.x << " " << t.y << " " << t.z
+                   << " " << r << " " << g << " " << b
+                   << " " << light.intensity << " " << light.radius
+                   << " " << light.innerCone << " " << light.outerCone;
+            if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
+        } else {
+            // point x y z r g b intensity radius [effect] [flare] [corona]
+            output << "light point " << p.x << " " << p.y << " " << p.z
+                   << " " << r << " " << g << " " << b
+                   << " " << light.intensity << " " << light.radius;
+            if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
+        }
         // Flare/corona trailing floats (parsed back by OzOzoneLoader)
         if (light.flare || light.corona) output << " " << (light.flare ? 1 : 0) << " " << (light.corona ? 1 : 0);
         output << "\n";

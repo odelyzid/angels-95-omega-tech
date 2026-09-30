@@ -811,6 +811,10 @@ bool OzoneLoader::LoadFile(const char* path) {
     }
 
     RebuildCollisionVolumes();
+    int r0shader = (!m_renderables.empty() && m_renderables[0].model.materialCount > 0)
+        ? m_renderables[0].model.materials[0].shader.id : -1;
+    OZ_INFO("OZONE: lights=%zu litShader=%d renderable0.shader=%d",
+            PawnSystem::Instance().GetLights().size(), GetLitFogShader().id, r0shader);
     OZ_INFO("OzoneLoader: loaded %zu primitives, %zu collision volumes from %s",
             primitives.size(), m_collisionVolumes.size(), path);
     return true;

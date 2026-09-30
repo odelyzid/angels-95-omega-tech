@@ -7,6 +7,8 @@
 //   -o test_pawn_system -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lm
 
 #include "../Source/Pawn/OzPawnSystem.hpp"
+#include "../Source/Script/LightningEntityRegistry.hpp"
+#include "../Source/Script/LightningEntityDef.hpp"
 #include <cstdio>
 #include <cassert>
 
@@ -127,6 +129,31 @@ static int test_pickup_crud() {
     CHECK(found->typeName == "HealthVial");
     ps.RemovePickup(id);
     CHECK(ps.GetPickup(id) == nullptr);
+    PASS(); return 0; END_TEST();
+}
+
+// Regression: a pickup whose entity def is not in ItemDB and has no item_id
+// (e.g. a weapon like pistol_01) used to crash on the ItemDB name-fallback scan
+// (std::string constructed from a null ItemDB entry name).
+static int test_pickup_unlisted_item_no_crash() {
+    TEST("Collect pickup not in ItemDB does not crash");
+    reset_pawn_system();
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "pistol_01_like";
+    def.type = EntityType::PICKUP;   // no item_id -> falls through to ItemDB scan
+    reg.Register(def);
+
+    auto& ps = PawnSystem::Instance();
+    PickupNode node;
+    node.typeName = def.name;
+    node.position = {0, 0, 0};
+    node.respawnTime = 30.0f;
+    ps.AddPickup(node);
+
+    BoundingBox playerBounds = {{-1, -1, -1}, {1, 1, 1}};
+    ps.UpdatePickups(0.016f, {0, 0, 0}, playerBounds); // must not crash
+    CHECK(true);
     PASS(); return 0; END_TEST();
 }
 
@@ -337,6 +364,7 @@ int main() {
     failures += test_despawn_all();
     failures += test_player_starts();
     failures += test_pickup_crud();
+    failures += test_pickup_unlisted_item_no_crash();
     failures += test_zone_crud();
     failures += test_skyzone_crud();
     failures += test_skyzone_active();
