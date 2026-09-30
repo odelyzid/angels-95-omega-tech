@@ -42,6 +42,9 @@ extern int Editor_GetCsgOperation();
 extern void Editor_SetCsgOperation(int op);
 extern int Editor_GetPlaceMode();
 extern void Editor_SetPlaceMode(int mode);
+// Current world directory (absolute) — used by the Texture Manager import feature
+extern std::string Editor_GetCurrentWorldDir();
+extern std::string Editor_GetCurrentWorldName();
 
 static HINSTANCE g_hInst = nullptr;
 static HWND g_hRaylibWnd = nullptr;
@@ -423,6 +426,7 @@ static const int ID_TEX_DIMS_LABEL = 107;
 static const int ID_TEX_SRC_LABEL  = 108;
 static const int ID_TEX_APPLY_ALL  = 109;
 static const int ID_TEX_ADDPKG     = 110;
+static const int ID_TEX_IMPORT     = 111;
 
 // Texture grid view constants
 static const int TEX_THUMB_SIZE = 64;
@@ -504,6 +508,71 @@ void SetTextureTargetNames(const std::vector<std::string>& names) {
     g_textureTargetNames = names;
     if (g_editorPanels.hTextureMgr)
         SendMessage((HWND)g_editorPanels.hTextureMgr, WM_USER + 51, 0, 0);
+}
+
+// ---------------------------------------------------------------------
+// Import Textures — copy image file(s) into the open world's tileset so
+// they become selectable in the browser and usable as texSlot indices.
+// ---------------------------------------------------------------------
+static void ImportTexturesIntoWorld(HWND hwnd) {
+    std::vector<wchar_t> buf(32768, 0);
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFile = buf.data();
+    ofn.nMaxFile = (DWORD)buf.size();
+    ofn.lpstrFilter = L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0All Files (*.*)\0*.*\0";
+    ofn.lpstrTitle = L"Import Textures";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
+                OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+    if (!GetOpenFileNameW(&ofn)) return;
+
+    // Multi-select buffer layout: "dir\0file1\0file2\0\0", or a single
+    // selection which is a direct "fullpath\0".
+    std::vector<std::wstring> files;
+    std::wstring first(buf.data());
+    if (first.empty()) return;
+    const wchar_t* p = buf.data() + first.size() + 1;
+    if (*p == L'\0') {
+        files.push_back(first);
+    } else {
+        fs::path dir(first);
+        while (*p) {
+            std::wstring name(p);
+            files.push_back((dir / name).wstring());
+            p += name.size() + 1;
+        }
+    }
+    if (files.empty()) return;
+
+    // Destination: <world>/oztex/tileset (1-based, sorted → new tile slots).
+    // With no world open, fall back to GameData/Textures.
+    fs::path dest;
+    std::string worldDir = Editor_GetCurrentWorldDir();
+    if (!worldDir.empty())
+        dest = fs::path(worldDir) / "oztex" / "tileset";
+    else
+        dest = fs::current_path() / "GameData" / "Textures";
+
+    std::error_code ec;
+    fs::create_directories(dest, ec);
+
+    int copied = 0, failed = 0;
+    for (const auto& f : files) {
+        fs::path src(f);
+        fs::path out = dest / src.filename();
+        std::error_code cec;
+        fs::copy_file(src, out, fs::copy_options::overwrite_existing, cec);
+        if (cec) failed++; else copied++;
+    }
+
+    ScanTextureBrowserFiles();
+
+    std::string msg = "Imported " + std::to_string(copied) + " texture(s) into:\n" +
+                      dest.string();
+    if (failed) msg += "\n" + std::to_string(failed) + " file(s) failed.";
+    msg += "\n\nReopen the world (or Refresh) to use them as tileset slots.";
+    MessageBoxA(hwnd, msg.c_str(), "Import Textures", MB_OK | MB_ICONINFORMATION);
 }
 
 // =====================================================================
@@ -669,9 +738,10 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     case WM_CREATE: {
         int x = 10, y = 10, bw = 500;
 
-        // Toolbar: Add Package + Refresh + Close
+        // Toolbar: Add Package + Import Textures + Refresh + Close
         CreateButton(hwnd, L"Add Package", x, y, 100, 24, ID_TEX_ADDPKG);
-        CreateButton(hwnd, L"Refresh", x + 106, y, 70, 24, ID_TEX_REFRESH);
+        CreateButton(hwnd, L"Import Textures", x + 106, y, 116, 24, ID_TEX_IMPORT);
+        CreateButton(hwnd, L"Refresh", x + 228, y, 70, 24, ID_TEX_REFRESH);
         CreateButton(hwnd, L"Close", x + bw - 80, y, 80, 24, ID_TEX_CLOSE);
         y += 30;
 
@@ -729,7 +799,8 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
 
         // Toolbar
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_ADDPKG), NULL, x, 10, 100, 24, SWP_NOZORDER);
-        SetWindowPos(GetDlgItem(hwnd, ID_TEX_REFRESH), NULL, x + 106, 10, 70, 24, SWP_NOZORDER);
+        SetWindowPos(GetDlgItem(hwnd, ID_TEX_IMPORT), NULL, x + 106, 10, 116, 24, SWP_NOZORDER);
+        SetWindowPos(GetDlgItem(hwnd, ID_TEX_REFRESH), NULL, x + 228, 10, 70, 24, SWP_NOZORDER);
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_CLOSE), NULL, x + bw - 80, 10, 80, 24, SWP_NOZORDER);
 
         // Grid — fill most of the window
@@ -879,6 +950,8 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
                     MessageBoxA(hwnd, "Failed to load package file.\nThe file may be corrupt or not a valid OzPackage.", "Error", MB_OK | MB_ICONERROR);
                 }
             }
+        } else if (id == ID_TEX_IMPORT) {
+            ImportTexturesIntoWorld(hwnd);
         } else if (id == ID_TEX_LIST && notify == 1) {
             // Grid selection changed — update preview
             if (hGrid) {

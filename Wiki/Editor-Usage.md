@@ -109,6 +109,10 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 - Select target model from dropdown (populated from loaded world models)
 - Click **Apply** to set texture on model; **Apply to All** checkbox applies to all model instances
 - **Add Package** button loads additional `.oztex`/`.ozpak` files at runtime
+- **Import Textures** button copies selected image file(s) into the open world's
+  `oztex/tileset/` folder (creating it if needed) so they appear in the browser
+  and become usable as `texSlot` indices; falls back to `GameData/Textures/` when
+  no world is open. Reopen the world (or Refresh) to pick them up as tileset slots.
 
 ### Sound Manager
 - Lists `.wav`/`.mp3`/`.ogg` files organized by category tabs: **SFX** / **Music** / **Ambience**
@@ -202,11 +206,15 @@ The CSG operation value is stored per brush and fed to the backend `CsgProcessor
 
 Worlds are saved in OZONE text format. OZONE export includes CSG brush primitives, heightmap, and all entity types (player starts, pickups, NPCs, zones, emitters) with per-zone environment overrides.
 
+## History (Undo / Redo)
+
+Full-document undo/redo via **Edit > Undo/Redo** or **Ctrl+Z** / **Ctrl+Y** (Ctrl+Shift+Z also redoes). Each step snapshots the whole world (geometry, entities, level metadata, heightmap) using the OZONE export, so place/delete/duplicate, property edits, lighting/portal/zone changes, texture application, heightmap generation, terrain painting, spawns and gizmo drags are all reversible. History is cleared when a world is opened or a new one is created. The Animation tool's vertex-edit undo (Ctrl+Z/Y while editing verts) is separate and takes precedence there.
+
 ## Known Limitations
 
 - Lighting toggle (Lit/Unlit) does not actually unset shader from model materials
 - Render meshes are not CSG-carved (CSG booleans process collision volumes only)
-- No undo/redo system
+- Undo/redo covers world state only; camera and selection are not restored
 - No test-play save prompts ("Reload world from playtest changes?")
 - Model/Texture preview rendering requires the raylib viewport to be focused
 - Lighting effects (watery, torch, fire, lamp) are UI only — not rendered in viewport

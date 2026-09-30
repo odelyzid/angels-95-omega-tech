@@ -187,7 +187,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 ### Tier 4 — tooling & UX
 
-- [ ] Editor undo/redo; multi-select; prefab library
+- [x] Editor undo/redo; [ ] multi-select; [ ] prefab library
 - [ ] CI runs `make test` and a game-state suite; build editor via its Makefile
 - [ ] clang-format/clang-tidy + `.editorconfig`
 - [ ] ASan/UBSan CI build variant

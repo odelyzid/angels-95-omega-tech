@@ -154,7 +154,7 @@ Full tree: `Wiki/Engine-Overview.md`. Key modules:
 - Win32 native panels + raylib viewport. Dynamic file scanning of `GameData/` + packages. Reads `System/AngelEd.ini`.
 - Lit/Unlit/Wire toggle swaps material shaders; right-click context menu exists; collision CSG runs via `OzoneLoader::RebuildCollisionVolumes` per brush `csgOp` (render meshes are not carved). Export preserves `add`/`sub`/`intersect`.
 - Tool modes (Cam/Move/Scale/Rotate) are wired in placement mode; Pawn-tree Weapons branch places weapon pickups; sound preview has volume + loop.
-- Still missing: undo/redo. Docs: `Wiki/Editor-Usage.md`.
+- Undo/redo: full-document History (Edit menu + Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z). Snapshots serialize the whole world via `ExportToOzone`; restore uses `OzoneLoader::LoadString(text, worldDir)` (tileset-aware). Cleared on new/open. The animation tool keeps its own vertex-edit undo stack. Docs: `Wiki/Editor-Usage.md`.
 
 ## CI (.github/workflows/ci.yml)
 - Runs on every push/PR; tags matching `b*` also create a GitHub Release. Release assets: `System-<tag>.zip` (full Windows bundle) plus per-binary downloads `AngelServ`/`AngelMaster`/`OzPack`/`Angels95` (`*-<tag>-{linux-x86_64,windows-x86_64.exe}`) and `AngelEd-<tag>-windows-x86_64.exe` (editor is Windows-only). `AngelServ`/`AngelMaster`/`OzPack` are self-contained; `Angels95`/`AngelEd` need the zip's DLLs+GameData.

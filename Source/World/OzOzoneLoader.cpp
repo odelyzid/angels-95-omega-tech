@@ -830,8 +830,18 @@ bool OzoneLoader::LoadFile(const char* path) {
 // ---------------------------------------------------------------------------
 // LoadString
 // ---------------------------------------------------------------------------
-bool OzoneLoader::LoadString(const char* data) {
+bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
     Unload();
+
+    // Optional world directory: load the tileset before parsing so texSlot
+    // indices resolve to real textures (editor snapshot restore path).
+    if (worldDir && worldDir[0]) {
+        std::string wd(worldDir);
+        if (!wd.empty() && wd.back() != '/' && wd.back() != '\\')
+            wd += '/';
+        LoadWorldTextures(wd);
+        m_worldDir = wd;
+    }
 
     auto primitives = OzoneParser::parse_string(data);
     if (primitives.empty()) return false;

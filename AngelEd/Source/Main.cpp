@@ -28,6 +28,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -40,6 +41,8 @@ enum EditorMenuCmd {
     IDM_SAVE,
     IDM_SAVE_AS,
     IDM_PLAY_TEST,
+    IDM_UNDO,
+    IDM_REDO,
     IDM_EXIT,
     IDM_MODEL_BRW = 1100,
     IDM_SOUND_MGR,
@@ -71,6 +74,10 @@ enum EditorMenuCmd {
 
 // Forward declarations
 static void EditorLog(const char* fmt, ...);
+static void HistoryPush();
+static void HistoryUndo();
+static void HistoryRedo();
+static void HistoryClear();
 
 // WDLModels definition (extern declared in Editor.hpp)
 GameModels WDLModels;
@@ -97,6 +104,15 @@ static Vector2 g_rbDownPos{0,0};
 // placement ghost) is not mistaken for a selection click.
 static bool g_lbDown = false;
 static Vector2 g_lbDownPos{0,0};
+
+// Gizmo drag: moving a SELECTED entity requires an intentional gesture (Move
+// tool active, or the press landing on the selection) — a plain viewport click
+// must never translate it. g_suppressViewportDrag swallows stale mouse input
+// for the frame(s) around a native context menu.
+static bool g_gizmoDrag = false;
+static bool g_gizmoHistPushed = false;
+static bool g_suppressViewportDrag = false;
+static bool g_terrainHistPushed = false;
 
 static RayCollision RaycastTestBrushes(Ray ray, EditorSelection& out) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
@@ -472,6 +488,7 @@ static void EditorHoverEntity() {
 // ---------------------------------------------------------------------------
 static void DeleteSelectedEntity() {
     if (g_sel.type == SelType::NONE) return;
+    HistoryPush();
     EditorLog("Deleted %s idx=%d", g_sel.name.c_str(), g_sel.index);
     if (g_sel.type == SelType::NPC)
         PawnSystem::Instance().Despawn(g_sel.index);
@@ -513,6 +530,7 @@ static void DeleteSelectedEntity() {
 
 static void DuplicateSelectedEntity() {
     if (g_sel.type == SelType::NONE) return;
+    HistoryPush();
     Vector3 offset = {2.0f, 0, 2.0f};
     EditorLog("Duplicating %s idx=%d", g_sel.name.c_str(), g_sel.index);
     if (g_sel.type == SelType::NPC) {
@@ -756,6 +774,7 @@ static const char* LegacyPickupType(int idx) {
 static bool LoadWorldDocument(const fs::path& path) {
     EditorLog("Loading world: %s", path.string().c_str());
     ClearScene();
+    HistoryClear();
     SetWorldDirectory(path.parent_path());
     g_documentPath = path;
 
@@ -1295,6 +1314,10 @@ std::string Editor_GetCurrentWorldName() {
     fs::path parent = g_documentPath.parent_path();
     return parent.filename().string();
 }
+std::string Editor_GetCurrentWorldDir() {
+    if (g_documentPath.empty()) return "";
+    return g_documentPath.parent_path().string();
+}
 int Editor_GetCsgOperation() { return OmegaTechEditor.CSGOperation; }
 void Editor_SetCsgOperation(int op) { OmegaTechEditor.CSGOperation = op; }
 int Editor_GetPlaceMode() { return (int)g_placeMode; }
@@ -1362,6 +1385,8 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_WORLD_GRAPH:   ToggleWorldGraph(); return 0;
             case IDM_LEVEL_LIST:    ShowLevelList(!g_editorPanels.showLevelList); RefreshLevelList(); return 0;
             case IDM_ABOUT:         MessageBoxA(NULL, "AngelEd v1.0\nOzWorld Editor\nBased on OmegaTech\nTribeWarez 2026", "About AngelEd", MB_OK | MB_ICONINFORMATION); return 0;
+            case IDM_UNDO:          HistoryUndo(); return 0;
+            case IDM_REDO:          HistoryRedo(); return 0;
             // Context menu actions
             case IDM_PROPERTIES:    OpenPropertiesForSelection(); return 0;
             case IDM_DELETE_ENTITY: DeleteSelectedEntity(); return 0;
@@ -1394,6 +1419,11 @@ static void CreateEditorMenuBar() {
     AppendMenuA(hFile, MF_SEPARATOR, 0, NULL);
     AppendMenuA(hFile, MF_STRING, IDM_EXIT, "E&xit\tQ");
     AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hFile, "&File");
+
+    HMENU hEdit = CreatePopupMenu();
+    AppendMenuA(hEdit, MF_STRING, IDM_UNDO, "&Undo\tCtrl+Z");
+    AppendMenuA(hEdit, MF_STRING, IDM_REDO, "&Redo\tCtrl+Y");
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR)hEdit, "&Edit");
 
     HMENU hView = CreatePopupMenu();
     AppendMenuA(hView, MF_STRING, IDM_MODEL_BRW, "Model &Browser\tF5");
@@ -1535,6 +1565,61 @@ static void AnimRedo() {
     AnimSnapshot s = g_animRedo.back();
     g_animRedo.pop_back();
     AnimRestore(s);
+}
+
+// ---------------------------------------------------------------------------
+// Editor History — full-document undo/redo via OZONE text snapshots.
+// A snapshot captures geometry, entities, level metadata and the heightmap
+// (everything ExportToOzone writes). Camera and selection are left untouched.
+// ---------------------------------------------------------------------------
+static std::vector<std::string> g_histUndo;
+static std::vector<std::string> g_histRedo;
+static const size_t kHistMax = 64;
+
+static std::string HistoryCapture() {
+    std::ostringstream oss;
+    ExportToOzone(oss);
+    return oss.str();
+}
+
+static void HistoryClear() {
+    g_histUndo.clear();
+    g_histRedo.clear();
+}
+
+// Call BEFORE a mutation: snapshots current state and invalidates redo.
+static void HistoryPush() {
+    g_histRedo.clear();
+    g_histUndo.push_back(HistoryCapture());
+    if (g_histUndo.size() > kHistMax) g_histUndo.erase(g_histUndo.begin());
+}
+
+static void HistoryRestore(const std::string& text) {
+    ClearScene();
+    OzoneLoader::Instance().LoadString(
+        text.c_str(), OTEditor.Path[0] ? OTEditor.Path : nullptr);
+    OzoneLoader::Instance().RebuildCollisionVolumes();
+    g_sel = { SelType::NONE, -1, "", {0,0,0} };
+    g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+    OmegaTechEditor.DrawModel = false;
+}
+
+static void HistoryUndo() {
+    if (g_histUndo.empty()) return;
+    g_histRedo.push_back(HistoryCapture());
+    std::string snap = g_histUndo.back();
+    g_histUndo.pop_back();
+    HistoryRestore(snap);
+    EditorLog("Undo (%zu undo / %zu redo)", g_histUndo.size(), g_histRedo.size());
+}
+
+static void HistoryRedo() {
+    if (g_histRedo.empty()) return;
+    g_histUndo.push_back(HistoryCapture());
+    std::string snap = g_histRedo.back();
+    g_histRedo.pop_back();
+    HistoryRestore(snap);
+    EditorLog("Redo (%zu undo / %zu redo)", g_histUndo.size(), g_histRedo.size());
 }
 
 int main(int argc, char **argv){
@@ -1698,6 +1783,7 @@ int main(int argc, char **argv){
 
         if (g_pendingNew) {
             ClearScene();
+            HistoryClear();
             g_documentPath.clear();
             g_pendingNew = false;
         }
@@ -1727,6 +1813,7 @@ int main(int argc, char **argv){
                 PlaySound(g_previewSound);
         }
         if (g_editorPanels.actionTextureTarget > 0 && !g_editorPanels.actionTexturePath.empty()) {
+            HistoryPush();
             ApplyTextureToModel(g_editorPanels.actionTextureTarget, g_editorPanels.actionTexturePath.c_str());
             g_editorPanels.actionTextureTarget = -1;
             g_editorPanels.actionTexturePath.clear();
@@ -1787,19 +1874,47 @@ int main(int argc, char **argv){
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             g_lbDown = true;
             g_lbDownPos = GetMousePosition();
+            g_gizmoHistPushed = false;
+            // Begin an intentional move only when the Move tool is active, or the
+            // press lands on the current selection. A plain viewport click never
+            // translates a selected entity.
+            g_gizmoDrag = false;
+            if (!g_suppressViewportDrag && g_sel.type != SelType::NONE &&
+                !g_editorPanels.animEditVerts) {
+                Vector2 mp = GetMousePosition();
+                if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
+                    if (g_editorPanels.currentToolMode == 1) {
+                        g_gizmoDrag = true;
+                    } else {
+                        EditorSelection probe;
+                        if (EditorRaycastAt(mp, probe) &&
+                            probe.type == g_sel.type && probe.index == g_sel.index)
+                            g_gizmoDrag = true;
+                    }
+                }
+            }
         }
         if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && g_lbDown) {
             Vector2 delta = GetMouseDelta();
             if (fabsf(delta.x) > 3.0f || fabsf(delta.y) > 3.0f) g_lbDown = false;
         }
-        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && g_lbDown) {
-            g_lbDown = false;
-            Vector2 mp = GetMousePosition();
-            if (!g_editorPanels.animEditVerts && g_placeMode != PlaceMode::TERRAIN &&
-                mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
-                EditorPickEntity();
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            if (g_lbDown) {
+                g_lbDown = false;
+                Vector2 mp = GetMousePosition();
+                if (!g_editorPanels.animEditVerts && g_placeMode != PlaceMode::TERRAIN &&
+                    mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
+                    EditorPickEntity();
+                }
             }
+            g_gizmoDrag = false;
+            g_gizmoHistPushed = false;
+            g_suppressViewportDrag = false;
+            g_terrainHistPushed = false;
         }
+        // Release the post-context-menu input guard once the button is no longer held.
+        if (g_suppressViewportDrag && !IsMouseButtonDown(MOUSE_LEFT_BUTTON))
+            g_suppressViewportDrag = false;
 
         // TERRAIN brush: raise/lower heightmap cells (TERRAIN mode, left mouse)
         if (g_placeMode == PlaceMode::TERRAIN && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
@@ -1807,6 +1922,7 @@ int main(int argc, char **argv){
             if (oz.HasHeightmap()) {
                 Vector2 mp = GetMousePosition();
                 if (mp.x >= (float)GetStatsSidebarWidth() && mp.y >= 28.0f) {
+                    if (!g_terrainHistPushed) { HistoryPush(); g_terrainHistPushed = true; }
                     Ray ray = GetMouseRay(mp, OTEditor.MainCamera);
                     Vector3 hmPos = oz.GetHeightmapPosition();
                     float scale = oz.GetHeightmapScale();
@@ -1905,6 +2021,18 @@ int main(int argc, char **argv){
                             TPM_RIGHTBUTTON | TPM_RETURNCMD,
                             pt.x, pt.y, 0, hWnd, NULL);
                         DestroyMenu(hMenu);
+                        // Swallow the input that dismissed/used the menu: the modal
+                        // loop skips raylib polling, so a stray held button + stale
+                        // mouse delta would otherwise drag the selected entity.
+                        g_suppressViewportDrag = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
+                        g_gizmoDrag = false;
+                        g_gizmoHistPushed = false;
+                        g_lbDown = false;
+                        (void)GetMouseDelta();
+                        (void)GetMouseWheelMove();
+                        // Keep the gizmo glued to the (possibly re-picked) selection
+                        // so no drift can be applied.
+                        if (g_sel.type != SelType::NONE) SnapGizmoToSelection(g_sel);
                         // Handle the returned command directly
                         if (cmd == IDM_PROPERTIES) OpenPropertiesForSelection();
                         else if (cmd == IDM_DELETE_ENTITY) DeleteSelectedEntity();
@@ -2375,6 +2503,14 @@ int main(int argc, char **argv){
             DrawSphere({px, py, pz}, gizmoTip * 0.5f, (Color){180, 180, 180, 200});
 
             // Movement controls
+            // Keyboard nudge/rotate/scale of a selection is an undoable edit.
+            if (g_sel.type != SelType::NONE && !g_editorPanels.animEditVerts &&
+                (IsKeyPressed(KEY_U) || IsKeyPressed(KEY_J) || IsKeyPressed(KEY_H) ||
+                 IsKeyPressed(KEY_K) || IsKeyPressed(KEY_Y) || IsKeyPressed(KEY_I) ||
+                 IsKeyPressed(KEY_O) || IsKeyPressed(KEY_L) ||
+                 IsKeyPressed(KEY_T) || IsKeyPressed(KEY_B))) {
+                HistoryPush();
+            }
             if (!IsMouseButtonDown(2)) {
                 if (IsKeyPressed(KEY_U)) OmegaTechEditor.X -= 2.0f;
                 if (IsKeyPressed(KEY_J)) OmegaTechEditor.X += 2.0f;
@@ -2515,6 +2651,12 @@ int main(int argc, char **argv){
             // Commit placement
             if (IsKeyPressed(KEY_ENTER) || DoubleClick)
             {
+                bool willCommit =
+                    (g_placeMode == PlaceMode::PICKUP) ||
+                    (g_placeMode == PlaceMode::NODE) ||
+                    (g_placeMode == PlaceMode::MODEL &&
+                     ((EMID == 0 && g_editorPanels.selectedModel >= 0) || EMID >= 200));
+                if (willCommit) HistoryPush();
                 if (g_placeMode == PlaceMode::MODEL) {
                     if (EMID > 0) {
                         // Legacy WDL Model/Collision placement is removed; OZONE
@@ -2648,11 +2790,22 @@ int main(int argc, char **argv){
                 float wheel = GetMouseWheelMove();
                 if (wheel != 0) OmegaTechEditor.R += wheel * 15.0f;
             } else if (IsMouseButtonDown(0)) {
-                OmegaTechEditor.X += GetMouseDelta().x / 8;
-                OmegaTechEditor.Y += GetMouseDelta().y / 8;
-                OmegaTechEditor.Z -= (GetMouseWheelMove() * 2);
+                // A selected entity moves only for an intentional gesture; a
+                // placement ghost (no selection) still drags freely. Suppressed
+                // entirely while the post-context-menu input guard is active.
+                bool allowMove = !g_suppressViewportDrag &&
+                    (g_sel.type == SelType::NONE || g_gizmoDrag);
+                if (allowMove) {
+                    if (g_sel.type != SelType::NONE && !g_gizmoHistPushed) {
+                        HistoryPush();
+                        g_gizmoHistPushed = true;
+                    }
+                    OmegaTechEditor.X += GetMouseDelta().x / 8;
+                    OmegaTechEditor.Y += GetMouseDelta().y / 8;
+                    OmegaTechEditor.Z -= (GetMouseWheelMove() * 2);
+                }
             }
-            if (IsMouseButtonDown(1)) {
+            if (IsMouseButtonDown(1) && !g_suppressViewportDrag) {
                 OmegaTechEditor.W += GetMouseDelta().x / 8;
                 OmegaTechEditor.H += GetMouseDelta().y / 8;
                 OmegaTechEditor.L -= (GetMouseWheelMove() * 2);
@@ -2987,6 +3140,7 @@ int main(int argc, char **argv){
 
         // Properties apply handler — write values back from native panel
         if (g_editorPanels.actionApplyProperties) {
+            HistoryPush();
             float px = g_editorPanels.propPosX;
             float py = g_editorPanels.propPosY;
             float pz = g_editorPanels.propPosZ;
@@ -3459,6 +3613,7 @@ int main(int argc, char **argv){
         // Apply active texture to selected entity (from context menu)
         if (g_editorPanels.actionApplyTextureToSel) {
             if (!g_editorPanels.activeTexturePath.empty() && g_sel.type != SelType::NONE) {
+                HistoryPush();
                 if (g_sel.type == SelType::BRUSH) {
                     // g_sel.index may be a renderable index or a collision-volume
                     // index depending on which raycast produced it. Resolve to the
@@ -3616,6 +3771,10 @@ int main(int argc, char **argv){
         // Handle action flags from Win32 dialogs
         if (g_editorPanels.actionPickupType >= 0) {
             g_placeMode = PlaceMode::PICKUP;
+            // A placement ghost and a selection must not coexist, or the drag
+            // gate can't tell which the user means to move.
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             // Look up pickup name from legacy index or registry
             int idx = g_editorPanels.actionPickupType;
             const char* legacy = LegacyPickupType(idx);
@@ -3636,6 +3795,8 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionNodeType >= 0) {
             g_placeMode = PlaceMode::NODE;
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.ActiveNodeType = (EditorNodeType)g_editorPanels.actionNodeType;
             OmegaTechEditor.DrawModel = true;
             OmegaTechEditor.X = OTEditor.MainCamera.position.x;
@@ -3647,6 +3808,7 @@ int main(int argc, char **argv){
         if (!g_editorPanels.actionSpawnPickup.empty()) {
             // Pawn Manager weapon/item leaf → spawn the pickup immediately at the
             // camera aim point (the Pickups panel still offers ghosted placement).
+            HistoryPush();
             PickupNode node;
             node.position = OTEditor.MainCamera.target;
             node.typeName = g_editorPanels.actionSpawnPickup;
@@ -3660,6 +3822,7 @@ int main(int argc, char **argv){
             // Browser, spawned at the camera target as an OZONE Mesh.* entity.
             int idx = g_editorPanels.selectedModel;
             if (idx >= 0 && idx < (int)g_editorPanels.modelEntries.size()) {
+                HistoryPush();
                 MeshObjectNode node;
                 node.meshPath = g_editorPanels.modelEntries[idx].path;
                 node.skeletal = (g_editorPanels.actionSpawnMesh == "skeletal");
@@ -3676,6 +3839,7 @@ int main(int argc, char **argv){
             g_editorPanels.actionSpawnMesh.clear();
         }
         if (g_editorPanels.actionSpawnParticleEmitter) {
+            HistoryPush();
             ParticleEmitterNode node;
             node.type = "fire";
             node.position = OTEditor.MainCamera.target;
@@ -3695,6 +3859,7 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionSpawnPathNode) {
             static int s_pathCounter = 0;
+            HistoryPush();
             PathNode node;
             node.name = "path_" + std::to_string(s_pathCounter++);
             node.position = OTEditor.MainCamera.target;
@@ -3711,11 +3876,13 @@ int main(int argc, char **argv){
             zone.direction = {1.0f, 0.0f, 0.0f};
             zone.strength = 1.0f;
             zone.frequency = 1.0f;
+            HistoryPush();
             PawnSystem::Instance().AddWindZone(zone);
             EditorLog("Placed WindZone at camera target");
             g_editorPanels.actionSpawnWindZone = false;
         }
         if (g_editorPanels.actionSpawnPlayerStart) {
+            HistoryPush();
             PlayerStartNode node;
             node.position = OTEditor.MainCamera.target;
             node.yaw = 0.0f;
@@ -3724,6 +3891,7 @@ int main(int argc, char **argv){
             g_editorPanels.actionSpawnPlayerStart = false;
         }
         if (!g_editorPanels.actionSpawnEmitter.empty()) {
+            HistoryPush();
             EmitterNode node;
             node.type = (g_editorPanels.actionSpawnEmitter == "music")
                 ? EmitterType::MUSIC : EmitterType::SOUND;
@@ -3734,6 +3902,7 @@ int main(int argc, char **argv){
             g_editorPanels.actionSpawnEmitter.clear();
         }
         if (g_editorPanels.actionSpawnZone >= 0) {
+            HistoryPush();
             ZoneVolumeNode node;
             Vector3 c = OTEditor.MainCamera.target;
             node.bounds.min = {c.x - 4.0f, c.y - 2.0f, c.z - 4.0f};
@@ -3746,6 +3915,8 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionPlaceModel >= 0) {
             g_placeMode = PlaceMode::MODEL;
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = true;
             OmegaTechEditor.X = OTEditor.MainCamera.position.x;
             OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
@@ -3756,6 +3927,8 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionCsgPlace >= 0) {
             g_placeMode = PlaceMode::MODEL;
+            g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = true;
             int primType = g_editorPanels.actionCsgPlace;
             // Map primitive type to EMID
@@ -3774,6 +3947,7 @@ int main(int argc, char **argv){
         // CSG commit immediately (from Solid/Add/Sub/Inter buttons)
         if (g_editorPanels.actionCsgCommitNow >= 0) {
             if (g_placeMode == PlaceMode::MODEL) {
+                HistoryPush();
                 // Default to box if no primitive is selected
                 if (EMID < 200) {
                     EMID = 200; // Box
@@ -3826,6 +4000,7 @@ int main(int argc, char **argv){
             auto& img = g_editorPanels.actionHeightmapImage;
             auto& tex = g_editorPanels.actionHeightmapTexture;
             if (!img.empty()) {
+                HistoryPush();
                 std::vector<float> args = {
                     g_editorPanels.actionHmPosX, g_editorPanels.actionHmPosY, g_editorPanels.actionHmPosZ,
                     g_editorPanels.actionHmScale,
@@ -3840,6 +4015,7 @@ int main(int argc, char **argv){
         if (g_editorPanels.actionApplyLight) {
             int idx = g_editorPanels.lightPropTarget;
             if (idx >= 0) {
+                HistoryPush();
                 auto& lights = PawnSystem::Instance().GetLights();
                 if (idx < (int)lights.size()) {
                     LightNode& ln = lights[idx];
@@ -3870,6 +4046,7 @@ int main(int argc, char **argv){
 
         if (!g_editorPanels.actionSpawnPawn.empty()) {
             Vector3 pos = OTEditor.MainCamera.target; // in front of the camera
+            HistoryPush();
             PawnSystem::Instance().Spawn(pos, g_editorPanels.actionSpawnPawn.c_str());
             EditorLog("Spawned pawn '%s' at camera target",
                       g_editorPanels.actionSpawnPawn.c_str());
@@ -3881,6 +4058,7 @@ int main(int argc, char **argv){
             int idx = g_editorPanels.actionApplyPortal;
             auto& portals = PawnSystem::Instance().GetPortals();
             if (idx >= 0 && idx < (int)portals.size()) {
+                HistoryPush();
                 PortalEditValues pe = GetPortalEditValues();
                 ZonePortal& p = portals[idx];
                 p.targetWorld = pe.targetWorld;
@@ -3896,6 +4074,7 @@ int main(int argc, char **argv){
         }
         if (g_editorPanels.actionDeletePortal >= 0) {
             int idx = g_editorPanels.actionDeletePortal;
+            HistoryPush();
             PawnSystem::Instance().RemovePortal(idx);
             EditorLog("Portal %d deleted", idx);
             RefreshPortalList();
@@ -3936,6 +4115,7 @@ int main(int argc, char **argv){
             g_editorPanels.actionLevelListLink.clear();
             // Create a portal in front of the camera linking to the target world
             Vector3 pos = OTEditor.MainCamera.target;
+            HistoryPush();
             ZonePortal portal;
             portal.bounds = {{pos.x - 2, pos.y - 2, pos.z - 2},
                              {pos.x + 2, pos.y + 2, pos.z + 2}};
@@ -4001,6 +4181,14 @@ int main(int argc, char **argv){
         }
         if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_D) && g_sel.type != SelType::NONE) {
             DuplicateSelectedEntity();
+        }
+        // Undo / redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z). Deferred to the anim tool
+        // while vertex-editing, which owns its own undo stack.
+        if (!g_editorPanels.animEditVerts &&
+            (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))) {
+            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            if (IsKeyPressed(KEY_Z)) { if (shift) HistoryRedo(); else HistoryUndo(); }
+            if (IsKeyPressed(KEY_Y)) HistoryRedo();
         }
 
         // Camera shortcuts

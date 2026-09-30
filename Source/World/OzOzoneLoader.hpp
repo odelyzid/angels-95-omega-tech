@@ -6,6 +6,12 @@
 #include <vector>
 #include <unordered_map>
 
+// windows.h defines LoadString -> LoadStringA/W; that would rename the method
+// below and break linking on Windows builds that include windows.h first.
+#ifdef LoadString
+#undef LoadString
+#endif
+
 // Surface behavior flags for OZONE brush primitives
 #define SURF_FAKEBACKDROP (1 << 3)  // brush renders as sky backdrop
 
@@ -63,7 +69,10 @@ struct OzoneCollisionVolume {
 class OzoneLoader {
 public:
     bool LoadFile(const char* path);
-    bool LoadString(const char* data);
+    // Load OZONE text directly. When worldDir is supplied, tileset textures are
+    // loaded from <worldDir>/oztex/tileset/ first so texSlot indices resolve
+    // (used by the editor's undo/redo snapshot restore).
+    bool LoadString(const char* data, const char* worldDir = nullptr);
     void Draw(Camera3D& camera);
     void Unload();
 

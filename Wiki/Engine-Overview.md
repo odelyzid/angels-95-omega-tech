@@ -189,6 +189,6 @@ Pickup types from LightningScript entity registry (`.ozls` definitions).
 
 - Lighting toggle (Lit/Unlit) does not actually unset shader from model materials
 - CSG Add/Subtract UI is wired but backend `CsgProcessor` never called for actual boolean geometry
-- No undo/redo system
+- Full-document undo/redo via Edit menu + Ctrl+Z/Ctrl+Y (camera/selection not restored)
 - No test-play save prompts ("Reload world from playtest changes?")
 - Lighting effects (watery, torch, fire, lamp) are UI-only — not rendered in viewport

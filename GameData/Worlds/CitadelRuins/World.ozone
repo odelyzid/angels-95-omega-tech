@@ -1,25 +1,60 @@
-# OZONE world exported from AngelEd
-# Format: ozone v1.0
+# OZONE world: CitadelRuins
+# Z-up convention: x = east, y = north, z = up
+# CSG prefix: add / sub / intersect
+# Tileset (oztex/tileset, 1-based sorted by filename):
+#   1 = floor  2 = wall  3 = column  4 = ceiling
 
+# --- 1. Foundation ---
 add box 0 0 -2 80 0.5 80 0 texScaleU=8 texScaleV=8
+
+# --- 2. Subterranean drainage tunnels ---
 add box 0 0 -1.5 6 2 40 0 texScaleU=16 texScaleV=16
 add box -15 0 -1.5 20 2 6 0 texScaleU=16 texScaleV=16
+
+# --- 3. Central courtyard & perimeter walls (gate in the south wall) ---
 add box 0 0 -0.25 30 0.5 30 0 texScaleU=8 texScaleV=8
 add box 0 15.25 3 30 6.5 0.5 0 texScaleU=16 texScaleV=16
-add box 0 -15.25 3 30 6.5 0.5 0 texScaleU=16 texScaleV=16
+add box -8.5 -15.25 3 13 6.5 0.5 0 texScaleU=16 texScaleV=16
+add box 8.5 -15.25 3 13 6.5 0.5 0 texScaleU=16 texScaleV=16
 add box -15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
 add box 15.25 0 3 0.5 6.5 30 0 texScaleU=16 texScaleV=16
-add box -10 10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
-add box 10 10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
-add box -10 -10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
-add box 10 -10 6 8 0.5 8 0 texScaleU=8 texScaleV=8
+
+# --- 4. Raised balconies & pillars ---
+add box -10 10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
+add box 10 10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
+add box -10 -10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
+add box 10 -10 6 8 0.5 8 0 2 texScaleU=8 texScaleV=8
 add cyl -6 6 2.5 0.6 0.6 5 16 0
 add cyl 6 6 2.5 0.6 0.6 5 16 0
 add cyl -6 -6 2.5 0.6 0.6 5 16 0
 add cyl 6 -6 2.5 0.6 0.6 5 16 0
+
+# --- 5. Courtyard cover ---
 add box 0 0 0.5 4 1.5 4 0 texScaleU=16 texScaleV=16
 add box -4 3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
 add box 4 -3 0.25 2 1 1 0 texScaleU=16 texScaleV=16
+
+# --- 6. Southern corridor network (long spine + crossing branch) ---
+# Floors: spine runs north-south, branch crosses it east-west
+add box 0 -27.5 -0.25 4.5 0.5 25 0 texScaleU=8 texScaleV=8
+add box 0 -27 -0.25 40.5 0.5 4.5 0 texScaleU=8 texScaleV=8
+# Spine walls (split to leave the branch junction open)
+add box -2.25 -19.875 2.5 0.5 5 9.75 0 texScaleU=16 texScaleV=16
+add box 2.25 -19.875 2.5 0.5 5 9.75 0 texScaleU=16 texScaleV=16
+add box -2.25 -34.375 2.5 0.5 5 10.25 0 texScaleU=16 texScaleV=16
+add box 2.25 -34.375 2.5 0.5 5 10.25 0 texScaleU=16 texScaleV=16
+# Branch walls (split to leave the spine junction open)
+add box -11.25 -24.75 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
+add box 11.25 -24.75 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
+add box -11.25 -29.25 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
+add box 11.25 -29.25 2.5 17.5 5 0.5 0 texScaleU=16 texScaleV=16
+# End caps (branch ends + spine south end)
+add box -20.25 -27 2.5 0.5 5 4.5 0 texScaleU=16 texScaleV=16
+add box 20.25 -27 2.5 0.5 5 4.5 0 texScaleU=16 texScaleV=16
+add box 0 -39.75 2.5 4.5 5 0.5 0 texScaleU=16 texScaleV=16
+# Ceilings (tileset slot 4)
+add box 0 -27.5 5.25 4.5 0.5 25 0 4 texScaleU=16 texScaleV=16
+add box 0 -27 5.25 40.5 0.5 4.5 0 4 texScaleU=16 texScaleV=16
 
 # Entities
 playerstart 0 -13 0 0
@@ -28,8 +63,11 @@ pickup HealthVial 0 -15 -1.25 25
 pickup rifle_01 -10 10 6.5 20
 pickup pistol_01 10 10 6.5 30
 pickup Medkit 0 0 0.5 45
+pickup Medkit -15 -27 0.5 30
 npc Skaarj -12 -12 0
 npc Skaarj 12 -12 0
+npc Skaarj -8 -27 0
+light point 0 -27 4 255 210 140 1 20
 light point 10 10 7.5 100 150 255 1 12
 light point 0 0 5.5 255 240 200 1 25
 light point -10 10 7.5 100 150 255 1 12
