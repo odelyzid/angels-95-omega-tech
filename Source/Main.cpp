@@ -255,8 +255,22 @@ static void ExecuteConsoleCommand(const char* cmd) {
                 }
                 if (match && *a == *b) {
                     int instIdx = LightningEntityManager::Instance().Spawn(def.name);
-                    if (instIdx >= 0 && !LightningEntityManager::Instance().HotbarPlaceFirstFree(instIdx))
-                        LightningEntityManager::Instance().Despawn(instIdx);
+                    if (instIdx >= 0) {
+                        // Place into the first empty hotbar slot AND select it
+                        // so the freshly-summoned weapon is immediately ready
+                        // to fire. HotbarAssign does not move m_selectedSlot on
+                        // its own (by design: it is also called from save/load
+                        // and from script actions that must not change the
+                        // player's hand), so /summon does that explicitly here.
+                        auto& lem = LightningEntityManager::Instance();
+                        int slot = lem.HotbarFirstFreeSlot();
+                        if (slot < 0) {
+                            lem.Despawn(instIdx);
+                        } else {
+                            lem.HotbarAssign(slot, instIdx);
+                            lem.SelectSlot(slot);
+                        }
+                    }
                     found = true;
                     break;
                 }
