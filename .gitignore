@@ -54,8 +54,16 @@ build/cmake*
 # Docs scratch
 .docs/
 
-# Debug screenshot renders (--shot mode output; regenerate, never commit)
-GameData/Screenshots/
+# Debug screenshot renders (--shot mode output; regenerate, never commit).
+# Exception: the curated showcase set below is committed so the README/Wiki
+# image links resolve on GitHub. Everything else in here stays ignored, which
+# is why the rule matches contents (/*) instead of the directory - git cannot
+# re-include files from inside an excluded directory.
+GameData/Screenshots/*
+!GameData/Screenshots/CitadelRuins_*.png
+!GameData/Screenshots/Dessert_Dreams_*.png
+!GameData/Screenshots/Dust_Ravine_*.png
+!GameData/Screenshots/EngineTest_*.png
 
 # Scratch plan files (keep main plan files tracked)
 PLAN_STUBS_*.scratch
