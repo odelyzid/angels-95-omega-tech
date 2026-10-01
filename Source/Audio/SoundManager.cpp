@@ -25,17 +25,30 @@ void SoundManager::AttachReverbProcessor() {
 }
 
 void SoundManager::LoadCoreSounds() {
+    // Wrap every core-sound load so a missing/unreadable file is logged at
+    // startup instead of surfacing only when a caller (PlayJump, PlayDeath, ...)
+    // silently no-ops. raylib's LoadSound returns Sound{0} when the audio
+    // converter rejects the file (malformed WAV header, unsupported codec, ...),
+    // so without this wrapper those failures are invisible until a player fires
+    // the one weapon whose fire_sound points at the bad file.
+    auto loadCore = [](const char* path) -> Sound {
+        Sound s = LoadSoundWithFallback(path);
+        if (s.frameCount == 0)
+            OZ_WARN("core sound: '%s' not found or unreadable", path);
+        return s;
+    };
+
     GameSounds& s = m_sounds;
-    s.CollisionSound = LoadSoundWithFallback("GameData/Global/Sounds/CollisionSound.mp3");
-    s.WalkingSound    = LoadSoundWithFallback("GameData/Global/Sounds/WalkingSound.mp3");
-    s.ChasingSound    = LoadSoundWithFallback("GameData/Global/Sounds/ChasingSound.mp3");
-    s.UIClick         = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
-    s.Death           = LoadSoundWithFallback("GameData/Global/Sounds/Hurt.mp3");
-    s.JumpSound       = LoadSoundWithFallback("GameData/Global/Sounds/Player/jump1.wav");
-    s.WeaponLoadSound = LoadSoundWithFallback("GameData/Global/Sounds/Player/weapload.wav");
-    s.MenuSelectSound = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
-    s.MatchStartSound = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuRoundBeginn.wav");
-    m_textNoise       = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
+    s.CollisionSound = loadCore("GameData/Global/Sounds/CollisionSound.mp3");
+    s.WalkingSound    = loadCore("GameData/Global/Sounds/WalkingSound.mp3");
+    s.ChasingSound    = loadCore("GameData/Global/Sounds/ChasingSound.mp3");
+    s.UIClick         = loadCore("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
+    s.Death           = loadCore("GameData/Global/Sounds/Hurt.mp3");
+    s.JumpSound       = loadCore("GameData/Global/Sounds/Player/jump1.wav");
+    s.WeaponLoadSound = loadCore("GameData/Global/Sounds/Player/weapload.wav");
+    s.MenuSelectSound = loadCore("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
+    s.MatchStartSound = loadCore("GameData/Global/Sounds/UI/MenuRoundBeginn.wav");
+    m_textNoise       = loadCore("GameData/Global/Sounds/TalkingNoise.mp3");
 }
 
 void SoundManager::Shutdown() {
