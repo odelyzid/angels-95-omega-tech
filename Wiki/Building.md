@@ -58,23 +58,37 @@ Builds: `Angels95`, `AngelServ`, `OzPack`
 | Game client | `make OTENGINE` | raylib 5.5 |
 | Dedicated server | `make AngelServ` | None (standalone) |
 | Asset packer | `make ozpack` | None (standalone) |
-| Level editor | `make -C AngelEd` | raylib 5.5 + Win32 |
+| Level editor | `make -C AngelEd` | raylib 5.5 + Win32 (**Windows only** — the Makefile errors out on Linux) |
 
 ### Windows Build Scripts
 
 ```powershell
 .\build-native-win.ps1              # w64devkit — full System/ release
 .\build-native-win.ps1 -SkipData    # skip asset packaging
-.\build-native-win.ps1 -SkipClean   # skip make clean
+.\build-native-win.ps1 -SkipClean   # skip make clean (incremental)
+.\build-native-win.ps1 -Fast        # incremental; implies -SkipClean
+.\build-native-win.ps1 -Debug       # MODE=debug (-O0 -g)
 
 .\build.ps1                         # MSYS2 — full System/ release
 .\build.ps1 -SkipData               # skip asset packaging
+.\build.ps1 -Fast -Debug            # incremental debug build
 ```
 
 Both scripts:
-1. Build all 4 targets (Angels95, AngelServ, OzPack, AngelEd)
+1. Build all 5 targets (Angels95, AngelServ, AngelMaster, OzPack, AngelEd)
 2. Assemble `System/` with EXEs, INI files, run scripts
 3. Package assets via `build-data.ps1`
+
+### Build speed / iteration
+
+- `MODE=debug` swaps `-O3` for `-O0 -g` (much faster compiles + symbols); default is `release`.
+- Plain `make` is already incremental (objects in `build/`); the scripts run
+  `make clean` unless you pass `-SkipClean`.
+- **ccache** is auto-detected on PATH (prefixes `g++`/`gcc`); disable with
+  `CCACHE=`, force with `CCACHE=<path>`.
+- **LLD** is auto-enabled as linker (`-fuse-ld=lld`) when `ld.lld`/`lld` is on
+  PATH; override with `LDEXTRA=` to disable.
+- `make help` prints the resolved `MODE`/`OPTFLAGS`/ccache/linker.
 
 ### Asset Packaging
 
@@ -83,6 +97,11 @@ Both scripts:
 ```
 
 Uses `OzPack.exe` to create `.oz*` containers from `GameData/` subdirectories.
+Packaged `.dds`/image/audio assets decode **from memory** (b71) — the loader
+passes the extension with its leading dot to
+`LoadImageFromMemory`/`LoadWaveFromMemory`/`LoadMusicStreamFromMemory`/
+`LoadFontFromMemory` — so packaged skyboxes/world textures no longer need the
+`System/Cache` temp-file workaround.
 
 ## Testing
 
@@ -93,6 +112,9 @@ make test_context        # LightningScriptContext tests
 make test_registry       # LightningEntityRegistry tests
 make test_entity_manager # LightningEntityManager lifecycle + ammo/reload/melee tests
 make test_pawn_system    # OzPawnSystem CRUD + projectile collision tests
+make test_ozone_parser   # OZONE parser tests
+make test_join_uri       # angels95:// URI parsing tests
+make test_master         # master heartbeat/list codec tests
 make test_network        # Network packet serialization + find_free_port tests
 make test_game_state     # GameState projectile simulation + AMMO pickup tests
 ```
@@ -157,3 +179,26 @@ Angels95.exe --world MyWorldName      # load a specific world
 | `--port` | 27015 | UDP game server port |
 | `--http-port` | 8080 | HTTP map API port |
 | `--dir` | GameData | Path to game data directory |
+| `--bind` | all | Interface to bind — IPv4, hostname, or `0.0.0.0` on a VPS |
+| `--master host[:port]` | – | Master UDP heartbeat target, repeatable |
+| `--master-http URL` | – | Master HTTP(S) heartbeat URL, repeatable |
+| `--public-ip` | – | Public IP to announce when behind NAT |
+| `--auth-token` | – | HTTP Bearer gate (env `OZ_AUTH_TOKEN`) |
+| `--admin-token` | – | Enables COMMAND list/say/kick (env `OZ_ADMIN_TOKEN`) |
+
+Server behavior is controlled entirely by CLI flags (env overrides them);
+`System/OzServer.ini` is a template written by the build scripts, never read at
+runtime, except `AngelServ` now also accepts an optional
+`System/OzServer.ini` (`[Server]`/`[Auth]`/`[MasterServers]`, CLI + env override).
+
+### VPS deployment
+
+`System/angels95-serv.service` ships **systemd units** for `AngelServ` and
+`AngelMaster` — copy the unit into `/etc/systemd/system/`, then:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now angels95-serv
+```
+
+Run both daemons with `--bind 0.0.0.0` so they listen on the public interface.

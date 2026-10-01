@@ -1,12 +1,58 @@
 # Engine Roadmap — Gap Analysis & Priorities
 
-Status as of **b55/b56**. This page is the living gap analysis for the Angels95 /
-OmegaTech engine: what exists, what is missing compared with a conventional game
-engine, and the prioritized plan to close the gaps. Each entry lists the
-`file:line` evidence so work can start without re-auditing.
+Status as of **b82** (delivery log for b57–b82 below). This page is the living
+gap analysis for the Angels95 / OmegaTech engine: what exists, what is missing
+compared with a conventional game engine, and the prioritized plan to close the
+gaps. Each entry lists the `file:line` evidence so work can start without
+re-auditing.
 
 Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 **[2]** multiplayer completeness, **[3]** presentation, **[4]** tooling/UX.
+
+---
+
+## b57–b82 delivery log
+
+### Tier 0 — security & correctness
+- **Complete at b56** (see Tier 0 roadmap below). b59 adds the HTTP Bearer gate
+  (`--auth-token`/`OZ_AUTH_TOKEN`) and `FILE_TRANSFER` reject-notice.
+
+### Tier 1 — engine fundamentals
+- Per-zone physics overrides (`gravity`/`jump`/`terminal`/`water_*`/
+  `ladder_speed`/`fly_mult`) via `PhysicsInfo` + `ZoneEnvOverrides` (b80).
+- `ZoneManager` extraction — zone volumes, portals, env-override merging live
+  outside `PawnSystem` (b80/b82).
+- Client settings persistence applied before `InitWindow` (VSync/MSAA/window
+  size honoured at creation).
+
+### Tier 2 — multiplayer completeness
+- Scene sync, ammo sync, weapon grants, typed network NPCs with server-owned
+  AI (b58); NPC death/respawn + broadcast, pickup `respawn_time` (b58).
+- Server world seeding from `World.ozone`, `PlayerData.dat`, V2 world saves
+  with autosave (b59/b61); join loads the server's map (b72); network NPC sync
+  keyed by (world, npc, partition) — no pawn explosion after map switches (b73).
+- Admin `COMMAND` (list/say/kick, b59/b61); stance replication (b78–b80).
+- Internet discovery: HTTPS master uplink (WinHTTP/curl, no vendored crypto),
+  default master `https://angels95.tribewarez.com/master`, working Internet
+  browser (b61/b70); `--bind` + anti-spoof `publicip` for VPS (b65).
+
+### Tier 3 — presentation
+- First-person weapon view-models with Idle/Fire/Reload clips + procedural
+  recoil (b74); FBX→GLB pipeline (b54+).
+- Vertex-keyframe `.ozanim` morph animation + skeletal mesh clips (b74); wind
+  sway shader (`Wind.vs`) (b74).
+- Particle system replaced by a 4096-particle `OzParticleSimulationManager`
+  pool (b74).
+- Audio: `DspReverb` on the master mix (b57); `SoundManager` facade with zone
+  ambience/reverb handling (b82).
+- Skybox rendering/packaging overhaul — levelinfo priority, package `.dds`,
+  editor viewport skybox (b63–b68); looping title video (b57).
+
+### Tier 4 — tooling & UX
+- Editor: full-document undo/redo (b81), world texture import (b81), Script
+  Manager (b60), def-aligned Entity Properties (b60), animation authoring tool
+  (b74), asset-scope tree + pack-on-import (b82).
+- CI: raylib 5.5 build fix (b75), per-binary release assets (b69).
 
 ---
 
@@ -36,66 +82,70 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 | Gap | Detail | Evidence |
 |---|---|---|
-| **[3]** Shadows | `castShadow` flag parsed but never used by the light pass | `Source/Renderer/LitLightning.hpp:11-24` |
-| **[3]** Materials | Diffuse-only; no normal/specular/PBR maps | `Source/Renderer/LitLightning.cpp:9-37` |
-| **[3]** LOD / instancing | Not present; every renderable drawn every frame | `Source/OzOzoneLoader.cpp:972-983` |
-| **[3]** Culling | No frustum/occlusion culling | `Source/OzOzoneLoader.cpp:972-983` |
-| **[3]** Animations | Zero skeletal/skinned/keyframe/flipbook; NPCs are billboards; remote players are capsules | `Source/Main.cpp:217-240` |
-| **[3]** View-model | No first-person weapon view-model | `Source/Main.cpp` (render loop) |
-| **[3]** Post shaders | Toon/Sobel/Line loaded but never applied | `Source/Core.hpp:865,1826` |
-| **[3]** Particles | 2D only, hard cap 50 | `Source/ParticleDemon/ParticleDemon.hpp:13-29` |
-| **[1]** VSync/MSAA | Flags set *after* `InitWindow` — ineffective | `Source/Settings.hpp:80-87,200-212` |
-| **[3]** Title video | MPEG1 opened but never drawn/freed (leak) | `Source/Core.hpp:850` |
+| **[3]** Shadows | `castShadow` flag parsed but never used by the light pass | `Source/Renderer/LitLightning.hpp` |
+| **[3]** Materials | Diffuse-only; no normal/specular/PBR maps | `Source/Renderer/LitLightning.cpp` |
+| **[3]** LOD / instancing | Not present; every renderable drawn every frame | `Source/World/OzOzoneLoader.cpp` |
+| **[3]** Post shaders | Toon/Sobel/Line loaded but never applied | `Source/Core.hpp` |
+
+*Closed since b56:* frustum culling (`Source/World/OzoneFrustum.*`),
+vertex-keyframe + skeletal mesh animation and first-person view-models (b74),
+4096-particle pool (b74), VSync/MSAA applied at window creation, looping title
+video (b57).
 
 ### Physics & gameplay
 
 | Gap | Detail | Evidence |
 |---|---|---|
-| **[1]** Collision is AABB-only | CSG brushes as AABBs; `MAX_SPLITS=64` | `Source/Physics/OzBsp.hpp:6-33` |
+| **[1]** Collision is AABB-only | CSG brushes as AABBs; `MAX_SPLITS=64` | `Source/Physics/OzBsp.hpp` |
 | **[1]** No collision APIs | No raycast, sphere/capsule cast, or query — gameplay can't reuse the BSP | `Source/Physics/` |
-| **[1]** Position restore | Player slide solved by restoring pre-frame snapshot; no swept/continuous collision | `Source/Core.hpp:966-968` |
-| **[0/1]** Parallel collision paths | WDL token-baked once; two CSG paths (CachedModels render vs OZONE bake) still not fully unified | `Source/Core.hpp:1183-1270` |
+| **[1]** Position restore | Player slide solved by restoring pre-frame snapshot; no swept/continuous collision | `Source/Core.hpp` |
 | **[3]** Rigid bodies | No physics engine at all (no joints, no ragdolls) | — |
-| **[3]** Navmesh/AI perception | NPCs use distance checks only; no pathfinding | `Source/Server/GameState.cpp:433-503` |
-| **[3]** Input | No rebinding, no gamepad tuning, no mouse-look sensitivity setting | `Source/Input*` (none) |
+| **[3]** Navmesh/AI perception | No true pathfinding — server PATROL follows `PathNode` graphs (b74), everything else is distance checks | `Source/Server/GameState.cpp` |
+| **[3]** Input | No rebinding, no gamepad tuning, no mouse-look sensitivity setting | — |
+
+*Closed since b56:* dual WDL/OZONE collision paths (WDL dropped b77), per-zone
+physics overrides (b80).
 
 ### Audio & video
 
 | Gap | Detail | Evidence |
 |---|---|---|
 | **[3]** Positional audio | Zero pan/attenuation calls; all sounds global | `Source/Audio/` |
-| **[3]** Zone audio | `ambience_loop` / `sfx_on_enter` slots never wired; `ZONE_REVERB` only logs — no DSP | `Source/Core.hpp:1887-1891,2052-2058` |
-| **[3]** Video | plmpeg present, title video unused | `Source/plmpeg/`, `Source/Core.hpp:850` |
+
+*Closed since b56:* zone ambience/reverb via `SoundManager::UpdateSoundZones` +
+`DspReverb` on the master mix (b57/b82); title video wired (b57).
 
 ### Networking & multiplayer
 
 | Gap | Detail | Evidence |
 |---|---|---|
-| **[0/2]** Prediction/interpolation | NPCs snap at 2.5 Hz broadcast; no client interpolation; no remote-player prediction | `Source/Server/Server.cpp:1293-1343` |
-| **[0/2]** Reliability | `sequence` is never set/checked (raw UDP, no acks) | valid everywhere; `Source/Network/Network.cpp` |
-| **[2]** Entity replication | NPC/pickup identity is index-triples, no stable net IDs | `Source/Network/Network.hpp:127-136` |
-| **[2]** Game modes | `levelinfo` maxPlayers/friendlyFire are enforced (b58); gameType/timeLimit/scoreLimit still cosmetic; no scoreboards/timers | `Source/Server/GameState.cpp` |
-| **[2]** Respawn | Server NPC death/respawn implemented (b58: DEAD state + 10s revive); no player death/respawn flow server-side | `Source/Server/GameState.cpp` |
-| **[2]** Admin | `COMMAND` implemented (b61): list/say/kick via `--admin-token`/`OZ_ADMIN_TOKEN`; ban list deferred (kicked clients can re-handshake — UDP identity is ip:port) | `Source/Server/Server.cpp` |
-| **[x] Ping** | Real RTT implemented (PING/PONG sequence-paired round-trip) | `Source/Network/Network.cpp` |
-| **[x] Join UX** | LAN server browser in the menu (Scan LAN); join/host ports functional from UI | `Source/Menu/TitleMenu.hpp`; `Source/Network/Network.cpp` |
-| **[x] Internet discovery** | Master server (`AngelMaster`), `AngelServ` heartbeat uplink (`--master`/`--master-http`) and client Internet browser with direct `/status` RTT queries | `Source/Master/`; `Source/Menu/InternetBrowser.hpp`; `Wiki/Master-Server.md` |
-| **[2]** Reconnect | None — dropped client must restart | `Source/Network/Network.cpp:608-611` |
-| **[x] Game stats** | Player persistence implemented (b61): `Saves/PlayerData.dat` keyed by name, saved on disconnect + 60s autosave + shutdown; world state V2 saves (GlobalNPCs.dat + Partition*.dat) | `Source/Server/GameState.cpp` |
+| **[0/2]** Prediction/interpolation | NPC interpolation landed (lerp + shortest-arc yaw); remote-player prediction still open | `Source/Server/Server.cpp` |
+| **[0/2]** Reliability | `sequence` is never set/checked (raw UDP, no acks) | `Source/Network/Network.cpp` |
+| **[2]** Entity replication | NPCs keyed by (world, npc, partition) triples (b73); still no stable net IDs | `Source/Network/Network.hpp` |
+| **[2]** Game modes | `levelinfo` maxPlayers/friendlyFire enforced (b58); gameType/timeLimit/scoreLimit still cosmetic; no scoreboards/timers | `Source/Server/GameState.cpp` |
+| **[2]** Respawn | Server NPC death/respawn implemented (b58); player death/respawn flow still open server-side | `Source/Server/GameState.cpp` |
+| **[x] Admin** | `COMMAND` (b59/b61): list/say/kick via `--admin-token`/`OZ_ADMIN_TOKEN`; ban list deferred (UDP identity is ip:port) | `Source/Server/Server.cpp` |
+| **[x] Ping** | Real RTT (PING/PONG sequence-paired round-trip) | `Source/Network/Network.cpp` |
+| **[x] Join UX** | LAN + Internet browsers; join/host ports functional from UI; `angels95://join` deep link (b60/b71) | `Source/Menu/TitleMenu.hpp`; `Source/Network/Network.cpp` |
+| **[x] Internet discovery** | HTTPS master uplink (b70), default `https://angels95.tribewarez.com/master`, client browser with `/status` RTT | `Source/Network/MasterHttp.hpp`; `Source/Menu/InternetBrowser.hpp`; `Wiki/Master-Server.md` |
+| **[2]** Reconnect | None — dropped client must restart | `Source/Network/Network.cpp` |
+| **[x] Game stats** | Player persistence (b61): `Saves/PlayerData.dat`, saved on disconnect + 60s autosave + shutdown; world state V2 saves | `Source/Server/GameState.cpp` |
 
 ### Engine core & persistence
 
 | Gap | Detail | Evidence |
 |---|---|---|
-| **[1]** Fixed timestep | Variable `GetFrameTime()` everywhere; server tick `0.1f` also uncapped | `Source/Main.cpp`; `Source/Server/Server.cpp:1259-1355` |
-| **[0]** Config persistence | INIs are templates never read at runtime; resolution/volume/FOV all in-memory | `Source/Settings.hpp`, `System/*.ini` |
-| **[2]** Save UX | Client save drops stats (hotbar names only) | `Source/Script/LightningEntityManager.cpp:859-914` |
+| **[1]** Fixed timestep | Client runs a 60 Hz accumulator; server tick capped at 10 Hz (done); uncapped paths remain in `Main.cpp` | `Source/Main.cpp`; `Source/Server/Server.cpp` |
+| **[2]** Save UX | Client save drops stats (hotbar names only) | `Source/Script/LightningEntityManager.cpp` |
 | **[4]** Profiling/telemetry | None | — |
 | **[4]** Crash reporting | None (no crashpad/minidumps) | — |
 | **[4]** Mod loading | None; GameData is baked at pack time | `Source/Package/` |
 | **[4]** Streaming | No async asset loading; home screen scans disk at boot | `Source/Main.cpp` |
 | **[3]** Cutscenes/sequences | None | — |
 | **[4]** Localization | String literals throughout | — |
+
+*Closed since b56:* client settings persistence (`System/Angels95.ini` read
+before `InitWindow`, saved on exit).
 
 ### Scripting (LightningScript)
 
@@ -111,11 +161,14 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 | Gap | Detail | Evidence |
 |---|---|---|
-| **[4]** Undo/redo | Not implemented (documented gap) | `Wiki/Editor-Usage.md` |
 | **[4]** Multi-select / prefabs | Single-object ops only | `AngelEd/Source/Editor.hpp` |
 | **[4]** Lightmap baking | none | — |
 | **[4]** CI drift | CI builds editor with inline g++ commands, not the `AngelEd/Makefile` | `.github/workflows/ci.yml` |
-| **[2]** Hardcoded pickups | `EditorPickupType` should map to LightningScript/pawn defs | `AngelEd/Source/Editor.hpp` |
+| **[2]** Hardcoded pickups | `EditorPickupType` still not fully registry-mapped (Weapons tree landed b58) | `AngelEd/Source/Editor.hpp` |
+
+*Closed since b56:* full-document undo/redo (b81), world texture import (b81),
+Script Manager + def-aligned properties (b60), animation authoring tool (b74),
+asset-scope tree + pack-on-import (b82).
 
 ### Engineering / CI
 
@@ -129,7 +182,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 ## Roadmap
 
-### Tier 0 — security & correctness (RCE/OOB/trust bugs) — **in progress (b56)**
+### Tier 0 — security & correctness (RCE/OOB/trust bugs) — **complete (b56)**
 
 - [x] Roadmap doc (this page)
 - [x] S6 — clamp world-list JSON to `MAX_MESSAGE_SIZE` on join
@@ -157,11 +210,7 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
   `System/Angels95.ini` before `InitWindow`; VSync/MSAA/window-size applied at
   window creation; saved on exit)
 - [x] Frustum culling for renderables (camera-geometry planes + AABB test in
-  `OzoneLoader::Draw`/`DrawWorldGeometry`)
-- [x] WDL token bake — `WDLProcess` walks a pre-split colon-delimited token
-  cache instead of re-tokenizing the whole world text with `WSplitValue` every
-  frame (`BakeWDLTokens`/`EnsureWDLTokensBaked` in `Source/Core.hpp`; rebuilt
-  lazily when `WorldData`/`OtherWDLData`/`ExtraWDLInstructions` change)
+  `OzoneFrustum`/`OzOzoneLoader`)
 
 ### Tier 2 — multiplayer completeness
 
@@ -169,21 +218,21 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 - [ ] `levelinfo` → real game modes (DM timers, score limits; maxPlayers/friendlyFire enforced b58)
 - [x] Kick/ban + server console (`COMMAND` implemented b61: list/say/kick behind --admin-token; ban list still open)
 - [x] Player roster + LAN browser UI; honor the join port field (b57)
-- [x] Internet discovery: `AngelMaster` master (UDP heartbeats + HTTP/JSON list, expiry/rate limits), `AngelServ` uplink, client Internet browser with direct status/RTT queries (see `Wiki/Master-Server.md`)
-- [x] Server world population from world files + server saves (b61: seed_world_entities, PlayerData.dat, V2 world saves, autosave)
+- [x] Internet discovery: `AngelMaster` master (UDP heartbeats + HTTP/JSON list, expiry/rate limits), `AngelServ` HTTPS uplink (b70), client Internet browser with direct status/RTT queries (see `Wiki/Master-Server.md`)
+- [x] Server world population from world files + server saves (b59/b61: seed_world_entities, PlayerData.dat, V2 world saves, autosave); join loads the server's map (b72)
 - [ ] Stable entity replication IDs (replace index-triples)
 - [ ] ACK/retry for critical messages (weapon fire, pickup collect)
 - [ ] Client prediction + reconciliation for own player
-- [ ] FILE_TRANSFER: rejected by design (b61 notice + rate limit); implement chunked transfer or drop the packet type
+- [ ] FILE_TRANSFER: rejected by design (b59 notice + rate limit); implement chunked transfer or drop the packet type
 
 ### Tier 3 — presentation
 
 - [ ] Shadow pass (directional + point)
-- [ ] First-person weapon view-model
-- [ ] Wire the title video (draw + free)
-- [ ] Positional audio (Attenuation/pan) + zone ambience/`sfx_on_enter`
-- [ ] 3D particles (raise/dimension the particle cap)
-- [ ] Skeletal/flipbook animation for NPCs + remote players
+- [x] First-person weapon view-model (b74; Idle/Fire/Reload + procedural recoil)
+- [x] Title video wired (b57: looping title video)
+- [ ] Positional audio (attenuation/pan) — zone ambience/reverb landed via `SoundManager` (b57/b82)
+- [x] 3D particles (b74: 4096-particle `OzParticleSimulationManager` pool)
+- [ ] Skeletal/flipbook animation for NPCs + remote players (mesh animation landed b74; NPC skins still mostly billboards)
 
 ### Tier 4 — tooling & UX
 
@@ -198,9 +247,9 @@ Legend: **[0]** security/correctness, **[1]** engine fundamentals,
 
 ## Known-truth corrections (claims that are only half-true)
 
-- "LAN discovery works": the server announces on UDP 27100 via
-  `NetworkDiscovery::update()` but there is **no client-side browser UI** and
-  `NetworkDiscovery::parse_response()` is unused.
+- "LAN discovery works": the server announces on UDP 27100 and the client's
+  Multiplayer → Join page scans LAN on demand (b57) — but there is no passive
+  background discovery; scans are manual.
 - "Dedicated server standalone works": it does for world/NPC simulation, but
   player damage is client-authoritative for world hazards (`PLAYER_HURT`) — now
   closed by Tier 0 ownership checks.

@@ -2,90 +2,131 @@
 
 ## Source Tree
 
+Layout as of **b77+** (source tree reorganized; legacy WDL dropped):
+
 ```
 Angels95/
   Source/
     Main.cpp              # Client entrypoint, game loop, rendering
-    Core.hpp              # Engine init, splash, menu, world loading (~2200 lines)
+    Core.hpp              # Engine init, splash, menu, world loading, render loop
     Data.hpp              # Game globals, models, sounds, flags
     Settings.hpp          # Runtime settings: fog, particles, debug, resolution
+    ClientSettings.hpp    # Runtime client settings (System/Angels95.ini)
+    DebugFlags.hpp        # Debug toggles
     WindowsCompat.hpp     # Win32/raylib name collision fixes (CloseWindow, etc.)
     Log.cpp/.hpp          # Logging system
     IniConfig.hpp         # INI config file reader
     PPGIO.hpp             # Save/config I/O helpers
-    OzOzoneLoader.cpp/.hpp # OZONE world format loader
-    OzPack.cpp            # Standalone packer/unpacker CLI tool
     WorldState.hpp        # Scene/camera transition + toggle-flag state
+    OzPack.cpp            # Standalone packer/unpacker CLI tool
+    Screenshot.hpp        # --shot headless screenshot mode
+
+    Client/
+      Client.cpp/.hpp     # Client networking layer
+      MasterList.hpp      # Master server address loader + default URL
+      ProtocolHandler.hpp # angels95:// OS protocol handler (HKCU / .desktop)
+      JoinUri.hpp         # angels95://join/<ip>:<port> URI parsing/validation
+
+    World/                # OZONE world module (post-b77 extraction)
+      LevelSettings.hpp   # Level metadata, game rules, skybox paths
+      ZoneTypes.hpp       # ZoneType enum, ZoneEnvOverrides, GameplaySoundProfile
+      ZoneManager.cpp/.hpp# Zone volume/portal storage + runtime queries
+      OzoneParser.cpp/.hpp# Pure text-to-primitive OZONE parser (no raylib)
+      OzOzoneLoader.cpp/.hpp # Geometry, heightmap, spatial chunk provider
+      OzoneFrustum.cpp/.hpp  # Frustum culling math
+      OzoneHeightmap.cpp     # Terrain mesh generation + height sampling
 
     Server/
-      Server.cpp          # Dedicated server, HTTP API on :8080
-      OzoneParser.cpp/.hpp # OZONE format parser (standalone)
-      GameState.cpp/.hpp  # Server-side world state, NPCs, pickups
+      Server.cpp          # Dedicated server; HTTP API; --bind/auth/admin flags
+      GameState.cpp/.hpp  # Server-side world state, NPCs, pickups, saves
+      ServerHttp.cpp      # HTTP /map + /status endpoints
+      ServerInternal.hpp  # Shared server internals
+
+    Server/Network/
+      Network.cpp/.hpp    # Custom UDP protocol, packed structs, LAN discovery
+
+    Server/Master/
+      Master.cpp          # AngelMaster daemon
+      MasterClient.hpp    # Server -> master heartbeat uplink thread
 
     Network/
-      Network.cpp/.hpp    # Custom UDP protocol, packed structs, LAN discovery
+      NetworkSession.hpp  # Session/sequence state
+      MasterProtocol.hpp  # Shared heartbeat + JSON list wire codec
+      MasterHttp.hpp      # Minimal HTTP(S) client (WinHTTP on Windows, curl POSIX)
 
     Script/
       LightningScriptParser.cpp/.hpp   # LightningScript parser
-      LightningScriptContext.cpp/.hpp  # Script execution context
+      LightningScriptContext.cpp/.hpp  # Script execution context (VM)
       LightningEntityRegistry.cpp/.hpp # Entity type registry (.ozls)
       LightningEntityManager.cpp/.hpp  # Runtime entity management
       LightningEntityDef.hpp           # Entity definition structs
 
     Pawn/
-      OzPawnSystem.cpp/.hpp  # Dynamic NPC system, FSM, zones, pickups
-      Items.hpp              # Item definitions (20 backpack + 8 equip + 5 weapon slots)
-      Entities.hpp           # Entity definitions
-      Objects.hpp            # World object definitions
+      OzPawnSystem.cpp/.hpp  # Dynamic NPC system, FSM, projectiles, wind sampling
       Player.hpp             # Player state/capabilities
+      PlayerMovement.hpp     # Movement physics (sprint/crouch/stance)
+      PickupPawns.cpp/.hpp   # Networked-pickup collect loop
+      Items.hpp              # Item definitions
 
-    Package/
-      PackageAssetLoader.hpp # Runtime asset loading from .oz* packages
-      OzPackage.hpp          # OzPackage format reader/writer
-      OzAssetMapper.cpp/.hpp # Engine/item texture mapper
+    Pawn/AngelPlayer/        # Player behaviour modules (b78-b82)
+      GameUi.cpp/.hpp        # GameUI object-bar bridge (data-only, never draws)
+      SlotBar.cpp/.hpp       # SlotBar HUD renderer (atlas + slots, click-to-select)
+      InventoryBehaviour.cpp/.hpp  # Inventory HUD/overlay + item/weapon hooks
+      WeaponBehaviour.cpp/.hpp     # Fire/recoil/ADS + view-model clip triggers
+      PlayerController.cpp/.hpp    # Toggles, vertical, game-over
 
     Physics/
       OzBsp.cpp/.hpp         # CSG AABB boolean processor
       WorldChunk.cpp/.hpp    # Spatial partitioning for collision
+      PlayerPhysics.cpp/.hpp # Player collision resolution
+      PhysicsInfo.hpp        # Per-zone physics overrides (oz::physics)
 
     Renderer/
-      LitLightning.cpp/.hpp  # Lighting renderer
+      LitLightning.cpp/.hpp  # Lighting renderer (per-frame light pass)
       EngineBillboard.hpp    # Billboard sprite rendering (pickups, icons)
       TextSystem.hpp         # Text rendering system
       Video.hpp              # Video playback support
+      WindShader.hpp         # Wind sway shader uniforms
+      ViewModel.cpp/.hpp     # First-person weapon view-model
+      CombatFX.hpp           # Combat effects
+
+    Renderer/Mesh/           # oz::Mesh taxonomy (b74; namespaced vs raylib ::Mesh)
+      Mesh.cpp/.hpp          # oz::Mesh base
+      StaticMesh.cpp/.hpp    # Static mesh (OBJ/GLB)
+      SkeletalMesh.cpp/.hpp  # Skeletal mesh with named clips (GLB/GLTF/IQM)
+      AnimatedMesh.cpp/.hpp  # Vertex-keyframe .ozanim morph animation
+      MeshCache.cpp/.hpp     # Shared model cache (intentionally leaked)
+
+    Particle/
+      OzParticleSimulationManager.cpp/.hpp  # 4096-particle pool (sim + render)
+
+    Package/
+      PackageAssetLoader.hpp # Runtime asset loading from .oz* packages
+      OzPackage.hpp          # OzPackage format reader/writer (zlib/miniz)
+      OzAssetMapper.cpp/.hpp # Engine/item texture mapper
+
+    Package/Anim/
+      OzAnimFormat.cpp/.hpp  # .ozanim text format (raylib-free)
 
     Audio/
-      DspReverb.hpp          # Audio reverb DSP (attached to the master mix)
-
-    Client/
-      Client.cpp/.hpp        # Client networking layer
-
-    Custom/
-      OTCustom.cpp/.hpp      # Custom engine code (statically linked)
-
-    Encoder/
-      Encoder.cpp/.hpp       # Asset encoder
+      SoundManager.cpp/.hpp  # Single facade for every sound/music call
+      DspReverb.hpp          # Schroeder reverb DSP (master mix)
 
     Menu/
       TitleMenu.hpp          # Title/home screen menu
+      InternetBrowser.hpp    # Async Internet server browser
+      SkillTree.hpp          # Ethereal skill tree (b78)
+      SettingsMenu.hpp       # Settings menu
 
-    Parasite/
-      ParasiteScript.hpp     # Parasite script definitions
-      ParasiteScriptData.hpp # Parasite script data
+    UI/
+      UiHandler.cpp/.hpp     # Win32 native menu bar (oz::ui::CreateNativeMenuBar)
 
-    ParticleDemon/
-      ParticleDemon.hpp      # 50-particle array system (explosion/trail/rain)
+    Renderer/plmpeg/         # pl_mpeg MPEG1 video decoder
+    Renderer/rlights/        # raylib lights helper
+    Renderer/raygui/         # raygui UI library
+    miniz/                   # Vendored miniz (OzPackage zlib compression)
 
-    plmpeg/
-      pl_mpeg.h              # MPEG1 video decoder
-
-    rlights/
-      rlights.cpp/.h         # raylib lights helper
-
-    raygui/
-      raygui.c/.h, dark.h    # raygui UI library
-
-  AngelEd/                  # Level editor (Win32 only)
+  AngelEd/                  # Level editor (Win32 only; Makefile errors out on Linux)
     Source/
       Main.cpp              # Editor entrypoint, toolbar, 3D viewport, selection
       Editor.hpp            # Editor state, camera, lighting, cached models
@@ -93,27 +134,100 @@ Angels95/
       EditorIcons.cpp/.hpp  # Toolbar icon loader (AngelEd/UI/*.bmp)
       PPGIO.hpp             # Save/config I/O helpers (shared with Source/)
       raygui/               # Bundled raygui (dark.h, raygui.c/.h)
-    UI/                     # 45 toolbar icon .bmp files
+    UI/                     # Toolbar icon .bmp files
     Makefile                # Separate editor Makefile
 
   GameData/                 # Loose assets, worlds, saves
     Worlds/
       <WorldName>/
         World.ozone         # World description (OZONE format)
-        Models/             # .obj files, textures, heightmap
+        Models/             # .obj/.glb models, textures, heightmap, Skybox.png
         Music/              # Background music
+        oztex/              # Tileset + free-placement textures
     Global/
       PawnDefs/*.cfg        # Data-driven NPC definitions
+      UI/GameUI.ozls        # Authored HUD object-bar def
+      gun/                  # Weapon .ozls defs + FBX-derived .glb view-models
+      sky/                  # Skybox textures (.dds)
     Saves/                  # Binary save files (gitignored)
 
-  System/                   # Release directory
-    Angels95.exe
-    AngelServ.exe
-    AngelEd.exe
-    OzPack.exe
+  System/                   # Release directory (gitignored, assembled by scripts)
+    Angels95.exe / AngelServ.exe / AngelEd.exe / AngelMaster.exe / OzPack.exe
     Data/*.oz*              # Packaged assets
     Cache/                  # Runtime temp cache (model extraction)
+    angels95-serv.service   # VPS systemd unit (AngelServ/AngelMaster)
 ```
+
+## Key Systems (b57–b82)
+
+### GameUI / SlotBar object-bar HUD (b82)
+`GameData/Global/UI/GameUI.ozls` (`EntityType::GAMEUI`) is the authored source
+of the player's object bar: one atlas `texture =` plus a comma-separated
+`slot_rects` stat (source-texture pixels, no spaces). `GameUi.{hpp,cpp}` is the
+data-only bridge (`SlotCount()`, `SlotRect(i)`, layout stats); `SlotBar.{hpp,cpp}`
+is the single renderer — it maps the atlas to the screen, fits each occupied
+cell's entity icon, draws slot numbers/selection, and does click-to-select. Both
+call sites (`LightningEntityManager::DrawHotbar` and
+`InventoryBehaviour::DrawOverlay`) share it, each keeping a plain-rectangle
+fallback when `GameUI.ozls` is absent.
+
+### AngelPlayer behaviour modules (b78–b80)
+The player is assembled from `Source/Pawn/AngelPlayer/` modules instead of one
+monolithic block: `PlayerController` (toggles, vertical, game-over),
+`WeaponBehaviour` (fire/recoil/ADS + view-model clip triggers),
+`InventoryBehaviour` (HUD/overlay + item/weapon collect hooks) and the `GameUi`
+bridge. Sprint (`Shift`) / crouch (`Ctrl`) and the resulting stance are
+replicated to the server; `PlayerPhysics` + `PhysicsInfo.hpp` hold the movement
+defaults.
+
+### ZoneManager (b80/b82)
+`ZoneManager` owns `ZoneVolumeNode`, `ZonePortal`, `PointRegion` and every
+runtime zone query (`GetActiveZones`, `CheckZoneCollision`,
+`CheckPortalCollision`, `UpdatePlayerRegion`). Zone entry/volume detection and
+env-override merging go through `ZoneManager::Instance()`, not `PawnSystem`.
+`ZoneEnvOverrides` (fog/ambient/reverb) layer lowest-priority-first so the
+highest-priority zone wins; `GameplaySoundProfile` is consumed by
+`SoundManager::UpdateSoundZones`. Per-zone physics (`gravity`, `jump`,
+`terminal`, `water_*`, `ladder_speed`, `fly_mult`) override
+`oz::physics::PhysicsInfo`.
+
+### SoundManager facade (b57, refactored b82)
+`Source/Audio/SoundManager.{hpp,cpp}` is the single entry point for every sound
+and music call — no gameplay file touches raylib sound handles directly. It
+owns world music, zone ambience, the reverb hook (`DspReverb` Schroeder reverb
+attached to the master mix) and the script-sound cache. `play_sound` routes
+through `SoundManager::PlayScriptSound` and is package-aware (`.ozsnd`
+resolves). The old `g_prevSoundZone`/`g_defaultWorldMusic`/`g_ambienceHandle`
+globals in `Core.hpp` are gone.
+
+### Master HTTPS uplink (b59/b70)
+`MasterHttp.hpp` speaks TLS with **no vendored crypto**: WinHTTP/Schannel on
+Windows, `curl` on POSIX (the Windows Makefile links `-lwinhttp`). The default
+master is `https://angels95.tribewarez.com/master` (client browser GET
+`/master/api/servers`, server uplink POST `/master/api/heartbeat`). See
+`Wiki/Master-Server.md`.
+
+### LightningScript VM (b59)
+The runtime became a real VM: `$flag<idx>` reads instance toggle flags,
+assignments support RHS arithmetic (`$x = $x - 1`), `if (...)` accepts both
+brace and `endif` styles, and `toggle_flag`/`jump` opcodes landed. Each
+instance carries a per-instance stat resolver and its hotbar/equipment flags
+persist across saves.
+
+### Mesh taxonomy + vertex-keyframe animation + wind (b74)
+`oz::Mesh`/`StaticMesh`/`SkeletalMesh`/`AnimatedMesh` unify the ad-hoc mesh
+paths behind one cache (`MeshCache`, intentionally leaked so GL teardown never
+runs after `CloseWindow`). `.ozanim` is a raylib-free text morph format
+(`Source/Package/Anim/`); `AnimatedMesh` samples clips and CPU-uploads
+positions. Wind-affected meshes (`wind=1`) draw with `Wind.vs` (height-weighted
+sine sway); `oz::SetWindUniforms` uploads the sway params per draw.
+
+### Screenshot mode (b82)
+`--shot <out.png>` plus `--shot-delay`, `--shot-res`, `--shot-cam` (repeatable,
+OZONE Z-up, yaw/pitch degrees) and `--shot-hud` capture deterministic,
+HUD-free frames. It suppresses splash/menu/audio, forces vsync/MSAA/pixel/
+jitter/fog/head-bob/debug off, freezes the camera via `isNoClip`, and exits when
+every camera is captured. See `Source/Screenshot.hpp`.
 
 ## Key Architecture Points
 
@@ -152,20 +266,32 @@ Packaging is done via `.\build-data.ps1` which uses `OzPack.exe`.
 
 ## Particle System
 
-`ParticleDemon.hpp` implements a 50-particle array system with three effect types:
-- **Explosion** — burst of colored particles in random directions
-- **Trail** — sequential particle trail
-- **Rain** — falling particles from top of screen
-
-The `RainParticles` instance is in `EngineData` (Core.hpp).
+`Source/Particle/OzParticleSimulationManager.{hpp,cpp}` replaces the legacy
+50-particle `ParticleDemon` with a pool of **4096 particles** (b74). Emitters
+are authored as `GameEngine.ParticleEmitter` nodes (or OZONE
+`ParticleEmitter <type> ...` lines) and boxed in `PawnSystem`. The manager is
+ticked once per frame in `Core.hpp` *after* the weapon/NPC/projectile sim loop
+and only reads emitter defs — it never calls gameplay code, so particles cannot
+interrupt weapon mechanics or NPC ticks. Client-only/cosmetic (not networked).
 
 ## Pawn System
 
 NPC definitions are loaded from `GameData/Global/PawnDefs/*.cfg` (name, speed, aggroRange, attackRange, damage, maxHealth, sprite_path, scream_path). Fallback hardcoded defs: Walker, Skaarj, Brute, Floater.
 
-FSM states: IDLE, PATROL, CHASE, ATTACK, RETURN, DEAD.
+FSM states: IDLE, PATROL, CHASE, RETURN, DEAD (no ATTACK state — see
+`Source/Pawn/OzPawnSystem.hpp:25`). State transitions fire `.ozls` actions
+(`on_patrol`/`on_chase`/`on_return`/`on_death`) only when a pawn-named def
+exists (e.g. `Walker.ozls`). Server-owned NPCs run the FSM server-side and are
+networked (`npc_type` in `NpcStateUpdateData`, `networkControlled=true`).
 
-NPCs attack via melee range check (no ranged attack capability). Projectile damage from players is detected client-side in `PawnSystem::UpdateProjectiles()` (collision radius 1.5) and server-side in `GameState::tick_projectiles()` (radius 2.0).
+Animated pawns: `.cfg` keys `mesh_type` (`static`/`skeletal`) + `anim_*` clips.
+A skeletal pawn uses `oz::SkeletalMesh` (GLB/GLTF/IQM) and maps `PawnState` to
+a clip; yaw tracks movement for skeletal pawns, static/billboard pawns face the
+camera.
+
+NPCs attack via melee range check (no ranged NPC fire). Projectile damage is
+detected client-side in `PawnSystem::UpdateProjectiles()` (collision radius
+1.5) and server-side in `GameState::tick_projectiles()` (radius 2.0).
 
 ## Weapon System
 
@@ -181,14 +307,24 @@ Key source files:
 | `Source/Script/LightningEntityManager.cpp` | `FireSelectedWeapon()` — reads weapon stats, handles ammo/reload/cooldown, runs `on_fire`/`on_swing`/`on_reload` actions, dispatches ranged (projectile) or melee (range check) logic |
 | `Source/Pawn/OzPawnSystem.cpp` | `SpawnProjectile()`, `UpdateProjectiles()` (movement + gravity + pawn collision), `DrawProjectiles()` |
 | `Source/Server/GameState.cpp` | `spawn_projectile()`, `tick_projectiles()` — server-authoritative projectile simulation with NPC and player collision |
-| `Source/Main.cpp` | `FireWeapon()` — camera ray, trigger, recoil, muzzle flash, crosshair, ADS, network send |
+| `Source/Pawn/AngelPlayer/WeaponBehaviour.cpp` | `FireWeapon()` — camera ray, trigger, recoil, muzzle flash, crosshair, ADS, view-model clip triggers |
+| `Source/Renderer/ViewModel.cpp/.hpp` | First-person weapon view-model: attached to the camera, Idle/Fire/Reload clips + procedural recoil kick / reload dip |
 
-Pickup types from LightningScript entity registry (`.ozls` definitions).
+Weapon `stats` may set `viewmodel_mesh`, `viewmodel_texture`,
+`viewmodel_offset/rot/scale`, `recoil`, and per-weapon `projectile_mesh` /
+`projectile_submesh` / `projectile_scale` / `projectile_color` for drawn
+tracers. FBX art is converted via `tools/convert_fbx.ps1` (FBX2glTF) and
+`tools/merge_glb_anims.py` folds Fire/Reload/Idle clips into one `.glb`.
+
+Pickup types come from the LightningScript entity registry (`.ozls` definitions).
 
 ## Known Editor Gaps
 
-- Lighting toggle (Lit/Unlit) does not actually unset shader from model materials
-- CSG Add/Subtract UI is wired but backend `CsgProcessor` never called for actual boolean geometry
-- Full-document undo/redo via Edit menu + Ctrl+Z/Ctrl+Y (camera/selection not restored)
+The editor is covered in detail by `Wiki/Editor-Usage.md`; the remaining
+limitations (as of b82):
+
+- Render meshes are not CSG-carved (CSG booleans process collision volumes only)
+- Undo/redo covers world state only; camera and selection are not restored
 - No test-play save prompts ("Reload world from playtest changes?")
-- Lighting effects (watery, torch, fire, lamp) are UI-only — not rendered in viewport
+- Lighting effects (watery, torch, fire, lamp) are UI-only — not rendered in the viewport
+- Model/Texture preview rendering requires the raylib viewport to be focused

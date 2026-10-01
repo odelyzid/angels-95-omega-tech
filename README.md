@@ -13,7 +13,50 @@ aesthetics, a custom **OZONE** world format, a
 (`AngelEd`), and a dedicated standalone server (`AngelServ`) with no raylib
 dependency.
 
-Current release: **b56**.
+Current release: **b82**.
+
+---
+
+## Showcase
+
+All 12 shots captured in-engine via `--shot` mode (PS1-style, HUD-free,
+1920x1060) across the four shipped worlds.
+
+### Citadel Ruins
+
+A ruined hill-citadel — roofed courtyard, four corner towers, a gatehouse
+over the south gate, and watch balconies over a collar of sand.
+
+<img src="GameData/Screenshots/CitadelRuins_1.png" width="32%" alt="Citadel Ruins — evening over the roofed courtyard" />
+<img src="GameData/Screenshots/CitadelRuins_2.png" width="32%" alt="Citadel Ruins — gatehouse and corner towers" />
+<img src="GameData/Screenshots/CitadelRuins_3.png" width="32%" alt="Citadel Ruins — watch balconies over the sand collar" />
+
+### Dessert Dreams
+
+Sun-baked desert oasis at midday — sandstone arches and columns under a noon
+sky.
+
+<img src="GameData/Screenshots/Dessert_Dreams_1.png" width="32%" alt="Dessert Dreams — oasis basin at midday" />
+<img src="GameData/Screenshots/Dessert_Dreams_2.png" width="32%" alt="Dessert Dreams — sandstone arches" />
+<img src="GameData/Screenshots/Dessert_Dreams_3.png" width="32%" alt="Dessert Dreams — columns above the sand" />
+
+### Dust Ravine
+
+Desert fortress — halls, corridors, underground tunnels and three outdoor
+areas under a daylight sky.
+
+<img src="GameData/Screenshots/Dust_Ravine_1.png" width="32%" alt="Dust Ravine — fortress ramparts" />
+<img src="GameData/Screenshots/Dust_Ravine_2.png" width="32%" alt="Dust Ravine — interior hall" />
+<img src="GameData/Screenshots/Dust_Ravine_3.png" width="32%" alt="Dust Ravine — outdoor courtyard" />
+
+### Engine Test
+
+Small functional/test scene — five chambers, a great hall and a courtyard,
+one zone of every zone type, and a portal to Dust Ravine.
+
+<img src="GameData/Screenshots/EngineTest_1.png" width="32%" alt="Engine Test — chamber with tileset brushes" />
+<img src="GameData/Screenshots/EngineTest_2.png" width="32%" alt="Engine Test — great hall" />
+<img src="GameData/Screenshots/EngineTest_3.png" width="32%" alt="Engine Test — courtyard and portal" />
 
 ---
 
@@ -37,6 +80,40 @@ Current release: **b56**.
   ops, OZONE export, Lit/Unlit/Wire view modes.
 - **Packaged assets** — `OzPack.exe` bundles models/scripts/textures/sounds/
   worlds into `.ozpak/.oztex/.ozsnd/.ozmux/.ozone` packages in `System/Data/`.
+- **GameUI object-bar HUD (b82)** — `SlotBar` renders a data-driven atlas +
+  slots with click-to-select; shared between the in-world hotbar and the
+  inventory overlay.
+- **AngelPlayer behaviours (b78–b80)** — `GameUi`, `InventoryBehaviour`,
+  `WeaponBehaviour`, `PlayerController` modules; sprint/crouch/stance
+  replicated to the server.
+- **Per-zone physics (b80)** — `gravity`, `jump`, `terminal`, `water_*`,
+  `ladder_speed`, `fly_mult` overrides via `ZoneEnvOverrides`.
+- **Unified audio (b57/b82)** — `SoundManager` facade for every sound/music
+  call; `DspReverb` Schroeder reverb on the master mix.
+- **Server worlds & saves (b59)** — seeds NPCs/pickups from `World.ozone`;
+  V2 world saves with 60s autosave; HTTP `/map` API; admin `list`/`say`/`kick`
+  + HTTP Bearer auth.
+- **HTTPS master uplink (b59/b70)** — WinHTTP/Schannel (Windows) + curl
+  (POSIX), no vendored crypto; default master
+  `https://angels95.tribewarez.com/master`; LAN + Internet browser.
+- **Editor undo/redo (b60–b81)** — full-document history (Ctrl+Z/Y/Shift+Z),
+  OZONE save/playtest, Script Manager, def-aligned Entity Properties, world
+  texture import, viewport skybox.
+- **Vertex-keyframe animation (b74)** — `.ozanim` morph clips, in-editor
+  animation tool, Convert to Animated, vertex deform + undo/redo.
+- **New OZONE entities (b74)** — `Mesh.Static`/`Mesh.Skeletal`,
+  `ParticleEmitter`, `PathNode`, `WindZone` end-to-end (OZONE → loader →
+  runtime → editor → export) with wind-sway shader.
+- **Weapons & view-models (b54+)** — six shipped weapons; FBX→GLB pipeline;
+  per-weapon first-person view-model with Idle/Fire/Reload clips + procedural
+  recoil.
+- **Screenshot mode (b82)** — `--shot`, `--shot-delay`, `--shot-res`,
+  `--shot-cam`, `--shot-hud` headless captures.
+- **Deep-link join (b60/b71)** — `angels95://join/<ip>:<port>` OS protocol
+  handler (HKCU / `.desktop`) with `JoinUri` validation.
+- **Pack-on-import (b82)** — editor imports pack straight into
+  `imported_models.ozpak` / `imported_textures.oztex` (free-placement
+  textures, not tileset).
 
 ---
 
@@ -52,6 +129,7 @@ Current release: **b56**.
 | OZONE world format | [World Format](Wiki/World-Format-OZONE.md) |
 | Build instructions, prerequisites, CI | [Building](Wiki/Building.md) |
 | Gap analysis and priorities | [Engine Roadmap](Wiki/Engine-Roadmap.md) |
+| Master server protocol, HTTPS uplink, browser | [Master Server](Wiki/Master-Server.md) |
 
 ---
 
@@ -88,8 +166,11 @@ The dedicated server has **no raylib dependency**:
 | `--dir` | `GameData` | Path to game data directory |
 | `--server-name` | `Angels95 Server` | Display name announced to masters |
 | `--master` | – | Master UDP heartbeat target `host[:port]`, repeatable |
-| `--master-http` | – | Master HTTP heartbeat URL, repeatable (plain `http://`) |
+| `--master-http` | – | Master HTTP(S) heartbeat URL, repeatable (TLS via WinHTTP/curl) |
 | `--public-ip` | – | Public IP to announce when behind NAT |
+| `--bind` | all | Interface to bind — IPv4, hostname, or `0.0.0.0` on a VPS |
+| `--auth-token` | – | HTTP Bearer gate (env `OZ_AUTH_TOKEN`) |
+| `--admin-token` | – | Enables COMMAND list/say/kick (env `OZ_ADMIN_TOKEN`) |
 
 LAN discovery on UDP `27100`. Worlds are scanned from `GameData/Worlds/`.
 
@@ -120,8 +201,10 @@ from a `System/` release folder:
 ```
 
 > Note: `System/Angels95.ini` **is read at runtime** by the client (`[Settings]`,
-> `[MasterServers]`); `System/OzServer.ini` is a template never read at runtime.
-> The server is controlled entirely by CLI flags.
+> `[MasterServers]`); `System/OzServer.ini` is a template written by the build
+> scripts, and `AngelServ` also reads it at runtime (`[Server]`/`[Auth]`/
+> `[MasterServers]`) — CLI flags and env (`OZ_AUTH_TOKEN`, `OZ_ADMIN_TOKEN`)
+> override it.
 
 ---
 
@@ -168,7 +251,8 @@ make test   # builds + runs all suites, continues past failures
 
 Standalone tests (no framework) land in the repo root as executables.
 Suites: parser, context, registry, entity_manager, pawn_system,
-ozone_parser, network, game_state. Single suites: `make test_parser`, etc.
+ozone_parser, join_uri, master, network, game_state. Single suites:
+`make test_parser`, etc.
 
 ---
 
@@ -185,53 +269,92 @@ ozone_parser, network, game_state. Single suites: `make test_parser`, etc.
 
 ## Changelog
 
-### b56 — 2026-09-24
-- **Network security hardenings (Tier 0 of engine roadmap)** — world-list JSON
-  clamped to the UDP payload size (fixes remote overflow), bounded
-  `SCENE_UPDATE`/`CHAT` reads on the client, server-authoritative
-  `PLAYER_HURT`/`PLAYER_KILL`/pickup ownership, `WEAPON_AMMO` clamps, non-finite
-  + teleport position rejection with server-authoritative relayed health, and a
-  deferred auth handshake (retry/resend fix + idempotent player join). See
-  `Wiki/Engine-Roadmap.md` for the full gap analysis.
-- **Footwork hardening** — explicit `COMMAND`/`GAME_STATE` handling, per-update
-  teleport clamp, monotonic-down health.
-- Tests extended (`NetworkClient` loopback auth handshake, `GameState`
-  idempotent `add_player`): all 9 suites green.
+### b82 — 2026-10-01
+- GameUI object-bar HUD (`SlotBar`) — data-driven atlas + `slot_rects`, click-to-select, shared between in-world hotbar and inventory overlay; editor asset-scope tree + pack-on-import; `SoundManager`/`ZoneManager` extraction; `--shot` screenshot mode; new pawn/player assets.
 
-### b55 — 2026-09-23
-- **LightningScript entity actions** — new opcode/actions for scripts:
-  `msg`, `heal`, `damage`, `playerstat <name> <op> <value>`, `consume`,
-  `spawn_pickup`; stat-resolver fallback with compound float ops.
-- **Scripted content for Dust_Ravine** — consumables (Medkit, ManaTonic),
-  a scripted quest pickup (PistonPart), a new weapon (flux_carbine, reusing
-  automag assets), plus `acidpool` (DoT tick zone) and `arena` (one-shot
-  NPC-spawn zone) skyzone defs and matching `zone name=` geometry.
-- **AngelEd** — brush property apply/delete, native menu bar, environment
-  settings slider fix; server network message coverage completed.
-- **CombatFX** module added for effect handling.
-- **CI overhaul** — raylib 5.5 built from source on the Windows runner
-  (pacman package removed), Editor build synced with `AngelEd/Makefile`,
-  Linux client fixed (Win32 chrome in `TitleMenu` guarded), `.res`/`windres`
-  made Windows-only. Both Linux and Windows CI jobs now pass.
-- Tests extended (`LightningScriptContext`, `OzoneParser`): all 9 suites green.
+### b81 — 2026-09-30
+- Editor full-document undo/redo (OZONE-snapshot history) + world texture import; tileset-aware `OzoneLoader::LoadString`; CitadelRuins south corridor + Skaarj Predator model.
 
-### b54 — 2026-08-21
-- OZONE terrain render pipeline, sky zone isolation, script action boundaries.
+### b80 — 2026-09-30
+- AngelPlayer behaviour modules (`GameUi`, `InventoryBehaviour`, `WeaponBehaviour`, `PlayerController`) + `PlayerPhysics`; per-zone physics overrides via `ZoneEnvOverrides`; native UI.
 
-### b53 — 2026-08-11
-- **New map: Dust_Ravine** — desert fortress complex with connected hallways,
-  rooms, corridors, underground tunnels, and three outdoor areas. 24 pickups,
-  22 lights across multiple interior/exterior zones.
-- **2x texture tiling on wall brushes**, `texScaleU=N texScaleV=N` OZONE
-  tokens, fixed overlapping floor geometry z-fighting.
+### b79 — 2026-09-30
+- Client lighting fixes (headlight wash, editor light export), pistol pickup crash, inverted controls; equipment wiring + skill respec + stance replication.
 
-### b52 — 2026-08-11
-- **Fix: extreme low FPS** — `EngineBillboard` was recreating its mesh model
-  every frame; now cached and reused across all draws.
+### b78 — 2026-09-30
+- Player model, `movement_speed` + sprint/crouch, ethereal skill tree, equipment wiring, multiplayer stance.
 
-### b51 — 2026-07-30
-- Crash fixes, server security, multiplayer UI, editor fixes, refactoring,
-  tests; `inline` global refactor; `ScanWorlds` multi-CWD fallback.
+### b77 — 2026-09-30
+- Source tree reorganized (`World/`, `Pawn/AngelPlayer/`, `Renderer/Mesh/`, `Audio/`); legacy WDL format dropped.
+
+### b76 — 2026-09-30
+- Model Browser preview fixed; Import/Export mesh buttons restored.
+
+### b75 — 2026-09-30
+- raylib 5.5 CI build fix; editor list de-dup, resizable panels, button icons.
+
+### b74 — 2026-09-30
+- `oz::Mesh` taxonomy (static/skeletal + vertex-keyframe `.ozanim` animation); new OZONE entities `ParticleEmitter`, `PathNode`, `WindZone` end-to-end; in-editor animation authoring tool.
+
+### b73 — 2026-09-28
+- Network NPC sync fix — server NPCs keyed by (world, npc, partition); no more unbounded pawn spawning after a map switch.
+
+### b72 — 2026-09-28
+- Joining a server now loads its map (menu `GetSelectedWorld` + server `active_world` JSON fixes); client relocates cwd to the install root.
+
+### b71 — 2026-09-28
+- Join-IP textbox corruption fixed; packaged `.dds`/image/audio decode from memory (`LoadImageFromMemory`/`LoadWaveFromMemory`).
+
+### b70 — 2026-09-28
+- Live HTTPS master uplink — WinHTTP/Schannel (Windows) + curl (POSIX), no vendored crypto; default master `https://angels95.tribewarez.com/master`; working Internet server browser.
+
+### b69 — 2026-09-28
+- Per-binary release assets on GitHub (Linux + Windows); release notes document standalone vs zip-required binaries.
+
+### b68 — 2026-09-28
+- Saved levelinfo skybox renders in client + editor; level skybox beats zone texture (explicit `set_skybox` still overrides).
+
+### b67 — 2026-09-28
+- Skybox actually loads (lazy `skyboxTex`); per-world `.ozls` skybox fallback; Sky toolbar toggle restored.
+
+### b66 — 2026-09-28
+- Editor skybox selection priority fixed (levelinfo > `Models/Skybox.png`).
+
+### b65 — 2026-09-28
+- Linux server build fixed; `--bind` on AngelServ/AngelMaster for VPS hosting; anti-spoof `publicip` trust; `System/angels95-serv.service` units.
+
+### b64 — 2026-09-28
+- Editor viewport skybox cube + Sky toolbar toggle.
+
+### b63 — 2026-09-28
+- Skybox packaging (`.dds` from packages via `System/Cache`); texture manager lists the `.dds` sky library.
+
+### b62 — 2026-09-28
+- Zone Properties tabs visible again (Particles/Portals wired); Fog skybox Browse/Use Active Tex/Apply Skybox.
+
+### b61 — 2026-09-28
+- OZONE texture persistence + editor load idempotence; AngelMaster daemon + InternetBrowser + master announce; Master wiki/test/CI.
+
+### b60 — 2026-09-28
+- Editor OZONE save/playtest fixed (compiles before launch); Script Manager; def-aligned Entity Properties; `angels95://` deep-link + `JoinUri`.
+
+### b59 — 2026-09-27
+- LightningScript VM made real (flag vars, RHS arithmetic, brace conditions, `toggle_flag`/`jump`); pawn FSM hooks live; server world seeding + V2 saves + admin/auth.
+
+### b58 — 2026-09-26
+- Multiplayer wiring: scene/ammo sync, weapon grants, typed network NPCs; NPC death/respawn; pickup respawn; CSG op export; portal traversal; editor tool modes.
+
+### b57 — 2026-09-26
+- Wired dead systems: reverb DSP on master mix, pawn aggro screams, looping title video, LAN browser + join/host ports, OzPackage zlib compression.
+
+### b56 and earlier — historical record
+
+- **b56 — 2026-09-24** — Tier 0 network security hardenings: world-list clamp, bounded reads, server-authoritative `PLAYER_HURT`/`PLAYER_KILL`, ammo clamps, teleport rejection, deferred auth.
+- **b55 — 2026-09-23** — LightningScript entity actions (`msg`/`heal`/`damage`/`playerstat`/`consume`/`spawn_pickup`); Dust_Ravine content; AngelEd brush ops; CombatFX; CI overhaul.
+- **b54 — 2026-08-21** — OZONE terrain render pipeline, sky zone isolation, script action boundaries.
+- **b53 — 2026-08-11** — New map Dust_Ravine (desert fortress); 2x wall texture tiling; `texScale*` tokens.
+- **b52 — 2026-08-11** — Fix: `EngineBillboard` model-cache (extreme low FPS).
+- **b51 — 2026-07-30** — Crash fixes, server security, multiplayer UI, editor fixes, refactoring, tests.
 
 ---
 

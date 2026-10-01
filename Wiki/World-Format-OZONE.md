@@ -42,6 +42,24 @@ sub / intersect <primitive> ...   # CSG carve
 Zones are scripted by sibling `<name>.ozls` skyzone files. The axis convention
 is **Z-up**.
 
+#### Per-zone physics overrides (b80)
+
+Any `zone` line may carry named kwargs that override
+`oz::physics::PhysicsInfo` (defaults: gravity 18, jump 9, terminal 60,
+water gravity 8 / drag 0.95 / swim-up 5, ladder speed 6, fly multiplier 1.5):
+
+```
+zone water ... gravity=12 jump=7 terminal=40 water_gravity=6 water_drag=0.9 swim_up=4
+zone ladder ... ladder_speed=8
+zone sky ... fly_mult=2.0
+```
+
+Accepted keys: `gravity=`, `jump=`, `terminal=`, `water_gravity=`,
+`water_drag=`, `swim_up=`, `ladder_speed=`, `fly_mult=`. Also order-independent
+named kwargs on entity lines: `name=`, `tex=`, `anim=`, `speed=`, `next=`,
+`loop`, `radius=`, `scale=` (see authoring traps below for the positional
+traps).
+
 ### Editor
 
 AngelEd loads, edits and exports OZONE only. Export path:

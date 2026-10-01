@@ -27,6 +27,7 @@ LAN discovery (UDP 27100) is unchanged and still works alongside this.
 | `--http-port` | `27950` | HTTP list/API port |
 | `--max-servers` | `4096` | Cap on tracked servers |
 | `--gamename` | `angels95` | Filter default for list queries |
+| `--bind` | `127.0.0.1` | Interface to bind (use `0.0.0.0` on a VPS) |
 
 ### HTTP API
 
@@ -51,8 +52,10 @@ Example response:
 Entries expire after **90 s** (3 × the 30 s heartbeat). Heartbeats are
 rate-limited to one per source IP per 1.5 s, the server cap is enforced, and
 display strings are sanitized — but heartbeats are unauthenticated by design
-(like classic masters). Run the master on a trusted host / behind a reverse
-proxy if you need stronger guarantees.
+(like classic masters). Since b65, a self-reported `publicip` is **only
+trusted when the heartbeat arrives from a non-private source** (anti-spoof);
+otherwise the real remote address is used. Run the master on a trusted host /
+behind a reverse proxy if you need stronger guarantees.
 
 ---
 
@@ -160,7 +163,9 @@ Terminal 3 — client: launch `Angels95`, go to Multiplayer → Join → Source
 
 For a public deployment, run `AngelMaster` on a reachable host (e.g.
 `master.example.com:27900/27950`), point game servers at it, and add that URL
-to each client's `[MasterServers]` section.
+to each client's `[MasterServers]` section. Both daemons accept `--bind
+0.0.0.0` for VPS hosting, and `System/angels95-serv.service` ships systemd
+units for `AngelServ` and `AngelMaster`.
 
 ---
 
@@ -168,11 +173,11 @@ to each client's `[MasterServers]` section.
 
 | Piece | File |
 |---|---|
-| Shared wire codec (heartbeat + JSON list) | `Source/Master/MasterProtocol.hpp` |
-| Minimal HTTP client (plain HTTP, no TLS) | `Source/Master/MasterHttp.hpp` |
-| Server → master uplink thread | `Source/Master/MasterClient.hpp` |
-| Master daemon | `Source/Master/Master.cpp` |
-| Master address/INI loader | `Source/Master/MasterList.hpp` |
+| Shared wire codec (heartbeat + JSON list) | `Source/Network/MasterProtocol.hpp` |
+| Minimal HTTP(S) client (WinHTTP on Windows, curl on POSIX — no vendored crypto) | `Source/Network/MasterHttp.hpp` |
+| Server → master uplink thread | `Source/Server/Master/MasterClient.hpp` |
+| Master daemon | `Source/Server/Master/Master.cpp` |
+| Master address loader + default URL | `Source/Client/MasterList.hpp` |
 | Client internet browser (async) | `Source/Menu/InternetBrowser.hpp` |
 | Client browser UI | `Source/Menu/TitleMenu.hpp` |
 | Uplink wiring | `Source/Server/Server.cpp` |
@@ -180,9 +185,11 @@ to each client's `[MasterServers]` section.
 
 ### Limitations
 
-- Heartbeats/lists use plain HTTP and unauthenticated UDP — spoofing is
-  mitigated only by rate limiting and expiry.
-- No TLS (`https://` masters unsupported) to avoid adding a crypto dependency.
+- Heartbeats/list uploads are unauthenticated by design (like classic
+  masters); spoofing is mitigated by rate limiting, expiry, and the b65
+  anti-spoof rule that only trusts `publicip` from non-private sources.
+- TLS adds no vendored crypto — Windows uses WinHTTP (Schannel), POSIX shells
+  out to `curl`; custom CAs resolve through the OS trust store.
 - The pure GameSpy binary/`\status\` query protocol is **not** implemented; the
   JSON/HTTP path is the supported integration. The wire format is small and
   documented above if a GameSpy-compatible endpoint is added later.

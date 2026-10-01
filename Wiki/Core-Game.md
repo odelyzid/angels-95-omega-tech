@@ -6,6 +6,8 @@
 |---|---|
 | WASD | Movement (first-person) |
 | Mouse | Look |
+| Shift (hold) | Sprint — faster movement (stance replicated to the server) |
+| Ctrl (hold) | Crouch — lower profile (stance replicated to the server) |
 | Left Click (hold) | Fire selected weapon (auto-fire at weapon's fire rate) |
 | Right Click (hold) | Aim Down Sights (tighter crosshair, reduced spread) |
 | R | Reload selected weapon |
@@ -21,7 +23,13 @@
 
 - **Health / Mana / Psychic Energy** — three resource pools displayed at top, automatic regeneration (tick-based). Max values default to 100.
 - **Level & XP** — exponential XP curve (`XP_BASE_TO_NEXT=100`, growth 1.3x per level). XP gained from pickups, NPC kills, and exploration.
-- **Hotbar** — 5 weapon slots + 3 equipment slots (8 total). Slot 1 is the default Wand / Energy Bolt weapon.
+- **SlotBar object bar (b82)** — 8 cells rendered from a data-driven atlas
+  (`GameData/Global/UI/GameUI.ozls`: `texture` + comma-separated `slot_rects`
+  in source-texture pixels). Occupied cells get a fitted entity icon, slot
+  numbers and a gold selection/hover outline; number keys, mouse wheel and
+  **click-to-select** all work. The same bar renders in-world (bottom centre)
+  and inside the inventory overlay (mini-bar). Slot 1 is the default starter
+  weapon.
 - **Ammo counter** — shows current ammunition / magazine capacity for the selected weapon. Turns red when empty.
 - **Crosshair** — 4-line crosshair at screen center. Gap expands with recoil bloom, tightens during ADS.
 - **Muzzle flash** — brief yellow sphere at weapon origin on each shot.
@@ -103,18 +111,32 @@ New pickup types can be added by creating `.ozls` entity definition files.
 - **5 weapon hotbar slots** — Object1–Object5, directly selectable with number keys
 - Press Tab to open/close the inventory overlay
 
+## Skills & Equipment (b78–b79)
+
+- **Ethereal skill tree** — the title-menu **SkillTree** overlay ("Angel's
+  Descent") renders every `skill`-typed `.ozls` entity as a tiered node graph.
+  Left-click an available node to unlock it for Mana or Psychic Energy; nodes
+  may require another skill and grant stat bonuses (`max_health_bonus`,
+  `max_mana_bonus`, `max_psychic_energy_bonus`, `move_speed_bonus`). Unlocks
+  persist through the toggle-flag save (`TF.sav`); **Respec (refund all)**
+  re-allocates the spent resources.
+- **Equipment wiring** — the inventory overlay renders an EQUIPMENT panel
+  (left side) alongside the backpack; equipment choices and the sprint/crouch
+  stance replicate to the server in multiplayer.
+
 ## NPC AI
 
-Six-state finite state machine:
+Five-state finite state machine (no ATTACK state — combat is melee-range
+checks and projectiles):
 
 ```
-IDLE -> PATROL -> CHASE -> ATTACK -> RETURN -> DEAD
+IDLE -> PATROL -> CHASE -> RETURN -> DEAD
 ```
 
 - **IDLE**: standing still, waiting for a target to enter aggro range
-- **PATROL**: circles around spawn point
+- **PATROL**: circles around spawn point (follows the world's `PathNode`
+  graph server-side when present, else the legacy circular patrol)
 - **CHASE**: pursues nearby player within aggro range
-- **ATTACK**: engages when within attack range (deals configured damage)
 - **RETURN**: goes back to spawn if target strays too far
 - **DEAD**: despawned state after health reaches zero
 
@@ -125,7 +147,12 @@ NPCs are configured data-driven from `GameData/Global/PawnDefs/*.cfg` (name, spe
 - **Game port**: UDP 27015
 - **LAN discovery**: UDP 27100 (servers broadcast presence)
 - **HTTP API**: port 8080 (`GET /map?list`, `GET /map?name=X`)
-- Client connects via `Join Game` in the home screen
+- **Internet**: the Multiplayer → Join page's Internet source fetches the live
+  server list from the configured masters (default
+  `https://angels95.tribewarez.com/master`) and queries each server's
+  `/status` for RTT; see `Wiki/Master-Server.md`
+- Client connects via `Join Game` in the home screen, or an
+  `angels95://join/<ip>:<port>` deep link
 
 ## Save System
 

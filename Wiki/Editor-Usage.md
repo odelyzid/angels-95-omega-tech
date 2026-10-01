@@ -23,7 +23,7 @@ Supports the OZONE (`.ozone`) world format. Open/Save dialogs accept `.ozone`. O
 | Open... | O | Load a world from file |
 | Save | S | Save the current world |
 | Save As... | | Save to a new path |
-| Play Test | P | Launch Angels95.exe with the current world |
+| Play Test | P | Save + compile the world, then launch Angels95.exe with it (b60: playtest saves and compiles before launch so the client never runs a stale export) |
 | Exit | Q | Close editor |
 
 ### View
@@ -80,8 +80,21 @@ Right-click drag (without an entity under the cursor) orbits the camera.
 |---|---|
 | Lit | Models render with LitFogShader (lighting + fog) |
 | Unlit | Models render with default unlit shader |
+| Wire | Wireframe view mode |
+| Sky | Show/hide the viewport skybox backdrop (b64/b67) |
 
 Toggle between modes from the ViewMode toolbar combo.
+
+## Viewport skybox (b64–b68)
+
+The editor renders the world skybox cube as a camera-following backdrop with
+cap-texture sides. Resolution order (highest first):
+
+1. `levelinfo` `skyboxTexturePath` (Fog tab) — saved skybox from the `.ozone`
+2. world `Models/Skybox.png` — fallback only
+
+The Fog tab's **Apply Skybox** (with **Browse** or **Use Active Tex**) commits
+the selection; a failed load is logged.
 
 ## CSG Brushes
 
@@ -159,9 +172,11 @@ auto-expand and folders with no matches are pruned.
 - **Spawn Selected** places the chosen actor at camera position
 - **Refresh** reloads the tree from current definitions
 
-### Script Manager
-- Lists `.ozone` files from `GameData/` and packages
-- Double-click to view file info and path
+### Script Manager (b60)
+- Lists `.ozls` entity definitions from the LightningScript registry (scanned
+  from all of `GameData/` + packages) with name, type and source path
+- Double-click to view the def body; **Edit / New / Delete / Reload** open the
+  file in the configured external editor and re-scan the registry after edits
 
 ### Zone Properties / Environment Settings
 - **Fog**: color, density, start/end distance
@@ -169,7 +184,8 @@ auto-expand and folders with no matches are pruned.
 - **Game Type**: Singleplayer, Coop, Etheral Match, Angel Team Game, Angel Run, Capture the Orb, Time Shift
 - **Max Players**, **Respawn Time**, **Time Limit**, **Score Limit**, **Friendly Fire**
 - **Particles**: type (None/Snow/Rain/Void Realm/Psychic Realm), density, speed, color, wind
-- **Skybox**: custom skybox texture path
+- **Skybox**: custom skybox texture path; levelinfo path takes priority over
+  `Models/Skybox.png` (see *Viewport skybox* above)
 - Per-zone overrides for fog/ambient/reverb when editing zone volumes
 
 ### Pickup Panel
@@ -202,6 +218,25 @@ auto-expand and folders with no matches are pruned.
 - Edit position (X/Y/Z), scale, rotation
 - For brushes/zones: edit size (W/H/D)
 - Texture mapping: U/V scale and offset
+- **Def-aligned rows (b60)**: entities backed by a `.ozls` def or `PawnDefs/*.cfg`
+  show read-only stats + hook rows straight from the def (read-only), with
+  instance overrides and zone/portal fields editable below them
+
+### Animation Tool (b74)
+Opens from the toolbar **Anim** button. Authors **vertex-keyframe (morph)**
+animation for `Mesh.Skeletal` entities — the text `.ozanim` format
+(`Source/Package/Anim/`, raylib-free):
+
+- **Clip list** — New/Delete clips, per-clip FPS + loop toggle
+- **Transport** — Play / Pause / Stop + timeline scrub
+- **Convert to Animated** (Mesh properties / Entity Properties) — writes a
+  default clip under `GameData/Global/Anims/` and switches the entity to an
+  animated mesh
+- **Edit Verts** — vertex picking (click / Shift-add / Sel All); keyboard
+  deform moves verts with **U/J/H/K/Y/I** (X/Z/Y) and rotates with **O/L**;
+  **Ctrl+Z/Y** undo/redo is tool-scoped
+- **Add Key / Del Key** — capture or drop sparse vertex offsets at the current
+  timeline position; playback is client-cosmetic (not networked)
 
 ## Keyboard Shortcuts
 

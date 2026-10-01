@@ -134,7 +134,7 @@ Hotbar/equipment instance flags are persisted in save games (`flags=` section). 
 | `restore_ambient` | `restore_ambient` | Restore default ambient |
 | `set_skybox` | `set_skybox "name"` | Set skybox by name |
 | `restore_skybox` | `restore_skybox` | Restore default skybox |
-| `play_sound` | `play_sound "path"` | Queue sound playback |
+| `play_sound` | `play_sound "path"` | Queue sound playback (package-aware: resolves `.ozsnd` via `SoundManager::PlayScriptSound`) |
 | `msg` | `msg "text"` | On-screen text message |
 | `heal` / `damage` | `heal 25` | Immediate player health delta |
 | `playerstat` | `playerstat health -= 5` | Deferred write to a player stat |
