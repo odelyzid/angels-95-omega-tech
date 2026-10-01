@@ -84,7 +84,7 @@ void ViewModel::Clear() {
     m_key.clear();
 }
 
-void ViewModel::SetWeapon(const EntityDef* def) {
+void ViewModel::SetWeapon(const EntityDef* def, int variantIndex) {
     static std::string s_lastDef;
     if (!def || def->type != EntityType::WEAPON) {
         if (!s_lastDef.empty()) {
@@ -102,6 +102,15 @@ void ViewModel::SetWeapon(const EntityDef* def) {
 
     std::string mesh = VmStatStr(def, "viewmodel_mesh", def->mesh);
     std::string tex  = VmStatStr(def, "viewmodel_texture", def->texture);
+
+    // Apply the instance's resolved variant, if the def declares any. Spawn()
+    // already picked the tier; without this the view-model kept showing the base
+    // mesh while the world copy used the variant.
+    if (variantIndex >= 0 && variantIndex < (int)def->variants.size()) {
+        const EntityVariant& v = def->variants[(size_t)variantIndex];
+        if (!v.meshOverride.empty())    mesh = v.meshOverride;
+        if (!v.textureOverride.empty()) tex  = v.textureOverride;
+    }
 
     // Transform params refresh cheaply each call.
     m_offset   = VmStatVec3(def, "viewmodel_offset", m_offset);
@@ -189,7 +198,7 @@ void ViewModel::Update(float dt) {
 void ViewModel::Draw(Camera3D& camera, Shader litShader) {
     // Bind to the currently selected weapon (cheap when unchanged).
     EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
-    SetWeapon(ent ? ent->def : nullptr);
+    SetWeapon(ent ? ent->def : nullptr, ent ? ent->variantIndex : -1);
     if (!m_mesh || !m_mesh->Valid()) return;
 
     static std::string s_loggedKey;

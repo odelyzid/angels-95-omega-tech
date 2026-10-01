@@ -1581,6 +1581,13 @@ if (inSkyZone)
             lem.ClearPendingAmbient();
         }
 
+        // Zone music authored on a skyzone def (`music = "..."`).
+        if (lem.HasPendingMusic()) {
+            const std::string track = lem.PendingMusic();
+            lem.ClearPendingMusic();
+            SoundManager::Instance().PlayWorldMusic(track);
+        }
+
         // Zone environment override application (from combined player region)
         {
             auto& region = ZoneManager::Instance().GetPlayerRegion();

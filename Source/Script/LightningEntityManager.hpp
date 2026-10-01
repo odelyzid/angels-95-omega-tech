@@ -104,6 +104,10 @@ public:
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
     void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
+    // Applies a skyzone def's declarative fog_color / ambient_light /
+    // fog_density / music. These keys parsed but nothing read them, so authored
+    // values were silently ignored.
+    void ApplyZoneEnvFields(const EntityDef& def);
 
     // --- Generic entity action (not SKYZONE-restricted; used for on_collect) ---
     void TriggerEntityAction(const EntityDef* def, const std::string& actionName);
@@ -189,6 +193,11 @@ public:
     bool TakePendingAmbientRestore() { bool v = m_pendingAmbientRestore; m_pendingAmbientRestore = false; return v; }
     bool TakePendingSkyboxRestore() { bool v = m_pendingSkyboxRestore; m_pendingSkyboxRestore = false; return v; }
 
+    // Zone music authored via `music = "..."` on a skyzone def.
+    bool HasPendingMusic() const { return !m_pendingMusic.empty(); }
+    const std::string& PendingMusic() const { return m_pendingMusic; }
+    void ClearPendingMusic() { m_pendingMusic.clear(); }
+
 private:
     LightningEntityManager();
     std::vector<EntityInstance> m_instances;
@@ -226,6 +235,10 @@ private:
     bool m_pendingFogRestore = false;
     bool m_pendingAmbientRestore = false;
     bool m_pendingSkyboxRestore = false;
+    std::string m_pendingMusic;
+    // Name of the zone def whose declarative env fields are currently applied,
+    // so a re-trigger of the same zone is idempotent.
+    std::string m_activeEnvZoneDef;
     float m_ambientR = 0.0f, m_ambientG = 0.0f, m_ambientB = 0.0f;
     std::string m_pendingMessage;
     bool m_playerHurt = false;

@@ -184,12 +184,46 @@ entity "automag" : weapon {
         }
     }
     variants {
-        "lvl1" { mesh_override = "automag_lvl1" }
-        "lvl2" { mesh_override = "automag_lvl2" }
-        "lvl3" { mesh_override = "automag_heavy_rifle_lvl3" }
+        "lvl1" { mesh_override = "automag_lvl1.obj" }
+        "lvl2" { mesh_override = "automag_lvl2_alt.obj" }
+        "lvl3" { mesh_override = "automag_heavy_rifle_lvl3.obj" }
     }
 }
 ```
+
+`variants` are resolved when the instance spawns: the engine parses the `lvlN`
+name for its tier and picks the highest tier that does not exceed the player's
+level (clamped to the highest declared tier). A level-1 player therefore always
+sees `lvl1`. The chosen variant applies to both the world pickup and the
+first-person view-model. Names without an `lvlN` prefix are treated as tier 0.
+Override `mesh_override` paths are resolved relative to the def's own directory,
+so include the file extension.
+
+### Declarative zone environment
+
+A `skyzone` entity can author its atmosphere directly rather than through
+`set_fog` / `set_ambient` opcodes. These are applied when the player enters the
+zone:
+
+```ozls
+entity "skyzone_citadel" : skyzone {
+    skybox = "..."
+    music = "..."            // asset prefix, handed to SoundManager::PlayWorldMusic
+    fog_color = (0.62, 0.52, 0.46)
+    fog_density = 0.0022
+    ambient_light = (0.50, 0.46, 0.46)
+
+    actions {
+        on_enter { msg "..." }
+        on_exit  { restore_fog   }
+    }
+}
+```
+
+`fog_color`, `fog_density` and `ambient_light` are applied on `on_enter`; the
+`restore_fog` / `restore_ambient` / `restore_skybox` opcodes revert them to the
+level defaults. Note the vec3 syntax is `name = (x, y, z)` — a `vec3` prefix
+does not parse.
 
 ## Example: Zone with Damage Loop (acidpool)
 

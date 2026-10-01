@@ -626,6 +626,75 @@ static int test_set_cooldown_is_one_shot() {
     PASS(); return 0; END_TEST();
 }
 
+// Regression: `variants { "lvlN" { mesh_override = ... } }` parsed into the def
+// but nothing read it, so every weapon always rendered its base mesh.
+static int test_variant_selected_by_level() {
+    TEST("Spawn picks the highest variant tier within the player level");
+    auto& reg = LightningEntityRegistry::Instance();
+
+    // Init() spawns a "Player" def to host the player stats; without one the
+    // player index stays -1 and SetPlayerLevel silently no-ops, so the tier
+    // selection would always see the default level.
+    EntityDef pdef;
+    pdef.name = "Player";
+    pdef.type = EntityType::UPGRADE;
+    pdef.stats.floats["level"] = 1.0f;
+    reg.Register(pdef);
+
+    EntityDef def;
+    def.name = "VariantGun";
+    def.type = EntityType::WEAPON;
+    def.mesh = "base.obj";
+    EntityVariant v1; v1.name = "lvl1"; v1.meshOverride = "t1.obj";
+    EntityVariant v2; v2.name = "lvl2"; v2.meshOverride = "t2.obj";
+    EntityVariant v3; v3.name = "lvl3"; v3.meshOverride = "t3.obj";
+    def.variants.push_back(v1);
+    def.variants.push_back(v2);
+    def.variants.push_back(v3);
+    reg.Register(def);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+
+    // Level 1 -> lvl1.
+    em.SetPlayerLevel(1);
+    int idx1 = em.Spawn("VariantGun");
+    CHECK(idx1 >= 0);
+    CHECK_EQ(em.Get(idx1)->variantIndex, 0);
+
+    // Level 2 -> lvl2.
+    em.SetPlayerLevel(2);
+    int idx2 = em.Spawn("VariantGun");
+    CHECK(idx2 >= 0);
+    CHECK_EQ(em.Get(idx2)->variantIndex, 1);
+
+    // Level 9 -> clamps to the highest declared tier, lvl3.
+    em.SetPlayerLevel(9);
+    int idx3 = em.Spawn("VariantGun");
+    CHECK(idx3 >= 0);
+    CHECK_EQ(em.Get(idx3)->variantIndex, 2);
+    PASS(); return 0; END_TEST();
+}
+
+// No variants declared must leave variantIndex unset rather than picking one.
+static int test_no_variants_leaves_index() {
+    TEST("Spawn leaves variantIndex unset when no variants exist");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "PlainGun";
+    def.type = EntityType::WEAPON;
+    def.mesh = "base.obj";
+    reg.Register(def);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    em.SetPlayerLevel(5);
+    int idx = em.Spawn("PlainGun");
+    CHECK(idx >= 0);
+    CHECK_EQ(em.Get(idx)->variantIndex, -1);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningEntityManager Tests\n");
     fprintf(stdout, "============================\n");
@@ -664,6 +733,11 @@ int main() {
     failures += test_equipment_slot_name();
     failures += test_auto_equip_and_defense();
     failures += test_respec_skills();
+    // Last: these register a "Player" def that Init() spawns, and the registry
+    // is a process-wide singleton, so running them earlier would change the
+    // player-instance assumptions of the tests above.
+    failures += test_variant_selected_by_level();
+    failures += test_no_variants_leaves_index();
 
     fprintf(stdout, "============================\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

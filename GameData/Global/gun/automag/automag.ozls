@@ -17,9 +17,12 @@ entity "automag" : weapon {
             say "Reloading..."
         }
     }
-    variants {
-        "lvl1" { mesh_override = "automag_lvl1" }
-        "lvl2" { mesh_override = "automag_lvl2" }
-        "lvl3" { mesh_override = "automag_heavy_rifle_lvl3" }
+    // Variants are resolved at Spawn by picking the highest tier whose "lvlN"
+// name does not exceed the player's level. lvl2 pointed at "automag_lvl2",
+// which does not exist - the shipped mesh is automag_lvl2_alt.obj.
+variants {
+        "lvl1" { mesh_override = "automag_lvl1.obj" }
+        "lvl2" { mesh_override = "automag_lvl2_alt.obj" }
+        "lvl3" { mesh_override = "automag_heavy_rifle_lvl3.obj" }
     }
 }

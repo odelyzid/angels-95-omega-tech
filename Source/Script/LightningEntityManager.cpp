@@ -410,13 +410,45 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
             def->name.c_str(), (int)def->type, def->mesh.c_str(), def->texture.c_str(),
             def->icon.c_str());
 
+    // Variant selection. `variants { "lvlN" { mesh_override = ... } }` parsed
+    // into the def but nothing ever read it, so every weapon always rendered its
+    // base mesh. Pick the highest variant tier that does not exceed the player's
+    // level; the declared order is the tier order.
+    std::string mesh   = def->mesh;
+    std::string tex    = def->texture;
+    std::string icon   = def->icon;
+    int variantIdx = -1;
+    if (!def->variants.empty() && def->type == EntityType::WEAPON) {
+        const int level = (int)GetPlayerLevel();
+        int bestTier = -1, bestIdx = -1;
+        for (size_t i = 0; i < def->variants.size(); i++) {
+            // "lvl3" -> 3. A name without a level prefix is treated as tier 0.
+            const std::string& name = def->variants[i].name;
+            int tier = 0;
+            const size_t p = name.rfind("lvl");
+            if (p != std::string::npos && p + 3 < name.size())
+                tier = std::atoi(name.c_str() + p + 3);
+            if (tier <= level && tier > bestTier) { bestTier = tier; bestIdx = (int)i; }
+        }
+        if (bestIdx >= 0 && !def->variants[(size_t)bestIdx].meshOverride.empty()) {
+            mesh = def->variants[(size_t)bestIdx].meshOverride;
+            if (!def->variants[(size_t)bestIdx].textureOverride.empty())
+                tex = def->variants[(size_t)bestIdx].textureOverride;
+            variantIdx = bestIdx;
+            OZ_INFO("LEM::Spawn '%s' using variant '%s' (mesh='%s')",
+                    def->name.c_str(), def->variants[(size_t)bestIdx].name.c_str(),
+                    mesh.c_str());
+        }
+    }
+
     EntityInstance inst;
     inst.def = def;
+    inst.variantIndex = variantIdx;
 
     // Load resources
-    if (!def->mesh.empty()) inst.modelIdx = CacheModel(def->mesh);
-    if (!def->texture.empty()) inst.textureIdx = CacheTexture(def->texture);
-    if (!def->icon.empty()) inst.iconIdx = CacheTexture(def->icon);
+    if (!mesh.empty())  inst.modelIdx   = CacheModel(mesh);
+    if (!tex.empty())   inst.textureIdx = CacheTexture(tex);
+    if (!icon.empty())  inst.iconIdx    = CacheTexture(icon);
     OZ_INFO("[CHAIN] LEM::Spawn cached model=%d tex=%d icon=%d",
             inst.modelIdx, inst.textureIdx, inst.iconIdx);
 
@@ -454,7 +486,7 @@ int LightningEntityManager::Spawn(const EntityDef* def) {
     inst.ctx.SetDebugTag(tag);
 
     inst.owned = true;
-    inst.variantIndex = 0;
+    // variantIndex was already resolved above; do not clobber it here.
     m_instances.push_back(std::move(inst));
 
     int idx = (int)m_instances.size() - 1;
@@ -806,7 +838,54 @@ void LightningEntityManager::TriggerZoneAction(const EntityDef* def,
     if (!def) return;
     // Only allow zone-type entities to trigger via TriggerZoneAction
     if (def->type != EntityType::SKYZONE) return;
+
+    // Declarative zone environment. These four body keys parse into the def but
+    // nothing ever read them, so every skyzone authored fog_color /
+    // ambient_light / fog_density / music and got the engine default instead.
+    // Applied on enter; on_exit the script's restore_fog / restore_ambient /
+    // restore_skybox opcodes take over (and now actually work).
+    if (actionName == "on_enter") ApplyZoneEnvFields(*def);
+
     TriggerEntityAction(def, actionName);
+}
+
+void LightningEntityManager::ApplyZoneEnvFields(const EntityDef& def) {
+    bool applied = false;
+
+    auto vc = def.stats.vec3s.find("fog_color");
+    if (vc != def.stats.vec3s.end()) {
+        m_pendingFog = true;
+        m_fogR = vc->second[0];
+        m_fogG = vc->second[1];
+        m_fogB = vc->second[2];
+        // fog_density is optional; fall back to a mild default.
+        auto fd = def.stats.floats.find("fog_density");
+        m_fogDensity = (fd != def.stats.floats.end()) ? fd->second : 0.3f;
+        applied = true;
+        OZ_INFO("Zone '%s': fog_color (%.2f, %.2f, %.2f) density %.2f",
+                def.name.c_str(), m_fogR, m_fogG, m_fogB, m_fogDensity);
+    }
+
+    auto al = def.stats.vec3s.find("ambient_light");
+    if (al != def.stats.vec3s.end()) {
+        m_pendingAmbient = true;
+        m_ambientR = al->second[0];
+        m_ambientG = al->second[1];
+        m_ambientB = al->second[2];
+        applied = true;
+        OZ_INFO("Zone '%s': ambient_light (%.2f, %.2f, %.2f)",
+                def.name.c_str(), m_ambientR, m_ambientG, m_ambientB);
+    }
+
+    // music: the authored world track. SoundManager owns playback, so hand it
+    // the asset prefix rather than duplicating stream handling here.
+    if (!def.music.empty()) {
+        m_pendingMusic = def.music;
+        applied = true;
+        OZ_INFO("Zone '%s': music '%s'", def.name.c_str(), def.music.c_str());
+    }
+
+    if (applied && !def.name.empty()) m_activeEnvZoneDef = def.name;
 }
 
 // ---------------------------------------------------------------------------

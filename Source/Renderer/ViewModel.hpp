@@ -36,7 +36,7 @@ public:
 private:
     ViewModel() = default;
 
-    void SetWeapon(const EntityDef* def);
+    void SetWeapon(const EntityDef* def, int variantIndex = -1);
 
     std::shared_ptr<Mesh> m_mesh;
     SkeletalMesh* m_skel = nullptr; // alias into m_mesh when it has clips
