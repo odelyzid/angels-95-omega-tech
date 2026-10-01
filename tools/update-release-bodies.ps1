@@ -12,7 +12,8 @@ $Tags = @(
   @{ T='b82'; Prev='b76' },
   @{ T='b83'; Prev='b82' },
   @{ T='b84'; Prev='b83' },
-  @{ T='b85'; Prev='b84' }
+  @{ T='b85'; Prev='b84' },
+  @{ T='b86'; Prev='b85' }
 )
 
 $ApiHeaders = @{
