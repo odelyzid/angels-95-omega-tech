@@ -101,6 +101,18 @@ public:
     // Signatures: (hotbarSlot, ammoInMag, magazineSize, action)
     void set_on_ammo_changed(std::function<void(int, int, int, int)> cb) { m_on_ammo_changed = std::move(cb); }
 
+    // True when the last ReloadSelectedWeapon / auto-reload actually started a
+    // reload. Set by the manager (both reload paths), consumed by the player
+    // layer to trigger the view-model reload clip. Reading clears the flag.
+    // Previously the clip was triggered from a raw KEY_R poll in the draw
+    // loop, so it played even when the reload was rejected (full magazine,
+    // no magazine stat, wrong weapon type).
+    bool ConsumeReloadStarted() {
+        bool r = m_reloadStarted;
+        m_reloadStarted = false;
+        return r;
+    }
+
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
     void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
@@ -245,6 +257,7 @@ private:
 
     // Ammo-change hook (bridged by the host to the network layer)
     std::function<void(int, int, int, int)> m_on_ammo_changed;
+    bool m_reloadStarted = false;
 
     int CacheModel(const std::string& path);
     int CacheTexture(const std::string& path);

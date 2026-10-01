@@ -137,6 +137,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
             if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
             if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
+            m_reloadStarted = true;  // auto-reload plays the clip too
             return -1;
         }
         ammoIt->second -= 1.0f;
@@ -227,6 +228,7 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
     if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
     if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
+    m_reloadStarted = true;
     return true;
 }
 
@@ -736,6 +738,10 @@ void LightningEntityManager::HandleInput(bool uiBlocking) {
         } else {
             SelectSlotSkippingEmpty(m_selectedSlot + m_wheelDir, m_wheelDir);
             m_wheelLock = 0.15f;
+            // Consume the direction once it has been used. Without this the
+            // latched direction never cleared and a single flick kept stepping
+            // the hotbar every 0.15s forever, long after the user let go.
+            m_wheelDir = 0;
         }
     }
 

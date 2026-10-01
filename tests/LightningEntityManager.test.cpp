@@ -487,6 +487,57 @@ static int test_reload_full_ammo() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_reload_started_flag() {
+    TEST("Reload-started flag is set only when a reload actually happens");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "ReloadFlagGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["magazine"] = 3;
+    def.stats.floats["fire_rate"] = 0.0f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("ReloadFlagGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+
+    // Drain the flag left over from earlier tests.
+    em.ConsumeReloadStarted();
+
+    // Firing 3 shots empties the magazine.
+    for (int i = 0; i < 3; i++) {
+        em.FireSelectedWeapon(origin, dir);
+        em.SelectedEntity()->cooldownRemaining = 0.0f;
+    }
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK_EQ((int)ent->runtimeStats["ammo"], 0);
+    CHECK(!em.ConsumeReloadStarted());  // emptying the mag is not a reload
+
+    // Firing on empty auto-reloads: that must report a reload.
+    ent->cooldownRemaining = 0.0f;
+    em.FireSelectedWeapon(origin, dir);
+    CHECK(em.ConsumeReloadStarted());  // auto-reload plays the clip
+    CHECK_EQ((int)ent->runtimeStats["ammo"], 3);
+    CHECK(!em.ConsumeReloadStarted());  // flag is consumed, not sticky
+
+    // Firing again spends ammo, leaving the magazine short.
+    ent->cooldownRemaining = 0.0f;
+    em.FireSelectedWeapon(origin, dir);
+    CHECK(!em.ConsumeReloadStarted());
+    CHECK_EQ((int)ent->runtimeStats["ammo"], 2);
+
+    // Manual reload reports one, and a rejected reload does not.
+    ent->cooldownRemaining = 0.0f;
+    CHECK(em.ReloadSelectedWeapon());
+    CHECK(em.ConsumeReloadStarted());
+    CHECK(!em.ReloadSelectedWeapon());          // already full
+    CHECK(!em.ConsumeReloadStarted());
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -719,6 +770,7 @@ int main() {
     failures += test_deserialize_roundtrip();
     failures += test_run_action_no_crash();
     failures += test_player_stats_default();
+    failures += test_reload_started_flag();
     failures += test_multi_despawn_cycles();
     failures += test_fire_no_weapon();
     failures += test_fire_not_a_weapon();

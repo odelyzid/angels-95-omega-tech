@@ -1171,7 +1171,7 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
 
     // GameEngine.ParticleEmitter � particles live in (and are drawn by) the
     // isolated simulation manager; the emitter nodes themselves are boxed here.
-    OzParticleSimulationManager::Instance().Draw(camera);
+    OzParticleSimulationManager::Instance().Draw(camera, &LitLightning_TransientLights());
 }
 
 // ---------------------------------------------------------------------------

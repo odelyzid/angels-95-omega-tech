@@ -9,6 +9,7 @@
 #include "../Source/Pawn/OzPawnSystem.hpp"
 #include "../Source/Script/LightningEntityRegistry.hpp"
 #include "../Source/Script/LightningEntityDef.hpp"
+#include "../Source/Particle/OzParticleSimulationManager.hpp"
 #include <cstdio>
 #include <cassert>
 
@@ -339,6 +340,37 @@ static int test_projectile_miss() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_particle_burst() {
+    TEST("Burst spawns, ages out and clamps to the pool cap");
+    auto& sim = OzParticleSimulationManager::Instance();
+    sim.Clear();
+    CHECK_EQ(sim.LiveCount(), 0);
+
+    sim.Burst({0, 0, 0}, {0, 1, 0}, 12, 5.0f, 30.0f,
+              {255, 200, 100, 255}, {0, 0, 0, 0}, 0.1f, 0.2f, 0.5f);
+    CHECK_EQ(sim.LiveCount(), 12);
+
+    // Over-requesting beyond the cap must not over-allocate the pool.
+    sim.Burst({0, 0, 0}, {0, 1, 0}, 99999, 5.0f, 30.0f,
+              {255, 255, 255, 255}, {0, 0, 0, 0}, 0.1f, 0.1f, 0.2f);
+    CHECK(sim.LiveCount() <= 4096);
+
+    // Retire everything.
+    sim.Update(10.0f);
+    CHECK_EQ(sim.LiveCount(), 0);
+
+    // Zero count is a no-op, and a zero lifetime retires on the first tick
+    // rather than living forever.
+    sim.Burst({0, 0, 0}, {0, 1, 0}, 0, 5.0f, 30.0f,
+              {255, 0, 0, 255}, {0, 0, 0, 0}, 0.1f, 0.1f, 1.0f);
+    CHECK_EQ(sim.LiveCount(), 0);
+    sim.Burst({0, 0, 0}, {0, 1, 0}, 3, 5.0f, 0.0f,
+              {255, 0, 0, 255}, {0, 0, 0, 0}, 0.1f, 0.1f, 0.0f);
+    sim.Update(0.016f);
+    CHECK_EQ(sim.LiveCount(), 0);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_light_crud() {
     TEST("AddLight and ClearLights");
     auto& ps = PawnSystem::Instance();
@@ -370,6 +402,7 @@ int main() {
     failures += test_skyzone_active();
     failures += test_emitter_crud();
     failures += test_light_crud();
+    failures += test_particle_burst();
     failures += test_projectile_spawn();
     failures += test_projectile_movement();
     failures += test_projectile_expiry();

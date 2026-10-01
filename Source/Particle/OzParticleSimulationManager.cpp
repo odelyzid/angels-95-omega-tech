@@ -1,6 +1,7 @@
 #include "OzParticleSimulationManager.hpp"
 #include "../Pawn/OzPawnSystem.hpp"
 #include "../Package/PackageAssetLoader.hpp"
+#include "raymath.h"
 #include <cmath>
 
 namespace {
@@ -140,8 +141,21 @@ void OzParticleSimulationManager::Update(float dt) {
     if (m_live < 0) m_live = 0;
 }
 
-void OzParticleSimulationManager::Draw(Camera3D& camera) {
+void OzParticleSimulationManager::Draw(Camera3D& camera,
+                                       const std::vector<LightNode>* transientLights) {
     if (m_live <= 0) return;
+
+    // Gather lights once per frame, transient first (matching the priority the
+    // shader uses) so a muzzle flash visibly lights the smoke sitting in it.
+    // Passed in by the caller rather than reaching for the global pool: the
+    // transient pool lives in LitLightning, and depending on it here would drag
+    // the whole lighting chain into every test target that links this file.
+    std::vector<const LightNode*> lit;
+    if (transientLights)
+        for (const auto& n : *transientLights)
+            if (n.active) lit.push_back(&n);
+    for (const auto& n : PawnSystem::Instance().GetLights())
+        if (n.active) lit.push_back(&n);
 
     BeginBlendMode(BLEND_ALPHA);
     for (auto& p : m_pool) {
@@ -158,12 +172,114 @@ void OzParticleSimulationManager::Draw(Camera3D& camera) {
             (unsigned char)(p.colorStart.a + (p.colorEnd.a - (int)p.colorStart.a) * t)
         };
 
+        c = ApplyLighting(c, p.position, lit);
+
         if (p.texture.id > 0)
             DrawBillboard(camera, p.texture, p.position, size, c);
         else
             DrawSphere(p.position, size * 0.5f, c);
     }
     EndBlendMode();
+}
+
+// Multiply a particle's colour by the light reaching it.
+//
+// Particles used to draw through raylib's immediate-mode DrawBillboard, which
+// never touches the Lights uniform block, so they were completely unlit and
+// floated at full brightness in dark rooms. Sampling the same LightNode data the
+// lit mesh shader uses keeps particles consistent with the scene without
+// routing them through the batcher (immediate mode cannot carry a custom shader).
+//
+// Alpha is preserved: lighting is a modulation of colour, not of coverage.
+Color OzParticleSimulationManager::ApplyLighting(
+        Color c, Vector3 pos, const std::vector<const LightNode*>& lights) {
+    if (lights.empty()) return c;
+
+    // Ambient floor so an unlit particle is still visible, matching the shader's
+    // default ambient of 1.0.
+    float lr = 1.0f, lg = 1.0f, lb = 1.0f;
+    for (const LightNode* n : lights) {
+        float dist = 0.0f;
+        if (n->type == LitLightType::DIRECTIONAL) {
+            // No positional falloff for the sun.
+        } else {
+            dist = Vector3Distance(pos, n->position);
+            if (n->radius > 0.0f && dist > n->radius) continue;
+        }
+        float atten = (n->radius > 0.0f)
+            ? std::max(0.0f, 1.0f - dist / n->radius)   // linear, cheap
+            : 1.0f;
+        if (atten <= 0.0f) continue;
+        float k = atten * n->intensity;
+        lr += (n->color.r / 255.0f) * k;
+        lg += (n->color.g / 255.0f) * k;
+        lb += (n->color.b / 255.0f) * k;
+    }
+    // Clamp so a bright light cannot blow the particle to flat white.
+    c.r = (unsigned char)std::min(255.0f, c.r * lr);
+    c.g = (unsigned char)std::min(255.0f, c.g * lg);
+    c.b = (unsigned char)std::min(255.0f, c.b * lb);
+    return c;
+}
+
+void OzParticleSimulationManager::Burst(Vector3 pos, Vector3 dir, int count,
+                                       float speed, float spread,
+                                       Color color, Color colorEnd,
+                                       float sizeStart, float sizeEnd,
+                                       float lifetime, float gravity,
+                                       Texture2D tex) {
+    if (count <= 0) return;
+    if ((int)m_pool.size() != MAX_PARTICLES) m_pool.resize(MAX_PARTICLES);
+
+    Vector3 base = dir;
+    const float bl = sqrtf(base.x*base.x + base.y*base.y + base.z*base.z);
+    if (bl > 1e-4f) { base.x /= bl; base.y /= bl; base.z /= bl; }
+    else base = {0.0f, 1.0f, 0.0f};
+
+    // Build an orthonormal basis around base so the spread cone is isotropic.
+    Vector3 up = (std::fabs(base.y) > 0.99f) ? Vector3{1,0,0} : Vector3{0,1,0};
+    Vector3 right = Vector3Normalize(Vector3CrossProduct(up, base));
+    Vector3 realUp = Vector3CrossProduct(base, right);
+
+    const float spreadRad = spread * DEG2RAD;
+    for (int i = 0; i < count; i++) {
+        Particle* p = nullptr;
+        for (int tries = 0; tries < MAX_PARTICLES; tries++) {
+            Particle& cand = m_pool[m_next];
+            m_next = (m_next + 1) % MAX_PARTICLES;
+            if (!cand.active) { p = &cand; break; }
+        }
+        if (!p) break;   // pool exhausted
+
+        // Random point in the cone: random angle, random radial falloff
+        // (sqrt keeps the distribution uniform over the disc).
+        const float ang = (float)rand() / (float)RAND_MAX * 2.0f * PI;
+        const float rad = spreadRad > 0.0f
+            ? sqrtf((float)rand() / (float)RAND_MAX) * spreadRad
+            : 0.0f;
+        Vector3 v = base * cosf(rad)
+                  + (right * cosf(ang) + realUp * sinf(ang)) * sinf(rad);
+        v = Vector3Normalize(v);
+
+        // Per-particle speed jitter so a burst does not read as one rigid cone.
+        const float s = speed * (0.7f + 0.6f * ((float)rand() / (float)RAND_MAX));
+
+        p->active = true;
+        p->position = pos;
+        p->velocity = Vector3Scale(v, s);
+        p->age = 0.0f;
+        p->lifetime = lifetime * (0.7f + 0.6f * ((float)rand() / (float)RAND_MAX));
+        p->sizeStart = sizeStart;
+        p->sizeEnd = sizeEnd;
+        p->colorStart = color;
+        p->colorEnd = colorEnd;
+        p->gravity = gravity;
+        // Left as 0 when no texture is given: Draw falls back to a sphere, so a
+        // one-shot burst does not need a GL upload. Resolving the soft sprite
+        // here would touch the GPU even on paths that never draw (tests).
+        p->texture = tex;
+        m_live++;
+    }
 }
 
 void OzParticleSimulationManager::Clear() {

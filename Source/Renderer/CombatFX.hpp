@@ -21,6 +21,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "LitLightning.hpp"
+#include "../Particle/OzParticleSimulationManager.hpp"
 #include "../Log.hpp"
 #include <vector>
 
@@ -99,27 +100,19 @@ public:
         m_decalTex = LoadTextureFromImage(img);
         UnloadImage(img);
 
-        Image white = GenImageColor(4, 4, WHITE);
-        m_whiteTex = LoadTextureFromImage(white);
-        UnloadImage(white);
-
         m_flashes.reserve(8);
-        m_particles.reserve(kMaxParticles);
         m_decals.resize(kMaxDecals);
     }
 
     void Shutdown() {
         if (m_decalTex.id != 0) { UnloadTexture(m_decalTex); m_decalTex = {0}; }
-        if (m_whiteTex.id != 0) { UnloadTexture(m_whiteTex); m_whiteTex = {0}; }
         m_flashes.clear();
-        m_particles.clear();
         m_tracers.clear();
         m_decals.clear();
     }
 
     void ClearAll() {
         m_flashes.clear();
-        m_particles.clear();
         m_tracers.clear();
         m_nextDecal = 0;
         for (auto& d : m_decals) d.age = -1.0f;
@@ -171,22 +164,20 @@ public:
 
     void SpawnImpact(Vector3 pos, Vector3 normal, Color color,
                      int count = 10, float speed = 6.0f) {
-        EnsureInit();
-        for (int i = 0; i < count; i++) {
-            if ((int)m_particles.size() >= kMaxParticles) break;
-            Particle p{};
-            p.pos = pos;
-            float rx = (float)GetRandomValue(-100, 100) / 100.0f;
-            float ry = (float)GetRandomValue(-100, 100) / 100.0f;
-            float rz = (float)GetRandomValue(-100, 100) / 100.0f;
-            Vector3 jitter = {rx, ry, rz};
-            p.vel = Vector3Scale(Vector3Normalize(Vector3Add(normal, Vector3Scale(jitter, 0.9f))),
-                                 speed * (0.35f + (float)GetRandomValue(0, 100) / 100.0f * 0.65f));
-            p.maxLife = p.life = 0.25f + (float)GetRandomValue(0, 100) / 100.0f * 0.35f;
-            p.size = 0.05f + (float)GetRandomValue(0, 100) / 100.0f * 0.08f;
-            p.color = color;
-            m_particles.push_back(p);
-        }
+        // Sparks go through the shared particle pool instead of a private list.
+        // They used to be drawn here with DrawBillboard, which is unlit, so a
+        // spark burst lit by a muzzle flash or a torch just glowed at full
+        // brightness. Pool particles are lit (see
+        // OzParticleSimulationManager::ApplyLighting) and fade out on their own.
+        Color end = Fade(color, 0.0f);
+        end.r = (unsigned char)(end.r / 2);
+        end.g = (unsigned char)(end.g / 3);
+        end.b = (unsigned char)(end.b / 3);
+        OzParticleSimulationManager::Instance().Burst(
+            pos, normal, count, speed, /*spread*/ 55.0f,
+            color, end,
+            /*sizeStart*/ 0.07f, /*sizeEnd*/ 0.015f,
+            /*lifetime*/ 0.30f, /*gravity*/ -9.0f);
     }
 
     void AddDecal(Vector3 pos, Vector3 normal, float size = 0.35f) {
@@ -226,18 +217,6 @@ public:
             else
                 i++;
         }
-        for (size_t i = 0; i < m_particles.size();) {
-            Particle& p = m_particles[i];
-            p.life -= dt;
-            if (p.life <= 0.0f) {
-                m_particles[i] = m_particles.back();
-                m_particles.pop_back();
-                continue;
-            }
-            p.vel.y -= 12.0f * dt;
-            p.pos = Vector3Add(p.pos, Vector3Scale(p.vel, dt));
-            i++;
-        }
         for (auto& d : m_decals)
             if (d.age >= 0.0f) d.age += dt;
     }
@@ -258,11 +237,6 @@ public:
             DrawLine3D(tr.a, tr.b, Fade(tr.color, a));
         }
 
-        for (const auto& p : m_particles) {
-            float a = p.life / p.maxLife;
-            DrawBillboard(camera, m_whiteTex, p.pos, p.size, Fade(p.color, a));
-        }
-
         Rectangle src = {0, 0, (float)m_decalTex.width, (float)m_decalTex.height};
         for (const auto& d : m_decals) {
             if (d.age < 0.0f) continue;
@@ -277,7 +251,6 @@ public:
 
 private:
     struct Flash { Vector3 pos; float timer; float duration; };
-    struct Particle { Vector3 pos, vel; float life, maxLife, size; Color color; };
     struct Decal { Vector3 pos{0, 0, 0}; Vector3 normal{0, 1, 0}; float size = 0.35f; float age = -1.0f; };
     struct Tracer { Vector3 a, b; Color color; float life, maxLife; };
 
@@ -286,15 +259,12 @@ private:
         return m_decalTex.id != 0;
     }
 
-    static constexpr size_t kMaxParticles = 512;
     static constexpr size_t kMaxDecals = 64;
 
     std::vector<Flash> m_flashes;
-    std::vector<Particle> m_particles;
     std::vector<Tracer> m_tracers;
     std::vector<Decal> m_decals;
     size_t m_nextDecal = 0;
 
     Texture2D m_decalTex{0};
-    Texture2D m_whiteTex{0};
 };

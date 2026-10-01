@@ -5,6 +5,7 @@
 #include "../../Renderer/ViewModel.hpp"
 #include "../../Renderer/CombatFX.hpp"
 #include "raymath.h"
+#include "../../Particle/OzParticleSimulationManager.hpp"
 #include <cstdlib>
 #include <cmath>
 
@@ -38,6 +39,19 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
     if (!oz::ViewModel::Instance().MuzzleWorldPos(cam, &muzzle))
         muzzle = origin;
     CombatFX::Instance().ArmMuzzleFlash(muzzle, 0.12f);
+
+    // Muzzle smoke. Ranged weapons get a small hot-gas puff; melee swings do
+    // not, since a sword has no muzzle. Particles are lit now (see
+    // OzParticleSimulationManager::ApplyLighting), so this catches the flash
+    // light instead of floating at full brightness.
+    if (SelectedWeaponStat("reach", 0.0f) <= 0.0f) {
+        OzParticleSimulationManager::Instance().Burst(
+            muzzle, forward, 5,
+            /*speed*/ 2.2f, /*spread*/ 22.0f,
+            /*color*/ {255, 220, 150, 200}, /*colorEnd*/ {120, 110, 100, 0},
+            /*sizeStart*/ 0.10f, /*sizeEnd*/ 0.32f,
+            /*lifetime*/ 0.28f, /*gravity*/ -0.4f);
+    }
 
     // Apply recoil
     float recoilKick = SelectedWeaponStat("recoil", result > 0 ? 2.0f : 1.0f);

@@ -924,12 +924,19 @@ int main(int argc, char** argv){
         // LightningScript dynamic hotbar
         if (!g_shot.active || !g_shot.hideHud)
             LightningEntityManager::Instance().DrawHotbar();
-        if (IsKeyPressed(KEY_R)) oz::ViewModel::Instance().TriggerReload();
         // Hotbar input. Suppressed while a modal is up or during --shot captures:
         // these keys/wheel previously fired underneath the inventory, skill tree
         // and console.
         LightningEntityManager::Instance().HandleInput(
             uiBlocking || (g_shot.active && g_shot.hideHud));
+
+        // Reload clip. Driven by the manager's own flag rather than a raw KEY_R
+        // poll, so it only plays when a reload actually started: the key poll
+        // ran the clip even when the reload was rejected (full magazine, no
+        // magazine stat, non-weapon selected). Auto-reload on firing dry is
+        // picked up here too.
+        if (LightningEntityManager::Instance().ConsumeReloadStarted())
+            oz::ViewModel::Instance().TriggerReload();
 
         if (FPSEnabled && !(g_shot.active && g_shot.hideHud)){
             DrawFPS(0,0);

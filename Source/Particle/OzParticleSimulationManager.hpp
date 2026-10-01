@@ -24,11 +24,23 @@ public:
     // Advance the simulation. Safely callable with dt <= 0 (no-op).
     void Update(float dt);
 
-    // Draw all live particles in the 3D pass.
-    void Draw(Camera3D& camera);
+    // Draw all live particles in the 3D pass. `transientLights` (optional) are
+    // effect lights that should be sampled before world lights; pass
+    // LitLightning_TransientLights().
+    void Draw(Camera3D& camera, const std::vector<struct LightNode>* transientLights = nullptr);
 
     // Drop every live particle (emitter nodes are cleared separately).
     void Clear();
+
+    // One-shot burst, independent of any OZONE emitter. There was no way to
+    // spawn a particle from gameplay code before - Update() only reads emitter
+    // defs - so muzzle smoke and impact sparks had to be drawn as separate
+    // immediate-mode primitives instead.
+    //
+    // velocity is a base speed along dir; spread (degrees) randomises around it.
+    void Burst(Vector3 pos, Vector3 dir, int count, float speed, float spread,
+               Color color, Color colorEnd, float sizeStart, float sizeEnd,
+               float lifetime, float gravity = 0.0f, Texture2D tex = {0});
 
     int LiveCount() const { return m_live; }
 
@@ -50,6 +62,12 @@ private:
     };
 
     static constexpr int MAX_PARTICLES = 4096;
+
+    // Modulate a particle colour by the light reaching it. Immediate-mode
+    // DrawBillboard cannot carry a custom shader, so lighting is sampled on the
+    // CPU from the same LightNode data the lit mesh shader uses.
+    static Color ApplyLighting(Color c, Vector3 pos,
+                               const std::vector<const struct LightNode*>& lights);
 
     Texture2D TextureFor(const std::string& path);
     Texture2D DefaultTexture();
