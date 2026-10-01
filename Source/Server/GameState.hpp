@@ -62,6 +62,13 @@ struct ServerPlayer {
     uint32_t last_melee_tick = 0;  // throttle MELEE_HIT (separate: melee is faster)
     float stamina = net::SERVER_MAX_STAMINA;  // server-authoritative swing budget
 
+    // Team (protocol v2). `team` is the server's own assignment and is the only
+    // value gameplay may read. `requested_team` is the UNTRUSTED team the client
+    // asked for; it is recorded so a future team system can honour preferences,
+    // but nothing may score or match on it. Both are 0 until teams exist.
+    int team = 0;
+    int requested_team = 0;
+
 // Weapon registry: one entry per hotbar slot, holding the weapon def name.
     // SERVER_WEAPON_SLOTS matches the client's HOTBAR_SIZE; both sides iterate
     // this many, so the literal 8s in Server.cpp's weapon-registry loop and
@@ -269,7 +276,8 @@ public:
     void init_global_npcs_and_pickups(WorldState& ws);
 
     // Player management
-    uint32_t add_player(uint32_t id, const char* name); // returns player id
+    uint32_t add_player(uint32_t id, const char* name,
+                     int team = 0, int requested_team = 0); // returns player id
     void remove_player(uint32_t id);
     ServerPlayer* get_player(uint32_t id);
     // Validated position update (choke point). Returns false if the player is

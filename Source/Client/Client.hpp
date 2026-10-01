@@ -115,6 +115,12 @@ public:
     int get_ping_ms() const { return m_client.get_ping_ms(); }
     const std::string& get_server_ip() const { return m_client.get_server_ip(); }
 
+    // Identity the server accepted for us (protocol v2). Valid only after the
+    // server has replied; differs from the local profile whenever the server
+    // sanitised or de-duplicated the display name.
+    const net::ServerProfile& server_profile() const;
+    bool has_server_profile() const;
+
     // Incoming scene data — call from game loop to apply dynamic WDL
     std::string consume_pending_scene_data();
 

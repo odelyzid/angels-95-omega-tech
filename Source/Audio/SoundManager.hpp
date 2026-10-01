@@ -33,6 +33,10 @@ struct GameSounds {
     Sound UIClick;
     Sound ChasingSound;
     Sound Death;
+    Sound JumpSound;
+    Sound WeaponLoadSound;
+    Sound MenuSelectSound;
+    Sound MatchStartSound;
 
     bool MusicFound = false;
 };
@@ -66,6 +70,10 @@ public:
     void PlayCollision();
     void PlayTextNoise();
     void StopTextNoise();
+    void PlayJump();
+    void PlayWeaponLoad();
+    void PlayMenuSelect();
+    void PlayMatchStart();
     // NPC aggro stinger; ignores empty handles.
     void PlayScream(const Sound& scream);
 

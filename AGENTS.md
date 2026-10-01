@@ -72,6 +72,42 @@ lists internet master URLs (http:// or https://), read by
   (`--port`, `--http-port`, `--dir`, `--master`, `--master-http`, `--public-ip`,
   `--server-name`).
 - `AngelEd` reads its INI (`g_config.Load("System/AngelEd.ini")`).
+- **Player profiles:** `System/PlayerProfiles.ini`, written by
+  `Source/PlayerProfile.{hpp,cpp}` (`PlayerProfileManager::Instance()`). Holds
+  player slots (`displayName`, `modelPath`, `voiceSet`, `team`) edited in the
+  title menu's Character pane (`Source/Menu/TitleMenu.hpp`). Loaded once in
+  `OmegaTechInit()` and re-saved on every mutation (no exit hook), so reopening
+  the pane never discards edits. The struct is **raylib-free** so AngelEd and the
+  server can read the same file; `SetPath()` redirects it for tests. One
+  `[Profiles]` section with `Profile<N>_*` keys — **not** one section per profile,
+  because `IniConfig` stores sections in an `unordered_map` and per-profile
+  sections would come back in arbitrary order. Writing bypasses `IniConfig::Save`
+  (unordered) to keep the file hand-editable; loading still uses `IniConfig`.
+- **Profile over the wire (protocol v2):** the active profile is attached to
+  `CLIENT_AUTH` as `net::ClientAuthPayload` (packed, with a `structSize`
+  forward-compat field so optional fields can be appended without another bump).
+  `PROTOCOL_VERSION` went 1->2 and is now actually sent and checked - it was a
+  dead constant before, so there had been **no** version negotiation on the wire.
+  A payload shorter than `kAuthSizeV2` is a v1 peer and is still accepted with
+  generated defaults; an unrecognised `protocolVersion` is **rejected** rather
+  than guessed at, because a misparse here assigns the wrong identity to a player.
+  **Trust model - every field in that payload is client-claimed.** The server
+  sanitises with `net::SanitizeDisplayName` (strips C0/DEL, keeps UTF-8),
+  `net::SanitizeAssetRef` (ASCII only, **rejects `..` path segments**) and
+  `net::ClampRequestedTeam` (out of range -> 0, never clamps onto a real team).
+  `modelPath`/`voiceSet` are **opaque strings the server never opens or
+  resolves** - if a future server-side loader ever consumes `modelPath` it must
+  treat it as untrusted input. Display names are de-duplicated via
+  `net::MakeUniqueName` because GameState persists save data keyed by name, so
+  two players sharing one would collide. The server replies `PROFILE_STATE` so the
+  client learns what was actually accepted instead of assuming its own values
+  were honoured.
+  **Team is NOT trusted and NOT assigned yet - the server has no team concept at
+  all.** `ServerPlayer::team` (server-owned, always 0 today) is the only field
+  gameplay may read; `requested_team` is the untrusted client hint, recorded for
+  a future team system. Nothing may score or match on `requested_team`.
+  Covered by `tests/Network.test.cpp` (profile round-trip and de-duplication run
+  over a real loopback socket).
 
 ## Entrypoints
 - **Client:** `Source/Main.cpp` - `main()` after OmegaTechInit, splash, home screen, world loading, game loop. Flags: `--world <name>`, `--world-dir <path>`, `--join <ip[:port]>`; also accepts an `angels95://join/<ip>:<port>` positional arg (web-portal deep link) and auto-joins/skips the menu. Registers the `angels95://` OS handler on launch (`Source/ProtocolHandler.hpp`, HKCU on Windows / user .desktop on Linux); URI parsing is `Source/JoinUri.hpp`. **Screenshot mode** (see `Source/Screenshot.hpp`): `--shot <out.png>`, `--shot-delay <frames>` (default 90; needs >=2 so the skyzone `on_enter` uniforms land), `--shot-res <WxH>`, `--shot-cam "x,y,z,yaw[,pitch]"` (repeatable, **OZONE Z-up**, yaw/pitch in degrees; repeats produce `out_1.png`, `out_2.png`, ...), `--shot-hud` (keep HUD). Suppresses splash/menu/audio and forces vsync/MSAA/pixel/jitter/fog/head-bob/debug/FPS off, hides hotbar/HUD/crosshair/view-model, freezes the camera via `isNoClip`, and exits when every camera is captured. `GameData/Launch.conf` is skipped in shot mode so `--shot-res` is authoritative.

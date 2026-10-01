@@ -1,680 +1,351 @@
-OZONE
-# ==============================================================================
-# World_endless_snow — snowbound industrial complex
-# ==============================================================================
-# OZONE Z-up: x=east, y=north, z=up.
-# Canvas is an eight-by-eight grid, one cell = one hundred and twenty-eight
-# world units. The map is centred on the origin, so extents are roughly
-# x -512..+512 and y -512..+512.
-#
-# Scale conventions used in this file:
-#   * Player collision is three units tall with a two-unit eye height.
-#   * kStepHeight is one unit: every stair tread rises exactly one unit.
-#   * Shared ground plane sits at z=0 (snow).
-#   * Concrete facility pads sit one-tenth unit higher, top z=0.1.
-#   * Road strips sit at z=0.05, halfway between snow and concrete.
-#   * Interior ceilings / roof undersides start no lower than z=4.0.
-#
-# Layout zones (see the header table in the design brief for grid ranges):
-#   Z1  North Radar Tower        (NW corner)
-#   Z2  Maintenance Hangars      (northwest-central)
-#   Z3  Fuel Storage Tanks       (northeast-central)
-#   Z4  South Radar Tower        (NE corner)
-#   Z5  Primary Refinery Block   (map centre, largest mass)
-#   Z6  Power Plant              (east of refinery)
-#   Z7  Security Outpost         (east-central)
-#   Z8  Rail Yard Terminal       (east-central)
-#   Z8b Rail Yard Track Field    (southeast)
-#   Z9  Administration Building  (west-central)
-#   Z10 Data Console Lobby       (south-central, spawn)
-#   Z11 East Radar Tower         (SW corner, sector codename)
-#   Z12 West Radar Tower         (SE corner, sector codename)
-#
-# The four radar towers ring the central refinery and act as the orientation
-# system through the heavy snow fog.
-# ==============================================================================
+# OZONE world exported from AngelEd
+# Format: ozone v1.0
 
-# ==============================================================================
-# Sky zone — explicit name so the sibling .ozls skyzone script resolves.
-# ==============================================================================
-zone sky -600 -600 -50 600 600 300 1 name=endless_snow_sky
+add box 0 0 -0.55 1200 1.1 1200 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/01_floor_snow_a2_32.png texScaleU=16 texScaleV=16
+add box -450 560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -150 560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 150 560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 450 560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -450 -560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -150 -560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 150 -560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 450 -560 7 45 14 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 560 -450 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 560 -150 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 560 150 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box 560 450 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -560 -450 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -560 -150 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -560 150 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -560 450 7 1 14 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/00_sky_snow_a1_32.png texScaleU=10 texScaleV=4 flags=8
+add box -500 200 1.5 60 3 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box -500 -300 1.5 60 3 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box 500 0 1.5 60 3 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box 0 -510 1.5 12 3 60 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box 0 500 0.025 1100 0.05 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 0 -500 0.025 1100 0.05 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -500 0 0.025 18 0.05 1100 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 500 0 0.025 18 0.05 1100 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 0 237 0.025 1000 0.05 51 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -211 0 0.025 38 0.05 900 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -198 64 0.025 38 0.05 340 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 186 64 0.025 38 0.05 340 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 0 -186 0.025 720 0.05 45 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 403 0 0.025 38 0.05 900 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 0 -365 0.025 900 0.05 51 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -150 -230 0.025 130 0.05 38 -25 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -70 -275 0.025 130 0.05 38 -25 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box -320 333 0.05 60 0.1 60 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -320 333 17.6 6 35 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -316 333 15 2 30 10 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -324 333 15 2 30 10 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -330 323 0.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 324 1.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 325 2.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 326 3.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 327 4.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 328 5.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 329 6.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 330 7.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 331 8.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 332 9.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 333 10.1 3 0.2 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -330 334 10.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 335 11.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 336 12.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 337 13.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 338 14.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 339 15.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 340 16.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 341 17.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 342 18.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -330 343 19.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -320 333 20.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -320 324 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -320 342 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -329 333 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -311 333 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -320 333 27.6 2 14 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add cyl -320 333 24 1.5 1.5 6 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -140 330 0.05 210 0.1 100 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 120 345 0.05 170 0.1 120 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add cyl 60 380 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
+add cyl 180 380 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
+add cyl 60 300 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
+add cyl 180 300 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
+add cyl 60 380 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 180 380 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 60 300 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 180 300 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add box 120 340 12.2 140 0.3 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 120 300 12.2 6 0.3 90 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 192 288 0.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 1.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 2.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 3.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 4.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 5.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 6.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 7.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 8.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 9.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 10.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 192 288 11.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 359 333 0.05 60 0.1 60 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 359 333 17.6 6 35 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 370 323 0.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 324 1.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 325 2.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 326 3.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 327 4.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 328 5.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 329 6.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 330 7.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 331 8.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 332 9.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 333 10.1 3 0.2 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 370 334 10.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 335 11.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 336 12.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 337 13.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 338 14.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 339 15.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 340 16.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 341 17.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 342 18.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 370 343 19.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 359 333 20.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 359 324 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 359 342 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 350 333 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 368 333 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 359 333 27.6 2 14 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add cyl 359 333 24 1.5 1.5 6 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 0 67 0.05 420 0.1 300 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -64 51 8.1 128 16 150 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 64 51 8.1 128 16 150 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box -80 -26 8.1 64 16 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 80 -26 8.1 64 16 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 0 128 8.1 256 16 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box -64 51 16.2 128 0.4 150 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 64 51 16.2 128 0.4 150 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -90 25 20.1 16 40 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -90 75 20.1 16 40 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -40 50 20.1 16 40 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -90 25 40.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -90 75 40.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -40 50 40.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 30 0 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 64 0 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 98 0 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 30 34 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 64 34 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 98 34 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 30 68 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 64 68 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 98 68 20.1 12 8 12 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 64 51 18.2 110 0.3 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 64 51 18.2 6 0.3 110 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box -96 -34 0.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -35 1.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -36 2.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -37 3.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -38 4.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -39 5.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -40 6.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -41 7.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -42 8.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -43 9.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -44 10.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -45 11.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -46 12.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -47 13.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -48 14.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -96 -49 15.6 4 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 166 70 16.2 80 0.3 5 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 166 70 17.2 80 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 166 73 17.2 80 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 262 95 0.05 150 0.1 200 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 335 0 0.05 140 0.1 120 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 295 0 0.05 120 0.1 120 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 210 -330 0.03 420 0.06 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 210 -350 0.03 420 0.06 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 210 -370 0.03 420 0.06 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 270 -260 0.03 180 0.06 8 25 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 290 -240 0.03 160 0.06 8 35 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 310 -220 0.03 140 0.06 8 45 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/07_floor_concrete_a3_32.png texScaleU=8 texScaleV=8
+add box 210 -330 0.06 420 0.08 0.5 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 210 -350 0.06 420 0.08 0.5 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 210 -370 0.06 420 0.08 0.5 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
+add box 120 -330 2.1 8 4 24 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 180 -350 2.1 8 4 24 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 240 -370 2.1 8 4 24 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 300 -330 2.1 8 4 24 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box 150 -300 2.1 24 4 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 260 -300 2.1 24 4 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png texScaleU=16 texScaleV=16
+add box -269 0 0.05 150 0.1 120 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 0 -410 0.05 280 0.1 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 0 -445 2.6 280 5 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box -139 -410 2.6 2 5 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 139 -410 2.6 2 5 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/10_wall_industrial_checker_a1_48.png texScaleU=16 texScaleV=16
+add box 0 -410 5.2 280 0.4 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/08_ceil_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 0 -435 1.6 40 3 8 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/14_wall_industrial_tech_a1_128.png texScaleU=16 texScaleV=16
+add box -307 -423 0.05 60 0.1 60 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -307 -423 0.6 70 1.2 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box -307 -423 17.6 6 35 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -413 0.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -412 1.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -411 2.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -410 3.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -409 4.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -408 5.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -407 6.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -406 7.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -405 8.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -404 9.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -403 10.1 3 0.2 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -318 -402 10.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -401 11.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -400 12.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -399 13.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -398 14.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -397 15.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -396 16.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -395 17.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -394 18.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -318 -393 19.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box -307 -403 20.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box -307 -412 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -307 -394 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -316 -403 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -298 -403 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box -307 -403 27.6 2 14 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add cyl -307 -403 24 1.5 1.5 6 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 320 -423 0.05 60 0.1 60 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 320 -423 0.5 70 1 70 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/02_floor_snow_a3_32.png texScaleU=16 texScaleV=16
+add box 320 -423 17.6 6 35 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -413 0.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -412 1.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -411 2.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -410 3.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -409 4.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -408 5.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -407 6.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -406 7.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -405 8.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -404 9.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -403 10.1 3 0.2 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 331 -402 10.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -401 11.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -400 12.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -399 13.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -398 14.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -397 15.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -396 16.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -395 17.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -394 18.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 331 -393 19.6 3 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=16 texScaleV=16
+add box 320 -403 20.2 18 0.4 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png texScaleU=8 texScaleV=8
+add box 320 -412 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 320 -394 21.2 18 2 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 311 -403 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 329 -403 21.2 1 2 18 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add box 320 -403 27.6 2 14 2 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
+add cyl 320 -403 24 1.5 1.5 6 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png
 
-# ==============================================================================
-# Level metadata and weather.
-# Heavy snow, low visibility, cold overcast sky.
-# ==============================================================================
-levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/sky_day.dds GameData/Global/sky/sky_day.dds
-particles snow 120 2.0 220 230 235 0.3 0.2
-
-# ==============================================================================
-# Global ground plane — snow, covers the whole play area plus a margin.
-# ==============================================================================
-add box 0 0 -0.55 1200 1.1 1200 0 texPath=oztex/tileset/01_floor_snow_a2_32.png
-
-# ==============================================================================
-# Backdrop walls — fake-backdrop planes that frame the fog horizon.
-# flags=8 disables depth writing so the skybox shows through.
-#
-# Panels are 1u thick and 14u tall (z spans 0..14), segmented into 4 runs per
-# side. This matches Dust_Ravine's backdrop convention. Do NOT scale these up to
-# match the ground plane: because depth writes are disabled they draw over the
-# scene, so an over-tall panel reads as a solid roof blanketing the map from any
-# elevated camera rather than as a distant horizon.
-# ==============================================================================
-# North wall panels (thin in Y, facing south)
-add box -450 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -150 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 150 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 450 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-# South wall panels (thin in Y, facing north)
-add box -450 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -150 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 150 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 450 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-# East wall panels (thin in X, facing west)
-add box 560 -450 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 560 -150 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 560 150 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 560 450 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-# West wall panels (thin in X, facing east)
-add box -560 -450 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -560 -150 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -560 150 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -560 450 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-
-# ==============================================================================
-# PERIMETER — raised ice and rock terrain.
-# Left, right, and bottom edges get 8m and 4m rocks plus brush snowdrifts.
-# The north edge is left more open for the approach from the tundra.
-# ==============================================================================
-# Left-edge cliff massing
-Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb -500 200 0 45 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_1.glb -490 -50 0 120 scale=1.1 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb -500 -300 0 80 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_0.glb -470 320 0 20 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_1.glb -460 -150 0 200 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_2.glb -475 -380 0 310 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
-# Right-edge cliff massing
-Mesh.Static Models/rocks/SM_RP_Rock_8m_3.glb 500 250 0 -60 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_4.glb 490 0 0 150 scale=1.1 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_5.glb 500 -350 0 -30 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_3.glb 470 380 0 0 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_4.glb 460 -100 0 90 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_5.glb 475 -400 0 180 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
-# Bottom-edge cliff massing
-Mesh.Static Models/rocks/SM_RP_Rock_8m_4K.glb -300 -500 0 10 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb 0 -510 0 0 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_8m_3.glb 300 -500 0 -20 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_6.glb -150 -480 0 45 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_4m_7.glb 150 -485 0 120 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
-# Brush snowdrifts pushed against the perimeter rocks
-add box -500 200 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box -500 -300 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 500 0 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 0 -510 1.5 12 3 60 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-
-# ==============================================================================
-# Perimeter loop road — vehicle ring just inside the map edge.
-# ==============================================================================
-# North segment (kept thin and broken so it does not dominate)
-add box 0 500 0.025 1100 0.05 18 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# South segment
-add box 0 -500 0.025 1100 0.05 18 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# West segment
-add box -500 0 0.025 18 0.05 1100 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# East segment
-add box 500 0 0.025 18 0.05 1100 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-
-# ==============================================================================
-# MAIN ROADS
-# P1 — north artery, east-west at y=+237.
-# P2 — west artery, north-south at x=-211.
-# P3 — refinery ring west, north-south at x=-198.
-# P4 — refinery ring east, north-south at x=+186.
-# P5 — refinery ring south, east-west at y=-186.
-# P6 — east artery, north-south at x=+403.
-# P7 — south artery, east-west at y=-365.
-# P9 — diagonal southwest from (-192,-192) to (0,-320).
-# ==============================================================================
-add box 0 237 0.025 1000 0.05 51 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -211 0 0.025 38 0.05 900 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -198 64 0.025 38 0.05 340 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 186 64 0.025 38 0.05 340 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 0 -186 0.025 720 0.05 45 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 403 0 0.025 38 0.05 900 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 0 -365 0.025 900 0.05 51 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# Diagonal P9 — built as short overlapping strips
-add box -150 -230 0.025 130 0.05 38 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -70 -275 0.025 130 0.05 38 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-
-# ==============================================================================
-# Z1 — NORTH RADAR TOWER (NW corner)
-# Concrete pad, lattice mast, switchback stair, observation platform, radar dish.
-# ==============================================================================
-# Pad
-add box -320 333 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Lattice mast shaft, rises to z=35
-add box -320 333 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Inner stairwell walls
-add box -316 333 15 2 30 10 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -324 333 15 2 30 10 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# West-face switchback stair, flight one: z=0.1..10.1
-add box -330 323 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 324 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 325 2.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 326 3.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 327 4.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 328 5.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 329 6.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 330 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 331 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 332 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Landing at z=10.1
-add box -330 333 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Flight two: z=10.1..20.1
-add box -330 334 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 335 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 336 12.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 337 13.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 338 14.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 339 15.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 340 16.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 341 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 342 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -330 343 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Observation platform at z=20.1
-add box -320 333 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Railings around platform
-add box -320 324 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -320 342 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -329 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -311 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Thin lattice extension above platform to z=35
-add box -320 333 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Radar dish omitted — no dedicated dish asset in stage-two drop.
-# A simple brush antenna marks the platform instead.
-add cyl -320 333 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Warm aviation light at tower top
-light point -320 333 35.2 255 140 60 0.9 40 2
-
-# ==============================================================================
-# Z2 — MAINTENANCE HANGARS
-# Replaced by Building_C whole-building GLB. Concrete pad and interior lights
-# remain; the brush shell has been removed to avoid z-fighting.
-# ==============================================================================
-# Concrete pad
-add box -140 330 0.05 210 0.1 100 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Hangar interior lights
-light point -180 320 6 220 200 170 0.7 25
-light point -100 360 6 220 200 170 0.7 25
-
-# ==============================================================================
-# Z3 — FUEL STORAGE TANKS
-# Four cylindrical tanks in a two-by-two grid, with a connecting catwalk.
-# ==============================================================================
-# Concrete pad
-add box 120 345 0.05 170 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Tank A (northwest)
-add cyl 60 380 12 11 11 12 20 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-# Tank B (northeast)
-add cyl 180 380 12 11 11 12 20 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-# Tank C (southwest)
-add cyl 60 300 12 11 11 12 20 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-# Tank D (southeast)
-add cyl 180 300 12 11 11 12 20 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-# Tank tops (concrete caps)
-add cyl 60 380 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 180 380 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 60 300 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 180 300 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Catwalk linking tank tops
-add box 120 340 12.2 140 0.3 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 120 300 12.2 6 0.3 90 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Ladder cage on tank D, z=0.1..12.1
-add box 192 288 0.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 1.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 2.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 3.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 4.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 5.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 6.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 7.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 8.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 9.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 10.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 192 288 11.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Tank area warm light
-light point 120 340 10 255 150 70 0.7 35 2
-
-# ==============================================================================
-# Z4 — SOUTH RADAR TOWER (NE corner)
-# Square pad and lattice mast, platform at z=20, dish at z=25.
-# ==============================================================================
-add box 359 333 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 359 333 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# East-face switchback stair, flight one
-add box 370 323 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 324 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 325 2.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 326 3.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 327 4.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 328 5.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 329 6.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 330 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 331 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 332 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Landing
-add box 370 333 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Flight two
-add box 370 334 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 335 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 336 12.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 337 13.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 338 14.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 339 15.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 340 16.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 341 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 342 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 370 343 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Platform
-add box 359 333 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Railings
-add box 359 324 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 359 342 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 350 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 368 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Lattice extension
-add box 359 333 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Radar dish omitted — no dedicated dish asset in stage-two drop.
-add cyl 359 333 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point 359 333 35.2 255 140 60 0.9 40 2
-
-# ==============================================================================
-# Z5 — PRIMARY REFINERY BLOCK
-# The central mass. West half carries tall pipe stacks; east half is a tank grid.
-# Roof z=16, stacks z=24, main catwalk z=16, pipe bridge to power plant.
-# ==============================================================================
-# Concrete pad covering the whole block and a little south apron
-add box 0 67 0.05 420 0.1 300 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Main hall shell, west half — pipe stack hall
-add box -64 51 8.1 128 16 150 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-# Main hall shell, east half — tank grid hall
-add box 64 51 8.1 128 16 150 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-# South wall with central gate at x=-16..+16
-add box -80 -26 8.1 64 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 80 -26 8.1 64 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-# North wall
-add box 0 128 8.1 256 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-# Roof slabs at z=16.2
-add box -64 51 16.2 128 0.4 150 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box 64 51 16.2 128 0.4 150 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-# Interior floor is the concrete pad at z=0.1
-# Pipe stacks in the west half, rising to z=24
-add box -90 25 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -90 75 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -40 50 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Stack caps
-add box -90 25 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box -90 75 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box -40 50 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-# Tank grid on east-half roof, nine small tanks 3x3
-add box 30 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 30 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 30 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-# Elevated catwalk ring around tank grid at z=18
-add box 64 51 18.2 110 0.3 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 64 51 18.2 6 0.3 110 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Exterior stairs to refinery roof on south face, west side
-add box -96 -34 0.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -35 1.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -36 2.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -37 3.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -38 4.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -39 5.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -40 6.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -41 7.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -42 8.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -43 9.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -44 10.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -45 11.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -46 12.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -47 13.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -48 14.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -96 -49 15.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Pipe bridge to power plant at z=16, spanning the P4 gap at y=+70
-add box 166 70 16.2 80 0.3 5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 166 70 17.2 80 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 166 73 17.2 80 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Refinery warm lights
-light point -64 51 16.2 255 150 70 0.9 35 2
-light point 64 51 16.2 255 150 70 0.9 35 2
-light point -90 25 40.5 255 130 50 1.0 30 2
-light point 64 34 24.2 255 140 60 0.8 25 2
-
-# ==============================================================================
-# Z6 — POWER PLANT
-# Replaced by Building_B whole-building GLB. Concrete pad and interior light
-# remain; brush shell, tanks, stacks, and roof access stairs removed.
-# The pipe bridge and stack particle emitters may need alignment after the
-# GLB orientation is verified in-engine.
-# ==============================================================================
-# Concrete pad
-add box 262 95 0.05 150 0.1 200 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Power plant interior light
-light point 262 95 10 220 200 170 0.7 30
-
-# ==============================================================================
-# Z7 — SECURITY OUTPOST
-# Replaced by Building_E whole-building GLB. Concrete pad and interior light
-# remain; brush compound walls and guard building removed.
-# ==============================================================================
-# Concrete pad
-add box 335 0 0.05 140 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Interior light
-light point 335 0 6 255 200 170 0.6 20
-
-# ==============================================================================
-# Z8 — RAIL YARD TERMINAL
-# Replaced by Building_D whole-building GLB. Concrete pad and interior light
-# remain; brush terminal shell removed.
-# ==============================================================================
-# Concrete pad
-add box 295 0 0.05 120 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Interior light
-light point 295 0 5 200 200 200 0.6 25
-
-# ==============================================================================
-# Z8b — RAIL YARD TRACK FIELD
-# Parallel tracks running west-east then curving northeast.
-# Scattered freight containers for cover.
-# ==============================================================================
-# Track ballast beds (three parallel), each about eight units wide
-add box 210 -330 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 210 -350 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 210 -370 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# Curved northeast extension strips
-add box 270 -260 0.03 180 0.06 8 25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 290 -240 0.03 160 0.06 8 35 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 310 -220 0.03 140 0.06 8 45 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-# Rails — thin raised strips on each bed
-add box 210 -330 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 210 -350 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 210 -370 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Freight containers as cover (four-unit-tall boxes)
-add box 120 -330 2.1 8 4 24 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 180 -350 2.1 8 4 24 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 240 -370 2.1 8 4 24 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 300 -330 2.1 8 4 24 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 150 -300 2.1 24 4 8 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 260 -300 2.1 24 4 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-
-# ==============================================================================
-# Z9 — ADMINISTRATION BUILDING
-# Replaced by Building_A whole-building GLB. Concrete pad and interior lights
-# remain; brush shell and roof-access stairs removed.
-# ==============================================================================
-# Concrete pad
-add box -269 0 0.05 150 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Interior lights per floor
-light point -269 0 4 220 210 200 0.6 20
-light point -269 0 8 220 210 200 0.6 20
-light point -269 0 12 220 210 200 0.6 20
-
-# ==============================================================================
-# Z10 — DATA CONSOLE LOBBY
-# South-central spawn building, low and open-fronted, facing the refinery.
-# ==============================================================================
-add box 0 -410 0.05 280 0.1 70 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Back and side walls
-add box 0 -445 2.6 280 5 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box -139 -410 2.6 2 5 70 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 139 -410 2.6 2 5 70 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-# Roof
-add box 0 -410 5.2 280 0.4 70 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-# Console block inside
-add box 0 -435 1.6 40 3 8 0 texPath=oztex/tileset/14_wall_industrial_tech_a1_128.png
-# Console screen glow
-light point 0 -435 3.1 80 180 255 0.6 12
-# Lobby fill
-light point 0 -410 4 220 215 210 0.8 30
-
-# ==============================================================================
-# Z11 — EAST RADAR TOWER (SW corner, sector codename)
-# Sits on a slight rocky knoll to vary silhouette from Z1.
-# ==============================================================================
-add box -307 -423 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Knoll under the pad
-add box -307 -423 0.6 70 1.2 70 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box -307 -423 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# West-face stair, flight one
-add box -318 -413 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -412 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -411 2.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -410 3.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -409 4.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -408 5.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -407 6.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -406 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -405 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -404 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Landing
-add box -318 -403 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Flight two
-add box -318 -402 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -401 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -400 12.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -399 13.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -398 14.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -397 15.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -396 16.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -395 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -394 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box -318 -393 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Platform
-add box -307 -403 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Railings
-add box -307 -412 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -307 -394 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -316 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -298 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Lattice extension
-add box -307 -403 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Radar dish omitted — no dedicated dish asset in stage-two drop.
-add cyl -307 -403 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point -307 -403 35.2 255 140 60 0.9 40 2
-
-# ==============================================================================
-# Z12 — WEST RADAR TOWER (SE corner, sector codename)
-# Square pad like Z4, but raised on a snow berm for variety.
-# ==============================================================================
-add box 320 -423 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Snow berm
-add box 320 -423 0.5 70 1 70 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 320 -423 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# East-face stair, flight one
-add box 331 -413 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -412 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -411 2.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -410 3.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -409 4.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -408 5.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -407 6.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -406 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -405 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -404 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Landing
-add box 331 -403 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Flight two
-add box 331 -402 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -401 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -400 12.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -399 13.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -398 14.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -397 15.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -396 16.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -395 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -394 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 331 -393 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Platform
-add box 320 -403 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# Railings
-add box 320 -412 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 320 -394 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 311 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 329 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Lattice extension
-add box 320 -403 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-# Radar dish omitted — no dedicated dish asset in stage-two drop.
-add cyl 320 -403 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point 320 -403 35.2 255 140 60 0.9 40 2
-
-# ==============================================================================
-# CHOKEPOINTS — deliberate tactical pinch points.
-# These are visual frame elements, not blocking geometry; the surrounding
-# buildings already create the narrow gaps.
-# ==============================================================================
-# Z2 hangars <-> Z5 refinery gap at x=-218, y=+256
-# Z5 refinery <-> Z6 power plant gap at x=+179, y=+128 (pipe bridge above)
-# Z7 security <-> Z8 rail yard gap at x=+256, y=-64
-# Z11 radar <-> Z10 data console gap at x=-192, y=-358
-
-# ==============================================================================
-# VEGETATION / SNOW DRESSING
-# Winter bushes and a few snow-dusted conifers at map edges and open areas.
-# Keep the industrial core and roads clear.
-# ==============================================================================
-# NW open snow near hangars
-Mesh.Static Models/bushes/bush_tall_winter.glb -350 150 0 0 scale=1.7
-Mesh.Static Models/bushes/bush_long_winter.glb -300 100 0 30 scale=1.7
-Mesh.Static Models/bushes/bush_overgrown_winter.glb -400 200 0 60 scale=3.0
-# SW open snow
-Mesh.Static Models/bushes/bush_tall_single_winter.glb -280 -200 0 0 scale=1.6
-Mesh.Static Models/bushes/bush_long_single_winter.glb -220 -150 0 -20 scale=1.6
-Mesh.Static Models/forest/forest_pine_1.glb -350 -250 0 0 scale=1.2
-Mesh.Static Models/forest/forest_stump_1.glb -300 -220 0 0 scale=3.6
-Mesh.Static Models/forest/forest_log_1.glb -260 -180 0 45 scale=1.0
-# SE corner and rail yard open
-Mesh.Static Models/bushes/bush_long_overgrown_winter.glb 400 -300 0 90 scale=1.7
-Mesh.Static Models/bushes/bush_tall_overgrown_winter.glb 350 -400 0 20 scale=1.7
-Mesh.Static Models/forest/forest_pine_2.glb 450 -450 0 0 scale=1.3
-Mesh.Static Models/forest/forest_stump_2.glb 420 -420 0 0 scale=3.0
-# Scatter 2m rocks for cover in open areas
-Mesh.Static Models/rocks/SM_RP_Rock_2m_0.glb -350 120 0 0 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_2m_1.glb -280 -120 0 30 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_2m_2.glb 380 -280 0 120 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_2m_3.glb 100 -420 0 0 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_2m_4.glb -120 -300 0 80 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
-Mesh.Static Models/rocks/SM_RP_Rock_2m_5.glb 420 -200 0 200 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
-
-# ==============================================================================
-# INDUSTRIAL BUILDING GLBs
-# Source assets are Y-up, baked at 100x scale, so scale=0.01 brings them to
-# OZONE game units. Each building uses a shared atlas; tex= override is not
-# expected to remap sub-meshes, so they render with their embedded material.
-# These five whole-building models replace the hand-authored brush shells in
-# zones Z2, Z6, Z7, Z8, and Z9.
-#
-# DO NOT add scale= here. Each GLB bakes scale=100 plus a Y-up -> Z-up node
-# rotation (and a translation that centres the mesh), so it already arrives at
-# world scale: Building_A's 0.12u mesh becomes a 12x6x12u building. Adding
-# scale=0.01 cancels that 100x bake and renders a 0.12u (knee-high) box.
-# tools/worldcheck.cpp flags any mesh whose scaled span drops below 1u.
-#
-# The loader maps the authored third arg onto engine up, so the third value is
-# the vertical offset. Each model's node bake leaves its base below the origin
-# (Building_A spans z -28..-16 pre-placement), so the third arg lifts it onto
-# the concrete pads rather than burying it.
-# ==============================================================================
-# Z9 — Administration Building (12x6x12u)
-Mesh.Static Models/industrial/Building_A.glb -263 3 28.1 0
-# Z6 — Power Plant (15x15x15u)
-Mesh.Static Models/industrial/Building_B.glb 282 -8 12.1 90
-# Z2 — Maintenance Hangars (12x6x12u)
-Mesh.Static Models/industrial/Building_C.glb -134 3 15.1 0
-# Z8 — Rail Yard Terminal (15x30x15u)
-Mesh.Static Models/industrial/Building_D.glb 316 -15 28.1 0
-# Z7 — Security Outpost (12x7x20u)
-Mesh.Static Models/industrial/Building_E.glb 341 -3 2.1 -90
-
-# ==============================================================================
-# PARTICLE EMITTERS
-# Steam/exhaust from stacks, plus a few drifting snow gusts.
-# ==============================================================================
-# Refinery pipe-stack steam
-ParticleEmitter smoke -90 25 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
-ParticleEmitter smoke -90 75 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
-ParticleEmitter smoke -40 50 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
-# Power plant smokestacks
-ParticleEmitter smoke 230 130 42 30 180 2.0 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
-ParticleEmitter smoke 290 140 42 30 180 2.0 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
-ParticleEmitter smoke 250 30 42 30 180 2.0 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
-# Snow gusts in open areas
-ParticleEmitter snow -300 150 4 60 300 2.5 20 2 2 240 245 255 230 235 245 0.1 40 0.5 0.2 0 0
-ParticleEmitter snow 350 -350 4 60 300 2.5 20 2 2 240 245 255 230 235 245 0.1 40 0.5 0.2 0 0
-
-# ==============================================================================
-# WIND ZONE — gentle ambient drift across the whole complex.
-# ==============================================================================
-WindZone -600 -600 -50 600 600 300 0.5 0.2 0.0 0.3 0.1
-
-# ==============================================================================
-# GLOBAL LIGHTING
-# Cold overcast directional sun plus a warm fill from the opposite side.
-# ==============================================================================
-light directional 300 -200 400 180 210 230 1.0
-light directional -100 200 100 120 130 150 0.25
-
-# ==============================================================================
-# ADDITIONAL LOCAL LIGHTS
-# Warm pools at industrial areas so structures read through the fog.
-# ==============================================================================
-# Fuel farm
-light point 120 345 10 255 150 70 0.7 35 2
-# Hangar approach
-light point -140 290 6 220 200 170 0.6 25
-# Refinery gate
-light point 0 -26 8 255 140 60 0.8 25 2
-# Rail terminal loading bay
-light point 295 -45 6 200 200 200 0.6 20
-# Security outpost gate
-light point 335 -60 6 255 200 170 0.6 20
-# South artery lamp
-light point 0 -365 8 220 220 230 0.5 30
-# Data console lobby entrance
-light point 0 -380 6 200 210 255 0.6 18
-
-# ==============================================================================
-# PLAYER START
-# Exactly one playerstart is used by the engine. Placed in Z10 Data Console
-# Lobby on the concrete pad, facing the refinery to the north.
-#
-# yaw is compass-style: RespawnPlayerAtStart() builds the camera target as
-# (x + sin(yaw), y, z - cos(yaw)), so yaw=0 looks toward -Y (SOUTH) and
-# yaw=180 looks toward +Y (NORTH). The lobby's only opening is its north face
-# at y=-375, so the spawn must use 180 to face the refinery. Using 0 spawns
-# the player staring at the lobby's 35u back wall.
-# ==============================================================================
+# Entities
 playerstart 0 -410 0.1 180
-
-# ==============================================================================
-# NPCs
-# Small patrol groups so the world is not inert.
-# ==============================================================================
+pickup pistol_01 -20 -420 1.1 30
+pickup HealthVial 20 -420 1.1 30
+pickup rifle_01 -100 320 1.1 30
+pickup HealthVial -180 360 1.1 30
+pickup etheral_waver -40 50 1.1 30
+pickup Medkit 0 50 1.1 30
+pickup HealthVial 250 30 19.1 30
+pickup HealthVial 180 -350 1.1 30
+pickup ManaVial -269 0 13.1 30
+pickup HealthVial 180 300 13.1 30
 npc Walker -140 320 0.1
 npc Brute -64 51 0.1
 npc Skaarj 262 95 0.1
 npc Walker 335 0 0.1
-
-# ==============================================================================
-# NPC PATH NODES
-# Patrol graphs linked by name.
-# ==============================================================================
+light directional 0 0 0 120 130 150 1
+light point 120 340 10 255 150 70 0.947601 36.6823 2
+light point 120 345 10 255 150 70 0.947601 36.6823 2
+light point 64 51 16.2 255 150 70 0.947601 36.6823 2
+light point 64 34 24.2 255 140 60 0.947601 36.6823 2
+light point -64 51 16.2 255 150 70 0.947601 36.6823 2
+light point -140 290 6 220 200 170 1 25
+light point -100 360 6 220 200 170 1 25
+light point -90 25 40.5 255 130 50 0.947601 36.6823 2
+light point -180 320 6 220 200 170 1 25
+light point 0 -26 8 255 140 60 0.947601 36.6823 2
+light point 262 95 10 220 200 170 1 30
+light point 295 0 5 200 200 200 1 25
+light point 359 333 35.2 255 140 60 0.947601 36.6823 2
+light point -269 0 12 220 210 200 1 20
+light point -320 333 35.2 255 140 60 0.947601 36.6823 2
+light point -269 0 8 220 210 200 1 20
+light point 295 -45 6 200 200 200 1 20
+light point -269 0 4 220 210 200 1 20
+light point 335 0 6 255 200 170 1 20
+light point 335 -60 6 255 200 170 1 20
+light directional 0 0 0 180 210 230 1
+light point 0 -365 8 220 220 230 1 30
+light point 0 -380 6 200 210 255 1 18
+light point 0 -410 4 220 215 210 1 30
+light point 0 -435 3.1 80 180 255 1 12
+light point 320 -403 35.2 255 140 60 0.947601 36.6823 2
+light point -307 -403 35.2 255 140 60 0.947601 36.6823 2
+zone sky -600 -600 -50 600 600 300 1 name=endless_snow_sky gravity=18 jump=9 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
+Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb -500 200 0 45 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_1.glb -490 -50 0 120 scale=1.1 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb -500 -300 0 80 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_0.glb -470 320 0 20 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_1.glb -460 -150 0 200 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_2.glb -475 -380 0 310 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_3.glb 500 250 0 -60 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_4.glb 490 0 0 150 scale=1.1 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_5.glb 500 -350 0 -30 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_3.glb 470 380 0 0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_4.glb 460 -100 0 90 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_5.glb 475 -400 0 180 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_4K.glb -300 -500 0 10 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb 0 -510 0 0 scale=1.3 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_8m_3.glb 300 -500 0 -20 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_6.glb -150 -480 0 45 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_4m_7.glb 150 -485 0 120 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
+Mesh.Static Models/bushes/bush_tall_winter.glb -350 150 0 0 scale=1.7
+Mesh.Static Models/bushes/bush_long_winter.glb -300 100 0 30 scale=1.7
+Mesh.Static Models/bushes/bush_overgrown_winter.glb -400 200 0 60 scale=3
+Mesh.Static Models/bushes/bush_tall_single_winter.glb -280 -200 0 0 scale=1.6
+Mesh.Static Models/bushes/bush_long_single_winter.glb -220 -150 0 -20 scale=1.6
+Mesh.Static Models/forest/forest_pine_1.glb -350 -250 0 0 scale=1.2
+Mesh.Static Models/forest/forest_stump_1.glb -300 -220 0 0 scale=3.6
+Mesh.Static Models/forest/forest_log_1.glb -260 -180 0 45
+Mesh.Static Models/bushes/bush_long_overgrown_winter.glb 400 -300 0 90 scale=1.7
+Mesh.Static Models/bushes/bush_tall_overgrown_winter.glb 350 -400 0 20 scale=1.7
+Mesh.Static Models/forest/forest_pine_2.glb 450 -450 0 0 scale=1.3
+Mesh.Static Models/forest/forest_stump_2.glb 420 -420 0 0 scale=3
+Mesh.Static Models/rocks/SM_RP_Rock_2m_0.glb -350 120 0 0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_2m_1.glb -280 -120 0 30 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_2m_2.glb 380 -280 0 120 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_2m_3.glb 100 -420 0 0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_2m_4.glb -120 -300 0 80 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
+Mesh.Static Models/rocks/SM_RP_Rock_2m_5.glb 420 -200 0 200 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
+Mesh.Static Models/industrial/Building_A.glb -263 3 28.1 0
+Mesh.Static Models/industrial/Building_B.glb 282 -8 12.1 90
+Mesh.Static Models/industrial/Building_C.glb -134 3 15.1 0
+Mesh.Static Models/industrial/Building_D.glb 316 -15 28.1 0
+Mesh.Static Models/industrial/Building_E.glb 341 -3 2.1 -90
+ParticleEmitter smoke -90 25 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
+ParticleEmitter smoke -90 75 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
+ParticleEmitter smoke -40 50 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
+ParticleEmitter smoke 230 130 42 30 180 2 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
+ParticleEmitter smoke 290 140 42 30 180 2 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
+ParticleEmitter smoke 250 30 42 30 180 2 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
+ParticleEmitter snow -300 150 4 60 300 2.5 20 2 2 240 245 255 230 235 245 0.1 40 0.5 0.2 0 0
+ParticleEmitter snow 350 -350 4 60 300 2.5 20 2 2 240 245 255 230 235 245 0.1 40 0.5 0.2 0 0
 PathNode hangar_patrol_a -180 320 0.1 radius=3 next=hangar_patrol_b
 PathNode hangar_patrol_b -100 360 0.1 radius=3 next=hangar_patrol_a
 PathNode refinery_patrol_a -64 0 0.1 radius=4 next=refinery_patrol_b
@@ -683,25 +354,8 @@ PathNode power_patrol_a 230 130 0.1 radius=4 next=power_patrol_b
 PathNode power_patrol_b 290 30 0.1 radius=4 next=power_patrol_a
 PathNode security_patrol_a 335 -40 0.1 radius=3 next=security_patrol_b
 PathNode security_patrol_b 335 40 0.1 radius=3 next=security_patrol_a
+WindZone -600 -600 -50 600 600 300 0.5 0.2 0 0.3 0.1
+levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/cloud02.dds
+particles 4 120 2 220 230 235 0.3 0.2
 
-# ==============================================================================
-# PICKUPS
-# Weapons, health, and supplies placed at logical points.
-# ==============================================================================
-# Spawn lobby
-pickup pistol_01 -20 -420 1.1
-pickup HealthVial 20 -420 1.1
-# Hangar
-pickup rifle_01 -100 320 1.1
-pickup HealthVial -180 360 1.1
-# Refinery
-pickup etheral_waver -40 50 1.1
-pickup Medkit 0 50 1.1
-# Power plant roof
-pickup HealthVial 250 30 19.1
-# Rail yard
-pickup HealthVial 180 -350 1.1
-# Admin roof
-pickup ManaVial -269 0 13.1
-# Fuel tanks
-pickup HealthVial 180 300 13.1
+# End of OZONE export

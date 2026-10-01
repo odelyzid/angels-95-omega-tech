@@ -290,6 +290,18 @@ public:
     // Draw billboard sprites for every active pawn (optional lit shader for fog/lighting)
     void DrawAll(Camera3D& camera, Shader litShader = {0});
 
+    // Authoring-gizmo overlay (player starts, lights, zones, emitters).
+    //
+    // These markers used to be gated behind the client's Debug flag
+    // (g_debugEnabled), which AngelEd never sets - so the editor viewport had no
+    // visible representation for any of these entity types and they were
+    // effectively unselectable by hand. The editor now opts in explicitly via
+    // SetShowAuthoringGizmos(true) at startup, so the two callers stay
+    // independent: the game still hides them unless Debug is on, the editor
+    // always shows them.
+    void SetShowAuthoringGizmos(bool on) { m_showAuthoringGizmos = on; }
+    bool ShowAuthoringGizmos() const { return m_showAuthoringGizmos; }
+
     // Access individual pawns
     Pawn* Get(int id);
     int Count() const { return (int)m_pawns.size(); }
@@ -467,6 +479,7 @@ private:
     std::vector<MeshObjectNode> m_meshObjects;
     uint32_t m_nextEntityId = 1;
     uint32_t m_nextLightId = 1;
+    bool m_showAuthoringGizmos = false;   // see SetShowAuthoringGizmos
 
     // Sky zone state
     std::vector<SkyZoneNode> m_skyZones;

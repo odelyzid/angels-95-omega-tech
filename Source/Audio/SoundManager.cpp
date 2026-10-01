@@ -29,9 +29,13 @@ void SoundManager::LoadCoreSounds() {
     s.CollisionSound = LoadSoundWithFallback("GameData/Global/Sounds/CollisionSound.mp3");
     s.WalkingSound    = LoadSoundWithFallback("GameData/Global/Sounds/WalkingSound.mp3");
     s.ChasingSound    = LoadSoundWithFallback("GameData/Global/Sounds/ChasingSound.mp3");
-    s.UIClick         = LoadSoundWithFallback("GameData/Global/Title/Click.mp3");
+    s.UIClick         = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
     s.Death           = LoadSoundWithFallback("GameData/Global/Sounds/Hurt.mp3");
-m_textNoise    = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
+    s.JumpSound       = LoadSoundWithFallback("GameData/Global/Sounds/Player/jump1.wav");
+    s.WeaponLoadSound = LoadSoundWithFallback("GameData/Global/Sounds/Player/weapload.wav");
+    s.MenuSelectSound = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuSelect_Click.wav");
+    s.MatchStartSound = LoadSoundWithFallback("GameData/Global/Sounds/UI/MenuRoundBeginn.wav");
+    m_textNoise       = LoadSoundWithFallback("GameData/Global/Sounds/TalkingNoise.mp3");
 }
 
 void SoundManager::Shutdown() {
@@ -39,7 +43,8 @@ void SoundManager::Shutdown() {
 
     GameSounds& s = m_sounds;
     for (Sound* snd : {&s.CollisionSound, &s.WalkingSound, &s.UIClick,
-                       &s.ChasingSound, &s.Death, &m_textNoise}) {
+                       &s.ChasingSound, &s.Death, &s.JumpSound, &s.WeaponLoadSound,
+                       &s.MenuSelectSound, &s.MatchStartSound, &m_textNoise}) {
         if (snd->frameCount > 0) {
             StopSound(*snd);
             UnloadSound(*snd);
@@ -103,6 +108,26 @@ void SoundManager::PlayTextNoise() {
 void SoundManager::StopTextNoise() {
     if (m_textNoise.frameCount > 0)
         StopSound(m_textNoise);
+}
+
+void SoundManager::PlayJump() {
+    if (m_sounds.JumpSound.frameCount > 0)
+        PlaySound(m_sounds.JumpSound);
+}
+
+void SoundManager::PlayWeaponLoad() {
+    if (m_sounds.WeaponLoadSound.frameCount > 0)
+        PlaySound(m_sounds.WeaponLoadSound);
+}
+
+void SoundManager::PlayMenuSelect() {
+    if (m_sounds.MenuSelectSound.frameCount > 0)
+        PlaySound(m_sounds.MenuSelectSound);
+}
+
+void SoundManager::PlayMatchStart() {
+    if (m_sounds.MatchStartSound.frameCount > 0)
+        PlaySound(m_sounds.MatchStartSound);
 }
 
 void SoundManager::PlayScream(const Sound& scream) {

@@ -236,13 +236,18 @@ static RayCollision RaycastTestZones(Ray ray, EditorSelection& out) {
 static RayCollision RaycastTestLights(Ray ray, EditorSelection& out) {
     RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
     auto& lights = PawnSystem::Instance().GetLights();
+    // A light is drawn as a billboard at position + 0.4 Y, so the pick volume
+    // has to cover that sprite rather than sitting under it - otherwise the
+    // visible marker and the clickable region disagree and aiming feels broken.
     for (auto& l : lights) {
-        BoundingBox box = { {l.position.x - 0.5f, l.position.y - 0.3f, l.position.z - 0.5f},
-                            {l.position.x + 0.5f, l.position.y + 0.8f, l.position.z + 0.5f} };
+        if (!l.active) continue;
+        BoundingBox box = { {l.position.x - 0.6f, l.position.y - 0.1f, l.position.z - 0.6f},
+                            {l.position.x + 0.6f, l.position.y + 1.0f, l.position.z + 0.6f} };
         RayCollision hit = GetRayCollisionBox(ray, box);
         if (hit.hit && hit.distance < best.distance) {
             best = hit;
-            out = { SelType::LIGHT, (int)l.id, "Light", l.position };
+            out = { SelType::LIGHT, (int)l.id,
+                    l.name.empty() ? "Light" : l.name.c_str(), l.position };
         }
     }
     return best;
@@ -407,6 +412,21 @@ static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     return best.hit;
 }
 
+static int ClampPropInt(int v, int lo, int hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// PlayerStart lookups are by node id, not vector index. Both the raycast and
+// the WorldGraph hand out `s.id`, and ids are assigned from a counter shared
+// with every other entity type, so they are neither 0-based nor contiguous per
+// type. Indexing the vector by id (as an earlier revision of the properties
+// apply handler did) therefore addressed the wrong node - or none.
+static PlayerStartNode* FindPlayerStartById(int id) {
+    for (auto& s : PawnSystem::Instance().GetPlayerStarts())
+        if ((int)s.id == id) return &s;
+    return nullptr;
+}
+
 static void SnapGizmoToSelection(const EditorSelection& sel) {
     OmegaTechEditor.X = sel.pos.x;
     OmegaTechEditor.Y = sel.pos.y;
@@ -445,7 +465,11 @@ static void SnapGizmoToSelection(const EditorSelection& sel) {
 // toggleOffSame: left-click toggles a repeat pick off (deselect); right-click
 // must NOT toggle, otherwise right-clicking the already-selected entity would
 // deselect it instead of opening its context menu.
-static void EditorPickEntity(bool toggleOffSame = true) {
+// Returns true only when the raycast actually HIT an entity. Callers that open a
+// context menu must gate on this: on a miss the selection is intentionally left
+// untouched, so g_sel still names the previous entity and would otherwise target
+// a menu at an entity the user did not right-click.
+static bool EditorPickEntity(bool toggleOffSame = true) {
     Vector2 mousePos = GetMousePosition();
     EditorSelection prevSel = g_sel;
 
@@ -455,14 +479,14 @@ static void EditorPickEntity(bool toggleOffSame = true) {
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;
-            return;
+            return true;
         }
         // Clicking a different zone while one is selected = deselect
         if (toggleOffSame && prevSel.type != SelType::NONE && g_sel.type == SelType::ZONE) {
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;
-            return;
+            return true;
         }
         EditorLog("Selected: %s (type=%d idx=%d x=%f y=%f z=%f)",
                   g_sel.name.c_str(), (int)g_sel.type, g_sel.index, (float)g_sel.pos.x, (float)g_sel.pos.y, (float)g_sel.pos.z);
@@ -474,7 +498,9 @@ static void EditorPickEntity(bool toggleOffSame = true) {
         }
     } else {
         OmegaTechEditor.DrawModel = false;
+        return false;
     }
+    return true;
 }
 
 static void EditorHoverEntity() {
@@ -574,14 +600,10 @@ static void DuplicateSelectedEntity() {
             PawnSystem::Instance().AddLight(clone);
         }
     } else if (g_sel.type == SelType::SPAWN) {
-        auto& starts = PawnSystem::Instance().GetPlayerStarts();
-        for (auto& s : starts) {
-            if ((int)s.id == g_sel.index) {
-                PlayerStartNode clone = s;
-                clone.position.x += offset.x; clone.position.z += offset.z;
-                PawnSystem::Instance().AddPlayerStart(clone);
-                break;
-            }
+        if (PlayerStartNode* s = FindPlayerStartById(g_sel.index)) {
+            PlayerStartNode clone = *s;
+            clone.position.x += offset.x; clone.position.z += offset.z;
+            PawnSystem::Instance().AddPlayerStart(clone);
         }
     } else if (g_sel.type == SelType::PORTAL) {
         auto& portals = ZoneManager::Instance().GetPortals();
@@ -1072,6 +1094,13 @@ static void ExportToOzone(std::ostream& output) {
     }
 
     // Lights
+    //
+    // Optional attributes (effect / flare / corona / name) are written as named
+    // kwargs, never as trailing positional floats. The positional tail is
+    // position-dependent: a light with no effect but a flare emitted
+    // `... 16 1 0`, which the loader read back as effect=1 (WATERY) + flare=0.
+    // The editor is also the only place these were editable, so the round trip
+    // has to be lossless or every save silently retuned the level's lighting.
     for (auto& light : pawns.GetLights()) {
         if (!light.active) continue;
         Vector3 p = zup(light.position);
@@ -1081,26 +1110,31 @@ static void ExportToOzone(std::ostream& output) {
         // the client's numeric light parser).
         int r = (int)light.color.r, g = (int)light.color.g, b = (int)light.color.b;
         if (light.type == LitLightType::DIRECTIONAL) {
-            // directional tx ty tz r g b intensity [flare] [corona]
-            output << "light directional " << t.x << " " << t.y << " " << t.z
+            // directional x y z r g b intensity  (x y z is the SOURCE; the
+            // loader aims it at the world origin)
+            output << "light directional " << p.x << " " << p.y << " " << p.z
                    << " " << r << " " << g << " " << b << " " << light.intensity;
         } else if (light.type == LitLightType::SPOT) {
-            // spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect] [flare] [corona]
+            // spot x y z tx ty tz r g b intensity radius innerCone outerCone
             output << "light spot " << p.x << " " << p.y << " " << p.z
                    << " " << t.x << " " << t.y << " " << t.z
                    << " " << r << " " << g << " " << b
                    << " " << light.intensity << " " << light.radius
                    << " " << light.innerCone << " " << light.outerCone;
-            if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
         } else {
-            // point x y z r g b intensity radius [effect] [flare] [corona]
+            // point x y z r g b intensity radius
             output << "light point " << p.x << " " << p.y << " " << p.z
                    << " " << r << " " << g << " " << b
                    << " " << light.intensity << " " << light.radius;
-            if (light.effect != LitLightEffect::NONE) output << " " << (int)light.effect;
         }
-        // Flare/corona trailing floats (parsed back by OzOzoneLoader)
-        if (light.flare || light.corona) output << " " << (light.flare ? 1 : 0) << " " << (light.corona ? 1 : 0);
+        if (light.effect != LitLightEffect::NONE) output << " effect=" << (int)light.effect;
+        if (light.flare)  output << " flare=1";
+        if (light.corona) output << " corona=1";
+        if (!light.name.empty()) {
+            std::string ln = light.name;
+            bool quote = ln.find(' ') != std::string::npos;
+            output << " name=" << (quote ? "\"" + ln + "\"" : ln);
+        }
         output << "\n";
     }
 
@@ -1666,6 +1700,12 @@ int main(int argc, char **argv){
     // Initialize engine/item texture mapper (must be before EngineBillboard::Init)
     AssetMapper::Instance().Init();
 
+    // The editor viewport must always show authoring gizmos (player starts,
+    // lights, zones, sound/music emitters). These were gated behind the client's
+    // Debug flag, which AngelEd never sets, so those entities had no visual
+    // representation at all and could not be picked in the viewport.
+    PawnSystem::Instance().SetShowAuthoringGizmos(true);
+
 #ifdef _WIN32
     CreateAllEditorWindows(GetModuleHandle(NULL), GetWindowHandle());
 #endif
@@ -2008,10 +2048,12 @@ int main(int argc, char **argv){
             Vector2 _mp_rel = GetMousePosition();
             bool _inVpRel = (_mp_rel.x >= (float)GetStatsSidebarWidth() && _mp_rel.y >= 28.0f);
             // Pick without the left-click toggle so right-clicking the already
-            // selected entity opens its menu instead of deselecting it.
+            // selected entity opens its menu instead of deselecting it. Gate on
+            // the hit result — on a miss g_sel still holds the previous entity,
+            // so a stale selection would otherwise pop a Delete menu onto
+            // whatever the user right-clicked next (or on empty space).
             if (_inVpRel) {
-                EditorPickEntity(false);
-                if (g_sel.type != SelType::NONE) {
+                if (EditorPickEntity(false)) {
                     // Native Win32 context menu with TPM_RETURNCMD (avoids WM_COMMAND routing issues)
                     #ifdef _WIN32
                     HWND hWnd = (HWND)GetWindowHandle();
@@ -2639,10 +2681,8 @@ int main(int argc, char **argv){
                     LightNode* l = PawnSystem::Instance().GetLight(idx);
                     if (l) l->position = newPos;
                 } else if (g_sel.type == SelType::SPAWN) {
-                    auto& starts = PawnSystem::Instance().GetPlayerStarts();
-                    for (auto& s : starts) {
-                        if ((int)s.id == idx) { s.position = newPos; break; }
-                    }
+                    if (PlayerStartNode* s = FindPlayerStartById(idx))
+                        s->position = newPos;
                 } else if (g_sel.type == SelType::PORTAL) {
                     auto& portals = ZoneManager::Instance().GetPortals();
                     if (idx >= 0 && idx < (int)portals.size()) {
@@ -2856,12 +2896,9 @@ int main(int argc, char **argv){
                     return {{l->position.x-0.5f,l->position.y-0.5f,l->position.z-0.5f},
                             {l->position.x+0.5f,l->position.y+1.0f,l->position.z+0.5f}};
             } else if (sel.type == SelType::SPAWN) {
-                auto& starts = PawnSystem::Instance().GetPlayerStarts();
-                for (auto& s : starts) {
-                    if ((int)s.id == sel.index)
-                        return {{s.position.x-0.6f,s.position.y-0.5f,s.position.z-0.6f},
-                                {s.position.x+0.6f,s.position.y+1.2f,s.position.z+0.6f}};
-                }
+                if (PlayerStartNode* s = FindPlayerStartById(sel.index))
+                    return {{s->position.x-0.6f,s->position.y-0.5f,s->position.z-0.6f},
+                            {s->position.x+0.6f,s->position.y+1.2f,s->position.z+0.6f}};
             } else if (sel.type == SelType::PORTAL) {
                 auto& portals = ZoneManager::Instance().GetPortals();
                 if (sel.index >= 0 && sel.index < (int)portals.size())
@@ -3247,13 +3284,49 @@ int main(int argc, char **argv){
                     }
                 }
             } else if (tgtType == SelType::SPAWN) {
-                auto& starts = PawnSystem::Instance().GetPlayerStarts();
-                for (auto& s : starts) {
-                    if ((int)s.id == tgtIdx) {
-                        s.position = {px, py, pz};
-                        s.yaw = prot;
-                        break;
-                    }
+                if (PlayerStartNode* s = FindPlayerStartById(tgtIdx)) {
+                    s->position = {px, py, pz};
+                    s->yaw = prot;
+                }
+            } else if (tgtType == SelType::LIGHT) {
+                if (LightNode* l = PawnSystem::Instance().GetLight(tgtIdx)) {
+                    l->position = {px, py, pz};
+                    l->name = g_editorPanels.propLightName;
+                    l->color = (Color){(unsigned char)ClampPropInt(g_editorPanels.propLightR, 0, 255),
+                                       (unsigned char)ClampPropInt(g_editorPanels.propLightG, 0, 255),
+                                       (unsigned char)ClampPropInt(g_editorPanels.propLightB, 0, 255),
+                                       255};
+                    l->intensity = fmaxf(0.0f, g_editorPanels.propLightIntensity);
+                    l->radius = fmaxf(0.1f, g_editorPanels.propLightRadius);
+                    int lt = g_editorPanels.propLightType;
+                    if (lt < 0 || lt > 2) lt = (int)LitLightType::POINT;
+                    l->type = (LitLightType)lt;
+                    int le = g_editorPanels.propLightEffect;
+                    if (le < 0 || le > 4) le = 0;
+                    l->effect = (LitLightEffect)le;
+                    // The panel edits the cone in degrees; LightNode stores
+                    // cos(half-angle) because that is what the shader compares
+                    // against, so convert on the way in.
+                    float innerDeg = fminf(fmaxf(g_editorPanels.propLightInnerAngle, 0.5f), 89.0f);
+                    float outerDeg = fminf(fmaxf(g_editorPanels.propLightOuterAngle, 1.0f), 89.0f);
+                    l->innerCone = cosf(innerDeg * DEG2RAD);
+                    l->outerCone = cosf(outerDeg * DEG2RAD);
+                    l->flare  = g_editorPanels.propLightFlare;
+                    l->corona = g_editorPanels.propLightCorona;
+                    l->target = {g_editorPanels.propLightTarget[0],
+                                 g_editorPanels.propLightTarget[1],
+                                 g_editorPanels.propLightTarget[2]};
+                    // A directional light is authored by its SOURCE point and
+                    // aimed at the world origin (see OzOzoneLoader), so the
+                    // panel's target row must be forced back to the origin or
+                    // the exported `light directional` line stops meaning what
+                    // the editor shows.
+                    if (l->type == LitLightType::DIRECTIONAL)
+                        l->target = {0.0f, 0.0f, 0.0f};
+                    // Lights are bound to the zone volume that contains them;
+                    // a moved light needs that recomputed or it keeps lighting
+                    // the volume it used to sit in.
+                    PawnSystem::Instance().AssignLightZones();
                 }
             } else if (tgtType == SelType::PORTAL) {
                 auto& portals = ZoneManager::Instance().GetPortals();
@@ -4022,35 +4095,36 @@ int main(int argc, char **argv){
             }
             g_editorPanels.actionGenerateHeightmap = false;
         }
-        // Light Properties apply handler — write panel values to LightNode
+        // Legacy Light Properties apply handler. Superseded by the properties
+        // panel (SelType::LIGHT), but kept so the old window still functions.
+        // lightPropTarget is a LightNode ID (that is what the selection and the
+        // WorldGraph hand out), so it must be resolved with GetLight() - the
+        // previous vector-index lookup addressed the wrong node whenever the
+        // ids and positions diverged, e.g. after any deletion.
         if (g_editorPanels.actionApplyLight) {
-            int idx = g_editorPanels.lightPropTarget;
-            if (idx >= 0) {
+            if (LightNode* ln = PawnSystem::Instance().GetLight(g_editorPanels.lightPropTarget)) {
                 HistoryPush();
-                auto& lights = PawnSystem::Instance().GetLights();
-                if (idx < (int)lights.size()) {
-                    LightNode& ln = lights[idx];
-                    ln.color.r = (unsigned char)g_editorPanels.lightColorR;
-                    ln.color.g = (unsigned char)g_editorPanels.lightColorG;
-                    ln.color.b = (unsigned char)g_editorPanels.lightColorB;
-                    ln.intensity = g_editorPanels.lightIntensity;
-                    ln.radius = g_editorPanels.lightRadius;
-                    ln.type = (LitLightType)g_editorPanels.lightType;
-                    ln.effect = (LitLightEffect)g_editorPanels.lightEffect;
-                    // Spot cone angles: edit fields are in degrees, LightNode stores cos(half-angle)
-                    float innerRad = g_editorPanels.lightInnerAngle * DEG2RAD;
-                    float outerRad = g_editorPanels.lightOuterAngle * DEG2RAD;
-                    ln.innerCone = cosf(innerRad);
-                    ln.outerCone = cosf(outerRad);
-                    ln.flare = g_editorPanels.lightFlare;
-                    ln.corona = g_editorPanels.lightCorona;
-                    EditorLog("Applied light properties to idx=%d: color=(%.0f,%.0f,%.0f) "
-                              "intensity=%.1f radius=%.0f type=%d effect=%d",
-                        idx,
-                        g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
-                        g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
-                        g_editorPanels.lightType, g_editorPanels.lightEffect);
-                }
+                ln->color.r = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorR, 0, 255);
+                ln->color.g = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorG, 0, 255);
+                ln->color.b = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorB, 0, 255);
+                ln->intensity = fmaxf(0.0f, g_editorPanels.lightIntensity);
+                ln->radius = fmaxf(0.1f, g_editorPanels.lightRadius);
+                ln->type = (LitLightType)g_editorPanels.lightType;
+                ln->effect = (LitLightEffect)g_editorPanels.lightEffect;
+                // Spot cone angles: edit fields are in degrees, LightNode stores cos(half-angle)
+                ln->innerCone = cosf(fminf(fmaxf(g_editorPanels.lightInnerAngle, 0.5f), 89.0f) * DEG2RAD);
+                ln->outerCone = cosf(fminf(fmaxf(g_editorPanels.lightOuterAngle, 1.0f), 89.0f) * DEG2RAD);
+                ln->flare  = g_editorPanels.lightFlare;
+                ln->corona = g_editorPanels.lightCorona;
+                if (ln->type == LitLightType::DIRECTIONAL)
+                    ln->target = {0.0f, 0.0f, 0.0f};
+                PawnSystem::Instance().AssignLightZones();
+                EditorLog("Applied legacy light properties to id=%d: color=(%.0f,%.0f,%.0f) "
+                          "intensity=%.1f radius=%.0f type=%d effect=%d",
+                    ln->id,
+                    g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
+                    g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
+                    g_editorPanels.lightType, g_editorPanels.lightEffect);
             }
             g_editorPanels.actionApplyLight = false;
         }

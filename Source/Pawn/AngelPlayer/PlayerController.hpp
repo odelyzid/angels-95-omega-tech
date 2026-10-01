@@ -30,6 +30,9 @@ public:
     void UpdateVertical(float dt, Camera3D& cam, float savedCamY, bool uiBlocked,
                         const oz::physics::PhysicsInfo& phys);
 
+    // Play the jump one-shot (called by UpdateVertical when a jump is detected).
+    void PlayJump();
+
     // Draws the "3 deaths" game-over overlay. Returns true when the overlay is
     // shown (caller should EndDrawing + continue). `restartWorld` re-loads the
     // world on Restart.

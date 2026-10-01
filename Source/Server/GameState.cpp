@@ -389,7 +389,7 @@ static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir)
 // ---------------------------------------------------------------------------
 // Player management
 // ---------------------------------------------------------------------------
-uint32_t GameState::add_player(uint32_t id, const char* name)
+uint32_t GameState::add_player(uint32_t id, const char* name, int team, int requested_team)
 {
     if (m_player_count >= (int)m_max_players) {
         OZ_WARN("Cannot add player, server full (%u/%u)", m_max_players, m_max_players);
@@ -400,6 +400,8 @@ uint32_t GameState::add_player(uint32_t id, const char* name)
     if (ServerPlayer* existing = get_player(id)) {
         strncpy(existing->name, name, sizeof(existing->name) - 1);
         existing->name[sizeof(existing->name) - 1] = '\0';
+        existing->team = team;
+        existing->requested_team = requested_team;
         return existing->id;
     }
     ServerPlayer player;

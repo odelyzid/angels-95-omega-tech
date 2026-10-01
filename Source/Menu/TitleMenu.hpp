@@ -5,6 +5,7 @@
 #include "InternetBrowser.hpp"
 #include "../Client/MasterList.hpp"
 #include "../Audio/SoundManager.hpp"
+#include "../PlayerProfile.hpp"
 #include <string>
 #include <vector>
 #include <cstring>
@@ -14,12 +15,16 @@
 
 namespace fs = std::filesystem;
 
-static const Color TEAM_COLORS[7] = {
+// Index 0 is "Unassigned" (PlayerProfile::team == 0); 1..7 map to the teams.
+// Keep this in sync with TEAM_COLOR_NAMES below.
+static const Color TEAM_COLORS[8] = {
+    {90, 90, 100, 255},    // Unassigned
     {200, 40, 40, 255},   {40, 100, 220, 255},  {40, 180, 60, 255},
     {200, 170, 30, 255},  {60, 180, 200, 255},  {160, 50, 200, 255},
     {220, 130, 30, 255}
 };
-static const char* TEAM_COLOR_NAMES[7] = {"Red","Blue","Green","Gold","Azure","Purple","Orange"};
+static const char* TEAM_COLOR_NAMES[8] = {"Unassigned","Red","Blue","Green","Gold","Azure","Purple","Orange"};
+static const int   TEAM_COLOR_COUNT = 8;
 
 struct WorldEntry { std::string name; std::string dirName; };
 
@@ -154,7 +159,10 @@ public:
     TitleMenu() {
         GetMenuTex();
         m_worlds = ScanWorlds();
-        snprintf(m_charName, sizeof(m_charName), "%s", "Player");
+        // The manager is initialised once at client startup (see Source/Main.cpp).
+        // Active() is safe to read even if that has not run: it falls back to a
+        // built-in default profile.
+        LoadActiveProfileIntoFields();
         m_masterUrls = master::LoadMasterUrls("System/Angels95.ini");
         m_internet.SetMasters(m_masterUrls);
     }
@@ -253,7 +261,15 @@ private:
     std::vector<WorldEntry> m_worlds;
 
     char m_charName[64];
-    int m_teamColor = 0, m_gameTypeFilter = 0, m_settingsSubPage = 0;
+    // Profile edit buffers. m_charName doubles as the active profile's name so
+    // there is a single source of truth; these two back the remaining fields.
+    char m_modelPath[128] = "";
+    char m_voiceSet[64]  = "";
+    bool m_modelPathEditing = false;
+    bool m_voiceSetEditing  = false;
+    // Index into TEAM_COLORS (0 = Unassigned). Mirrors PlayerProfile::team.
+    int m_teamColor = 0;
+    int m_gameTypeFilter = 0, m_settingsSubPage = 0;
     char m_joinIPBuffer[64] = "127.0.0.1";
     char m_hostPortBuffer[16] = "27015";
     // raygui textboxes share one global cursor index; forcing editMode=true
@@ -624,15 +640,34 @@ private:
                 break;
             }
             case PANE_CHARACTER: {
-                // Team color swatches
-                float x = contentRect.x + 16;
-                float y = contentRect.y + 76; // after name and label
-                float sx2 = x + 100;
-                for (int i = 0; i < 7; i++) {
-                    Rectangle sw = {sx2 + i * 30, y, 24, 24};
+                // Geometry comes from CharGeom so these hit rects can never
+                // drift from the ones DrawCharacterPage actually painted.
+                auto& pm = PlayerProfileManager::Instance();
+                const CharLayout L = CharGeom(contentRect);
+                const float x = contentRect.x + 16;
+                const int listW = (int)(contentRect.width - 32);
+
+                // Profile rows select the active slot.
+                for (int i = 0; i < L.visibleRows; i++) {
+                    Rectangle row = {x, (float)(L.rowY + i * L.rowH), (float)listW, (float)L.rowH};
+                    if (CheckCollisionPointRec(mp, row)) {
+                        SoundManager::Instance().PlayUIClick();
+                        pm.SetActive(i);
+                        LoadActiveProfileIntoFields();
+                        return;
+                    }
+                }
+
+                // Team swatches.
+                for (int i = 0; i < TEAM_COLOR_COUNT; i++) {
+                    Rectangle sw = {(float)(L.teamX + i * L.swStep), (float)L.teamY,
+                                    (float)L.swSize, (float)L.swSize};
                     if (CheckCollisionPointRec(mp, sw)) {
                         SoundManager::Instance().PlayUIClick();
                         m_teamColor = i;
+                        // Persist immediately so the swatch survives a pane close
+                        // without an explicit Save.
+                        SaveFieldsIntoActiveProfile();
                         break;
                     }
                 }
@@ -932,40 +967,127 @@ private:
         }
     }
 
+    // Single source of truth for Character-pane geometry. The draw pass and the
+    // click handler must agree, and the row count depends on how many profiles
+    // exist — so both read these values instead of hardcoding offsets.
+    struct CharLayout {
+        int  visibleRows = 0;
+        int  rowY   = 0;    // top of the first profile row
+        int  rowH   = 18;
+        int  teamX  = 0;    // left edge of the first team swatch
+        int  teamY  = 0;
+        int  swStep = 26;
+        int  swSize = 22;
+        int  saveY  = 0;    // top of the Save/New/Delete button row
+    };
+
+    CharLayout CharGeom(Rectangle area) const {
+        CharLayout L;
+        L.rowY = (int)area.y + 62;                 // below the page header + "Profile:" label
+        const int listBottom = (int)(area.y + area.height) - 150;
+        for (int i = 0; i < PlayerProfileManager::Instance().Count(); i++) {
+            if (L.rowY + L.rowH * (i + 1) > listBottom) break;
+            L.visibleRows++;
+        }
+        int y = L.rowY + L.rowH * L.visibleRows + 24;   // + list bottom padding
+        y += 30;                                          // name row
+        y += 30;                                          // model row
+        y += 30;                                          // voice row
+        L.teamX = (int)area.x + 16 + 60;
+        L.teamY = y;
+        y += 26;                                          // swatch row + team caption
+        L.saveY = y + 26;
+        return L;
+    }
+
     void DrawCharacterPage(Rectangle area) {
         DrawPageHeader(area, "Character Configuration");
-        float x = area.x + 16, y = area.y + 42;
-        DrawText("Name:", (int)x, (int)y, 14, WHITE);
-        Rectangle nameRect = {x + 60, y - 2, 200, 22};
+        float x = area.x + 16;
+        int y = (int)area.y + 42;
+        auto& pm = PlayerProfileManager::Instance();
+        const CharLayout L = CharGeom(area);
+
+        // --- Profile slots -------------------------------------------------
+        DrawText("Profile:", (int)x, y, 14, WHITE);
+
+        const int listW = (int)(area.width - 32);
+        for (int i = 0; i < L.visibleRows; i++) {
+            const PlayerProfile& p = pm.Get(i);
+            Rectangle row = {x, (float)(L.rowY + i * L.rowH), (float)listW, (float)L.rowH};
+            bool active = (i == pm.ActiveIndex());
+            bool hover = CheckCollisionPointRec(GetMousePosition(), row);
+            DrawRectangleRec(row, active ? (Color){40,80,140,200}
+                                        : (hover ? (Color){24,44,84,200} : (Color){12,24,50,160}));
+            if (active) DrawRectangleLinesEx(row, 1, (Color){120,190,255,220});
+
+            char label[192];
+            snprintf(label, sizeof(label), "%s%s%s",
+                     active ? "> " : "  ", p.displayName.c_str(),
+                     p.team > 0 ? TextFormat("  [%s]", TEAM_COLOR_NAMES[
+                         (p.team < TEAM_COLOR_COUNT) ? p.team : 0]) : "");
+            DrawText(label, (int)(row.x + 4), (int)(row.y + 3), 12,
+                     active ? WHITE : (Color){180,200,230,220});
+        }
+        if (L.visibleRows == 0)
+            DrawText("(no profiles)", (int)(x + 4), L.rowY, 12, (Color){140,160,180,180});
+
+        // --- Fields for the active slot -----------------------------------
+        y = L.rowY + L.rowH * L.visibleRows + 24;
+        DrawText("Name:", (int)x, y, 14, WHITE);
+        Rectangle nameRect = {x + 60, (float)y - 2, 200, 22};
         // GuiTextBox returns true on focus enter/exit; toggling here keeps the
         // shared cursor index valid and lets exactly one box consume key input.
         if (GuiTextBox(nameRect, m_charName, sizeof(m_charName), m_charNameEditing))
             m_charNameEditing = !m_charNameEditing;
-        y += 34;
+        y += 30;
 
-        DrawText("Team Color:", (int)x, (int)(y + 4), 14, WHITE);
-        float sx2 = x + 100;
-        for (int i = 0; i < 7; i++) {
-            Rectangle sw = {sx2 + i * 30, y, 24, 24};
+        DrawText("Model:", (int)x, y, 14, WHITE);
+        Rectangle modelRect = {x + 60, (float)y - 2, 260, 22};
+        if (GuiTextBox(modelRect, m_modelPath, sizeof(m_modelPath), m_modelPathEditing))
+            m_modelPathEditing = !m_modelPathEditing;
+        y += 30;
+
+        DrawText("Voice Set:", (int)x, y, 14, WHITE);
+        Rectangle voiceRect = {x + 60, (float)y - 2, 200, 22};
+        if (GuiTextBox(voiceRect, m_voiceSet, sizeof(m_voiceSet), m_voiceSetEditing))
+            m_voiceSetEditing = !m_voiceSetEditing;
+        y += 30;
+
+        DrawText("Team:", (int)x, L.teamY + 4, 14, WHITE);
+        for (int i = 0; i < TEAM_COLOR_COUNT; i++) {
+            Rectangle sw = {(float)(L.teamX + i * L.swStep), (float)L.teamY,
+                            (float)L.swSize, (float)L.swSize};
             bool h = CheckCollisionPointRec(GetMousePosition(), sw);
             DrawRectangleRec(sw, TEAM_COLORS[i]);
             if (i == m_teamColor) DrawRectangleLinesEx(sw, 2, WHITE);
             else if (h) DrawRectangleLinesEx(sw, 1, LIGHTGRAY);
         }
-        y += 36;
-        DrawText(TEAM_COLOR_NAMES[m_teamColor], (int)x, (int)y, 12, LIGHTGRAY); y += 24;
+        DrawText(TEAM_COLOR_NAMES[(m_teamColor >= 0 && m_teamColor < TEAM_COLOR_COUNT)
+                                  ? m_teamColor : 0],
+                 (int)x, L.teamY + L.swSize + 4, 12, LIGHTGRAY);
 
-        DrawText("Model:", (int)x, (int)(y + 2), 14, WHITE);
-        DrawText("(not yet implemented)", (int)(x + 64), (int)(y + 2), 12, (Color){120,140,160,180}); y += 30;
-
-        Rectangle vp = {x, y, area.width - 32, area.height - (y - area.y) - 16};
-        if (vp.height > 100) {
-            DrawRectangleRec(vp, (Color){10,20,40,200});
-            DrawRectangleLinesEx(vp, 1, (Color){40,60,100,150});
-            int cx = (int)(vp.x + vp.width/2), cy = (int)(vp.y + vp.height/2);
-            DrawText("3D Model Preview", cx - MeasureText("3D Model Preview", 16)/2, cy - 10, 16, (Color){80,100,140,180});
-            DrawText("(coming soon)", cx - MeasureText("(coming soon)", 13)/2, cy + 12, 13, (Color){60,80,120,150});
+        // --- Actions -------------------------------------------------------
+        if (GuiButton({x, (float)L.saveY, 90, 24}, "Save"))
+            SaveFieldsIntoActiveProfile();
+        if (GuiButton({x + 98, (float)L.saveY, 90, 24}, "New")) {
+            // Seed the new slot from the current fields, then make it active.
+            PlayerProfile p;
+            p.displayName = m_charName;
+            p.modelPath   = m_modelPath;
+            p.voiceSet    = m_voiceSet;
+            p.team        = m_teamColor;
+            pm.Add(p);
+            LoadActiveProfileIntoFields();
         }
+        if (GuiButton({x + 196, (float)L.saveY, 90, 24}, "Delete")) {
+            if (pm.Count() > 1) {
+                pm.Remove(pm.ActiveIndex());
+                LoadActiveProfileIntoFields();
+            }
+        }
+
+        DrawText("Saved to " + std::string(PlayerProfileManager::DefaultPath()),
+                 (int)x, L.saveY + 28, 11, (Color){120,150,180,190});
     }
 
     void DrawMultiplayerPage(Rectangle area) {
@@ -1186,6 +1308,27 @@ private:
         };
         int y = (int)(area.y + 40);
         for (int i = 0; i < 21; i++) { DrawText(l[i], (int)(area.x + 16), y, 13, (Color){160,180,200,220}); y += 18; }
+    }
+
+    // Copy the active profile into the edit buffers. Called on construction and
+    // whenever the selection changes, so the fields always show the active slot.
+    void LoadActiveProfileIntoFields() {
+        const PlayerProfile& p = PlayerProfileManager::Instance().Active();
+        snprintf(m_charName,   sizeof(m_charName),   "%s", p.displayName.c_str());
+        snprintf(m_modelPath,  sizeof(m_modelPath),  "%s", p.modelPath.c_str());
+        snprintf(m_voiceSet,   sizeof(m_voiceSet),   "%s", p.voiceSet.c_str());
+        // team is 1-based on the profile, 0-based as a TEAM_COLORS index.
+        m_teamColor = (p.team >= 0 && p.team < TEAM_COLOR_COUNT) ? p.team : 0;
+    }
+
+    // Write the edit buffers back into the active profile and persist.
+    void SaveFieldsIntoActiveProfile() {
+        PlayerProfile p = PlayerProfileManager::Instance().Active();
+        p.displayName = m_charName;
+        p.modelPath   = m_modelPath;
+        p.voiceSet    = m_voiceSet;
+        p.team        = m_teamColor;
+        PlayerProfileManager::Instance().Update(PlayerProfileManager::Instance().ActiveIndex(), p);
     }
 
     void DrawHelpBar() {

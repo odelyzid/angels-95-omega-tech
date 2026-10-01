@@ -1689,6 +1689,30 @@ PawnTreeNode BuildPawnTree() {
     }
     volBranch.children.push_back(meshBranch);
 
+    // GameEngine.Light — light nodes. Placement writes an OZONE
+    // `light <point|spot|directional>` line; every other property (colour,
+    // intensity, radius, effect, flare, corona, spot cone) lives in the
+    // Entity Properties panel on the selected light.
+    PawnTreeNode lightBranch;
+    lightBranch.label = "GameEngine.Light";
+    lightBranch.isExpanded = false;
+    lightBranch.typeTag = "category";
+    {
+        struct { const char* label; const char* defName; const char* typeTag; } lightLeaves[] = {
+            { "Light.Directional", "Light.Directional", "light_directional" },
+            { "Light.Point",       "Light.Point",       "light_point" },
+            { "Light.Spot",        "Light.Spot",        "light_spot" },
+        };
+        for (auto& ll : lightLeaves) {
+            PawnTreeNode leaf;
+            leaf.label = ll.label;
+            leaf.defName = ll.defName;
+            leaf.typeTag = ll.typeTag;
+            lightBranch.children.push_back(leaf);
+        }
+    }
+    volBranch.children.push_back(lightBranch);
+
     // GameEngine.ParticleEmitter — local 3D particles (fire/sparks/smoke)
     PawnTreeNode particleLeaf;
     particleLeaf.label = "ParticleEmitter";
@@ -1761,6 +1785,34 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
         n.skeletal = (typeTag == "mesh_skeletal");
         n.position = pos; n.yaw = 0.0f; n.scale = 1.0f;
         ps.AddMeshObject(n);
+    } else if (typeTag == "light_point" || typeTag == "light_spot" ||
+               typeTag == "light_directional") {
+        LightNode n;
+        n.active = true;
+        n.position = pos;
+        n.color = WHITE;
+        n.intensity = 1.0f;
+        n.radius = 20.0f;
+        if (typeTag == "light_directional") {
+            // A directional light is authored by its SOURCE point and aimed at
+            // the world origin (see OzOzoneLoader), so seed it above the aim
+            // point rather than at the emitter position a point light uses.
+            n.type = LitLightType::DIRECTIONAL;
+            n.position = {pos.x, pos.y + 40.0f, pos.z};
+            n.target = {0.0f, 0.0f, 0.0f};
+            n.intensity = 0.8f;
+        } else if (typeTag == "light_spot") {
+            n.type = LitLightType::SPOT;
+            // Default aim: straight down from the emitter, matching the
+            // engine's inner/outer cone defaults (cos 18deg / cos 37deg).
+            n.target = {pos.x, pos.y - 10.0f, pos.z};
+            n.innerCone = 0.95f;
+            n.outerCone = 0.80f;
+        } else {
+            n.type = LitLightType::POINT;
+        }
+        n.name = defName;
+        ps.AddLight(n);
     } else if (typeTag == "particle") {
         ParticleEmitterNode n;
         n.type = "fire"; n.position = pos; n.direction = {0, 1, 0};
@@ -3581,6 +3633,13 @@ static const int ID_LP_CORONA = 410;
 static const int ID_LP_INNER  = 411;
 static const int ID_LP_OUTER  = 412;
 
+// The supported light editor is the context-sensitive Entity Properties panel
+// (right-click a light -> Properties): it shows the same colour / intensity /
+// radius / type / effect / flare / corona fields plus position, target and name,
+// and round-trips them through the OZONE export. This legacy window is kept
+// only so the "Light Properties" menu entry has somewhere to point; when a
+// light is selected it hands over to the properties panel instead of opening a
+// second, narrower editor for the same node.
 void ShowLightProps(bool show) {
     g_editorPanels.showLightProps = show;
     if (show && g_editorPanels.hLightProps) {
@@ -3589,6 +3648,8 @@ void ShowLightProps(bool show) {
         int selIdx  = Editor_GetSelectedIndex();
         if (selType == 5 && selIdx >= 0) { // SelType::LIGHT = 5
             g_editorPanels.lightPropTarget = selIdx;
+            ShowPropertiesPanel(true);
+            return;
         }
         // Populate controls from the target light
         SendMessage((HWND)g_editorPanels.hLightProps, WM_USER + 50, 0, 0);
@@ -3659,25 +3720,28 @@ static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         break;
     }
     case WM_USER + 50: {
-        // Populate controls from the target light node
-        auto& lights = PawnSystem::Instance().GetLights();
-        int idx = g_editorPanels.lightPropTarget;
-        if (idx >= 0 && idx < (int)lights.size()) {
-            LightNode& ln = lights[idx];
-            SetScrollPos(GetDlgItem(hwnd, ID_LP_R), SB_CTL, ln.color.r, TRUE);
-            SetScrollPos(GetDlgItem(hwnd, ID_LP_G), SB_CTL, ln.color.g, TRUE);
-            SetScrollPos(GetDlgItem(hwnd, ID_LP_B), SB_CTL, ln.color.b, TRUE);
-            SetScrollPos(GetDlgItem(hwnd, ID_LP_INTENS), SB_CTL, (int)(ln.intensity * 100), TRUE);
-            SetScrollPos(GetDlgItem(hwnd, ID_LP_RADIUS), SB_CTL, (int)ln.radius, TRUE);
-            SendMessage(GetDlgItem(hwnd, ID_LP_TYPE), CB_SETCURSEL, (int)ln.type, 0);
-            SendMessage(GetDlgItem(hwnd, ID_LP_EFFECT), CB_SETCURSEL, (int)ln.effect, 0);
+        // Populate controls from the target light node.
+        // lightPropTarget is a LightNode ID, so resolve it with GetLight()
+        // rather than indexing the vector (ids are 1-based and shift after a
+        // deletion, so the old index lookup showed the wrong light's values).
+        LightNode* ln = PawnSystem::Instance().GetLight(g_editorPanels.lightPropTarget);
+        if (ln) {
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_R), SB_CTL, ln->color.r, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_G), SB_CTL, ln->color.g, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_B), SB_CTL, ln->color.b, TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_INTENS), SB_CTL, (int)(ln->intensity * 100), TRUE);
+            SetScrollPos(GetDlgItem(hwnd, ID_LP_RADIUS), SB_CTL, (int)ln->radius, TRUE);
+            SendMessage(GetDlgItem(hwnd, ID_LP_TYPE), CB_SETCURSEL, (int)ln->type, 0);
+            SendMessage(GetDlgItem(hwnd, ID_LP_EFFECT), CB_SETCURSEL, (int)ln->effect, 0);
             // Recompute angle from cosine
-            float innerDeg = acosf(ln.innerCone) * RAD2DEG;
-            float outerDeg = acosf(ln.outerCone) * RAD2DEG;
+            float innerDeg = acosf(fminf(fmaxf(ln->innerCone, -1.0f), 1.0f)) * RAD2DEG;
+            float outerDeg = acosf(fminf(fmaxf(ln->outerCone, -1.0f), 1.0f)) * RAD2DEG;
             SetWindowTextW(GetDlgItem(hwnd, ID_LP_INNER), std::to_wstring(innerDeg).c_str());
             SetWindowTextW(GetDlgItem(hwnd, ID_LP_OUTER), std::to_wstring(outerDeg).c_str());
-            SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_SETCHECK, ln.flare ? BST_CHECKED : BST_UNCHECKED, 0);
-            SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_SETCHECK, 0, 0); // reserved
+            SendMessage(GetDlgItem(hwnd, ID_LP_FLARE), BM_SETCHECK, ln->flare ? BST_CHECKED : BST_UNCHECKED, 0);
+            // Corona used to be force-cleared here with a "reserved" comment,
+            // so the flag could be turned on but never read back off.
+            SendMessage(GetDlgItem(hwnd, ID_LP_CORONA), BM_SETCHECK, ln->corona ? BST_CHECKED : BST_UNCHECKED, 0);
         }
         g_editorPanels.lightColorR = (float)SendDlgItemMessage(hwnd, ID_LP_R, SBM_GETPOS, 0, 0);
         g_editorPanels.lightColorG = (float)SendDlgItemMessage(hwnd, ID_LP_G, SBM_GETPOS, 0, 0);
@@ -4292,6 +4356,23 @@ static const int ID_PP_MESHANIMFILE       = 461;
 static const int ID_PP_MESHANIMFILE_BROWSE = 462;
 static const int ID_PP_MESHANIMSPEED      = 463;
 static const int ID_PP_CONVERT_ANIMATED   = 464;
+// Light editing (SelType::LIGHT) — these IDs continue the ID_PP_* block; the
+// window is rebuilt per entity type so no two live controls ever collide.
+static const int ID_PP_LIGHT_TYPE     = 470;
+static const int ID_PP_LIGHT_EFFECT   = 471;
+static const int ID_PP_LIGHT_R        = 472;
+static const int ID_PP_LIGHT_G        = 473;
+static const int ID_PP_LIGHT_B        = 474;
+static const int ID_PP_LIGHT_INTENS   = 475;
+static const int ID_PP_LIGHT_RADIUS   = 476;
+static const int ID_PP_LIGHT_INNER    = 477;
+static const int ID_PP_LIGHT_OUTER    = 478;
+static const int ID_PP_LIGHT_FLARE    = 479;
+static const int ID_PP_LIGHT_CORONA   = 480;
+static const int ID_PP_LIGHT_TARGETX  = 481;
+static const int ID_PP_LIGHT_TARGETY  = 482;
+static const int ID_PP_LIGHT_TARGETZ  = 483;
+static const int ID_PP_LIGHT_NAME     = 484;
 
 // Build a read-only def summary (stats + actions + PawnDef block). Shared by the
 // Script Manager detail pane and the Properties panel def section.
@@ -4468,6 +4549,59 @@ static void PopulatePropertiesPanel(HWND hwnd) {
         addSection("Instance overrides");
         addField(L"Health:", ID_PP_HEALTH, g_editorPanels.propHealth);
         addField(L"Speed:", ID_PP_SPEED, g_editorPanels.propSpeed);
+    } else if (selType == 5) { // GameEngine.Light
+        addSection("Light");
+        addTextField(L"Name:", ID_PP_LIGHT_NAME, g_editorPanels.propLightName);
+        // Type / Effect combos. The stored ints are the LitLightType /
+        // LitLightEffect enum values and the combo order matches them.
+        CreateLabel(hwnd, L"Type:", x, y, lw, 20, 0);
+        {
+            HWND hCombo = CreateWindowEx(0, L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                x + lw, y, ew, 200, hwnd, (HMENU)(INT_PTR)ID_PP_LIGHT_TYPE, g_hInst, nullptr);
+            const wchar_t* lt[] = { L"directional", L"point", L"spot" };
+            for (auto* t : lt) SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)t);
+            int lsel = g_editorPanels.propLightType;
+            if (lsel < 0 || lsel > 2) lsel = 1;
+            SendMessage(hCombo, CB_SETCURSEL, lsel, 0);
+        }
+        y += rowH;
+        CreateLabel(hwnd, L"Effect:", x, y, lw, 20, 0);
+        {
+            HWND hCombo = CreateWindowEx(0, L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                x + lw, y, ew, 200, hwnd, (HMENU)(INT_PTR)ID_PP_LIGHT_EFFECT, g_hInst, nullptr);
+            const wchar_t* le[] = { L"none", L"watery", L"torch", L"fire", L"lamp" };
+            for (auto* t : le) SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)t);
+            int lsel = g_editorPanels.propLightEffect;
+            if (lsel < 0 || lsel > 4) lsel = 0;
+            SendMessage(hCombo, CB_SETCURSEL, lsel, 0);
+        }
+        y += rowH;
+        addField(L"Red:", ID_PP_LIGHT_R, (float)g_editorPanels.propLightR);
+        addField(L"Green:", ID_PP_LIGHT_G, (float)g_editorPanels.propLightG);
+        addField(L"Blue:", ID_PP_LIGHT_B, (float)g_editorPanels.propLightB);
+        addField(L"Intensity:", ID_PP_LIGHT_INTENS, g_editorPanels.propLightIntensity);
+        addField(L"Radius:", ID_PP_LIGHT_RADIUS, g_editorPanels.propLightRadius);
+        // Spot cone, edited in degrees because cos(half-angle) is unreadable.
+        // LightNode stores the cosine for the shader; conversion is on apply.
+        addField(L"Inner Angle:", ID_PP_LIGHT_INNER, g_editorPanels.propLightInnerAngle);
+        addField(L"Outer Angle:", ID_PP_LIGHT_OUTER, g_editorPanels.propLightOuterAngle);
+        // A directional light is authored by its source point and aimed at the
+        // world origin, so a target row would be meaningless here (and is
+        // forced back to the origin on apply).
+        if (g_editorPanels.propLightType != (int)LitLightType::DIRECTIONAL) {
+            addField(L"Target X:", ID_PP_LIGHT_TARGETX, g_editorPanels.propLightTarget[0]);
+            addField(L"Target Y:", ID_PP_LIGHT_TARGETY, g_editorPanels.propLightTarget[1]);
+            addField(L"Target Z:", ID_PP_LIGHT_TARGETZ, g_editorPanels.propLightTarget[2]);
+        }
+        CreateCtrl(hwnd, L"BUTTON", L"Lens Flare", x, y, 120, 22, ID_PP_LIGHT_FLARE, BS_AUTOCHECKBOX);
+        CreateCtrl(hwnd, L"BUTTON", L"Corona", x + 124, y, 100, 22, ID_PP_LIGHT_CORONA, BS_AUTOCHECKBOX);
+        SendMessage(GetDlgItem(hwnd, ID_PP_LIGHT_FLARE), BM_SETCHECK,
+                    g_editorPanels.propLightFlare ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessage(GetDlgItem(hwnd, ID_PP_LIGHT_CORONA), BM_SETCHECK,
+                    g_editorPanels.propLightCorona ? BST_CHECKED : BST_UNCHECKED, 0);
+        y += rowH;
     } else if (selType == 4) { // PICKUP / weapon — instance overrides
         addSection("Instance overrides");
         addField(L"Respawn:", ID_PP_RESPAWN, g_editorPanels.propRespawnTime);
@@ -4740,6 +4874,34 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.propWindDirZ = readFloat(ID_PP_WIND_DIRZ, g_editorPanels.propWindDirZ);
             g_editorPanels.propWindStrength = readFloat(ID_PP_WIND_STRENGTH, g_editorPanels.propWindStrength);
             g_editorPanels.propWindFrequency = readFloat(ID_PP_WIND_FREQ, g_editorPanels.propWindFrequency);
+            // GameEngine.Light edits. Defaults fall back to the current panel
+            // values so a partially-visible section (directional hides the
+            // target rows) cannot zero a field that was never shown.
+            g_editorPanels.propLightName = readString(ID_PP_LIGHT_NAME, g_editorPanels.propLightName);
+            g_editorPanels.propLightR = (int)readFloat(ID_PP_LIGHT_R, (float)g_editorPanels.propLightR);
+            g_editorPanels.propLightG = (int)readFloat(ID_PP_LIGHT_G, (float)g_editorPanels.propLightG);
+            g_editorPanels.propLightB = (int)readFloat(ID_PP_LIGHT_B, (float)g_editorPanels.propLightB);
+            g_editorPanels.propLightIntensity = readFloat(ID_PP_LIGHT_INTENS, g_editorPanels.propLightIntensity);
+            g_editorPanels.propLightRadius = readFloat(ID_PP_LIGHT_RADIUS, g_editorPanels.propLightRadius);
+            g_editorPanels.propLightInnerAngle = readFloat(ID_PP_LIGHT_INNER, g_editorPanels.propLightInnerAngle);
+            g_editorPanels.propLightOuterAngle = readFloat(ID_PP_LIGHT_OUTER, g_editorPanels.propLightOuterAngle);
+            g_editorPanels.propLightTarget[0] = readFloat(ID_PP_LIGHT_TARGETX, g_editorPanels.propLightTarget[0]);
+            g_editorPanels.propLightTarget[1] = readFloat(ID_PP_LIGHT_TARGETY, g_editorPanels.propLightTarget[1]);
+            g_editorPanels.propLightTarget[2] = readFloat(ID_PP_LIGHT_TARGETZ, g_editorPanels.propLightTarget[2]);
+            if (HWND hz = GetDlgItem(hwnd, ID_PP_LIGHT_TYPE)) {
+                int s = (int)SendMessage(hz, CB_GETCURSEL, 0, 0);
+                if (s >= 0 && s <= 2) g_editorPanels.propLightType = s;
+            }
+            if (HWND hz = GetDlgItem(hwnd, ID_PP_LIGHT_EFFECT)) {
+                int s = (int)SendMessage(hz, CB_GETCURSEL, 0, 0);
+                if (s >= 0 && s <= 4) g_editorPanels.propLightEffect = s;
+            }
+            if (HWND hb = GetDlgItem(hwnd, ID_PP_LIGHT_FLARE))
+                g_editorPanels.propLightFlare =
+                    SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            if (HWND hb = GetDlgItem(hwnd, ID_PP_LIGHT_CORONA))
+                g_editorPanels.propLightCorona =
+                    SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
             g_editorPanels.actionApplyProperties = true;
         }
         break;
@@ -4835,6 +4997,27 @@ void ShowPropertiesPanel(bool show) {
                     fillDefBlock(pk.typeName, "");
                     break;
                 }
+            }
+        } else if (g_editorPanels.propsTargetType == 5) { // GameEngine.Light
+            if (LightNode* l = PawnSystem::Instance().GetLight(g_editorPanels.propsTargetIndex)) {
+                g_editorPanels.propLightName = l->name;
+                g_editorPanels.propLightR = l->color.r;
+                g_editorPanels.propLightG = l->color.g;
+                g_editorPanels.propLightB = l->color.b;
+                g_editorPanels.propLightIntensity = l->intensity;
+                g_editorPanels.propLightRadius = l->radius;
+                g_editorPanels.propLightType = (int)l->type;
+                g_editorPanels.propLightEffect = (int)l->effect;
+                // Recompute the editable degrees from the stored cosines.
+                g_editorPanels.propLightInnerAngle =
+                    acosf(fminf(fmaxf(l->innerCone, -1.0f), 1.0f)) * RAD2DEG;
+                g_editorPanels.propLightOuterAngle =
+                    acosf(fminf(fmaxf(l->outerCone, -1.0f), 1.0f)) * RAD2DEG;
+                g_editorPanels.propLightFlare = l->flare;
+                g_editorPanels.propLightCorona = l->corona;
+                g_editorPanels.propLightTarget[0] = l->target.x;
+                g_editorPanels.propLightTarget[1] = l->target.y;
+                g_editorPanels.propLightTarget[2] = l->target.z;
             }
         } else if (g_editorPanels.propsTargetType == 6) { // ZONE
             for (auto& z : ZoneManager::Instance().GetZones()) {

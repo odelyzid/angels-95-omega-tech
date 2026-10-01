@@ -3,6 +3,7 @@
 #include "Physics/PlayerPhysics.hpp"
 #include "Client/JoinUri.hpp"
 #include "Network/NetworkSession.hpp"
+#include "PlayerProfile.hpp"
 #include "Renderer/OzAssetMapper.hpp"
 #include "Audio/SoundManager.hpp"
 #include "World/OzOzoneLoader.hpp"
@@ -480,6 +481,11 @@ void OmegaTechInit()
 
     GuiLoadStyleDark();
 
+    // Player profile slots (System/PlayerProfiles.ini). Loaded once here rather
+    // than per menu visit so reopening the Character pane cannot discard edits
+    // by re-reading the file. The title menu only reads from here.
+    PlayerProfileManager::Instance().Init();
+
     // Initialize package-based asset loading
     PackageAssetLoader::Instance().Init();
 
@@ -707,6 +713,21 @@ void PlaySplashScreen()
     // also leave the title logo in the first captured frame on slow machines.
     if (g_shot.active)
         return;
+
+    // Reveal gate. The window is created hidden (FLAG_WINDOW_HIDDEN in
+    // Main.cpp) so the engine can boot, resolve the asset pipeline and prime
+    // the first frame without flashing an undecorated title bar or an empty
+    // client area. This function is the one place allowed to reveal it, which
+    // is why it must be called before anything interactive: a hidden Win32
+    // window is not hit-tested, so the title menu would never see a click.
+    ClearWindowState(FLAG_WINDOW_HIDDEN);
+    #ifdef _WIN32
+    // ClearWindowState clears WS_VISIBLE through raylib's platform layer, but
+    // SetWindowLongPtr cannot reliably *show* a window on every Windows
+    // version, so state the intent explicitly and keep the HWND in step with
+    // raylib's flag.
+    if (HWND hwnd = GetActiveWindow()) ShowWindow(hwnd, SW_SHOW);
+    #endif
 
     Texture2D splash = LoadTexture("GameData/Global/Title/splash.png");
     double startTime = GetTime();

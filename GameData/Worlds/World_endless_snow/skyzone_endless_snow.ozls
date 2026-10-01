@@ -9,7 +9,7 @@ entity "endless_snow_sky" : skyzone {
         on_enter {
             set_fog 0.45 0.62 0.68 0.0030
             set_ambient 0.42 0.48 0.52
-            set_skybox "GameData/Global/sky/sky_day.dds"
+            set_skybox "GameData/Global/sky/cloud02.dds"
             say "World Endless Snow - radar contact lost, visibility zero"
         }
         on_exit {

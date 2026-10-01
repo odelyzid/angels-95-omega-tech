@@ -228,6 +228,20 @@ struct EditorPanelState {
     float propWindFrequency = 1.0f;
     float propWindSizeX = 10.0f, propWindSizeY = 10.0f, propWindSizeZ = 10.0f;
 
+    // GameEngine.Light editing (Properties panel, SelType::LIGHT). This is the
+    // supported home for light settings; the standalone Light Properties window
+    // is a legacy shell that writes the same values via lightColor*/actionApplyLight.
+    std::string propLightName;
+    int   propLightR = 255, propLightG = 255, propLightB = 255;
+    float propLightIntensity = 1.0f;
+    float propLightRadius = 20.0f;
+    int   propLightType = 1;      // LitLightType: 0=directional 1=point 2=spot
+    int   propLightEffect = 0;    // LitLightEffect: none/watery/torch/fire/lamp
+    float propLightInnerAngle = 18.0f;   // spot inner cone half-angle, degrees
+    float propLightOuterAngle = 37.0f;   // spot outer cone half-angle, degrees
+    bool  propLightFlare = false, propLightCorona = false;
+    float propLightTarget[3] = {0,0,0};
+
     // Animation / vertex-keyframe tool
     bool showAnimPanel = false;
     int animTargetMesh = -1;        // MeshObjectNode id (set by Main.cpp from selection)
@@ -430,7 +444,10 @@ void ShowEnvPanel(bool show);
 void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
-void ShowLightProps(bool show);
+// Legacy light window. Superseded by the Entity Properties panel, which
+    // owns light settings (see propLight*); ShowLightProps forwards to it when
+    // a light is selected so the menu entry still works.
+    void ShowLightProps(bool show);
 void ShowWorldGraph(bool show);
 void ShowPropertiesPanel(bool show);
 void ShowAnimPanel(bool show);

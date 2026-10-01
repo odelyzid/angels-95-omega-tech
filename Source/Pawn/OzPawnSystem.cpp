@@ -821,7 +821,7 @@ void PawnSystem::DrawAll(Camera3D& camera, Shader litShader) {
             } else {
                 DrawBillboard(camera, p.sprite, p.position, 2.0f, WHITE);
             }
-        } else if (g_debugEnabled) {
+        } else if (g_debugEnabled || m_showAuthoringGizmos) {
             // No model and no sprite: fall back to the editor's pawn-node gizmo
             // rather than a magenta missing-icon grid in a shipping frame.
             EngineBillboard::Draw(camera, "PawnNode", p.position, 2.0f, litShader);
@@ -1056,10 +1056,79 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
     // marking authoring anchors, not level art, so they are hidden unless Debug
     // is on. Previously unconditional, which put a marker at the player's feet in
     // every frame of normal play and in every --shot capture.
-    if (g_debugEnabled) {
+    const bool gizmos = g_debugEnabled || m_showAuthoringGizmos;
+    if (gizmos) {
         for (auto& n : m_playerStarts) {
             EngineBillboard::Draw(camera, "PlayerStart",
                 {n.position.x, n.position.y + 0.5f, n.position.z}, 1.2f, litShader);
+        }
+    }
+
+    // Light gizmos. Debug/editor-only, same reasoning as the player starts.
+    // A light contributes nothing to the frame on its own - it only tints
+    // surfaces - so without a marker there is literally nothing to click in
+    // the viewport and the light is invisible in the editor AND in a debug
+    // play session. Drawn as a type-tinted billboard plus a shape hint
+    // (point = sphere, spot = cone to its target, directional = arrow) so the
+    // three subtypes are distinguishable at a glance.
+    if (gizmos) {
+        for (auto& l : m_lights) {
+            if (!l.active) continue;
+            Color tint = l.color;
+            tint.a = 255;
+            // Billboard sits slightly above the emitter so it does not z-fight
+            // the shape hint drawn on the exact position.
+            EngineBillboard::DrawTinted(camera, "Light",
+                {l.position.x, l.position.y + 0.4f, l.position.z}, 1.0f, tint, litShader);
+            if (l.type == LitLightType::POINT) {
+                DrawSphereWires(l.position, l.radius > 0.1f ? l.radius * 0.25f : 1.0f,
+                                12, 6, (Color){tint.r, tint.g, tint.b, 70});
+            } else if (l.type == LitLightType::SPOT) {
+                Vector3 toTarget = Vector3Subtract(l.target, l.position);
+                DrawLine3D(l.position, l.target, (Color){tint.r, tint.g, tint.b, 160});
+                if (Vector3Length(toTarget) > 0.01f) {
+                    Vector3 dir = Vector3Normalize(toTarget);
+                    Vector3 tip = Vector3Add(l.position, Vector3Scale(dir, 1.0f));
+                    DrawSphere(tip, 0.2f, (Color){tint.r, tint.g, tint.b, 200});
+                    // Cone footprint: a ring at the target end, sized from the
+                    // authored outer cone half-angle and the throw distance.
+                    float dist = Vector3Distance(l.position, l.target);
+                    float coneR = dist * tanf(acosf(fminf(fmaxf(l.outerCone, -1.0f), 1.0f)));
+                    if (coneR > 0.05f) {
+                        Vector3 up = fabsf(dir.y) > 0.99f ? Vector3{1,0,0} : Vector3{0,1,0};
+                        Vector3 right = Vector3Normalize(Vector3CrossProduct(dir, up));
+                        Vector3 fwd = Vector3Normalize(Vector3CrossProduct(right, dir));
+                        for (int i = 0; i < 12; i++) {
+                            float a0 = (float)i / 12.0f * 2.0f * PI;
+                            float a1 = (float)(i + 1) / 12.0f * 2.0f * PI;
+                            Vector3 p0 = Vector3Add(l.target,
+                                Vector3Add(Vector3Scale(right, cosf(a0) * coneR),
+                                           Vector3Scale(fwd, sinf(a0) * coneR)));
+                            Vector3 p1 = Vector3Add(l.target,
+                                Vector3Add(Vector3Scale(right, cosf(a1) * coneR),
+                                           Vector3Scale(fwd, sinf(a1) * coneR)));
+                            DrawLine3D(p0, p1, (Color){tint.r, tint.g, tint.b, 90});
+                        }
+                    }
+                }
+            } else { // DIRECTIONAL
+                // The loader aims a directional light from its authored position
+                // at the world origin, so the arrow points along
+                // (origin - position), i.e. the direction the light travels.
+                Vector3 travel = Vector3Subtract({0.0f, 0.0f, 0.0f}, l.position);
+                if (Vector3Length(travel) < 0.01f) travel = Vector3{0, -1, 0};
+                Vector3 dir = Vector3Normalize(travel);
+                Vector3 tail = Vector3Add(l.position, Vector3Scale(dir, -2.0f));
+                Vector3 head = Vector3Add(l.position, Vector3Scale(dir, 4.0f));
+                DrawLine3D(tail, head, (Color){tint.r, tint.g, tint.b, 200});
+                DrawSphere(head, 0.25f, (Color){tint.r, tint.g, tint.b, 220});
+            }
+            // Lens flare / corona read as extra rings around the emitter so
+            // the two visual-only flags are visible while authoring.
+            if (l.corona)
+                DrawSphereWires(l.position, 0.9f, 16, 8, (Color){tint.r, tint.g, tint.b, 120});
+            if (l.flare)
+                DrawSphereWires(l.position, 0.45f, 12, 6, (Color){255, 255, 255, 160});
         }
     }
 
@@ -1182,9 +1251,10 @@ void PawnSystem::DrawEntities(Camera3D& camera, Shader litShader, Shader windSha
 
     // Zone billboards at center of bounding box (volumes live in ZoneManager),
     // plus sound/music emitter markers. Both are authoring gizmos, so they are
-    // Debug-only - otherwise a big icon floats in the middle of every zone in
-    // normal play and in every capture.
-    if (g_debugEnabled) {
+    // Debug-only in the game - otherwise a big icon floats in the middle of every
+    // zone in normal play and in every capture. The editor opts in through
+    // SetShowAuthoringGizmos so its viewport is not blank.
+    if (gizmos) {
         for (auto& n : ZoneManager::Instance().GetZones()) {
             Vector3 center = {
                 (n.bounds.min.x + n.bounds.max.x) * 0.5f,

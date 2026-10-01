@@ -1,6 +1,7 @@
 #include "Client.hpp"
 #include "../Log.hpp"
 #include "../Pawn/PickupItems.hpp"
+#include "../PlayerProfile.hpp"
 #include <cstring>
 #include <cstdio>
 #include <mutex>
@@ -20,6 +21,14 @@ static uint32_t id_to_color_packed(uint32_t id) {
 }
 
 bool OmegaClient::connect(const char* ip, uint16_t port) {
+    // Present the active player profile to the server (protocol v2). Read here
+    // rather than from the caller so the profile always reflects whatever the
+    // title menu last committed.
+    {
+        const PlayerProfile& p = PlayerProfileManager::Instance().Active();
+        m_client.set_profile(p.displayName, p.modelPath, p.voiceSet, p.team);
+    }
+
     net::ClientCallbacks cbs;
     cbs.on_connected = [this]() { this->on_connected(); };
     cbs.on_disconnected = [this]() { this->on_disconnected(); };
@@ -36,7 +45,18 @@ bool OmegaClient::connect(const char* ip, uint16_t port) {
 }
 
 void OmegaClient::disconnect() {
+    // The accepted profile belongs to the session that just ended.
+    m_client.clear_server_profile();
     m_client.disconnect();
+}
+
+// The identity the server actually assigned. Differs from the local profile
+// whenever the server sanitised or de-duplicated the name.
+const net::ServerProfile& OmegaClient::server_profile() const {
+    return m_client.server_profile();
+}
+bool OmegaClient::has_server_profile() const {
+    return m_client.has_server_profile();
 }
 
 void OmegaClient::update(float cam_x, float cam_y, float cam_z,

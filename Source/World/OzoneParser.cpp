@@ -192,12 +192,25 @@ std::vector<OzonePrimitive> OzoneParser::parse_string(const std::string& content
             }
         } else if (type_name == "light") {
             prim.type = OzonePrimitiveType::ENTITY_LIGHT;
-            // light point x y z r g b intensity radius [effect]
-            // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect]
-            // light directional tx ty tz r g b intensity
+            // light point x y z r g b intensity radius [effect] [flare] [corona]
+            // light spot x y z tx ty tz r g b intensity radius innerCone
+            //          outerCone [effect] [flare] [corona]
+            // light directional x y z r g b intensity [flare] [corona]
+            // Optional attributes are also accepted as named kwargs, which is
+            // the only unambiguous form: effect= flare= corona= name=
             if (ls >> prim.entityType) {
                 std::string s;
                 while (ls >> s) {
+                    if (s.rfind("effect=", 0) == 0) { prim.lightEffect = std::stoi(s.substr(7)); continue; }
+                    if (s.rfind("flare=", 0)  == 0) { prim.lightFlare  = std::stoi(s.substr(6)); continue; }
+                    if (s.rfind("corona=", 0) == 0) { prim.lightCorona = std::stoi(s.substr(7)); continue; }
+                    if (s.rfind("name=", 0) == 0) {
+                        prim.name = s.substr(5);
+                        if (prim.name.size() >= 2 && prim.name.front() == '\"' &&
+                            prim.name.back() == '\"')
+                            prim.name = prim.name.substr(1, prim.name.size() - 2);
+                        continue;
+                    }
                     try { prim.args.push_back(std::stof(s)); }
                     catch (...) { break; }
                 }

@@ -146,7 +146,10 @@ static void on_player_join(net::NetworkPlayer& player) {
     OZ_INFO("Player %s (id=%u) joined from %s:%u",
             player.name, player.id, player.ip_address, player.port);
     // Idempotent: re-auth/re-ack may replay this for an existing player.
-    g_game_state.add_player(player.id, player.name);
+    // player.name is already sanitised and de-duplicated by the network layer,
+    // so it is safe to use as a persistent identity key.
+    g_game_state.add_player(player.id, player.name,
+                            player.profile.team, player.profile.requestedTeam);
     if (g_discovery)
         g_discovery->set_player_count((uint32_t)g_game_state.player_count(), net::MAX_PLAYERS);
 

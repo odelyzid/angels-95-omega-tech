@@ -75,3 +75,6 @@ worldcheck
 worldcheck.exe
 __pycache__/
 *.pyc
+
+# Orchestrator deepwork session state (git-local but OpenCode-readable)
+.slim/deepwork/

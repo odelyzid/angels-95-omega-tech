@@ -320,18 +320,18 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 return (i >= 0 && i < (int)prim.args.size()) ? prim.args[i] : 0.0f;
             };
             if (subtype == "point" && prim.args.size() >= 7) {
-                // light point x y z r g b intensity radius [effect]
+                // light point x y z r g b intensity radius [effect] [flare] [corona]
                 node.type = LitLightType::POINT;
                 node.position = {arg(0), arg(2), arg(1)}; // Z-up conversion
                 node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
                 node.intensity = arg(6);
                 node.radius = arg(7);
                 if (prim.args.size() >= 9) node.effect = (LitLightEffect)(int)arg(8);
-                // Optional trailing floats: [flare] [corona]
                 if (prim.args.size() >= 10) node.flare = arg(9) != 0.0f;
                 if (prim.args.size() >= 11) node.corona = arg(10) != 0.0f;
             } else if (subtype == "spot" && prim.args.size() >= 12) {
-                // light spot x y z tx ty tz r g b intensity radius innerCone outerCone [effect] [flare] [corona]
+                // light spot x y z tx ty tz r g b intensity radius innerCone
+                //          outerCone [effect] [flare] [corona]
                 node.type = LitLightType::SPOT;
                 node.position = {arg(0), arg(2), arg(1)};
                 node.target = {arg(3), arg(5), arg(4)};
@@ -344,7 +344,7 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 if (prim.args.size() >= 15) node.flare = arg(14) != 0.0f;
                 if (prim.args.size() >= 16) node.corona = arg(15) != 0.0f;
             } else if (subtype == "directional" && prim.args.size() >= 6) {
-                // light directional tx ty tz r g b intensity [flare] [corona]
+                // light directional x y z r g b intensity [flare] [corona]
                 node.type = LitLightType::DIRECTIONAL;
                 node.target = {arg(0), arg(2), arg(1)};
                 // A directional light has no emitter position, only an aim
@@ -370,6 +370,14 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 OZ_WARN("OZONE: invalid light definition (subtype=%s args=%zu)", subtype.c_str(), prim.args.size());
                 return true;
             }
+            // Named kwargs win over the positional tail. They are what the
+            // editor writes, because the positional form is ambiguous: with no
+            // `effect` authored, a following flare float slid into the effect
+            // slot and a TORCH-less flickering light came back as WATERY.
+            if (prim.lightEffect >= 0) node.effect = (LitLightEffect)prim.lightEffect;
+            if (prim.lightFlare  >= 0) node.flare  = prim.lightFlare != 0;
+            if (prim.lightCorona >= 0) node.corona = prim.lightCorona != 0;
+            if (!prim.name.empty())   node.name = prim.name;
             out.lights.push_back(node);
             return true;
         }

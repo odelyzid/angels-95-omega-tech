@@ -81,6 +81,7 @@ const char* message_type_string(MessageType type) {
         case MessageType::PICKUP_COLLECTED: return "PICKUP_COLLECTED";
         case MessageType::NPC_DAMAGE:       return "NPC_DAMAGE";
     case MessageType::MELEE_HIT:         return "MELEE_HIT";
+        case MessageType::PROFILE_STATE:     return "PROFILE_STATE";
         case MessageType::WEAPON_AMMO:      return "WEAPON_AMMO";
         case MessageType::SERVER_CHALLENGE: return "SERVER_CHALLENGE";
         case MessageType::CLIENT_AUTH:      return "CLIENT_AUTH";
@@ -92,6 +93,96 @@ bool is_valid_ip(const char* ip) {
     if (!ip) return false;
     struct sockaddr_in sa;
     return inet_pton(AF_INET, ip, &sa.sin_addr) == 1;
+}
+
+// ---------------------------------------------------------------------------
+// Profile sanitising (protocol v2)
+//
+// These run on data a client controls, before it reaches a log line, the
+// scoreboard or GameState. The guiding rule is that the server must never be
+// talked into printing escape sequences, storing an unbounded string, or
+// holding a path it could be tricked into resolving later.
+// ---------------------------------------------------------------------------
+
+// Trim ASCII space/tab from both ends, in place on a std::string.
+static void TrimAsciiSpace(std::string& s) {
+    const char* ws = " \t";
+    size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) { s.clear(); return; }
+    size_t e = s.find_last_not_of(ws);
+    s = s.substr(b, e - b + 1);
+}
+
+std::string SanitizeDisplayName(const std::string& raw, size_t max_len) {
+    std::string out;
+    out.reserve(std::min(raw.size(), max_len));
+    for (unsigned char c : raw) {
+        // Drop C0 controls and DEL: they are how a name smuggles terminal
+        // escape sequences into server logs and the console. Bytes >= 0x80 are
+        // kept so UTF-8 display names survive intact.
+        if (c < 0x20 || c == 0x7F) continue;
+        out.push_back(static_cast<char>(c));
+    }
+    TrimAsciiSpace(out);
+    if (out.size() > max_len) out.resize(max_len);
+    // A name of only stripped control characters yields "", and the caller then
+    // substitutes a generated identity rather than accepting a nameless player.
+    return out;
+}
+
+std::string SanitizeAssetRef(const std::string& raw, size_t max_len) {
+    if (raw.empty()) return "";
+    std::string out;
+    out.reserve(std::min(raw.size(), max_len));
+    for (unsigned char c : raw) {
+        if (c < 0x20 || c == 0x7F) continue;
+        // Asset references are ASCII paths in this engine; rejecting other
+        // bytes avoids encoding tricks in a value the server may one day hand
+        // to a loader.
+        if (c > 0x7E) continue;
+        out.push_back(static_cast<char>(c));
+    }
+    if (out.size() > max_len) out.resize(max_len);
+
+    // Reject traversal outright rather than trying to normalise it. The server
+    // never opens these, but a value that has already been normalised-by-force
+    // is a value a future loader is more likely to trust.
+    size_t seg = 0;
+    for (size_t i = 0; i <= out.size(); ++i) {
+        if (i == out.size() || out[i] == '/' || out[i] == '\\') {
+            if (i - seg == 2 && out[seg] == '.' && out[seg + 1] == '.') return "";
+            seg = i + 1;
+        }
+    }
+    TrimAsciiSpace(out);
+    return out;
+}
+
+int ClampRequestedTeam(int32_t raw) {
+    // Out of range collapses to "no preference" instead of clamping to a
+    // boundary team, so a hostile value cannot nudge team assignment.
+    if (raw < 0 || raw > MAX_TEAMS) return 0;
+    return static_cast<int>(raw);
+}
+
+std::string MakeUniqueName(const std::string& name, const std::vector<std::string>& taken) {
+    const size_t cap = PLAYER_NAME_MAX - 1;
+    auto is_taken = [&](const std::string& n) {
+        for (const auto& t : taken) if (t == n) return true;
+        return false;
+    };
+    if (!is_taken(name)) return name;
+
+    for (int n = 2; n < 10000; ++n) {
+        std::string suffix = "(" + std::to_string(n) + ")";
+        std::string base = name;
+        if (base.size() + suffix.size() > cap) {
+            base.resize(cap > suffix.size() ? cap - suffix.size() : 0);
+        }
+        std::string candidate = base + suffix;
+        if (!is_taken(candidate)) return candidate;
+    }
+    return name;
 }
 
 uint16_t find_free_port() {
@@ -315,12 +406,105 @@ void NetworkServer::update() {
                     continue;
                 }
 
+                // Token valid — parse the optional v2 profile block, then create
+                // the player. A payload too short to hold a version is a v1
+                // client: accepted, but it gets generated defaults.
+                ServerProfile parsed;
+                bool have_profile = false;
+                if (msg.size >= kAuthSizeV2) {
+                    ClientAuthPayload auth{};
+                    // Copy only the bytes actually sent; the struct is packed but
+                    // a truncated send must not read past msg.size.
+                    const uint32_t copy = std::min<uint32_t>(static_cast<uint32_t>(msg.size),
+                                                             static_cast<uint32_t>(sizeof(auth)));
+                    memcpy(&auth, msg.payload, copy);
+
+                    if (auth.protocolVersion != PROTOCOL_VERSION) {
+                        printf("CLIENT_AUTH from %s:%u: protocol version %u (server %u) — rejected\n",
+                               client_ip, client_port, (unsigned)auth.protocolVersion,
+                               (unsigned)PROTOCOL_VERSION);
+                        // Drop the pending entry so the client stops retrying and
+                        // falls back to its disconnect/retry path.
+                        m_pending.erase(std::remove_if(m_pending.begin(), m_pending.end(),
+                            [&](const PendingConnection& pc) { return &pc == pending; }), m_pending.end());
+                        continue;
+                    }
+
+                    // structSize is the client's own idea of the layout; it must
+                    // not claim to be larger than what it actually sent, or a
+                    // truncated packet would be read past its end.
+                    const uint32_t have = std::min<uint32_t>(copy, static_cast<uint32_t>(auth.structSize));
+                    // A field is only read if its last byte actually arrived. The
+                    // struct is packed, so end offsets are byte-exact.
+                    auto field_arrived = [&](size_t offset, size_t width) {
+                        return have >= offset + width;
+                    };
+                    // Copy a fixed char[] field with an explicit cap. A client
+                    // may fill all N bytes with no terminator, so treating the
+                    // field as a C string would read into the neighbouring field.
+                    auto field_to_string = [](const char* field, size_t cap) {
+                        size_t len = 0;
+                        while (len < cap && field[len] != '\0') ++len;
+                        return std::string(field, len);
+                    };
+
+                    const size_t nameOff = offsetof(ClientAuthPayload, displayName);
+                    if (field_arrived(nameOff, 1))
+                        parsed.displayName = SanitizeDisplayName(
+                            field_to_string(auth.displayName, PLAYER_NAME_MAX), PLAYER_NAME_MAX - 1);
+
+                    const size_t modelOff = offsetof(ClientAuthPayload, modelPath);
+                    if (field_arrived(modelOff, 1))
+                        parsed.modelPath = SanitizeAssetRef(
+                            field_to_string(auth.modelPath, PROFILE_MODEL_MAX), PROFILE_MODEL_MAX - 1);
+
+                    const size_t voiceOff = offsetof(ClientAuthPayload, voiceSet);
+                    if (field_arrived(voiceOff, 1))
+                        parsed.voiceSet = SanitizeAssetRef(
+                            field_to_string(auth.voiceSet, PROFILE_VOICE_MAX), PROFILE_VOICE_MAX - 1);
+
+                    const size_t teamOff = offsetof(ClientAuthPayload, requestedTeam);
+                    if (field_arrived(teamOff, sizeof(int32_t)))
+                        parsed.requestedTeam = ClampRequestedTeam(auth.requestedTeam);
+                    // Server assigns the team; it has no team concept yet, so
+                    // this stays 0 and requestedTeam is recorded separately as
+                    // an untrusted preference for future use.
+                    parsed.team = 0;
+                    have_profile = true;
+                }
+
                 // Token valid — create player
                 for (auto& p : m_players) {
                     if (!p.connected) {
                         player = &p;
                         player->id = static_cast<uint32_t>(&p - m_players.data());
-                        std::snprintf(player->name, sizeof(player->name), "Player_%u", player->id + 1);
+                        player->profile_received = have_profile;
+
+                        // Prefer the profile's name, but never accept an empty or
+                        // duplicate one: names are used as player identities in
+                        // GameState (which persists save data keyed by name), so
+                        // two players sharing one would collide.
+                        std::vector<std::string> taken;
+                        for (const auto& other : m_players)
+                            if (other.connected) taken.push_back(other.profile.displayName);
+
+                        std::string chosen = parsed.displayName;
+                        const std::string generated = "Player_" + std::to_string(player->id + 1);
+                        bool name_changed = false;
+                        if (chosen.empty()) {
+                            chosen = MakeUniqueName(generated, taken);
+                            name_changed = true;
+                        } else {
+                            const std::string unique = MakeUniqueName(chosen, taken);
+                            name_changed = (unique != chosen);
+                            chosen = unique;
+                        }
+                        parsed.displayName = chosen;
+                        player->profile = parsed;
+                        // Keep the legacy `name` field in sync so every existing
+                        // consumer (logs, GameState, chat) sees the new identity.
+                        std::snprintf(player->name, sizeof(player->name), "%s", chosen.c_str());
+
                         std::snprintf(player->ip_address, sizeof(player->ip_address), "%s", client_ip);
                         player->port = client_port;
                         player->connected = true;
@@ -332,10 +516,32 @@ void NetworkServer::update() {
                             [&](const PendingConnection& pc) {
                                 return std::strcmp(pc.ip_address, client_ip) == 0 && pc.port == client_port;
                             }), m_pending.end());
-                        printf("Player %s (id=%u) authenticated from %s:%u\n",
-                               player->name, player->id, client_ip, client_port);
+                        printf("Player %s (id=%u) authenticated from %s:%u (proto %u%s)\n",
+                               player->name, player->id, client_ip, client_port,
+                               have_profile ? (unsigned)PROTOCOL_VERSION : 1u,
+                               name_changed ? ", name adjusted" : "");
                         if (m_callbacks.on_player_join)
                             m_callbacks.on_player_join(*player);
+
+                        // Tell the client what the server actually accepted, so it
+                        // never assumes its own values were honoured.
+                        if (have_profile) {
+                            ProfileStateData ps{};
+                            ps.playerId = player->id;
+                            ps.team = player->profile.team;
+                            ps.requestedTeam = player->profile.requestedTeam;
+                            ps.nameWasChanged = name_changed ? 1 : 0;
+                            std::snprintf(ps.displayName, sizeof(ps.displayName), "%s",
+                                          player->profile.displayName.c_str());
+                            NetworkMessage reply;
+                            reply.magic = MAGIC;
+                            reply.type = static_cast<uint32_t>(MessageType::PROFILE_STATE);
+                            reply.size = static_cast<uint32_t>(sizeof(ps));
+                            reply.sequence = m_message_sequence++;
+                            reply.timestamp = static_cast<uint32_t>(now_seconds());
+                            memcpy(reply.payload, &ps, sizeof(ps));
+                            send_message(*player, reply);
+                        }
                         break;
                     }
                 }
@@ -457,6 +663,25 @@ bool NetworkServer::broadcast_message(const NetworkMessage& msg) {
 NetworkClient::NetworkClient() {}
 NetworkClient::~NetworkClient() { disconnect(); }
 
+void NetworkClient::BuildAuthPayload(uint32_t token, ClientAuthPayload& out) const {
+    out = ClientAuthPayload{};
+    out.challengeToken  = token;
+    out.protocolVersion = PROTOCOL_VERSION;
+    out.structSize      = static_cast<uint16_t>(sizeof(ClientAuthPayload));
+
+    // Truncate rather than let a long profile overflow a fixed wire field. The
+    // server re-sanitises everything, but never send an unterminated field.
+    auto copy_field = [](char* dst, size_t cap, const std::string& src) {
+        const size_t n = src.size() < (cap - 1) ? src.size() : (cap - 1);
+        if (n) memcpy(dst, src.data(), n);
+        dst[n] = '\0';
+    };
+    copy_field(out.displayName, PLAYER_NAME_MAX,    m_profile_display);
+    copy_field(out.modelPath,   PROFILE_MODEL_MAX, m_profile_model);
+    copy_field(out.voiceSet,    PROFILE_VOICE_MAX, m_profile_voice);
+    out.requestedTeam = static_cast<int32_t>(ClampRequestedTeam(m_profile_team));
+}
+
 bool NetworkClient::connect(const char* server_ip, uint16_t port) {
     if (m_connected) return true;
     if (m_connecting) return false; // already in handshake
@@ -565,10 +790,13 @@ void NetworkClient::update() {
             retry.sequence = m_message_sequence++;
             retry.timestamp = static_cast<uint32_t>(now);
             if (m_challenge_token != 0) {
-                // Already challenged: resend our auth token; the server re-acks.
+                // Already challenged: resend our auth token WITH the profile so
+                // a lost ack cannot downgrade us to a v1 (nameless) join.
                 retry.type = static_cast<uint32_t>(MessageType::CLIENT_AUTH);
-                retry.size = static_cast<uint32_t>(sizeof(m_challenge_token));
-                memcpy(retry.payload, &m_challenge_token, sizeof(m_challenge_token));
+                ClientAuthPayload retry_auth{};
+                BuildAuthPayload(m_challenge_token, retry_auth);
+                retry.size = static_cast<uint32_t>(sizeof(retry_auth));
+                memcpy(retry.payload, &retry_auth, sizeof(retry_auth));
             } else {
                 retry.type = static_cast<uint32_t>(MessageType::PLAYER_JOIN);
                 retry.size = 0;
@@ -617,14 +845,17 @@ void NetworkClient::update() {
                 memcpy(&token, msg.payload, sizeof(token));
             m_challenge_token = token;
 
-            // Respond with CLIENT_AUTH
+            // Respond with CLIENT_AUTH, carrying the profile (protocol v2).
+            ClientAuthPayload auth_payload{};
+            BuildAuthPayload(token, auth_payload);
+
             NetworkMessage auth;
             auth.magic = MAGIC;
             auth.type = static_cast<uint32_t>(MessageType::CLIENT_AUTH);
-            auth.size = static_cast<uint32_t>(sizeof(token));
+            auth.size = static_cast<uint32_t>(sizeof(auth_payload));
             auth.sequence = m_message_sequence++;
             auth.timestamp = static_cast<uint32_t>(now);
-            memcpy(auth.payload, &token, sizeof(token));
+            memcpy(auth.payload, &auth_payload, sizeof(auth_payload));
             sendto(TO_SOCK(m_socket_fd),
                    sock_sendto_buf(&auth, sizeof(auth)), 0,
                    (struct sockaddr*)&m_server_address, sizeof(m_server_address));
@@ -645,6 +876,26 @@ void NetworkClient::update() {
         }
 
         switch (rcvType) {
+            case MessageType::PROFILE_STATE: {
+                // The server tells us which identity it accepted. Store it so
+                // the UI can show the final name rather than assuming our own
+                // request was honoured.
+                if (msg.size >= sizeof(ProfileStateData)) {
+                    ProfileStateData ps{};
+                    memcpy(&ps, msg.payload, sizeof(ps));
+                    const size_t cap = sizeof(ps.displayName);
+                    size_t len = 0;
+                    while (len < cap && ps.displayName[len] != '\0') ++len;
+                    m_server_profile.displayName.assign(ps.displayName, len);
+                    m_server_profile.team          = ps.team;
+                    m_server_profile.requestedTeam = ClampRequestedTeam(ps.requestedTeam);
+                    m_server_profile_valid = true;
+                    if (ps.nameWasChanged)
+                        printf("Client: server adjusted display name to '%s'\n",
+                               m_server_profile.displayName.c_str());
+                }
+                break;
+            }
             case MessageType::PONG:
                 m_last_pong_time = now;
                 // Pair with the most recent client-sent PING via sequence.

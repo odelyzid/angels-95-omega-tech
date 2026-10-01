@@ -567,18 +567,20 @@ int main(int argc, char** argv){
 
     static bool g_returnToMenu = false;
 
-    // Outer loop: return to menu after gameplay. Splash runs once per world
-    // load (initial and on return-to-menu), after the world has been loaded
-    // and its first frame is rendered, so the user never sees an empty client
-    // area or the title bar.
-    bool splashShown = false;
+    // Reveal gate for the borderless window created hidden above. The splash
+    // must run HERE - after the engine and the asset pipeline have finished
+    // booting, but BEFORE PlayHomeScreen(), which blocks on menu.Tick(): a
+    // hidden Win32 window is not hit-tested, so the title menu would receive no
+    // clicks at all and the process would look hung.
+    PlaySplashScreen();
+
+    // Outer loop: return to menu after gameplay
     while (!WindowShouldClose()) {
     PlayHomeScreen();
     if (WindowShouldClose()) break;
     g_returnToMenu = false;
 
     LoadWorld();
-    if (!splashShown) { PlaySplashScreen(); splashShown = true; }
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });

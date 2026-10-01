@@ -49,7 +49,7 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
             muzzle, forward, 5,
             /*speed*/ 2.2f, /*spread*/ 22.0f,
             /*color*/ {255, 220, 150, 200}, /*colorEnd*/ {120, 110, 100, 0},
-            /*sizeStart*/ 0.10f, /*sizeEnd*/ 0.32f,
+            /*sizeStart*/ 0.01f, /*sizeEnd*/ 0.32f,
             /*lifetime*/ 0.28f, /*gravity*/ -0.4f);
     }
 

@@ -17,12 +17,38 @@ class EngineBillboard {
 private:
     inline static Model s_BillboardModel{0};
 
+    // A 1x1 quad in the XY plane (normal +Z), centred on the origin.
+    //
+    // This deliberately does NOT use GenMeshPlane(): that lays the quad out on
+    // the XZ plane with its normal along +Y, so a Y-axis yaw left it lying flat
+    // on the ground. Every sprite drawn through DrawSprite with a lit shader
+    // (which is what AngelEd always uses, and what the game uses in LIT mode)
+    // was therefore edge-on to the camera and effectively invisible - the whole
+    // gizmo/billboard layer silently rendered nothing. A vertical quad yawed to
+    // face the camera is the only correct shape here.
+    static Mesh MakeBillboardQuad() {
+        static const float v[] = {
+            // x     y     z      u     v
+            -0.5f, -0.5f, 0.0f,  0.0f, 1.0f,
+             0.5f, -0.5f, 0.0f,  1.0f, 1.0f,
+             0.5f,  0.5f, 0.0f,  1.0f, 0.0f,
+            -0.5f,  0.5f, 0.0f,  0.0f, 0.0f,
+        };
+        static const unsigned short idx[] = { 0, 1, 2, 0, 2, 3 };
+        Mesh mesh = {0};
+        mesh.vertexCount = 4;
+        mesh.triangleCount = 6;
+        mesh.vertices = (float*)v;
+        mesh.texcoords = (float*)(v + 12);
+        mesh.indices = (unsigned short*)idx;
+        return mesh;
+    }
+
 public:
     static void Init() {
         AssetMapper::Instance().PreloadCategory("engine");
         AssetMapper::Instance().PreloadCategory("items");
-        Mesh plane = GenMeshPlane(1.0f, 1.0f, 1, 1);
-        s_BillboardModel = LoadModelFromMesh(plane);
+        s_BillboardModel = LoadModelFromMesh(MakeBillboardQuad());
     }
 
     static void Shutdown() {

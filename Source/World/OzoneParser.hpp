@@ -56,6 +56,14 @@ struct OzonePrimitive {
     bool meshWind = false;          // GameEngine.Mesh.*: foliage wind-affection flag
     bool hasPhysics = false;        // zones: PhysicsInfo kwargs were authored
     oz::physics::PhysicsInfo physics; // zones: overrides (defaults when !hasPhysics)
+    // Light optional attributes. Authored as named kwargs (effect=/flare=/
+    // corona=/name=) because the positional tail is ambiguous: an omitted
+    // `effect` slot shifted flare/corona into it, so a point light with no
+    // effect but a flare round-tripped as a WATERY effect. -1 = not authored,
+    // so the loader can fall back to the legacy positional tail.
+    int  lightEffect = -1;          // LitLightEffect index
+    int  lightFlare  = -1;          // 0/1
+    int  lightCorona = -1;          // 0/1
 };
 
 class OzoneParser {

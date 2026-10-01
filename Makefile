@@ -83,7 +83,8 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
           LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
-          ViewModel.o OzParticleSimulationManager.o rlights.o UiHandler.o)
+          ViewModel.o OzParticleSimulationManager.o rlights.o UiHandler.o \
+          PlayerProfile.o)
 
 .PHONY: all clean test help
 all: OTENGINE AngelServ AngelMaster ozpack
@@ -129,6 +130,10 @@ $(BUILD_DIR)/Log.o: Source/Log.cpp Source/Log.hpp | $(BUILD_DIR)
 # 5c. Compile Client networking
 $(BUILD_DIR)/Client.o: Source/Client/Client.cpp Source/Client/Client.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Client/Client.cpp -o $@
+
+# 5c-player. Player profile slots (raylib-free: also usable by AngelEd/server).
+$(BUILD_DIR)/PlayerProfile.o: Source/PlayerProfile.cpp Source/PlayerProfile.hpp Source/IniConfig.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/PlayerProfile.cpp -o $@
 
 # 5d. Compile the Oz* subsystem modules
 $(BUILD_DIR)/OzAssetMapper.o: Source/Renderer/OzAssetMapper.cpp Source/Renderer/OzAssetMapper.hpp | $(BUILD_DIR)

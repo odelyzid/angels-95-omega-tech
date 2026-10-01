@@ -2,6 +2,7 @@
 #define OMEGA_NETWORK_HPP
 
 #include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <vector>
@@ -35,7 +36,19 @@
 namespace net {
 
 constexpr uint32_t MAGIC = 0x4F5A574F;
-constexpr int PROTOCOL_VERSION = 1;
+
+// Wire protocol version. Sent in every CLIENT_AUTH (see ClientAuthPayload).
+//   1 = pre-profile handshake (challenge token only)
+//   2 = carries a profile block (ClientAuthPayload::structSize >= kAuthStructSizeV2)
+//
+// Bump this whenever a change would make an older peer misparse a message —
+// NOT for purely additive optional fields. The server rejects a version it does
+// not recognise rather than guessing, because a misparse here silently assigns
+// the wrong identity to a player.
+constexpr uint16_t PROTOCOL_VERSION = 2;
+
+// Size of the v1 CLIENT_AUTH payload: the bare challenge token.
+constexpr uint32_t kAuthSizeV1 = sizeof(uint32_t);
 constexpr size_t MAX_MESSAGE_SIZE = 1024;
 constexpr int HEARTBEAT_INTERVAL = 5;
 constexpr int TIMEOUT_INTERVAL = 30;
@@ -43,6 +56,15 @@ constexpr int DISCOVERY_PORT = 27100;
 constexpr int MAX_PLAYERS = 32;
 constexpr int PLAYER_NAME_MAX = 64;
 constexpr int IP_STRING_MAX = 48;
+
+// Profile field caps on the wire. The server truncates to these; anything longer
+// is discarded rather than trusted.
+constexpr int PROFILE_MODEL_MAX = 128;
+constexpr int PROFILE_VOICE_MAX = 48;
+
+// Teams the server will ever be able to represent. A client asking for anything
+// outside 0..MAX_TEAMS is clamped, not honoured. 0 means "no preference".
+constexpr int MAX_TEAMS = 8;
 
 struct NetVec3 {
     float x, y, z;
@@ -72,13 +94,29 @@ enum class MessageType : uint32_t {
     WEAPON_AMMO = 20,
     SERVER_CHALLENGE = 21,
     CLIENT_AUTH = 22,
-    MELEE_HIT = 23
+    MELEE_HIT = 23,
+    // Server -> client: the profile the server actually accepted for this
+    // player, after sanitising and de-duplicating it. The client's requested
+    // values are advisory, so it must echo this rather than assume its own.
+    PROFILE_STATE = 24
 };
 
 // Melee stamina: the server keeps its own pool per player so a swinging client
 // cannot bypass stamina_cost. The regen rate lives in Server/GameState.hpp
 // (which the client cannot include); keep the two in step.
 constexpr float SERVER_MAX_STAMINA = 100.0f;
+
+// The profile as the server holds it. `displayName` is always safe to print;
+// `modelPath`/`voiceSet` are OPAQUE STRINGS THE SERVER NEVER OPENS OR RESOLVES
+// — they exist so the client can be told what it asked for. Any future code that
+// loads modelPath server-side must treat it as untrusted input.
+struct ServerProfile {
+    std::string displayName;
+    std::string modelPath;
+    std::string voiceSet;
+    int         team = 0;          // server-assigned; 0 until teams exist
+    int         requestedTeam = 0; // UNTRUSTED client hint, clamped on receipt
+};
 
 struct NetworkPlayer {
     uint32_t id;
@@ -88,6 +126,11 @@ struct NetworkPlayer {
     bool connected;
     double last_ping;
     double last_seen;
+    // Sanitised client profile (protocol v2). `name` above is kept in sync with
+    // profile.displayName so existing consumers stay correct.
+    ServerProfile profile;
+    // True once this player authenticated at v2 or later.
+    bool profile_received = false;
 };
 
 #pragma pack(push, 1)
@@ -100,6 +143,68 @@ struct NetworkMessage {
     uint8_t payload[MAX_MESSAGE_SIZE];
 };
 #pragma pack(pop)
+
+// ---------------------------------------------------------------------------
+// Client profile sync (protocol v2)
+// ---------------------------------------------------------------------------
+// Everything in ClientAuthPayload is CLIENT-CLAIMED and therefore UNTRUSTED.
+// The server treats it as a request and answers with the values it accepted
+// (PROFILE_STATE), so a client can never assume its own copy was honoured.
+//
+// In particular `requestedTeam` is a *preference hint only*. The server owns
+// team assignment: it has no team concept yet, and when one lands the
+// server-side decision is authoritative. Nothing about scoring may ever read
+// this field as if it were verified.
+//
+// `structSize` makes the tail forward-compatible: a peer that recognises only
+// the first N bytes can read those and ignore the rest, so optional fields can
+// be appended later without another version bump.
+#pragma pack(push, 1)
+struct ClientAuthPayload {
+    uint32_t challengeToken;                       // also the v1 payload, alone
+    uint16_t protocolVersion;
+    uint16_t structSize;                           // == sizeof(ClientAuthPayload)
+    char     displayName[PLAYER_NAME_MAX];
+    char     modelPath[PROFILE_MODEL_MAX];         // opaque to the server
+    char     voiceSet[PROFILE_VOICE_MAX];          // opaque to the server
+    int32_t  requestedTeam;                        // UNTRUSTED hint, 0 = none
+};
+
+// Minimum bytes the server must see before it may read the version/profile.
+// A shorter payload is a v1 client, which is still accepted (see below).
+constexpr uint32_t kAuthSizeV2 = offsetof(ClientAuthPayload, displayName);
+
+// Server -> client: the sanitised profile actually in force for a player.
+struct ProfileStateData {
+    uint32_t playerId;
+    int32_t  team;                                  // server-assigned (always 0 today)
+    int32_t  requestedTeam;                         // what the server stored from the client
+    uint8_t  nameWasChanged;                        // 1 => server rewrote displayName
+    char     displayName[PLAYER_NAME_MAX];
+};
+#pragma pack(pop)
+
+// ---------------------------------------------------------------------------
+// Profile sanitising (server side; exposed for tests)
+// ---------------------------------------------------------------------------
+// Strip control characters, collapse nothing else, and cap the length.
+// Returns an empty string when nothing printable survives, so callers can
+// substitute a fallback rather than accepting an empty identity.
+std::string SanitizeDisplayName(const std::string& raw, size_t max_len);
+
+// Cap and scrub an asset reference (model path / voice set). Rejects any path
+// containing a ".." segment and drops characters outside printable ASCII.
+// Never resolves or opens the result.
+std::string SanitizeAssetRef(const std::string& raw, size_t max_len);
+
+// Clamp a client-claimed team into 0..MAX_TEAMS. Out-of-range becomes 0
+// ("no preference") rather than clamping to an arbitrary team, so a hostile
+// value cannot steer team assignment by sitting near a boundary.
+int ClampRequestedTeam(int32_t raw);
+
+// Make `name` unique among `taken` by appending "(2)", "(3)", ... Truncates the
+// base name as needed so the result always fits.
+std::string MakeUniqueName(const std::string& name, const std::vector<std::string>& taken);
 
 // Player stance, replicated so remote clients can render crouch/sprint.
 enum PlayerStance : uint8_t {
@@ -341,6 +446,25 @@ public:
     bool send_message(const NetworkMessage& msg);
     void set_callbacks(ClientCallbacks cb) { m_callbacks = std::move(cb); }
 
+    // Profile to present at authentication (protocol v2). Called by the client
+    // layer from the active PlayerProfile; the transport itself just ships the
+    // strings, so it stays independent of where they came from.
+    void set_profile(const std::string& displayName,
+                     const std::string& modelPath,
+                     const std::string& voiceSet,
+                     int requestedTeam) {
+        m_profile_display = displayName;
+        m_profile_model   = modelPath;
+        m_profile_voice   = voiceSet;
+        m_profile_team    = requestedTeam;
+    }
+
+    // The profile the server accepted for us (PROFILE_STATE). Empty until the
+    // server replies; `has_server_profile` tells them apart.
+    bool has_server_profile() const { return m_server_profile_valid; }
+    const ServerProfile& server_profile() const { return m_server_profile; }
+    void clear_server_profile() { m_server_profile_valid = false; m_server_profile = ServerProfile(); }
+
     bool is_connected() const { return m_connected; }
     bool is_connecting() const { return m_connecting; }
     const std::string& get_server_ip() const { return m_server_ip; }
@@ -379,6 +503,20 @@ private:
     double      m_handshake_start = 0;
     static constexpr int MAX_HANDSHAKE_RETRIES = 5;
     static constexpr double HANDSHAKE_TIMEOUT = 2.0;
+
+    // Outgoing profile (see set_profile).
+    std::string m_profile_display;
+    std::string m_profile_model;
+    std::string m_profile_voice;
+    int         m_profile_team = 0;
+
+    // Profile the server confirmed via PROFILE_STATE.
+    ServerProfile m_server_profile;
+    bool          m_server_profile_valid = false;
+
+    // Fill `out` with the auth payload for `token`, truncating every string to
+    // its wire cap so the copy into NetworkMessage::payload is always safe.
+    void BuildAuthPayload(uint32_t token, ClientAuthPayload& out) const;
 };
 
 // ---------------------------------------------------------------------------
