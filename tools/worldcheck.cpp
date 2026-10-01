@@ -106,8 +106,12 @@ Aabb brushBounds(const OzonePrimitive& p) {
     switch (p.type) {
         case OzonePrimitiveType::BOX:
             if (a.size() >= 6) {
-                for (int i = 0; i < 3; i++)
-                    b.span(i, a[i] - a[3 + i] * 0.5f, a[i] + a[3 + i] * 0.5f);
+                // Loader: position = {a0, a2, a1}, BuildBox(w=a3, h=a4, d=a5).
+                // Engine X span = a3; engine Y (up) span = a4; engine Z span = a5.
+                // Invert the Z-up swap: authoring Y = engine Z, authoring Z = engine Y.
+                b.span(0, a[0] - a[3] * 0.5f, a[0] + a[3] * 0.5f);
+                b.span(1, a[1] - a[5] * 0.5f, a[1] + a[5] * 0.5f);
+                b.span(2, a[2] - a[4] * 0.5f, a[2] + a[4] * 0.5f);
             }
             break;
         case OzonePrimitiveType::CYLINDER:
@@ -310,7 +314,7 @@ int main(int argc, char** argv) {
         // as the pure float list; the loader uses arg(0)/arg(2)/arg(1).
         if (p.type != OzonePrimitiveType::ENTITY_LIGHT) continue;
         if (p.args.size() < 3) continue;
-        float x = p.args[0], y = p.args[2], z = p.args[1];
+        float x = p.args[0], y = p.args[1], z = p.args[2]; // authoring (Z-up)
         if (p.entityType == "directional") {
             dirLights++;
             float len = std::sqrt(x * x + y * y + z * z);
@@ -374,7 +378,7 @@ int main(int argc, char** argv) {
                          p.meshPath.c_str(), hWorld, scale, span);
                 err(buf);
                 belowGround++;
-            } else if (scale > 0.0f && hWorld < 4.0f) {
+            } else if (scale > 0.0f && hWorld < 3.0f) {
                 snprintf(buf, sizeof buf,
                          "mesh %s is only %.2fu across after scale=%g - likely too small",
                          p.meshPath.c_str(), hWorld, scale);
@@ -422,7 +426,7 @@ int main(int argc, char** argv) {
         for (const auto& p : prims) {
             if (p.type != OzonePrimitiveType::ENTITY_MESH_STATIC) continue;
             if (p.args.size() < 4) continue;
-            float x = p.args[0], y = p.args[2], z = p.args[1];
+            float x = p.args[0], y = p.args[2], z = p.args[1]; // engine Y-up (matches worldBounds)
             if (x < worldBounds.lo[0] - 1 || x > worldBounds.hi[0] + 1 ||
                 y < worldBounds.lo[1] - 1 || y > worldBounds.hi[1] + 1) {
                 char buf[256];

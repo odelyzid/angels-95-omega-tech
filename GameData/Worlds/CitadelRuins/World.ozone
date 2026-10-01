@@ -168,18 +168,18 @@ add box 0 -43.5 -1.25 4.5 0.5 1 0 1
 # value and the map's outer collision edge. Replaces the unused bb_wall_13.dds.
 # Heights alternate so the skyline is broken.
 # ==============================================================================
-add box -30 42 11 30 22 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 0 42 13 30 26 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 30 42 9 30 18 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -30 -42 9 30 18 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 0 -42 12 30 24 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 30 -42 13 30 26 1 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 -30 11 1 22 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 0 12 1 24 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 30 10 1 20 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 -30 12 1 24 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 0 10 1 20 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 30 11 1 22 30 0 flags=8 texPath=oztex/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -30 42 11 30 22 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 0 42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 30 42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -30 -42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 0 -42 12 30 24 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 30 -42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 -30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 0 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box 42 30 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 -30 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 0 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -42 30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
 
 # ==============================================================================
 # Entities

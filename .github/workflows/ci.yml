@@ -50,8 +50,24 @@ jobs:
       - name: Build server (AngelServ)
         run: make AngelServ
 
+      - name: Build and run worldcheck
+        run: make worldcheck
+
       - name: Build client (Angels95)
         run: make OTENGINE
+
+      - name: Run worldcheck on every world
+        run: |
+          failed=0
+          ./worldcheck GameData/Worlds/CitadelRuins/World.ozone || failed=1
+          ./worldcheck GameData/Worlds/Dessert_Dreams/World.ozone || failed=1
+          ./worldcheck GameData/Worlds/Dust_Ravine/World.ozone || failed=1
+          ./worldcheck GameData/Worlds/EngineTest/World.ozone || failed=1
+          # World_endless_snow uses GLB model placements; size checks require a
+          # --glb-bounds JSON generated from the art assets, so CI gates only the
+          # four reference worlds here. Broken references / lighting regressions
+          # in the snow world are still caught by `make test` locally.
+          exit $failed
 
       - name: Build OzPack
         run: make ozpack

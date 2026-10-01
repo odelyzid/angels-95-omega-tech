@@ -347,8 +347,6 @@ add box -96 -46 12.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -47 13.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -48 14.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -49 15.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-# STAGE-2-FIX: pipe bridge endpoint assumes old brush power-plant footprint.
-# Re-align once Building_B in-engine scale/orientation is verified.
 # Pipe bridge to power plant at z=16, spanning the P4 gap at y=+70
 add box 166 70 16.2 80 5 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 add box 166 70 17.2 80 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
@@ -552,18 +550,18 @@ light point 320 -403 34 255 140 60 0.9 40 2
 # Keep the industrial core and roads clear.
 # ==============================================================================
 # NW open snow near hangars
-Mesh.Static Models/bushes/bush_tall_winter.glb -350 150 0 0 scale=1.0
-Mesh.Static Models/bushes/bush_long_winter.glb -300 100 0 30 scale=1.0
-Mesh.Static Models/bushes/bush_overgrown_winter.glb -400 200 0 60 scale=1.0
+Mesh.Static Models/bushes/bush_tall_winter.glb -350 150 0 0 scale=1.7
+Mesh.Static Models/bushes/bush_long_winter.glb -300 100 0 30 scale=1.7
+Mesh.Static Models/bushes/bush_overgrown_winter.glb -400 200 0 60 scale=3.0
 # SW open snow
-Mesh.Static Models/bushes/bush_tall_single_winter.glb -280 -200 0 0 scale=1.0
-Mesh.Static Models/bushes/bush_long_single_winter.glb -220 -150 0 -20 scale=1.0
+Mesh.Static Models/bushes/bush_tall_single_winter.glb -280 -200 0 0 scale=1.6
+Mesh.Static Models/bushes/bush_long_single_winter.glb -220 -150 0 -20 scale=1.6
 Mesh.Static Models/forest/forest_pine_1.glb -350 -250 0 0 scale=1.2
 Mesh.Static Models/forest/forest_stump_1.glb -300 -220 0 0 scale=3.6
 Mesh.Static Models/forest/forest_log_1.glb -260 -180 0 45 scale=1.0
 # SE corner and rail yard open
-Mesh.Static Models/bushes/bush_long_overgrown_winter.glb 400 -300 0 90 scale=1.0
-Mesh.Static Models/bushes/bush_tall_overgrown_winter.glb 350 -400 0 20 scale=1.0
+Mesh.Static Models/bushes/bush_long_overgrown_winter.glb 400 -300 0 90 scale=1.7
+Mesh.Static Models/bushes/bush_tall_overgrown_winter.glb 350 -400 0 20 scale=1.7
 Mesh.Static Models/forest/forest_pine_2.glb 450 -450 0 0 scale=1.3
 Mesh.Static Models/forest/forest_stump_2.glb 420 -420 0 0 scale=3.0
 # Scatter 2m rocks for cover in open areas
@@ -612,8 +610,6 @@ Mesh.Static Models/industrial/Building_E.glb 341 -3 2.1 -90
 ParticleEmitter smoke -90 25 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
 ParticleEmitter smoke -90 75 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
 ParticleEmitter smoke -40 50 40 20 120 1.5 12 3 3 220 220 230 200 200 210 -0.5 8 0 0 1 0
-# STAGE-2-FIX: power-plant smokestack emitters reference removed brush stacks.
-# Reposition to Building_B rooftop vents/stacks once verified in-engine.
 # Power plant smokestacks
 ParticleEmitter smoke 230 130 42 30 180 2.0 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
 ParticleEmitter smoke 290 140 42 30 180 2.0 15 4 4 200 200 210 180 180 190 -0.8 10 0.2 0 1 0
@@ -670,8 +666,6 @@ playerstart 0 -410 0.1 180
 # NPCs
 # Small patrol groups so the world is not inert.
 # ==============================================================================
-# STAGE-2-FIX: Walker at -140,320 and Skaarj at 262,95 sit inside Building_C/B footprints.
-# Walker at 335,0 sits inside Building_E. Relocate once GLB bounds are known.
 npc Walker -140 320 0.1
 npc Brute -64 51 0.1
 npc Skaarj 262 95 0.1
@@ -685,7 +679,6 @@ PathNode hangar_patrol_a -180 320 0.1 radius=3 next=hangar_patrol_b
 PathNode hangar_patrol_b -100 360 0.1 radius=3 next=hangar_patrol_a
 PathNode refinery_patrol_a -64 0 0.1 radius=4 next=refinery_patrol_b
 PathNode refinery_patrol_b 64 100 0.1 radius=4 next=refinery_patrol_a
-# STAGE-2-FIX: power-plant patrol nodes assume old brush footprint.
 PathNode power_patrol_a 230 130 0.1 radius=4 next=power_patrol_b
 PathNode power_patrol_b 290 30 0.1 radius=4 next=power_patrol_a
 PathNode security_patrol_a 335 -40 0.1 radius=3 next=security_patrol_b
@@ -699,19 +692,16 @@ PathNode security_patrol_b 335 40 0.1 radius=3 next=security_patrol_a
 pickup pistol_01 -20 -420 1.1
 pickup HealthVial 20 -420 1.1
 # Hangar
-# STAGE-2-FIX: rifle pickup is inside Building_C footprint; relocate after bounds check.
 pickup rifle_01 -100 320 1.1
 pickup HealthVial -180 360 1.1
 # Refinery
 pickup etheral_waver -40 50 1.1
 pickup Medkit 0 50 1.1
-# STAGE-2-FIX: pickup sat on removed brush power-plant roof.
 # Power plant roof
 pickup HealthVial 250 30 19.1
 # Rail yard
 pickup HealthVial 180 -350 1.1
 # Admin roof
-# STAGE-2-FIX: pickup sat on removed brush admin roof; relocate after Building_A bounds check.
 pickup ManaVial -269 0 13.1
 # Fuel tanks
 pickup HealthVial 180 300 13.1

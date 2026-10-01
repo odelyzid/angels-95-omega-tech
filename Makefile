@@ -348,6 +348,7 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_ozanim
 	@echo ""
 	@echo "=== Worldcheck (.ozone auditor) ==="
+	# Run worldcheck on every shipped .ozone world (errors are printed, warnings do not fail).
 	@for w in GameData/Worlds/*/World.ozone; do \
 	  ./worldcheck "$$w" || echo "  --> $$w failed"; \
 	done
