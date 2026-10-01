@@ -7,6 +7,14 @@ entity "selenite_blade" : weapon {
         swing_speed = 0.8
         reach = 3.0
         stamina_cost = 15
+        // This def had no viewmodel_* keys at all, so it fell back to ViewModel's
+        // defaults: rot = 0 left the sword's 3.9-unit long axis vertical on
+        // screen (~15x oversized at 0.45 units). The blade's long axis is Y, so
+        // a Y yaw cannot fix it - it needs a 90 deg pitch about X to lay the
+        // blade along screen depth.
+        viewmodel_offset = (0.26, -0.30, 0.44)
+        viewmodel_rot = (90, 0, 0)
+        viewmodel_scale = 1.0
     }
     actions {
         on_swing {

@@ -19,7 +19,6 @@ entity "pistol_01" : weapon {
         viewmodel_offset = (0.22, -0.18, 0.45)
         viewmodel_rot = (0, 90, 0)
         viewmodel_scale = 1.0
-        viewmodel_fov = 60.0
     }
     actions {
         on_fire {

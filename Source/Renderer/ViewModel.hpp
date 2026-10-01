@@ -52,6 +52,9 @@ private:
     Vector3 m_offset{0.22f, -0.18f, 0.45f};
     Vector3 m_rot{0.0f, 0.0f, 0.0f};
     float m_scale = 1.0f;
+    // Midpoint of the loaded mesh's bounds, subtracted before rotation so the
+    // weapon spins about its middle. Recomputed on every (re)load.
+    Vector3 m_center{0.0f, 0.0f, 0.0f};
 
     std::string m_key; // def+mesh+tex, to avoid reloading each frame
 };

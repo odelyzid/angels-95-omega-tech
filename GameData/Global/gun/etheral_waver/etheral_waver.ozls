@@ -6,10 +6,9 @@ entity "etheral_waver" : weapon {
         swing_speed = 0.7
         reach = 3.5
         stamina_cost = 18
-        viewmodel_offset = (0.42, -0.36, 0.5)
+        viewmodel_offset = (0.30, -0.26, 0.52)
         viewmodel_rot = (0, 90, 0)
         viewmodel_scale = 1.0
-        viewmodel_fov = 60.0
     }
     actions {
         on_swing {

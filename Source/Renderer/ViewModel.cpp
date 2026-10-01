@@ -10,6 +10,43 @@
 
 namespace oz {
 
+// Target on-screen length for a first-person weapon, in camera-space units.
+// A held weapon should read as roughly a forearm-to-torso long prop.
+static constexpr float kViewModelTargetSize = 0.55f;
+
+// Source assets disagree wildly on scale because each came out of a different
+// DCC tool. Measured from the shipped GLBs:
+//
+//   pistol_01   bbox 0.223 x 0.032 x 0.141   (already human-scale)
+//   etheral_waver bbox ~9.9 x 1.1 x 0.52      (node scale of 100/100/64.8,
+//                                               plus a ~19 unit origin offset)
+//
+// Rendering either at scale 1.0 is wrong: the pistol is a speck and the weaver
+// fills the screen. Rather than hand-tuning every def, fit the loaded mesh to
+// the target size and let viewmodel_scale act as a relative tuning multiplier on
+// top of that.
+static float ComputeFitScale(const BoundingBox& b) {
+    const float ex = std::fabs(b.max.x - b.min.x);
+    const float ey = std::fabs(b.max.y - b.min.y);
+    const float ez = std::fabs(b.max.z - b.min.z);
+    const float longest = std::fmax(ex, std::fmax(ey, ez));
+    if (longest <= 1e-5f) return 1.0f;   // degenerate/empty mesh: leave as-is
+    // Guard against absurd input so a bad asset cannot produce an invisible or
+    // screen-filling weapon; the real offenders are ~40x, not ~1e6x.
+    float s = kViewModelTargetSize / longest;
+    if (s < 1e-3f) s = 1e-3f;
+    if (s > 100.0f) s = 100.0f;
+    return s;
+}
+
+// Centre of the mesh in its own space, so rotation spins it about its middle
+// instead of about the model's origin.
+static Vector3 ComputeCenter(const BoundingBox& b) {
+    return { (b.min.x + b.max.x) * 0.5f,
+             (b.min.y + b.max.y) * 0.5f,
+             (b.min.z + b.max.z) * 0.5f };
+}
+
 ViewModel& ViewModel::Instance() {
     // Intentionally leaked: the mesh is owned by MeshCache anyway, and we must
     // not run GL unloads during static destruction (after CloseWindow).
@@ -94,6 +131,15 @@ void ViewModel::SetWeapon(const EntityDef* def) {
         return;
     }
     m_mesh = m;
+    m_center = ComputeCenter(m_mesh->Bounds());
+    OZ_INFO("ViewModel: '%s' mesh=%s bounds=[%.3f..%.3f, %.3f..%.3f, %.3f..%.3f] "
+            "centre=(%.3f, %.3f, %.3f) fitScale=%.4f",
+            def->name.c_str(), mesh.c_str(),
+            m_mesh->Bounds().min.x, m_mesh->Bounds().max.x,
+            m_mesh->Bounds().min.y, m_mesh->Bounds().max.y,
+            m_mesh->Bounds().min.z, m_mesh->Bounds().max.z,
+            m_center.x, m_center.y, m_center.z,
+            ComputeFitScale(m_mesh->Bounds()));
     // Skeletal clip playback is intentionally disabled: the FBX2glTF weapon
     // exports contain MULTIPLE skins (one per mesh part), which raylib loads
     // inconsistently ("can only load one skin") and can crash in
@@ -148,6 +194,7 @@ void ViewModel::Draw(Camera3D& camera, Shader litShader) {
 
     static std::string s_loggedKey;
     static const bool s_trace = (getenv("OZ_VM_TRACE") != nullptr);
+    static std::string s_frustumWarned;
     if (m_key != s_loggedKey) {
         OZ_INFO("[CHAIN] VM::Draw begin key='%s' meshes=%d", m_key.c_str(), m_mesh->MeshCount());
         s_loggedKey = m_key;
@@ -169,13 +216,35 @@ void ViewModel::Draw(Camera3D& camera, Shader litShader) {
     }
 
     // Local transform in camera space: x right, y up, z forward (view -Z).
+    //
+    // raylib is row-vector: v*M, and MatrixMultiply(A,B) == A*B, so in v*(A*B)
+    // the LEFTMOST matrix is applied FIRST. The per-vertex order we want is
+    //
+    //     subtract centre -> rotate -> scale -> translate into camera space
+    //
+    // so the chain must read left-to-right in that same order:
+    //
+    //     T(-centre) * R * S * T(offset)
+    //
+    // This used to be T(off) * R * S, which applied the translate FIRST. That
+    // made the 90 deg yaw rotate the offset itself: a weapon authored at
+    // offset.x = +0.22 (right) rendered at view-space X = -0.45, roughly 2.3x
+    // outside the frustum edge, i.e. off-screen to the left. That is why the
+    // pistol was invisible and read as sitting in the left hand. Every shipped
+    // weapon offset was tuned against that broken order, so all of them are
+    // re-authored below.
     Vector3 off = {m_offset.x, m_offset.y + dip, -m_offset.z + kick};
     Vector3 rotDeg = {m_rot.x + rpitch, m_rot.y, m_rot.z + rtilt};
+    // Fit normalises wildly different source scales into a usable held size;
+    // viewmodel_scale stays a relative tuning multiplier on top of that.
+    const float fitScale = m_scale * ComputeFitScale(m_mesh->Bounds());
     Matrix local = MatrixMultiply(
         MatrixMultiply(
-            MatrixTranslate(off.x, off.y, off.z),
+            MatrixTranslate(-m_center.x, -m_center.y, -m_center.z),
             MatrixRotateXYZ({rotDeg.x * DEG2RAD, rotDeg.y * DEG2RAD, rotDeg.z * DEG2RAD})),
-        MatrixScale(m_scale, m_scale, m_scale));
+        MatrixMultiply(
+            MatrixScale(fitScale, fitScale, fitScale),
+            MatrixTranslate(off.x, off.y, off.z)));
     Matrix world = MatrixMultiply(local, camWorld);
 
     if (m_skel && m_active >= 0)
@@ -184,6 +253,31 @@ void ViewModel::Draw(Camera3D& camera, Shader litShader) {
     if (s_trace)
         OZ_INFO("[CHAIN] VM::Draw pre-DrawMatrix key='%s' recoil=%.2f reloadT=%.2f",
                 m_key.c_str(), m_recoil, m_reloadT);
+
+    // Fail loudly instead of silently: a view-model off-screen is
+    // indistinguishable from a broken one, which is exactly how the
+    // multiply-order bug survived. Warn once per weapon key.
+    if (m_key != s_frustumWarned) {
+        const float fit = ComputeFitScale(m_mesh->Bounds()) * m_scale;
+        const Vector3 c = m_center;
+        // Nearest point of the fitted box along -Z (forward) in view space.
+        const float nearest = -m_offset.z - 0.5f * fit;
+        const float halfH = std::fmax(0.5f * fit, 0.5f * (m_mesh->Bounds().max.y -
+                                                          m_mesh->Bounds().min.y) * fit);
+        const float halfW = halfH;
+        const float limH = std::tan(camera.fovy * 0.5f * DEG2RAD) * std::fmax(nearest, 0.01f);
+        const float limW = limH * ((float)GetScreenWidth() / (float)GetScreenHeight());
+        const float dx = std::fmax(0.0f, std::fabs(off.x + c.x * fit) - limW);
+        const float dy = std::fmax(0.0f, std::fabs(off.y + c.y * fit) - limH);
+        const float behind = (nearest + 0.5f * fit) <= 0.0f;
+        if (dx > 0.0f || dy > 0.0f || behind) {
+            OZ_WARN("ViewModel '%s' is off-screen (off=(%.3f, %.3f, %.3f) nearest=%.3f "
+                    "limW=%.3f limH=%.3f excessX=%.3f excessY=%.3f behind=%d)",
+                    m_key.c_str(), off.x, off.y, off.z, nearest, limW, limH, dx, dy,
+                    behind ? 1 : 0);
+            s_frustumWarned = m_key;
+        }
+    }
 
     // Draw on top of the world (no depth test) but over the 2D HUD passes later.
     rlDrawRenderBatchActive();
