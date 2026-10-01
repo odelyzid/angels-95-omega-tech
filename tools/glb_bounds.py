@@ -10,7 +10,9 @@ Used by tools/worldcheck.cpp (via --glb-bounds JSON) and standalone:
 
     python tools/glb_bounds.py GameData/Worlds/World_endless_snow/Models/industrial/Building_A.glb
 """
+import glob
 import json
+import os
 import struct
 import sys
 
@@ -21,6 +23,15 @@ COMP = {
 
 
 def _minmax(node, gltf, accessors, out):
+    """Collect THIS node's own POSITION accessor bounds.
+
+    Deliberately does not recurse: the caller walks the scene graph itself and
+    pushes each child onto its stack, so recursing here would visit every
+    descendant twice. The duplicate visit is not harmless -- it re-transforms
+    the same accessor under the parent's world matrix, which corrupts the
+    resulting AABB with untransformed coordinates and inflates the reported
+    size (a 7u rock once measured as 336u).
+    """
     if "mesh" in node:
         for prim in gltf["meshes"][node["mesh"]]["primitives"]:
             idx = prim.get("attributes", {}).get("POSITION")
@@ -29,8 +40,6 @@ def _minmax(node, gltf, accessors, out):
             acc = accessors[idx]
             if "min" in acc and "max" in acc:
                 out.append(tuple(acc["min"]) + tuple(acc["max"]))
-    for child in node.get("children", []):
-        _minmax(gltf["nodes"][child], gltf, accessors, out)
 
 
 def _matrix(node):
@@ -104,6 +113,7 @@ def glb_bounds(path):
                         for a in range(3):
                             lo[a] = min(lo[a], p[a])
                             hi[a] = max(hi[a], p[a])
+            # Once per node-with-mesh, not once per corner.
             names.append(node.get("name", "<unnamed>"))
         for child in reversed(node.get("children", [])):
             stack.append((gltf["nodes"][child], world))
@@ -118,8 +128,39 @@ def _identity():
     return [[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
 
 
+def emit_json(world_dir, out_path):
+    """Write a worldcheck --glb-bounds JSON covering every GLB under world_dir.
+
+    Paths are stored relative to world_dir so the file stays valid regardless
+    of where the repo is checked out.
+
+        python tools/glb_bounds.py --emit-json GameData/Worlds/<World> <out.json>
+    """
+    world_dir = world_dir.rstrip("/\\")
+    pattern = world_dir + "/Models/**/*.glb"
+    entries = []
+    for path in sorted(glob.glob(pattern, recursive=True)):
+        b = glb_bounds(path)
+        rel = os.path.relpath(path, world_dir).replace("\\", "/")
+        b["path"] = rel
+        entries.append(b)
+    if not entries:
+        raise ValueError("no GLBs found under %s" % world_dir)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(entries, fh, indent=1)
+        fh.write("\n")
+    return entries
+
+
 if __name__ == "__main__":
-    for arg in sys.argv[1:]:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "--emit-json":
+        if len(argv) != 3:
+            sys.exit("usage: glb_bounds.py --emit-json <world-dir> <out.json>")
+        rows = emit_json(argv[1], argv[2])
+        print("wrote %d model bounds to %s" % (len(rows), argv[2]))
+        sys.exit(0)
+    for arg in argv:
         b = glb_bounds(arg)
         print("%s\n  nodes: %s\n  min: %s\n  max: %s\n  size: %s"
               % (b["path"], ", ".join(b["nodes"]),

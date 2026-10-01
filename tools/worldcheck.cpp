@@ -219,14 +219,26 @@ int main(int argc, char** argv) {
     // ---------------- pass 1: references + bounds ----------------
     printf("--- references ---\n");
     std::set<std::string> missingRefs;
+    // Mirrors OzoneLoader::ResolveWorldAssetPath: try the path as-is, then a
+    // repo-relative GameData/ path, then an absolute path, and only then treat
+    // it as world-relative. Without the as-is/GameData cases a perfectly valid
+    // repo-relative ref like GameData/Worlds/X/oztex/foo.dds gets joined onto
+    // the world dir and reported missing.
+    auto resolves = [&](const std::string& raw) {
+        if (raw.empty()) return true;
+        if (fileExists(raw)) return true;
+        if (raw.rfind("GameData/", 0) == 0 || raw.rfind("GameData\\", 0) == 0)
+            return fileExists(raw);
+        if ((raw.size() > 1 && raw[1] == ':') || raw[0] == '/' || raw[0] == '\\')
+            return fileExists(raw);
+        return fileExists(joinPath(worldDir, raw));
+    };
     for (const auto& p : prims) {
         if (!p.texPath.empty()) {
-            std::string t = joinPath(worldDir, p.texPath);
-            if (!fileExists(t)) missingRefs.insert(p.texPath);
+            if (!resolves(p.texPath)) missingRefs.insert(p.texPath);
         }
         if (!p.meshPath.empty()) {
-            std::string m = joinPath(worldDir, p.meshPath);
-            if (!fileExists(m)) missingRefs.insert(p.meshPath);
+            if (!resolves(p.meshPath)) missingRefs.insert(p.meshPath);
         }
     }
     for (const auto& m : missingRefs) {

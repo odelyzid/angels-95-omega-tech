@@ -63,11 +63,37 @@ jobs:
           ./worldcheck GameData/Worlds/Dessert_Dreams/World.ozone || failed=1
           ./worldcheck GameData/Worlds/Dust_Ravine/World.ozone || failed=1
           ./worldcheck GameData/Worlds/EngineTest/World.ozone || failed=1
-          # World_endless_snow uses GLB model placements; size checks require a
-          # --glb-bounds JSON generated from the art assets, so CI gates only the
-          # four reference worlds here. Broken references / lighting regressions
-          # in the snow world are still caught by `make test` locally.
+          # World_endless_snow places GLB models, so its mesh-size gate needs
+          # --glb-bounds. The JSON is committed next to the world and is
+          # regenerated with:
+          #   python tools/glb_bounds.py --emit-json \
+          #     GameData/Worlds/World_endless_snow \
+          #     GameData/Worlds/World_endless_snow/glb_bounds.json
+          # Regenerate it whenever a model under that world's Models/ is added,
+          # replaced or rescaled, otherwise the size check silently degrades to
+          # a no-op for models missing from the file.
+          ./worldcheck GameData/Worlds/World_endless_snow/World.ozone \
+            --glb-bounds GameData/Worlds/World_endless_snow/glb_bounds.json || failed=1
           exit $failed
+
+      - name: Verify committed GLB bounds are up to date
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check glb_bounds.json is current
+        run: |
+          # Guards against the mesh-size gate silently going stale. Regenerating
+          # must be a no-op; if this fails, a model changed without its bounds
+          # JSON being refreshed.
+          python tools/glb_bounds.py --emit-json \
+            GameData/Worlds/World_endless_snow \
+            GameData/Worlds/World_endless_snow/glb_bounds.json.regen
+          if ! diff -u GameData/Worlds/World_endless_snow/glb_bounds.json \
+                      GameData/Worlds/World_endless_snow/glb_bounds.json.regen; then
+            echo "::error::glb_bounds.json is stale - regenerate and commit it (see step above)"
+            exit 1
+          fi
 
       - name: Build OzPack
         run: make ozpack

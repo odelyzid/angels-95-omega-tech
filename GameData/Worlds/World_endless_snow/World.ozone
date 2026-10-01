@@ -49,7 +49,7 @@ particles snow 120 2.0 220 230 235 0.3 0.2
 # ==============================================================================
 # Global ground plane — snow, covers the whole play area plus a margin.
 # ==============================================================================
-add box 0 0 -0.55 1200 1200 1.1 0 texPath=oztex/tileset/01_floor_snow_a2_32.png
+add box 0 0 -0.55 1200 1.1 1200 0 texPath=oztex/tileset/01_floor_snow_a2_32.png
 
 # ==============================================================================
 # Backdrop walls — fake-backdrop planes that frame the fog horizon.
@@ -62,15 +62,15 @@ add box 0 0 -0.55 1200 1200 1.1 0 texPath=oztex/tileset/01_floor_snow_a2_32.png
 # elevated camera rather than as a distant horizon.
 # ==============================================================================
 # North wall panels (thin in Y, facing south)
-add box -450 560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -150 560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 150 560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 450 560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box -450 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box -150 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box 150 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box 450 560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
 # South wall panels (thin in Y, facing north)
-add box -450 -560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box -150 -560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 150 -560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
-add box 450 -560 7 45 1 14 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box -450 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box -150 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box 150 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
+add box 450 -560 7 45 14 1 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
 # East wall panels (thin in X, facing west)
 add box 560 -450 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
 add box 560 -150 7 1 14 45 0 flags=8 texScaleU=10 texScaleV=4 texPath=oztex/tileset/00_sky_snow_a1_32.png
@@ -108,22 +108,22 @@ Mesh.Static Models/rocks/SM_RP_Rock_8m_3.glb 300 -500 0 -20 scale=1.2 tex=oztex/
 Mesh.Static Models/rocks/SM_RP_Rock_4m_6.glb -150 -480 0 45 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_1_2K.png
 Mesh.Static Models/rocks/SM_RP_Rock_4m_7.glb 150 -485 0 120 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
 # Brush snowdrifts pushed against the perimeter rocks
-add box -500 200 1.5 60 12 3 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box -500 -300 1.5 60 12 3 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 500 0 1.5 60 12 3 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 0 -510 1.5 12 60 3 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box -500 200 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box -500 -300 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box 500 0 1.5 60 3 12 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box 0 -510 1.5 12 3 60 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
 
 # ==============================================================================
 # Perimeter loop road — vehicle ring just inside the map edge.
 # ==============================================================================
 # North segment (kept thin and broken so it does not dominate)
-add box 0 500 0.025 1100 18 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 0 500 0.025 1100 0.05 18 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # South segment
-add box 0 -500 0.025 1100 18 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 0 -500 0.025 1100 0.05 18 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # West segment
-add box -500 0 0.025 18 1100 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box -500 0 0.025 18 0.05 1100 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # East segment
-add box 500 0 0.025 18 1100 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 500 0 0.025 18 0.05 1100 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 
 # ==============================================================================
 # MAIN ROADS
@@ -136,28 +136,28 @@ add box 500 0 0.025 18 1100 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32
 # P7 — south artery, east-west at y=-365.
 # P9 — diagonal southwest from (-192,-192) to (0,-320).
 # ==============================================================================
-add box 0 237 0.025 1000 51 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -211 0 0.025 38 900 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -198 64 0.025 38 340 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 186 64 0.025 38 340 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 0 -186 0.025 720 45 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 403 0 0.025 38 900 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 0 -365 0.025 900 51 0.05 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 0 237 0.025 1000 0.05 51 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box -211 0 0.025 38 0.05 900 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box -198 64 0.025 38 0.05 340 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 186 64 0.025 38 0.05 340 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 0 -186 0.025 720 0.05 45 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 403 0 0.025 38 0.05 900 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 0 -365 0.025 900 0.05 51 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # Diagonal P9 — built as short overlapping strips
-add box -150 -230 0.025 130 38 0.05 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box -70 -275 0.025 130 38 0.05 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box -150 -230 0.025 130 0.05 38 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box -70 -275 0.025 130 0.05 38 -25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 
 # ==============================================================================
 # Z1 — NORTH RADAR TOWER (NW corner)
 # Concrete pad, lattice mast, switchback stair, observation platform, radar dish.
 # ==============================================================================
 # Pad
-add box -320 333 0.05 60 60 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -320 333 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Lattice mast shaft, rises to z=35
-add box -320 333 17.6 6 6 35 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -320 333 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Inner stairwell walls
-add box -316 333 15 2 10 30 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -324 333 15 2 10 30 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -316 333 15 2 30 10 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -324 333 15 2 30 10 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # West-face switchback stair, flight one: z=0.1..10.1
 add box -330 323 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 324 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -170,7 +170,7 @@ add box -330 330 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 331 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 332 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Landing at z=10.1
-add box -330 333 10.1 3 6 0.2 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -330 333 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Flight two: z=10.1..20.1
 add box -330 334 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 335 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -183,19 +183,19 @@ add box -330 341 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 342 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -330 343 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Observation platform at z=20.1
-add box -320 333 20.2 18 18 0.4 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -320 333 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Railings around platform
-add box -320 324 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -320 342 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -329 333 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -311 333 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -320 324 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -320 342 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -329 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -311 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Thin lattice extension above platform to z=35
-add box -320 333 27.6 2 2 14 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -320 333 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Radar dish omitted — no dedicated dish asset in stage-two drop.
 # A simple brush antenna marks the platform instead.
 add cyl -320 333 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Warm aviation light at tower top
-light point -320 333 34 255 140 60 0.9 40 2
+light point -320 333 35.2 255 140 60 0.9 40 2
 
 # ==============================================================================
 # Z2 — MAINTENANCE HANGARS
@@ -203,7 +203,7 @@ light point -320 333 34 255 140 60 0.9 40 2
 # remain; the brush shell has been removed to avoid z-fighting.
 # ==============================================================================
 # Concrete pad
-add box -140 330 0.05 210 100 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -140 330 0.05 210 0.1 100 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Hangar interior lights
 light point -180 320 6 220 200 170 0.7 25
 light point -100 360 6 220 200 170 0.7 25
@@ -213,7 +213,7 @@ light point -100 360 6 220 200 170 0.7 25
 # Four cylindrical tanks in a two-by-two grid, with a connecting catwalk.
 # ==============================================================================
 # Concrete pad
-add box 120 345 0.05 170 120 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 120 345 0.05 170 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Tank A (northwest)
 add cyl 60 380 12 11 11 12 20 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
 # Tank B (northeast)
@@ -228,8 +228,8 @@ add cyl 180 380 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_3
 add cyl 60 300 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add cyl 180 300 12.2 11 11 0.4 20 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Catwalk linking tank tops
-add box 120 340 12.2 140 6 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 120 300 12.2 6 90 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 120 340 12.2 140 0.3 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 120 300 12.2 6 0.3 90 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Ladder cage on tank D, z=0.1..12.1
 add box 192 288 0.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 add box 192 288 1.6 1 1 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
@@ -250,8 +250,8 @@ light point 120 340 10 255 150 70 0.7 35 2
 # Z4 — SOUTH RADAR TOWER (NE corner)
 # Square pad and lattice mast, platform at z=20, dish at z=25.
 # ==============================================================================
-add box 359 333 0.05 60 60 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
-add box 359 333 17.6 6 6 35 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 359 333 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 359 333 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # East-face switchback stair, flight one
 add box 370 323 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 324 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -264,7 +264,7 @@ add box 370 330 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 331 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 332 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Landing
-add box 370 333 10.1 3 6 0.2 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 370 333 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Flight two
 add box 370 334 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 335 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -277,17 +277,17 @@ add box 370 341 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 342 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 370 343 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Platform
-add box 359 333 20.2 18 18 0.4 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 359 333 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Railings
-add box 359 324 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 359 342 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 350 333 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 368 333 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 359 324 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 359 342 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 350 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 368 333 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Lattice extension
-add box 359 333 27.6 2 2 14 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 359 333 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Radar dish omitted — no dedicated dish asset in stage-two drop.
 add cyl 359 333 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point 359 333 34 255 140 60 0.9 40 2
+light point 359 333 35.2 255 140 60 0.9 40 2
 
 # ==============================================================================
 # Z5 — PRIMARY REFINERY BLOCK
@@ -295,41 +295,41 @@ light point 359 333 34 255 140 60 0.9 40 2
 # Roof z=16, stacks z=24, main catwalk z=16, pipe bridge to power plant.
 # ==============================================================================
 # Concrete pad covering the whole block and a little south apron
-add box 0 67 0.05 420 300 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 0 67 0.05 420 0.1 300 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Main hall shell, west half — pipe stack hall
-add box -64 51 8.1 128 150 16 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box -64 51 8.1 128 16 150 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
 # Main hall shell, east half — tank grid hall
-add box 64 51 8.1 128 150 16 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 64 51 8.1 128 16 150 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
 # South wall with central gate at x=-16..+16
-add box -80 -26 8.1 64 2 16 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 80 -26 8.1 64 2 16 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box -80 -26 8.1 64 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 80 -26 8.1 64 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
 # North wall
-add box 0 128 8.1 256 2 16 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 0 128 8.1 256 16 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
 # Roof slabs at z=16.2
-add box -64 51 16.2 128 150 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box 64 51 16.2 128 150 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box -64 51 16.2 128 0.4 150 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box 64 51 16.2 128 0.4 150 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
 # Interior floor is the concrete pad at z=0.1
 # Pipe stacks in the west half, rising to z=24
-add box -90 25 20.1 16 16 40 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -90 75 20.1 16 16 40 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -40 50 20.1 16 16 40 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -90 25 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -90 75 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -40 50 20.1 16 40 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Stack caps
-add box -90 25 40.2 18 18 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box -90 75 40.2 18 18 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
-add box -40 50 40.2 18 18 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box -90 25 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box -90 75 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box -40 50 40.2 18 0.4 18 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
 # Tank grid on east-half roof, nine small tanks 3x3
-add box 30 0 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 0 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 0 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 30 34 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 34 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 34 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 30 68 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 64 68 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 98 68 20.1 12 12 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 30 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 64 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 98 0 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 30 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 64 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 98 34 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 30 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 64 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 98 68 20.1 12 8 12 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
 # Elevated catwalk ring around tank grid at z=18
-add box 64 51 18.2 110 6 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 64 51 18.2 6 110 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 64 51 18.2 110 0.3 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 64 51 18.2 6 0.3 110 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Exterior stairs to refinery roof on south face, west side
 add box -96 -34 0.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -35 1.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -348,14 +348,14 @@ add box -96 -47 13.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -48 14.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -96 -49 15.6 4 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Pipe bridge to power plant at z=16, spanning the P4 gap at y=+70
-add box 166 70 16.2 80 5 0.3 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 166 70 17.2 80 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 166 73 17.2 80 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 166 70 16.2 80 0.3 5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 166 70 17.2 80 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 166 73 17.2 80 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Refinery warm lights
-light point -64 51 12 255 150 70 0.9 35 2
-light point 64 51 12 255 150 70 0.9 35 2
-light point -90 25 30 255 130 50 1.0 30 2
-light point 64 34 24 255 140 60 0.8 25 2
+light point -64 51 16.2 255 150 70 0.9 35 2
+light point 64 51 16.2 255 150 70 0.9 35 2
+light point -90 25 40.5 255 130 50 1.0 30 2
+light point 64 34 24.2 255 140 60 0.8 25 2
 
 # ==============================================================================
 # Z6 — POWER PLANT
@@ -365,7 +365,7 @@ light point 64 34 24 255 140 60 0.8 25 2
 # GLB orientation is verified in-engine.
 # ==============================================================================
 # Concrete pad
-add box 262 95 0.05 150 200 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 262 95 0.05 150 0.1 200 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Power plant interior light
 light point 262 95 10 220 200 170 0.7 30
 
@@ -375,7 +375,7 @@ light point 262 95 10 220 200 170 0.7 30
 # remain; brush compound walls and guard building removed.
 # ==============================================================================
 # Concrete pad
-add box 335 0 0.05 140 120 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 335 0 0.05 140 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Interior light
 light point 335 0 6 255 200 170 0.6 20
 
@@ -385,7 +385,7 @@ light point 335 0 6 255 200 170 0.6 20
 # remain; brush terminal shell removed.
 # ==============================================================================
 # Concrete pad
-add box 295 0 0.05 120 120 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 295 0 0.05 120 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Interior light
 light point 295 0 5 200 200 200 0.6 25
 
@@ -395,24 +395,24 @@ light point 295 0 5 200 200 200 0.6 25
 # Scattered freight containers for cover.
 # ==============================================================================
 # Track ballast beds (three parallel), each about eight units wide
-add box 210 -330 0.03 420 8 0.06 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 210 -350 0.03 420 8 0.06 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 210 -370 0.03 420 8 0.06 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 210 -330 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 210 -350 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 210 -370 0.03 420 0.06 8 0 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # Curved northeast extension strips
-add box 270 -260 0.03 180 8 0.06 25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 290 -240 0.03 160 8 0.06 35 texPath=oztex/tileset/07_floor_concrete_a3_32.png
-add box 310 -220 0.03 140 8 0.06 45 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 270 -260 0.03 180 0.06 8 25 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 290 -240 0.03 160 0.06 8 35 texPath=oztex/tileset/07_floor_concrete_a3_32.png
+add box 310 -220 0.03 140 0.06 8 45 texPath=oztex/tileset/07_floor_concrete_a3_32.png
 # Rails — thin raised strips on each bed
-add box 210 -330 0.06 420 0.5 0.08 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 210 -350 0.06 420 0.5 0.08 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 210 -370 0.06 420 0.5 0.08 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 210 -330 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 210 -350 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 210 -370 0.06 420 0.08 0.5 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Freight containers as cover (four-unit-tall boxes)
-add box 120 -330 2.1 8 24 4 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 180 -350 2.1 8 24 4 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 240 -370 2.1 8 24 4 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 300 -330 2.1 8 24 4 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
-add box 150 -300 2.1 24 8 4 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 260 -300 2.1 24 8 4 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 120 -330 2.1 8 4 24 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 180 -350 2.1 8 4 24 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 240 -370 2.1 8 4 24 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 300 -330 2.1 8 4 24 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
+add box 150 -300 2.1 24 4 8 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 260 -300 2.1 24 4 8 0 texPath=oztex/tileset/11_wall_industrial_checker_a2_48.png
 
 # ==============================================================================
 # Z9 — ADMINISTRATION BUILDING
@@ -420,7 +420,7 @@ add box 260 -300 2.1 24 8 4 0 texPath=oztex/tileset/11_wall_industrial_checker_a
 # remain; brush shell and roof-access stairs removed.
 # ==============================================================================
 # Concrete pad
-add box -269 0 0.05 150 120 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -269 0 0.05 150 0.1 120 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Interior lights per floor
 light point -269 0 4 220 210 200 0.6 20
 light point -269 0 8 220 210 200 0.6 20
@@ -430,17 +430,17 @@ light point -269 0 12 220 210 200 0.6 20
 # Z10 — DATA CONSOLE LOBBY
 # South-central spawn building, low and open-fronted, facing the refinery.
 # ==============================================================================
-add box 0 -410 0.05 280 70 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 0 -410 0.05 280 0.1 70 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Back and side walls
-add box 0 -445 2.6 280 2 5 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box -139 -410 2.6 2 70 5 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
-add box 139 -410 2.6 2 70 5 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 0 -445 2.6 280 5 2 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box -139 -410 2.6 2 5 70 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
+add box 139 -410 2.6 2 5 70 0 texPath=oztex/tileset/10_wall_industrial_checker_a1_48.png
 # Roof
-add box 0 -410 5.2 280 70 0.4 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
+add box 0 -410 5.2 280 0.4 70 0 texPath=oztex/tileset/08_ceil_concrete_a1_32.png
 # Console block inside
-add box 0 -435 1.6 40 8 3 0 texPath=oztex/tileset/14_wall_industrial_tech_a1_128.png
+add box 0 -435 1.6 40 3 8 0 texPath=oztex/tileset/14_wall_industrial_tech_a1_128.png
 # Console screen glow
-light point 0 -435 3 80 180 255 0.6 12
+light point 0 -435 3.1 80 180 255 0.6 12
 # Lobby fill
 light point 0 -410 4 220 215 210 0.8 30
 
@@ -448,10 +448,10 @@ light point 0 -410 4 220 215 210 0.8 30
 # Z11 — EAST RADAR TOWER (SW corner, sector codename)
 # Sits on a slight rocky knoll to vary silhouette from Z1.
 # ==============================================================================
-add box -307 -423 0.05 60 60 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -307 -423 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Knoll under the pad
-add box -307 -423 0.6 70 70 1.2 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box -307 -423 17.6 6 6 35 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -307 -423 0.6 70 1.2 70 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box -307 -423 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # West-face stair, flight one
 add box -318 -413 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -412 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -464,7 +464,7 @@ add box -318 -406 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -405 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -404 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Landing
-add box -318 -403 10.1 3 6 0.2 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -318 -403 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Flight two
 add box -318 -402 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -401 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -477,26 +477,26 @@ add box -318 -395 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -394 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box -318 -393 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Platform
-add box -307 -403 20.2 18 18 0.4 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box -307 -403 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Railings
-add box -307 -412 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -307 -394 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -316 -403 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box -298 -403 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -307 -412 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -307 -394 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -316 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -298 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Lattice extension
-add box -307 -403 27.6 2 2 14 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box -307 -403 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Radar dish omitted — no dedicated dish asset in stage-two drop.
 add cyl -307 -403 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point -307 -403 34 255 140 60 0.9 40 2
+light point -307 -403 35.2 255 140 60 0.9 40 2
 
 # ==============================================================================
 # Z12 — WEST RADAR TOWER (SE corner, sector codename)
 # Square pad like Z4, but raised on a snow berm for variety.
 # ==============================================================================
-add box 320 -423 0.05 60 60 0.1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 320 -423 0.05 60 0.1 60 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Snow berm
-add box 320 -423 0.5 70 70 1 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
-add box 320 -423 17.6 6 6 35 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 320 -423 0.5 70 1 70 0 texPath=oztex/tileset/02_floor_snow_a3_32.png
+add box 320 -423 17.6 6 35 6 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # East-face stair, flight one
 add box 331 -413 0.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -412 1.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -509,7 +509,7 @@ add box 331 -406 7.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -405 8.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -404 9.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Landing
-add box 331 -403 10.1 3 6 0.2 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 331 -403 10.1 3 0.2 6 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Flight two
 add box 331 -402 10.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -401 11.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
@@ -522,17 +522,17 @@ add box 331 -395 17.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -394 18.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 add box 331 -393 19.6 3 1 1 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Platform
-add box 320 -403 20.2 18 18 0.4 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
+add box 320 -403 20.2 18 0.4 18 0 texPath=oztex/tileset/05_floor_concrete_a1_32.png
 # Railings
-add box 320 -412 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 320 -394 21.2 18 1 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 311 -403 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-add box 329 -403 21.2 1 18 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 320 -412 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 320 -394 21.2 18 2 1 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 311 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 329 -403 21.2 1 2 18 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Lattice extension
-add box 320 -403 27.6 2 2 14 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
+add box 320 -403 27.6 2 14 2 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
 # Radar dish omitted — no dedicated dish asset in stage-two drop.
 add cyl 320 -403 24 1.5 1.5 6 16 0 texPath=oztex/tileset/09_wall_industrial_metal_a1_32.png
-light point 320 -403 34 255 140 60 0.9 40 2
+light point 320 -403 35.2 255 140 60 0.9 40 2
 
 # ==============================================================================
 # CHOKEPOINTS — deliberate tactical pinch points.
