@@ -1231,7 +1231,7 @@ void GameState::save_player_data() {
                 << p.level << "," << p.xp << "," << p.xp_to_next << ",";
             for (int i = 0; i < 5; i++) out << p.inventory[i] << ",";
             out << p.ammo << "," << p.world_index << "\n";
-            for (int s = 0; s < 8; s++) {
+            for (int s = 0; s < SERVER_WEAPON_SLOTS; s++) {
                 if (p.weapon_def[s][0] == '\0') continue;
                 out << "WEAP," << s << "," << p.weapon_def[s] << ","
                     << p.weapon_ammo[s] << "," << p.weapon_magazine[s] << "\n";

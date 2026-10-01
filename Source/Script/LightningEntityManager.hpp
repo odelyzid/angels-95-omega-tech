@@ -1,5 +1,6 @@
 #pragma once
 #include "LightningEntityDef.hpp"
+#include "../Pawn/EquipSlots.hpp"
 #include "LightningScriptContext.hpp"
 #include "raylib.h"
 #include <string>
@@ -24,8 +25,10 @@ struct EntityInstance {
 class LightningEntityManager {
 public:
     static constexpr int MAX_ENTITIES = 512;
-    static constexpr int HOTBAR_SIZE = 8;
-    static constexpr int EQUIP_SLOT_COUNT = 8;
+static constexpr int HOTBAR_SIZE = 8;
+// EQUIP_SLOT_COUNT lives in Pawn/EquipSlots.hpp (derived from EquipSlotType).
+// It used to be declared here AND in Pawn/Items.hpp as two independent literal
+// 8s, so changing the equipment row meant hunting for both.
 
     static LightningEntityManager& Instance() {
         static LightningEntityManager instance;
@@ -45,6 +48,21 @@ public:
     // --- Hotbar ---
     void HotbarAssign(int slot, int instanceIndex);
     void HotbarSwap(int slotA, int slotB);
+
+    // Drag reorder. HotbarSwap previously had no caller outside the tests, so
+    // the hotbar could not be rearranged at all. The renderer that knows the
+    // slot rectangles drives these: BeginDrag on press, UpdateDrag with the
+    // hovered slot each frame, EndDrag on release.
+    void HotbarBeginDrag(int slot);
+    void HotbarUpdateDrag(int hoveredSlot);
+    void HotbarEndDrag();
+    // Complete a pending drag against a hovered slot, handling the release edge.
+    // Called once per frame by the fallback bar; returns true when a drag was
+    // pending. No-op in test builds, where there is no mouse.
+    bool HotbarEndDragOnRelease(int hoveredSlot);
+    bool IsHotbarDragging() const;
+    int  HotbarDragFrom() const;
+    int  HotbarDragTo() const;   // -1 when not over a slot
     int  HotbarAt(int slot) const;
     // First slot holding no instance, or -1 when the bar is full. Single source
     // of truth for "where does a newly collected item go" — the walk-over, the
@@ -258,6 +276,10 @@ private:
     // Ammo-change hook (bridged by the host to the network layer)
     std::function<void(int, int, int, int)> m_on_ammo_changed;
     bool m_reloadStarted = false;
+
+    // Hotbar drag reorder state. -1 = not dragging / not over a slot.
+    int m_dragFrom = -1;
+    int m_dragTo = -1;
 
     int CacheModel(const std::string& path);
     int CacheTexture(const std::string& path);

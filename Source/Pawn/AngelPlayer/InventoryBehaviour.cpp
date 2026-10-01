@@ -176,10 +176,8 @@ void InventoryBehaviour::DrawOverlay() {
     // === EQUIPMENT (left side) ===
     DrawText("EQUIPMENT", ex, ey - 18, 12, LIGHTGRAY);
 
-    const char* equipLabels[EQUIP_SLOT_COUNT] = {
-        "Armor", "Jewelry 1", "Jewelry 2", "Helmet",
-        "Boots", "Legs", "Accessory 1", "Accessory 2"
-    };
+    // Labels now live in Pawn/EquipSlots.hpp, sized by EQUIP_SLOT_COUNT, so a new
+    // equipment slot without a label is a compile error instead of a blank row.
 
     auto& lem = LightningEntityManager::Instance();
     for (int i = 0; i < EQUIP_SLOT_COUNT; i++) {
@@ -198,7 +196,7 @@ void InventoryBehaviour::DrawOverlay() {
 
         DrawRectangle(ex, ey, slotW, slotH, bg);
         DrawRectangleLines(ex, ey, slotW, slotH, c);
-        DrawText(equipLabels[i], ex + 6, ey + 12, 12, c);
+        DrawText(kEquipSlotLabels[i], ex + 6, ey + 12, 12, c);
 
         if (owned && lem.Get(idx)->iconIdx >= 0) {
             Texture2D* iconTex = (Texture2D*)lem.GetIcon(lem.Get(idx)->iconIdx);

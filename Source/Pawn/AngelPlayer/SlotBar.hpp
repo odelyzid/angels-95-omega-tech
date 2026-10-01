@@ -26,6 +26,12 @@ struct SlotBarOptions {
     bool drawSlotNumbers = true;  // "N" in each cell's top-left corner
     bool drawSlotName    = true;  // selected slot's entity name under the bar
     bool clickToSelect   = true;  // left-click a cell to select that slot
+
+    // Allow press-drag-release to reorder the hotbar (LightningEntityManager's
+    // HotbarSwap, which previously had no caller at all). Only the in-world bar
+    // enables this: the inventory overlay's mini bar reorders the same array
+    // underneath the player's cursor, which would fight the backpack drag.
+    bool dragToReorder   = false;
 };
 
 // Draws the bar. Returns false when GameUI declares no usable bar (missing

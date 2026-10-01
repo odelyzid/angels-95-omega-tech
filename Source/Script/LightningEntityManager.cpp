@@ -571,6 +571,68 @@ void LightningEntityManager::HotbarAssign(int slot, int instanceIndex) {
     OZ_INFO("[CHAIN] LEM::HotbarAssign done slot=%d inst=%d", slot, instanceIndex);
 }
 
+// ---------------------------------------------------------------------------
+// Hotbar drag reorder.
+//
+// HotbarSwap had no caller outside the tests, so the hotbar could not be
+// rearranged at all. The drag is driven from whichever renderer knows the slot
+// rectangles (SlotBar for the authored atlas bar, DrawHotbar's fallback for the
+// plain rectangles) via the three calls below: the geometry stays with the
+// renderer, the drag state and the swap stay here.
+//
+// Selecting a slot and dragging it are separate: pressing on a slot selects it
+// as before, and only a press-then-move-then-release reorders. Releasing on the
+// source slot is a no-op, so a plain click never disturbs the order.
+// ---------------------------------------------------------------------------
+void LightningEntityManager::HotbarBeginDrag(int slot) {
+    if (slot < 0 || slot >= HOTBAR_SIZE) { m_dragFrom = -1; return; }
+    if (m_hotbar[slot] < 0) { m_dragFrom = -1; return; }  // nothing to move
+    m_dragFrom = slot;
+    m_dragTo = slot;
+}
+
+void LightningEntityManager::HotbarUpdateDrag(int hoveredSlot) {
+    if (m_dragFrom < 0) return;
+    m_dragTo = (hoveredSlot >= 0 && hoveredSlot < HOTBAR_SIZE) ? hoveredSlot : -1;
+}
+
+void LightningEntityManager::HotbarEndDrag() {
+    const int from = m_dragFrom;
+    const int to   = m_dragTo;
+    m_dragFrom = -1;
+    m_dragTo = -1;
+    if (from < 0 || to < 0 || from == to) return;
+    // Both ends must be in range; the drop may land on an empty slot, which is
+    // a legitimate "move into the gap" reorder.
+    if (from < 0 || from >= HOTBAR_SIZE || to < 0 || to >= HOTBAR_SIZE) return;
+    HotbarSwap(from, to);
+}
+
+// Complete a pending drag against a hovered slot. The fallback bar calls this
+// once per frame (not once per cell) so the release edge is handled once.
+// Returns true when a drag was pending.
+bool LightningEntityManager::HotbarEndDragOnRelease(int hoveredSlot) {
+    if (!IsHotbarDragging()) return false;
+#ifndef OMEGA_TEST_ENV
+    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+        HotbarUpdateDrag(hoveredSlot);
+        HotbarEndDrag();
+    } else {
+        HotbarUpdateDrag(hoveredSlot);
+    }
+#else
+    // Headless: no mouse, so only track the hover for direct-drive tests.
+    HotbarUpdateDrag(hoveredSlot);
+#endif
+    return true;
+}
+
+bool LightningEntityManager::IsHotbarDragging() const { return m_dragFrom >= 0; }
+
+int LightningEntityManager::HotbarDragFrom() const { return m_dragFrom; }
+
+int LightningEntityManager::HotbarDragTo() const { return m_dragTo; }
+
 void LightningEntityManager::HotbarSwap(int slotA, int slotB) {
     if (slotA < 0 || slotA >= HOTBAR_SIZE || slotB < 0 || slotB >= HOTBAR_SIZE) return;
     std::swap(m_hotbar[slotA], m_hotbar[slotB]);
@@ -781,7 +843,9 @@ void LightningEntityManager::DrawHotbar() {
     // per-cell rect list, and SlotBar does the mapping/drawing.
 #ifndef OMEGA_TEST_ENV
     {
-        SlotBarOptions opt;  // all defaults: centred, bottom, click-to-select
+        // all defaults: centred, bottom, click-to-select, drag-to-reorder
+        SlotBarOptions opt;
+        opt.dragToReorder = true;
         int hover = -1;
         if (DrawSlotBar(opt, hover)) return;
     }
@@ -794,6 +858,21 @@ void LightningEntityManager::DrawHotbar() {
     int totalWidth = HOTBAR_SIZE * (slotSize + margin) - margin;
     int startX = (sw - totalWidth) / 2;
     int y = sh - slotSize - 20;
+
+    // Same drag reorder as the authored bar, driven from these plain rectangles.
+    // Only reachable when the authored bar is absent, since DrawSlotBar returns
+    // early otherwise and owns the interaction there.
+    int hoveredCell = -1;
+    for (int s = 0; s < HOTBAR_SIZE; s++) {
+        int cx = startX + s * (slotSize + margin);
+        Rectangle cell{(float)cx, (float)y, (float)slotSize, (float)slotSize};
+        if (CheckCollisionPointRec(GetMousePosition(), cell)) { hoveredCell = s; break; }
+    }
+    if (hoveredCell >= 0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        SelectSlot(hoveredCell);
+        HotbarBeginDrag(hoveredCell);
+    }
+    if (IsHotbarDragging()) HotbarEndDragOnRelease(hoveredCell);
 
     for (int s = 0; s < HOTBAR_SIZE; s++) {
         int x = startX + s * (slotSize + margin);

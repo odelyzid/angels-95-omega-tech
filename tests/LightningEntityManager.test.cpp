@@ -538,6 +538,79 @@ static int test_reload_started_flag() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_hotbar_drag_reorder() {
+    TEST("Hotbar drag reorders; press and release on the same slot is a no-op");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "DragItem";
+    def.type = EntityType::WEAPON;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int a = em.Spawn("DragItem");
+    int b = em.Spawn("DragItem");
+    int c = em.Spawn("DragItem");
+    CHECK(a >= 0); CHECK(b >= 0); CHECK(c >= 0);
+    em.HotbarAssign(0, a);
+    em.HotbarAssign(1, b);
+    em.HotbarAssign(2, c);
+    CHECK(!em.IsHotbarDragging());
+
+    // An empty slot has nothing to drag.
+    em.HotbarBeginDrag(5);
+    CHECK(!em.IsHotbarDragging());
+    CHECK_EQ(em.HotbarDragFrom(), -1);
+
+    // Out-of-range press is rejected.
+    em.HotbarBeginDrag(-1);
+    CHECK(!em.IsHotbarDragging());
+    em.HotbarBeginDrag(LightningEntityManager::HOTBAR_SIZE);
+    CHECK(!em.IsHotbarDragging());
+
+    // Dragging slot 0 onto slot 2 swaps them.
+    em.HotbarBeginDrag(0);
+    CHECK(em.IsHotbarDragging());
+    CHECK_EQ(em.HotbarDragFrom(), 0);
+    CHECK_EQ(em.HotbarDragTo(), 0);          // defaults to the source
+    em.HotbarUpdateDrag(2);
+    CHECK_EQ(em.HotbarDragTo(), 2);
+    em.HotbarEndDrag();
+    CHECK(!em.IsHotbarDragging());
+    CHECK_EQ(em.HotbarAt(0), c);
+    CHECK_EQ(em.HotbarAt(2), a);
+    CHECK_EQ(em.HotbarAt(1), b);             // untouched
+
+    // Release on the source slot changes nothing.
+    em.HotbarBeginDrag(0);
+    em.HotbarUpdateDrag(0);
+    em.HotbarEndDrag();
+    CHECK_EQ(em.HotbarAt(0), c);
+    CHECK_EQ(em.HotbarAt(2), a);
+
+    // Dragging off the bar (hover -1) cancels rather than corrupting the order.
+    em.HotbarBeginDrag(1);
+    em.HotbarUpdateDrag(-1);
+    CHECK_EQ(em.HotbarDragTo(), -1);
+    em.HotbarEndDrag();
+    CHECK_EQ(em.HotbarAt(0), c);
+    CHECK_EQ(em.HotbarAt(1), b);
+
+    // Dropping onto an empty slot is a legitimate reorder into the gap.
+    em.HotbarBeginDrag(1);
+    em.HotbarUpdateDrag(6);
+    em.HotbarEndDrag();
+    CHECK_EQ(em.HotbarAt(6), b);
+    CHECK_EQ(em.HotbarAt(1), -1);
+
+    // Out-of-range drop target is clamped away, not applied.
+    em.HotbarBeginDrag(0);
+    em.HotbarUpdateDrag(999);
+    CHECK_EQ(em.HotbarDragTo(), -1);
+    em.HotbarEndDrag();
+    CHECK_EQ(em.HotbarAt(0), c);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -771,6 +844,7 @@ int main() {
     failures += test_run_action_no_crash();
     failures += test_player_stats_default();
     failures += test_reload_started_flag();
+    failures += test_hotbar_drag_reorder();
     failures += test_multi_despawn_cycles();
     failures += test_fire_no_weapon();
     failures += test_fire_not_a_weapon();

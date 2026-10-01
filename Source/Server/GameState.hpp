@@ -3,6 +3,7 @@
 
 #include "../Network/Network.hpp"
 #include "../Pawn/CombatMath.hpp"
+#include "../Pawn/PickupItems.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -11,6 +12,10 @@
 #include <algorithm>
 #include <cstring>
 #include <ctime>
+
+// Server-side weapon slots per player. Matches the client's hotbar width
+// (LightningEntityManager::HOTBAR_SIZE); both sides iterate this many.
+static constexpr int SERVER_WEAPON_SLOTS = 8;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,10 +56,13 @@ struct ServerPlayer {
     int exploration_tick = 0; // for exploration XP
     uint32_t last_damage_tick = 0; // throttle NPC_DAMAGE
 
-    // Weapon registry: per hotbar slot (8), store weapon def name
-    char weapon_def[8][64] = {{0}};
-    int weapon_ammo[8] = {0};
-    int weapon_magazine[8] = {0};
+// Weapon registry: one entry per hotbar slot, holding the weapon def name.
+    // SERVER_WEAPON_SLOTS matches the client's HOTBAR_SIZE; both sides iterate
+    // this many, so the literal 8s in Server.cpp's weapon-registry loop and
+    // GameState.cpp's save loop are replaced with it instead of drifting apart.
+    char weapon_def[SERVER_WEAPON_SLOTS][64] = {{0}};
+    int weapon_ammo[SERVER_WEAPON_SLOTS] = {0};
+    int weapon_magazine[SERVER_WEAPON_SLOTS] = {0};
 };
 
 // ---------------------------------------------------------------------------
@@ -118,19 +126,8 @@ struct ServerPathNode {
 // ---------------------------------------------------------------------------
 // Pickup system (from Angels95 pickup_system.h)
 // ---------------------------------------------------------------------------
-enum class PickupType : uint8_t {
-    HEALTH = 0,
-    MANA,
-    PSYCHIC,
-    ARMOR,
-    WEAPON,
-    AMMO,
-    KEY,
-    COIN,
-    POWERUP
-};
-
-constexpr uint32_t PICKUP_TYPE_COUNT = 9;
+// PickupType + PICKUP_TYPE_COUNT now live in PickupItems.hpp so the client can
+// share the pickup->item mapping (see ResolvePickupItemId).
 
 constexpr const char* pickup_type_str(PickupType t) {
     switch (t) {

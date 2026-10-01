@@ -451,11 +451,46 @@ static int test_npc_follows_path_nodes() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_resolve_pickup_item_id() {
+    TEST("ResolvePickupItemId maps every pickup type onto a valid item id");
+    // The mapping must agree with the client's ItemDB, otherwise the server
+    // grants an item the client cannot display. ItemDB is only reachable from
+    // the client build (it pulls raylib), so this pins the mapping's own
+    // invariants; both sides now use the same item_id:: constants.
+    CHECK_EQ(ResolvePickupItemId(PickupType::HEALTH, 25).itemId, item_id::HEALTH_VIAL);
+    CHECK_EQ(ResolvePickupItemId(PickupType::MANA, 20).itemId, item_id::MANA_VIAL);
+    CHECK_EQ(ResolvePickupItemId(PickupType::KEY, 1).itemId, item_id::KEY);
+    CHECK_EQ(ResolvePickupItemId(PickupType::COIN, 1).itemId, item_id::COIN);
+    CHECK_EQ(ResolvePickupItemId(PickupType::POWERUP, 1).itemId, item_id::POWERUP);
+    CHECK_EQ(ResolvePickupItemId(PickupType::WEAPON, 1).itemId, item_id::WEAPON);
+    // ARMOR/AMMO previously fell through to `default: break`, leaving itemId
+    // -1: the pickup was consumed and hidden for everyone but granted to nobody.
+    CHECK_EQ(ResolvePickupItemId(PickupType::ARMOR, 50).itemId, item_id::ARMOR);
+    CHECK_EQ(ResolvePickupItemId(PickupType::AMMO, 30).itemId, item_id::AMMO);
+
+    // Psychic energy steps one tier per crystal value: 111 -> 3, 999 -> 11.
+    CHECK_EQ(PickupEnergyCrystalId(111), item_id::ENERGY_FIRST);
+    CHECK_EQ(PickupEnergyCrystalId(999), item_id::ENERGY_LAST);
+    CHECK_EQ(ResolvePickupItemId(PickupType::PSYCHIC, 333).itemId, 5);
+    // Out-of-range values clamp into the table rather than escaping it.
+    CHECK_EQ(PickupEnergyCrystalId(0), item_id::ENERGY_FIRST);
+    CHECK_EQ(PickupEnergyCrystalId(5000), item_id::ENERGY_LAST);
+
+    // Stackables carry the pickup value as quantity, floored at 1.
+    CHECK_EQ(ResolvePickupItemId(PickupType::COIN, 7).quantity, 7);
+    CHECK_EQ(ResolvePickupItemId(PickupType::COIN, 0).quantity, 1);
+    CHECK_EQ(ResolvePickupItemId(PickupType::AMMO, -3).quantity, 1);
+    // Non-stackables stay at one regardless of value.
+    CHECK_EQ(ResolvePickupItemId(PickupType::HEALTH, 999).quantity, 1);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
 
     int failures = 0;
+    failures += test_resolve_pickup_item_id();
     failures += test_spawn_projectile();
     failures += test_tick_projectile_movement();
     failures += test_tick_projectile_expiry();

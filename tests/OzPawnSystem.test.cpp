@@ -10,6 +10,7 @@
 #include "../Source/Script/LightningEntityRegistry.hpp"
 #include "../Source/Script/LightningEntityDef.hpp"
 #include "../Source/Particle/OzParticleSimulationManager.hpp"
+#include "../Source/Renderer/CombatFX.hpp"
 #include <cstdio>
 #include <cassert>
 
@@ -272,6 +273,39 @@ static int test_projectile_movement() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_projectile_tracer() {
+    TEST("Projectile travel emits a tracer and tracks prevPosition");
+    reset_pawn_system();
+    CombatFX::Instance().ClearAll();
+    auto& ps = PawnSystem::Instance();
+    ProjectileNode p;
+    p.position = {0, 0, 0};
+    p.prevPosition = {0, 0, 0};
+    p.velocity = {10, 0, 0};
+    p.lifetime = 5.0f;
+    ps.SpawnProjectile(p);
+    auto& projs = ps.GetProjectiles();
+    CHECK(projs.size() == 1);
+
+    ps.UpdateProjectiles(0.1f);
+    // prevPosition is the position before this step, so the tracer spans the
+    // distance actually travelled rather than a fixed-length streak.
+    CHECK_APROX(projs[0].prevPosition.x, 0.0f, 0.001f);
+    CHECK(projs[0].prevPosition.x < projs[0].position.x);
+    CHECK(CombatFX::Instance().TracerCount() > 0);
+
+    ps.UpdateProjectiles(0.1f);
+    CHECK_APROX(projs[0].prevPosition.x, 1.0f, 0.05f);
+
+    // Tracers age out, so they cannot accumulate across frames.
+    int before = CombatFX::Instance().TracerCount();
+    CombatFX::Instance().Update(1.0f);
+    CHECK(CombatFX::Instance().TracerCount() < before);
+
+    CombatFX::Instance().ClearAll();
+    PASS(); return 0; END_TEST();
+}
+
 static int test_projectile_expiry() {
     TEST("Projectile deactivates after lifetime expires");
     reset_pawn_system();
@@ -405,6 +439,7 @@ int main() {
     failures += test_particle_burst();
     failures += test_projectile_spawn();
     failures += test_projectile_movement();
+    failures += test_projectile_tracer();
     failures += test_projectile_expiry();
     failures += test_projectile_pawn_collision();
     failures += test_projectile_miss();

@@ -305,11 +305,23 @@ void PawnSystem::UpdateProjectiles(float dt) {
             p.active = false;
             continue;
         }
+        p.prevPosition = p.position;
         p.position.x += p.velocity.x * dt;
         p.position.y += p.velocity.y * dt;
         p.position.z += p.velocity.z * dt;
         // Simple gravity on projectiles
         p.velocity.y -= 5.0f * dt;
+
+        // Travel tracer for this step, emitted through CombatFX so it fades and
+        // draws with every other combat effect. Only for tracer-styled rounds
+        // (no model) - a mesh projectile draws its own geometry.
+        if (p.meshPath.empty()) {
+            float travelled = Vector3Distance(p.prevPosition, p.position);
+            if (travelled > 0.01f) {
+                CombatFX::Instance().AddTracer(p.prevPosition, p.position,
+                                               Fade(p.tint, 0.75f), 0.06f);
+            }
+        }
 
         // Projectile vs Pawn collision
         for (auto& pawn : m_pawns) {
@@ -348,14 +360,12 @@ void PawnSystem::DrawProjectiles(Camera3D& camera, Shader litShader) {
                 continue;
             }
         }
-        // Draw as small glowing spheres
+        // Draw as small glowing spheres. The travel tracer is emitted from
+        // UpdateProjectiles through CombatFX, so it fades with every other
+        // effect instead of being a fixed-length streak re-rendered each frame.
         Color c = p.tint;
         float radius = 0.3f;
         DrawSphere(p.position, radius, c);
-        // Tracer streak along the travel direction
-        Vector3 tail = Vector3Scale(p.velocity, -0.03f);
-        DrawLine3D(p.position, Vector3Add(p.position, tail),
-                   Color{255, 220, 120, 200});
         // Optional glow sprite
         if (p.sprite && p.sprite->id > 0) {
             DrawBillboard(camera, *p.sprite, p.position, 0.5f, WHITE);

@@ -242,38 +242,22 @@ static void on_server_message(const net::NetworkMessage& msg,
                     net::NetworkPlayer tmp = sender;
                     g_game_server->send_message(tmp, xmsg);
                 }
-                // Map pickup type/value to inventory item_id
-                int item_id = -1;
-                int quantity = 1;
+                // Shared pickup->item mapping (see Pawn/PickupItems.hpp).
+                const PickupGrant grant = ResolvePickupItemId(ptype, pvalue);
+                int item_id = grant.itemId;
+                int quantity = grant.quantity;
                 char weapon_def_out[64] = {0};
-                switch (ptype) {
-                    case PickupType::HEALTH:   item_id = 1; break;
-                    case PickupType::MANA:     item_id = 2; break;
-                    case PickupType::PSYCHIC:
-                        item_id = 2 + (pvalue / 111); // 3..11 for 111..999
-                        if (item_id < 3) item_id = 3;
-                        if (item_id > 11) item_id = 11;
-                        break;
-                    case PickupType::KEY:      item_id = 12; break;
-                    case PickupType::COIN:     item_id = 13; quantity = pvalue > 0 ? pvalue : 1; break;
-                    case PickupType::POWERUP:  item_id = 14; break;
-                    // ARMOR/AMMO previously fell through to `default: break`,
-                    // leaving item_id = -1: the pickup was consumed and hidden
-                    // for everyone but granted to nobody.
-                    case PickupType::ARMOR:    item_id = 16; quantity = pvalue > 0 ? pvalue : 1; break;
-                    case PickupType::AMMO:     item_id = 17; quantity = pvalue > 0 ? pvalue : 1; break;
-                    case PickupType::WEAPON: {
-                        item_id = 15; // weapon item_id
+                if (ptype == PickupType::WEAPON) {
                         // Use weapon def name from server pickup, or default
                         if (weapon_def_name[0] != '\0') {
                             strncpy(weapon_def_out, weapon_def_name, sizeof(weapon_def_out) - 1);
                         } else {
                             strcpy(weapon_def_out, "automag"); // default
                         }
-                        // Store weapon in player's weapon registry (first free slot 0-7)
+                        // Store weapon in player's weapon registry (first free slot)
                         ServerPlayer* pl2 = g_game_state.get_player(sender.id);
                         if (pl2) {
-                            for (int i = 0; i < 8; i++) {
+                            for (int i = 0; i < SERVER_WEAPON_SLOTS; i++) {
                                 if (pl2->weapon_def[i][0] == '\0') {
                                     strncpy(pl2->weapon_def[i], weapon_def_out, 63);
                                     pl2->weapon_def[i][63] = '\0';
@@ -287,9 +271,6 @@ static void on_server_message(const net::NetworkMessage& msg,
                                 }
                             }
                         }
-                        break;
-                    }
-                    default: break;
                 }
                 net::PickupCollectedData pcd_out;
                 pcd_out.player_id = sender.id;

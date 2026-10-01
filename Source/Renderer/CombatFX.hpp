@@ -156,8 +156,16 @@ public:
                 pos.x, pos.y, pos.z);
     }
 
+    // A tracer streak. Deliberately does not call EnsureInit(): tracers are drawn
+    // with DrawLine3D and need no texture, and every projectile step emits one,
+    // so this must stay allocation-and-GL-free. Decals are what need Init().
+    //
+    // Capped because Update() is only reached from the draw path: a frame that
+    // ticks projectiles without drawing (tests, a paused world) would otherwise
+    // grow this vector without bound.
     void AddTracer(Vector3 start, Vector3 end, Color color, float life = 0.05f) {
-        EnsureInit();
+        if (life <= 0.0f) return;
+        if (m_tracers.size() >= kMaxTracers) m_tracers.erase(m_tracers.begin());
         Tracer t{start, end, color, life, life};
         m_tracers.push_back(t);
     }
@@ -249,6 +257,10 @@ public:
         }
     }
 
+// Live tracer count. Exposed so the projectile tick's tracer emission can be
+    // asserted without reaching into the private vector.
+    size_t TracerCount() const { return m_tracers.size(); }
+
 private:
     struct Flash { Vector3 pos; float timer; float duration; };
     struct Decal { Vector3 pos{0, 0, 0}; Vector3 normal{0, 1, 0}; float size = 0.35f; float age = -1.0f; };
@@ -260,6 +272,7 @@ private:
     }
 
     static constexpr size_t kMaxDecals = 64;
+    static constexpr size_t kMaxTracers = 256;
 
     std::vector<Flash> m_flashes;
     std::vector<Tracer> m_tracers;

@@ -1,5 +1,6 @@
 #include "Client.hpp"
 #include "../Log.hpp"
+#include "../Pawn/PickupItems.hpp"
 #include <cstring>
 #include <cstdio>
 #include <mutex>
@@ -324,7 +325,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 }
             }
             if (pcd.item_id > 0 && granted) {
-                if (pcd.item_id == 15 && pcd.weapon_def_name[0] != '\0') {
+                if (pcd.item_id == item_id::WEAPON && pcd.weapon_def_name[0] != '\0') {
                     // Weapon pickup - notify with weapon def name
                     if (m_on_weapon_collected) m_on_weapon_collected(pcd.weapon_def_name);
                 } else if (m_on_item_collected) {

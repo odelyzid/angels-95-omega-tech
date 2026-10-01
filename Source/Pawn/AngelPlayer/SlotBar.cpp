@@ -107,7 +107,10 @@ bool DrawSlotBar(const SlotBarOptions& opt, int& hoverSlot) {
     const int   selected = lem.SelectedSlot();
     const Vector2 mouse = GetMousePosition();
     bool mouseConsumed = false;
+    // Dragged cell is redrawn last so it paints over its neighbours.
+    int dragFrom = opt.dragToReorder ? lem.HotbarDragFrom() : -1;
 
+    for (int pass = 0; pass < 2; ++pass) {
     for (int i = 0; i < count; ++i) {
         const int slot = first + i;
 
@@ -125,8 +128,13 @@ bool DrawSlotBar(const SlotBarOptions& opt, int& hoverSlot) {
             if (opt.clickToSelect && !mouseConsumed && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 lem.SelectSlot(slot);
                 mouseConsumed = true;
+                if (opt.dragToReorder) lem.HotbarBeginDrag(slot);
             }
         }
+
+        // Two passes: the dragged cell is skipped until the second one so it
+        // draws on top of whatever it is dragged over.
+        if ((pass == 1) != (dragFrom == slot)) continue;
 
         // Selection / hover outline sits just inside the art's own glowing
         // border, so the two read as one frame instead of fighting.
@@ -160,6 +168,19 @@ bool DrawSlotBar(const SlotBarOptions& opt, int& hoverSlot) {
                      isSel ? WHITE : (Color){150, 200, 150, 220});
         }
     }
+    }
+
+#ifndef OMEGA_TEST_ENV
+    // Complete the drag: release reorders, and releasing off the bar cancels.
+    if (opt.dragToReorder) {
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            lem.HotbarUpdateDrag(hoverSlot);
+            lem.HotbarEndDrag();
+        } else if (lem.IsHotbarDragging()) {
+            lem.HotbarUpdateDrag(hoverSlot);
+        }
+    }
+#endif
 
     // --- Selected slot name --------------------------------------------------
     if (opt.drawSlotName && gui.ShowSlotName()) {

@@ -172,6 +172,12 @@ struct ProjectileNode {
     int ownerId = -1;          // pawn or player id that fired it
     bool active = true;
     Texture2D* sprite = nullptr; // optional trail/glow texture
+    // Previous frame's position, used to draw the travel tracer as a segment
+    // from where the round was to where it is. The tracer used to be drawn
+    // inline in DrawProjectiles, which meant it re-rendered every frame from
+    // the current position (a fixed-length streak glued to the bullet) and
+    // bypassed CombatFX, so it could not fade or be lit.
+    Vector3 prevPosition{0, 0, 0};
     // Optional per-weapon projectile visual (model + submesh), resolved by
     // FireSelectedWeapon from the weapon def's stats.
     std::string meshPath;      // resolved model path (empty = sphere/tracer)
