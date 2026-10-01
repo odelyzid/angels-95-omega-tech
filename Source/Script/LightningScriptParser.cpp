@@ -304,9 +304,22 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
             float v = ReadNumber(s);
             def.stats.floats["fog_density"] = v;
         } else {
-            // Unknown key — skip value
+            // Unknown key. Kept reading a value and discarding it so a typo
+            // cannot cascade, but warn: without this the shipped
+            // reverb_mix / reverb_decay keys in the Dust_Ravine and EngineTest
+            // zone defs were dropped in total silence.
+            //
+            // Uses fprintf rather than OZ_WARN because this TU is linked into
+            // several test targets that do not pull in Log.cpp.
             std::string eq = ReadToken(s);
-            if (eq == "=") { ReadToken(s); }
+            if (eq == "=") {
+                std::string val = ReadToken(s);
+                fprintf(stderr, "[LightningParser] %s: ignoring unknown key '%s = %s'\n",
+                        def.sourcePath.c_str(), tok.c_str(), val.c_str());
+            } else {
+                fprintf(stderr, "[LightningParser] %s: ignoring unknown key '%s'\n",
+                        def.sourcePath.c_str(), tok.c_str());
+            }
         }
     }
 

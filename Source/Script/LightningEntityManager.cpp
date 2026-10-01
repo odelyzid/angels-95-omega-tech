@@ -259,16 +259,23 @@ void LightningEntityManager::Init() {
         m_playerEntityIndex = playerIdx;
         EntityInstance* p = Get(playerIdx);
         if (p && p->def) {
-            // Populate runtimeStats from EntityDef defaults
-            p->runtimeStats["health"] = p->def->defaultHealth;
-            p->runtimeStats["max_health"] = p->def->defaultMaxHealth;
-            p->runtimeStats["mana"] = p->def->defaultMana;
-            p->runtimeStats["max_mana"] = p->def->defaultMaxMana;
-            p->runtimeStats["psychic_energy"] = p->def->defaultPsychicEnergy;
-            p->runtimeStats["max_psychic_energy"] = p->def->defaultMaxPsychicEnergy;
-            p->runtimeStats["level"] = (float)p->def->defaultLevel;
-            p->runtimeStats["xp"] = (float)p->def->defaultXP;
-            p->runtimeStats["xp_to_next"] = (float)p->def->defaultXPToNext;
+            // Fall back to the compiled-in defaults for any stat the def did not
+            // author. This used to assign unconditionally, which overwrote
+            // whatever Spawn had already copied out of Player.ozls's stats block
+            // — so authored health/mana/xp were silently discarded.
+            auto seed = [&](const char* key, float fallback) {
+                if (p->runtimeStats.find(key) == p->runtimeStats.end())
+                    p->runtimeStats[key] = fallback;
+            };
+            seed("health", p->def->defaultHealth);
+            seed("max_health", p->def->defaultMaxHealth);
+            seed("mana", p->def->defaultMana);
+            seed("max_mana", p->def->defaultMaxMana);
+            seed("psychic_energy", p->def->defaultPsychicEnergy);
+            seed("max_psychic_energy", p->def->defaultMaxPsychicEnergy);
+            seed("level", (float)p->def->defaultLevel);
+            seed("xp", (float)p->def->defaultXP);
+            seed("xp_to_next", (float)p->def->defaultXPToNext);
         }
         // Bind stat resolver so scripts can read $health/$mana/etc.
         auto& playerCtx = m_instances[m_playerEntityIndex].ctx;
@@ -320,6 +327,12 @@ void LightningEntityManager::ApplyEntityScriptEffects(EntityInstance& inst) {
     std::string sound = inst.ctx.PopPendingSound();
     if (!sound.empty())
         SoundManager::Instance().PlayScriptSound(sound);
+
+    // restore_* opcodes. Handled before the set_* reads below so a restore in
+    // the same body as a set wins.
+    if (inst.ctx.PopPendingFogRestore()) m_pendingFogRestore = true;
+    if (inst.ctx.PopPendingAmbientRestore()) m_pendingAmbientRestore = true;
+    if (inst.ctx.PopPendingSkyboxRestore()) m_pendingSkyboxRestore = true;
 
     float fr=0, fg=0, fb=0, fd=0;
     if (inst.ctx.PopPendingFog(fr, fg, fb, fd)) {
@@ -816,17 +829,30 @@ void LightningEntityManager::TriggerEntityAction(const EntityDef* def,
     for (int i = 0; i < (int)m_instances.size(); i++) {
         if (m_instances[i].def == def) { instIdx = i; break; }
     }
-    if (instIdx < 0) {
-        instIdx = Spawn(def);
-    }
+    const bool created = (instIdx < 0);
+    if (created) instIdx = Spawn(def);
     if (instIdx < 0) return;
 
     EntityInstance* inst = Get(instIdx);
     if (!inst) return;
 
-    // Jump to the action label and execute (stops at the next action label)
+    // Jump to the action label and execute (stops at the next action label).
+    // Uses the 50-step budget rather than RunAction's 30: zone enter bodies
+    // routinely carry several opcodes.
     inst->ctx.RunAction(actionName, 50);
     ApplyEntityScriptEffects(*inst);
+
+    // An instance is only worth keeping if something will run on it later.
+    // Defs with an on_tick hook stay resident; everything else (zone enter/exit,
+    // pickup collect) was being spawned and never released, so every collected
+    // pickup and every entered zone permanently consumed a slot out of
+    // MAX_ENTITIES and eventually stopped spawning.
+    if (created) {
+        const bool needsResident = inst->ctx.FindJumpLabel("on_tick") >= 0;
+        // Use Despawn, not erase: it swaps-with-last and rewrites the hotbar /
+        // equipment / player index references that a raw erase would invalidate.
+        if (!needsResident) Despawn(instIdx);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -864,16 +890,25 @@ void LightningEntityManager::EquipmentAssign(int slot, int instanceIndex) {
 void LightningEntityManager::EquipmentUnequip(int slot) {
     if (slot < 0 || slot >= EQUIP_SLOT_COUNT) return;
     if (m_equipment[slot] >= 0) {
-        Despawn(m_equipment[slot]);
+        int idx = m_equipment[slot];
+        // Fire on_unequip before despawning. EquipmentAssign always did this;
+        // dropping a piece by hand did not, so an item's unequip hook never ran
+        // when the player removed it.
+        if (idx < (int)m_instances.size())
+            RunAction(&m_instances[idx], "on_unequip");
         m_equipment[slot] = -1;
+        Despawn(idx);
     }
 }
 
 void LightningEntityManager::EquipmentClear() {
     for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
         if (m_equipment[s] >= 0) {
-            Despawn(m_equipment[s]);
+            int idx = m_equipment[s];
             m_equipment[s] = -1;
+            if (idx < (int)m_instances.size())
+                RunAction(&m_instances[idx], "on_unequip");
+            Despawn(idx);
         }
     }
 }

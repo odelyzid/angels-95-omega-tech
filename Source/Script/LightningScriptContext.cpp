@@ -351,10 +351,11 @@ bool LightningScriptContext::ExecuteNext() {
         m_pc++;
 
     } else if (opcode == "restore_fog") {
-        m_floatVars.erase("__fog_r");
-        m_floatVars.erase("__fog_g");
-        m_floatVars.erase("__fog_b");
-        m_floatVars.erase("__fog_density");
+        // Signals the host to revert to the world's fog. These used to erase
+        // __fog_* directly, but the host's PopPendingFog() checks for __fog_r to
+        // decide whether anything is pending - so erasing it made the whole
+        // opcode a silent no-op and fog was never restored.
+        SetFloat("__fog_restore", 1.0f);
         m_pc++;
 
     } else if (opcode == "set_ambient") {
@@ -365,9 +366,8 @@ bool LightningScriptContext::ExecuteNext() {
         m_pc++;
 
     } else if (opcode == "restore_ambient") {
-        m_floatVars.erase("__ambient_r");
-        m_floatVars.erase("__ambient_g");
-        m_floatVars.erase("__ambient_b");
+        // See restore_fog: erasing the pending vars made this a no-op.
+        SetFloat("__ambient_restore", 1.0f);
         m_pc++;
 
     } else if (opcode == "set_skybox") {
@@ -382,7 +382,9 @@ bool LightningScriptContext::ExecuteNext() {
         m_pc++;
 
     } else if (opcode == "restore_skybox") {
-        SetStr("__skybox", "");
+        // Was SetStr("__skybox", ""), but PopPendingSkybox() returns early on an
+        // empty name, so the host skipped it and the skybox never reverted.
+        SetStr("__skybox_restore", "1");
         m_pc++;
 
     } else if (opcode == "spawn_pawn") {
@@ -462,7 +464,12 @@ bool LightningScriptContext::ExecuteNext() {
         }
         float x, y, z, respawn = 30.0f;
         ls >> x >> y >> z;
-        ls >> respawn;
+        // Only overwrite the default if a 4th value was actually present. A
+        // failed `>>` leaves the target untouched in C++11+ but this stream is
+        // reused, and omitting the argument used to yield 0.0 instead of the
+        // documented 30.0 - which meant "never respawn" for an omitted value.
+        float maybeRespawn = 0.0f;
+        if (ls >> maybeRespawn) respawn = maybeRespawn;
         SetStr("__pickup_name", name);
         SetFloat("__pickup_x", x);
         SetFloat("__pickup_y", y);
@@ -632,6 +639,29 @@ std::string LightningScriptContext::PopPendingSkybox() {
     std::string name = it->second;
     m_strVars.erase(it);
     return name;
+}
+
+bool LightningScriptContext::PopPendingFogRestore() {
+    auto it = m_floatVars.find("__fog_restore");
+    if (it == m_floatVars.end()) return false;
+    const bool set = it->second != 0.0f;
+    m_floatVars.erase(it);
+    return set;
+}
+
+bool LightningScriptContext::PopPendingAmbientRestore() {
+    auto it = m_floatVars.find("__ambient_restore");
+    if (it == m_floatVars.end()) return false;
+    const bool set = it->second != 0.0f;
+    m_floatVars.erase(it);
+    return set;
+}
+
+bool LightningScriptContext::PopPendingSkyboxRestore() {
+    auto it = m_strVars.find("__skybox_restore");
+    if (it == m_strVars.end()) return false;
+    m_strVars.erase(it);
+    return true;
 }
 
 bool LightningScriptContext::PopPendingAmbient(float& r, float& g, float& b) {

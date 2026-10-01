@@ -190,14 +190,65 @@ static int test_pop_skybox() {
 }
 
 static int test_restore_skybox() {
-    TEST("restore_skybox clears pending skybox");
+    // Regression: restore_skybox used to set __skybox = "", which the host's
+    // PopPendingSkybox() rejects as "nothing pending" - so it was a silent
+    // no-op and the skybox was never restored. It now raises a dedicated flag.
+    TEST("restore_skybox raises a restore flag for the host");
     LightningScriptContext ctx;
     ctx.SetDebugTag("test_restore_sky");
     CHECK(ctx.Load("set_skybox \"foo\"\nrestore_skybox"));
     ctx.ExecuteNext();
     CHECK(ctx.PopPendingSkybox() == "foo");
     ctx.ExecuteNext(); // restore
-    CHECK(ctx.PopPendingSkybox() == ""); // should be empty
+    CHECK(ctx.PopPendingSkyboxRestore());
+    // One-shot: draining it twice must not report it again.
+    CHECK(!ctx.PopPendingSkyboxRestore());
+    PASS(); return 0; END_TEST();
+}
+
+static int test_restore_fog_and_ambient() {
+    // Same defect: restore_fog / restore_ambient erased the very vars the host
+    // Pop* reads, so PopPendingFog/Ambient returned false and nothing reverted.
+    TEST("restore_fog / restore_ambient raise restore flags");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_restore_fog");
+    CHECK(ctx.Load("set_fog 0.1 0.2 0.3 0.4\nrestore_fog\n"
+                   "set_ambient 0.5 0.6 0.7\nrestore_ambient"));
+    ctx.ExecuteNext();                       // set_fog
+    float r = 0, g = 0, b = 0, d = 0;
+    CHECK(ctx.PopPendingFog(r, g, b, d));
+    ctx.ExecuteNext();                       // restore_fog
+    CHECK(ctx.PopPendingFogRestore());
+    CHECK(!ctx.PopPendingFogRestore());
+    ctx.ExecuteNext();                       // set_ambient
+    CHECK(ctx.PopPendingAmbient(r, g, b));
+    ctx.ExecuteNext();                       // restore_ambient
+    CHECK(ctx.PopPendingAmbientRestore());
+    CHECK(!ctx.PopPendingAmbientRestore());
+    PASS(); return 0; END_TEST();
+}
+
+// Regression: spawn_pickup with an omitted respawn used to yield 0.0 (a failed
+// stream extraction overwrote the 30.0 default), meaning "never respawn".
+static int test_spawn_pickup_default_respawn() {
+    TEST("spawn_pickup without a respawn arg keeps the 30s default");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_spawn_pickup");
+    CHECK(ctx.Load("spawn_pickup \"Coin\" 1 2 3"));
+    ctx.ExecuteNext();
+    CHECK(ctx.GetStr("__pickup_name") == "Coin");
+    CHECK(ctx.GetFloat("__pickup_x") == 1.0f);
+    CHECK(ctx.GetFloat("__pickup_respawn") == 30.0f);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_spawn_pickup_explicit_respawn() {
+    TEST("spawn_pickup honours an explicit respawn arg");
+    LightningScriptContext ctx;
+    ctx.SetDebugTag("test_spawn_pickup2");
+    CHECK(ctx.Load("spawn_pickup \"Coin\" 1 2 3 12.5"));
+    ctx.ExecuteNext();
+    CHECK(ctx.GetFloat("__pickup_respawn") == 12.5f);
     PASS(); return 0; END_TEST();
 }
 
@@ -600,6 +651,9 @@ int main() {
     failures += test_pop_sound();
     failures += test_pop_skybox();
     failures += test_restore_skybox();
+    failures += test_restore_fog_and_ambient();
+    failures += test_spawn_pickup_default_respawn();
+    failures += test_spawn_pickup_explicit_respawn();
     failures += test_rtflag_stores_result();
     failures += test_empty_script();
     failures += test_reset_rewinds();

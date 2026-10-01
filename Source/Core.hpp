@@ -1492,6 +1492,22 @@ if (inSkyZone)
 
         // Apply pending Fog changes from script contexts
         auto &lem = LightningEntityManager::Instance();
+
+        // restore_fog: hand fog back to the level defaults. The three restore_*
+        // opcodes used to clear the pending value instead of signalling the host,
+        // so they never restored anything.
+        if (lem.TakePendingFogRestore()) {
+            static int fogD = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
+            static int fogC = GetShaderLocation(OmegaTechData.Lights, "fogColor");
+            float density = 0.0f;
+            float color[3] = {FogTint.r / 255.0f, FogTint.g / 255.0f, FogTint.b / 255.0f};
+            SetShaderValue(OmegaTechData.Lights, fogD, &density, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(OmegaTechData.Lights, fogC, color, SHADER_UNIFORM_VEC3);
+            FogEnabled = false;
+            FogIntensity = 0.0f;
+            OZ_INFO("LightningScript: restore_fog - reverted to level default");
+        }
+
         if (lem.HasPendingFog())
         {
             static int fogDensityLoc = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
@@ -1505,6 +1521,21 @@ if (inSkyZone)
             FogTint = {(unsigned char)(color[0] * 255), (unsigned char)(color[1] * 255),
                        (unsigned char)(color[2] * 255), 255};
             lem.ClearPendingFog();
+        }
+
+        // restore_skybox: drop the script override and go back to the level skybox.
+        // This used to set __skybox to "", which PopPendingSkybox rejects as
+        // "nothing pending", so the skybox was never restored.
+        if (lem.TakePendingSkyboxRestore()) {
+            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
+            if (sky && sky->skyboxTex.id > 0) {
+                UnloadTexture(sky->skyboxTex);
+                sky->skyboxTex = Texture2D{0};
+            }
+            // WorldModels.Skybox is left alone: it is the level's own texture and
+            // is still what the sky pass falls back to.
+            OmegaTechData.SkyboxEnabled = (WorldModels.Skybox.id > 0);
+            OZ_INFO("LightningScript: restore_skybox - reverted to level skybox");
         }
 
         // Apply pending Skybox changes from script contexts.
@@ -1536,6 +1567,12 @@ if (inSkyZone)
         }
 
         // Apply pending Ambient changes from script contexts
+        if (lem.TakePendingAmbientRestore()) {
+            static int ambLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
+            float amb[4] = {1.0f, 1.0f, 1.0f, 1.0f};   // matches LitLightning default
+            SetShaderValue(OmegaTechData.Lights, ambLoc, amb, SHADER_UNIFORM_VEC4);
+            OZ_INFO("LightningScript: restore_ambient - reverted to level default");
+        }
         if (lem.HasPendingAmbient())
         {
             float amb[4] = {lem.PendingAmbientR(), lem.PendingAmbientG(), lem.PendingAmbientB(), 1.0f};

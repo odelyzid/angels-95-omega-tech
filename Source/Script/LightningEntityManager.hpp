@@ -179,6 +179,16 @@ public:
     float PendingAmbientB() const { return m_ambientB; }
     void ClearPendingAmbient() { m_pendingAmbient = false; }
 
+    // restore_fog / restore_ambient / restore_skybox: the host must revert the
+    // corresponding override. All three opcodes used to clear the very value the
+    // host reads (or blank a name it rejects), so they did nothing at all.
+    bool HasPendingRestore() const {
+        return m_pendingFogRestore || m_pendingAmbientRestore || m_pendingSkyboxRestore;
+    }
+    bool TakePendingFogRestore() { bool v = m_pendingFogRestore; m_pendingFogRestore = false; return v; }
+    bool TakePendingAmbientRestore() { bool v = m_pendingAmbientRestore; m_pendingAmbientRestore = false; return v; }
+    bool TakePendingSkyboxRestore() { bool v = m_pendingSkyboxRestore; m_pendingSkyboxRestore = false; return v; }
+
 private:
     LightningEntityManager();
     std::vector<EntityInstance> m_instances;
@@ -213,6 +223,9 @@ private:
     float m_fogR = 0.0f, m_fogG = 0.0f, m_fogB = 0.0f, m_fogDensity = 0.0f;
     std::string m_pendingSkybox;
     bool m_pendingAmbient = false;
+    bool m_pendingFogRestore = false;
+    bool m_pendingAmbientRestore = false;
+    bool m_pendingSkyboxRestore = false;
     float m_ambientR = 0.0f, m_ambientG = 0.0f, m_ambientB = 0.0f;
     std::string m_pendingMessage;
     bool m_playerHurt = false;

@@ -99,6 +99,12 @@ public:
     bool PopPendingFog(float& r, float& g, float& b, float& density);
     std::string PopPendingSkybox();             // returns __skybox name or empty
     bool PopPendingAmbient(float& r, float& g, float& b);
+
+    // restore_* opcodes: these used to clear the pending value the host reads
+    // (or blank a name the host rejects), so all three were silent no-ops.
+    bool PopPendingFogRestore();
+    bool PopPendingAmbientRestore();
+    bool PopPendingSkyboxRestore();
     PawnSpawnRequest PopPendingPawnSpawn();     // returns __pawn_name and position
 
     // New side-effects (msg / player stats / consume / pickup spawn)
