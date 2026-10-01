@@ -38,8 +38,6 @@ static constexpr int EQUIP_SLOT_COUNT = 8;
 static constexpr int BACKPACK_COLS = 5;
 static constexpr int BACKPACK_ROWS = 4;
 static constexpr int BACKPACK_SLOTS = 20;
-static constexpr int HOTBAR_SLOTS = 8;
-static constexpr int WEAPON_SLOTS = 5;
 static constexpr int ITEM_DB_SIZE = 20;
 
 struct BackpackSlot {
@@ -73,6 +71,11 @@ static const ItemDBEntry ItemDB[ITEM_DB_SIZE] = {
     {12,ItemCategory::KEY,             EquipSlotType::NONE, "Key",                  "GameData/Global/Items/Key.png",            1,   "Opens locked doors and chests",  20},
     {13,ItemCategory::COIN,            EquipSlotType::NONE, "Coin",                 "GameData/Global/Items/Coin.png",           1,   "Currency",                        99},
     {14,ItemCategory::POWERUP,         EquipSlotType::NONE, "Powerup",              "GameData/Global/Items/Powerup.png",        0,   "Mysterious power",                5},
+    // Ammo previously shared item_id 14 with Powerup, so collecting an ammo box
+    // granted a Powerup. 16/17 must match the ids the server emits for
+    // PickupType::ARMOR / PickupType::AMMO (Source/Server/Server.cpp).
+    {16,ItemCategory::ARMOR,            EquipSlotType::NONE, "Armor Bundle",         "GameData/Global/Items/Ammo_Box.png",       1,   "Restores 1 armor point",         5},
+    {17,ItemCategory::POWERUP,         EquipSlotType::NONE, "Ammo Box",             "GameData/Global/Items/Ammo_Box.png",       30,  "Refills the ammo pool",          5},
 };
 
 inline const ItemDBEntry* GetItemDef(int id) {

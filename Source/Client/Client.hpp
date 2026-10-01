@@ -112,9 +112,12 @@ public:
     // Incoming chat messages
     std::string consume_pending_chat_message();
 
-    // Access received NPC / pickup state
-    const std::vector<ClientNPC>& npcs() const { return m_npcs; }
-    const std::vector<ClientPickup>& pickups() const { return m_pickups; }
+    // Access received NPC / pickup state.
+    // These return snapshots by value: the vectors are mutated by the network
+    // thread under m_msg_mutex, and handing out a reference let the game thread
+    // iterate while push_back reallocated (iterator-invalidation data race).
+    std::vector<ClientNPC> npcs() const { std::lock_guard<std::mutex> l(m_msg_mutex); return m_npcs; }
+    std::vector<ClientPickup> pickups() const { std::lock_guard<std::mutex> l(m_msg_mutex); return m_pickups; }
     const std::vector<RemotePlayer>& remote_players() const { return m_remote_players; }
     const std::vector<ClientProjectile>& projectiles() const { return m_projectiles; }
     int get_xp() const { return m_xp; }
@@ -142,7 +145,8 @@ private:
     net::NetworkClient m_client;
     std::string m_pending_scene;
     std::string m_chat_msg;
-    std::mutex m_msg_mutex;
+    // mutable so const accessors can take the lock (see npcs()/pickups()).
+    mutable std::mutex m_msg_mutex;
 
     std::vector<ClientNPC> m_npcs;
     std::vector<ClientPickup> m_pickups;
@@ -157,7 +161,11 @@ private:
     std::function<void(int item_id, int quantity)> m_on_item_collected;
     std::function<void(const char* weapon_def_name)> m_on_weapon_collected;
     std::function<void(int damage, float remaining_health)> m_on_player_hurt;
-    int m_pending_collect_id = -1;
+    // Pickup collects we have requested but not yet seen acknowledged, keyed by
+    // (pickup_id, world_index). A set rather than a single slot: overwriting one
+    // entry with another used to drop the earlier grant on the floor even though
+    // the server had already applied the effect.
+    std::vector<std::pair<int, int>> m_pending_collects;
 
     void handle_message(const net::NetworkMessage& msg);
     void on_connected();

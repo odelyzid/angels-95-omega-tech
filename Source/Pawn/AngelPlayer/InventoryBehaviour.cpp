@@ -457,11 +457,7 @@ void InventoryBehaviour::OnWeaponCollected(const char* weapon_def_name) {
     }
     int instIdx = lem.Spawn(def->name);
     if (instIdx < 0) return;
-    bool assigned = false;
-    for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
-        if (lem.HotbarAt(s) < 0) { lem.HotbarAssign(s, instIdx); assigned = true; break; }
-    }
-    if (assigned) Emit(std::string("Picked up weapon: ") + def->name);
+    if (lem.HotbarPlaceFirstFree(instIdx)) Emit(std::string("Picked up weapon: ") + def->name);
     else { OZ_WARN("Hotbar full — weapon %s lost", def->name.c_str()); lem.Despawn(instIdx); }
 
     if (m_feedbackSink) m_feedbackSink();

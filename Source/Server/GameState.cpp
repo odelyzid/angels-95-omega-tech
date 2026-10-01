@@ -790,6 +790,12 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
     ServerPlayer* player = get_player(player_id);
     if (!player) return false;
 
+    // The client's world index is not trusted: it must be the world the player
+    // is actually standing in. Without this check a client can reach into any
+    // loaded world (all worlds are authored near the origin, so several pickup
+    // clusters sit within collect range of one another).
+    if (world_index != player->world_index) return false;
+
     WorldState* ws = get_world(world_index);
     if (!ws) return false;
 

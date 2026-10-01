@@ -2,6 +2,7 @@
 #include "Log.hpp"
 #include "Physics/PlayerPhysics.hpp"
 #include "Client/JoinUri.hpp"
+#include "Network/NetworkSession.hpp"
 #include "Renderer/OzAssetMapper.hpp"
 #include "Audio/SoundManager.hpp"
 #include "World/OzOzoneLoader.hpp"
@@ -893,8 +894,13 @@ void UpdateEntitiesSim(float dt)
     // Update all pawns via PawnSystem (FSM: IDLE/PATROL/CHASE/RETURN)
     PawnSystem::Instance().Update(playerPos, dt);
 
-    // Update pickups (respawn timers, player collision)
-    PawnSystem::Instance().UpdatePickups(dt, playerPos, g_playerMovement.PlayerBounds);
+    // Update pickups (respawn timers, player collision).
+    // Single-player only. In multiplayer the server owns pickup state and the
+    // client additionally requests collects via PickupPawns; running this
+    // unconditionally granted every pickup twice and ran two independent
+    // respawn clocks that drifted apart.
+    if (!g_network_enabled)
+        PawnSystem::Instance().UpdatePickups(dt, playerPos, g_playerMovement.PlayerBounds);
 
     // Pickup collection feedback (console message + flash)
     {

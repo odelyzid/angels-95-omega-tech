@@ -46,7 +46,15 @@ public:
     void HotbarAssign(int slot, int instanceIndex);
     void HotbarSwap(int slotA, int slotB);
     int  HotbarAt(int slot) const;
+    // First slot holding no instance, or -1 when the bar is full. Single source
+    // of truth for "where does a newly collected item go" — the walk-over, the
+    // collect reply and the /summon console command each had their own copy,
+    // and only one of them reported a full bar.
+    int  HotbarFirstFreeSlot() const;
     void SelectSlot(int slot);
+    // Place `instanceIndex` in the first free slot. Returns false (leaving the
+    // caller to despawn or refund) when the bar is full.
+    bool HotbarPlaceFirstFree(int instanceIndex);
     int  SelectedSlot() const { return m_selectedSlot; }
     EntityInstance* SelectedEntity() const;
 

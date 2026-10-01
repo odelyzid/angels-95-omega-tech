@@ -165,6 +165,10 @@ struct PlayerKillData {
 struct PickupCollectedData {
     uint32_t player_id;
     int pickup_id;
+    // Required: pickup ids restart at 0 per world, so (pickup_id) alone is not
+    // unique across the partition set the client holds. Without this, collecting
+    // pickup 4 in world 1 also hides pickup 4 in every other loaded world.
+    int world_index;
     int item_id;
     int quantity;
     char weapon_def_name[64]; // for weapon pickups

@@ -21,7 +21,8 @@ public:
     // Scan the server pickup list for a nearby active pickup and request a
     // collect. Called inside the network block of the game loop (throttled
     // internally; `pressedE` widens the range to the interact radius).
-    void Update(bool pressedE, const Vector3& playerPos, double now);
+    // `local_world` restricts the scan to the world the player is actually in.
+    void Update(bool pressedE, const Vector3& playerPos, int local_world, double now);
 
 private:
     PickupPawns() = default;

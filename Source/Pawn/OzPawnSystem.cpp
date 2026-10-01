@@ -473,18 +473,18 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                     // equipped
                 } else {
                     int instIdx = lem.Spawn(edef->name);
-                    if (instIdx >= 0) {
-                        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
-                            if (lem.HotbarAt(s) < 0) {
-                                lem.HotbarAssign(s, instIdx);
-                                break;
-                            }
-                        }
-                    }
+                    // Was: a bare scan that broke out without despawning, so a
+                    // full hotbar silently orphaned the instance forever.
+                    if (instIdx >= 0 && !lem.HotbarPlaceFirstFree(instIdx))
+                        lem.Despawn(instIdx);
                 }
             }
 
-            // Fire the pickup's on_collect script hook (quest pickups, rewards)
+            // Fire the pickup's on_collect script hook (quest pickups, rewards).
+            // Script hooks are local-authority; in MP the pickup is granted by
+            // the server and this instance is not consulted (see Core.hpp, which
+            // gates UpdatePickups on !g_network_enabled), so running the hook
+            // here would double-fire every quest flag and reward.
             LightningEntityManager::Instance().TriggerCollectAction(n.typeName);
 
             OZ_INFO("Pickup collected: %s (itemId=%d)", n.typeName.c_str(), itemId);

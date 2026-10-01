@@ -76,12 +76,15 @@ static void signal_handler(int) { g_running = false; }
 // ---------------------------------------------------------------------------
 static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
                                     int world_index, const ServerPickup& p) {
-    net::PickupRespawnData prd;
+    net::PickupRespawnData prd{};
     prd.pickup_id = p.id;
     prd.world_index = world_index;
     prd.position = {p.position.x, p.position.y, p.position.z};
     prd.type = static_cast<int>(p.type);
     prd.value = p.value;
+    // Zero-init matters: this path used to leave weapon_def_name uninitialised
+    // and ship stack garbage on the wire.
+    strncpy(prd.weapon_def_name, p.weapon_def_name, sizeof(prd.weapon_def_name) - 1);
     net::NetworkMessage msg{};
     msg.magic = net::MAGIC;
     msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
@@ -254,6 +257,11 @@ static void on_server_message(const net::NetworkMessage& msg,
                     case PickupType::KEY:      item_id = 12; break;
                     case PickupType::COIN:     item_id = 13; quantity = pvalue > 0 ? pvalue : 1; break;
                     case PickupType::POWERUP:  item_id = 14; break;
+                    // ARMOR/AMMO previously fell through to `default: break`,
+                    // leaving item_id = -1: the pickup was consumed and hidden
+                    // for everyone but granted to nobody.
+                    case PickupType::ARMOR:    item_id = 16; quantity = pvalue > 0 ? pvalue : 1; break;
+                    case PickupType::AMMO:     item_id = 17; quantity = pvalue > 0 ? pvalue : 1; break;
                     case PickupType::WEAPON: {
                         item_id = 15; // weapon item_id
                         // Use weapon def name from server pickup, or default
@@ -286,6 +294,9 @@ static void on_server_message(const net::NetworkMessage& msg,
                 net::PickupCollectedData pcd_out;
                 pcd_out.player_id = sender.id;
                 pcd_out.pickup_id = pcd.pickup_id;
+                // Echo the world the pickup actually came from (already
+                // validated against player->world_index in collect_pickup).
+                pcd_out.world_index = pcd.world_index;
                 pcd_out.item_id = item_id;
                 pcd_out.quantity = quantity;
                 strncpy(pcd_out.weapon_def_name, weapon_def_out, sizeof(pcd_out.weapon_def_name) - 1);
@@ -883,9 +894,14 @@ int main(int argc, char** argv) {
                     WorldState* ws = g_game_state.get_world(rp.world_index);
                     if (!ws) continue;
                     ServerPickup* pickup = nullptr;
-                    for (auto& part : ws->partitions)
-                        for (auto& p : part.pickups)
+                    for (auto& part : ws->partitions) {
+                        for (auto& p : part.pickups) {
                             if (p.id == rp.pickup_id) { pickup = &p; break; }
+                        }
+                        // Was missing: the outer loop kept scanning every later
+                        // partition and the *last* match won.
+                        if (pickup) break;
+                    }
                     if (!pickup)
                         for (auto& p : ws->global_pickups)
                             if (p.id == rp.pickup_id) { pickup = &p; break; }

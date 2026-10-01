@@ -523,6 +523,23 @@ int LightningEntityManager::HotbarAt(int slot) const {
     return m_hotbar[slot];
 }
 
+int LightningEntityManager::HotbarFirstFreeSlot() const {
+    for (int s = 0; s < HOTBAR_SIZE; s++)
+        if (m_hotbar[s] < 0) return s;
+    return -1;
+}
+
+bool LightningEntityManager::HotbarPlaceFirstFree(int instanceIndex) {
+    if (instanceIndex < 0) return false;
+    int slot = HotbarFirstFreeSlot();
+    if (slot < 0) {
+        OZ_WARN("Hotbar full - instance %d not placed", instanceIndex);
+        return false;
+    }
+    HotbarAssign(slot, instanceIndex);
+    return true;
+}
+
 void LightningEntityManager::SelectSlot(int slot) {
     if (slot < 0 || slot >= HOTBAR_SIZE) return;
     OZ_INFO("[CHAIN] LEM::SelectSlot slot=%d", slot);

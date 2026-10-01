@@ -81,7 +81,10 @@ static void RelocateToInstallRoot() {
 }
 
 static OmegaClient g_client;
-static bool g_network_enabled = false;
+// Network session state lives in Network/NetworkSession.hpp because Core.hpp is
+// included above (line 1) and needs to read it.
+bool g_network_enabled = false;
+int g_network_world_index = -1;
 static bool ShowInventory = false;
 static bool ShowSkillTree = false;
 
@@ -252,14 +255,8 @@ static void ExecuteConsoleCommand(const char* cmd) {
                 }
                 if (match && *a == *b) {
                     int instIdx = LightningEntityManager::Instance().Spawn(def.name);
-                    if (instIdx >= 0) {
-                        for (int s = 0; s < LightningEntityManager::HOTBAR_SIZE; s++) {
-                            if (LightningEntityManager::Instance().HotbarAt(s) < 0) {
-                                LightningEntityManager::Instance().HotbarAssign(s, instIdx);
-                                break;
-                            }
-                        }
-                    }
+                    if (instIdx >= 0 && !LightningEntityManager::Instance().HotbarPlaceFirstFree(instIdx))
+                        LightningEntityManager::Instance().Despawn(instIdx);
                     found = true;
                     break;
                 }
@@ -605,6 +602,33 @@ int main(int argc, char** argv){
         size_t end = sceneJson.find('"', start);
         if (end == std::string::npos) return;
         std::string activeWorld = sceneJson.substr(start, end - start);
+
+        // Record which world index the server has us in. The server indexes
+        // worlds by their position in the "worlds":[...] array it sent, so the
+        // index is that array position — this is the id the pickup/NPC packets
+        // carry and the only one collect_pickup() will accept.
+        {
+            static const std::string wkey = "\"worlds\":[";
+            size_t wpos = sceneJson.find(wkey);
+            if (wpos != std::string::npos) {
+                size_t p = wpos + wkey.size();
+                int idx = 0;
+                bool found = false;
+                while (p < sceneJson.size()) {
+                    while (p < sceneJson.size() && (sceneJson[p] == ' ' || sceneJson[p] == ',')) ++p;
+                    if (p >= sceneJson.size() || sceneJson[p] == ']') break;
+                    if (sceneJson[p] != '"') { ++p; continue; }
+                    size_t s2 = ++p;
+                    while (p < sceneJson.size() && sceneJson[p] != '"') ++p;
+                    std::string entry = sceneJson.substr(s2, p - s2);
+                    if (entry == activeWorld) { g_network_world_index = idx; found = true; }
+                    ++idx;
+                    if (p < sceneJson.size()) ++p;
+                }
+                if (!found) g_network_world_index = -1;
+            }
+        }
+
         if (activeWorld.empty() || activeWorld == g_world_to_load) return;
         OZ_INFO("Network: server active world is '%s' — switching", activeWorld.c_str());
         strncpy(g_world_to_load, activeWorld.c_str(), sizeof(g_world_to_load) - 1);
@@ -975,6 +999,7 @@ int main(int argc, char** argv){
                 // by PickupPawns (networked pickups only; throttled internally).
                 PickupPawns::Instance().Update(IsKeyPressed(KEY_E),
                                                OmegaTechData.MainCamera.position,
+                                               g_network_world_index,
                                                GetTime());
             }
         }

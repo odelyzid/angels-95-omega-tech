@@ -112,10 +112,17 @@ void OmegaClient::send_pickup_collect(int pickup_id, int world_index, const char
     pcd.player_id = 0; // server knows player id
     pcd.pickup_id = pickup_id;
     pcd.world_index = world_index;
+    memset(pcd.weapon_def_name, 0, sizeof(pcd.weapon_def_name));
     if (weapon_def_name) {
         strncpy(pcd.weapon_def_name, weapon_def_name, sizeof(pcd.weapon_def_name) - 1);
     }
-    m_pending_collect_id = pickup_id;
+    {
+        const std::lock_guard<std::mutex> lock(m_msg_mutex);
+        // Track this request so the PICKUP_COLLECTED reply is applied. Bounded
+        // so a server that never replies cannot grow this without limit.
+        if (m_pending_collects.size() >= 32) m_pending_collects.erase(m_pending_collects.begin());
+        m_pending_collects.emplace_back(pickup_id, world_index);
+    }
 
     net::NetworkMessage msg;
     msg.magic = net::MAGIC;
@@ -299,20 +306,30 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             net::PickupCollectedData pcd;
             memcpy(&pcd, msg.payload, sizeof(pcd));
             for (auto& p : m_pickups) {
-                if (p.id == pcd.pickup_id) {
+                if (p.id == pcd.pickup_id && p.world_index == pcd.world_index) {
                     p.active = false;
                     break;
                 }
             }
-            // Grant item only if we requested this collect
-            if (pcd.item_id > 0 && m_pending_collect_id == pcd.pickup_id) {
+            // Grant item only if we requested this collect. Pending ids are a
+            // set, not a single slot: two rapid collects (E then walk-over) used
+            // to overwrite each other and silently drop the first grant even
+            // though the server had already applied the effect.
+            bool granted = false;
+            for (auto it = m_pending_collects.begin(); it != m_pending_collects.end(); ++it) {
+                if (it->first == pcd.pickup_id && it->second == pcd.world_index) {
+                    granted = true;
+                    m_pending_collects.erase(it);
+                    break;
+                }
+            }
+            if (pcd.item_id > 0 && granted) {
                 if (pcd.item_id == 15 && pcd.weapon_def_name[0] != '\0') {
                     // Weapon pickup - notify with weapon def name
                     if (m_on_weapon_collected) m_on_weapon_collected(pcd.weapon_def_name);
                 } else if (m_on_item_collected) {
                     m_on_item_collected(pcd.item_id, pcd.quantity);
                 }
-                m_pending_collect_id = -1;
             }
             break;
         }

@@ -214,6 +214,60 @@ static int test_ammo_pickup_no_xp_granted() {
     PASS(); return 0; END_TEST();
 }
 
+// Regression: the client-supplied world index used to be trusted verbatim, so a
+// player in world 0 could collect pickups belonging to any other loaded world
+// (all shipped worlds are authored near the origin, so their pickup clusters sit
+// within collect range of each other).
+static int test_collect_pickup_rejects_foreign_world() {
+    TEST("collect_pickup rejects a world_index the player is not in");
+    GameState gs;
+    uint32_t pid = gs.add_player(12, "WrongWorld");
+    ServerPlayer* p = gs.get_player(pid);
+    CHECK(p != nullptr);
+
+    // Player is in world 0.
+    WorldState home = make_test_world(0);
+    ServerPickup home_pickup;
+    home_pickup.id = 1;
+    home_pickup.type = PickupType::COIN;
+    home_pickup.value = 5;
+    home_pickup.active = true;
+    home.global_pickups.push_back(home_pickup);
+    gs.worlds().push_back(home);
+
+    // A second world also holding a pickup at the same position and the same id.
+    WorldState other = make_test_world(1);
+    ServerPickup other_pickup;
+    other_pickup.id = 1;
+    other_pickup.type = PickupType::COIN;
+    other_pickup.value = 500;
+    other_pickup.active = true;
+    other.global_pickups.push_back(other_pickup);
+    gs.worlds().push_back(other);
+
+    // Re-read through GameState: worlds() stores copies, so `home`/`other` go
+    // stale the moment they are pushed.
+    WorldState* home_w = gs.get_world(0);
+    WorldState* other_w = gs.get_world(1);
+    CHECK(home_w != nullptr && other_w != nullptr);
+
+    int xp_before = p->xp;
+
+    // Pointing the collect at world 1 must be refused outright.
+    bool crossed = gs.collect_pickup(pid, 1, 1);
+    CHECK_EQ(crossed, false);
+    CHECK_EQ(p->xp, xp_before);
+    CHECK_EQ(other_w->global_pickups[0].active, true);
+
+    // The player's own world still works.
+    bool ok = gs.collect_pickup(pid, 1, 0);
+    CHECK_EQ(ok, true);
+    CHECK_EQ(p->xp, xp_before + 5);   // only the home pickup's value applied
+    CHECK_EQ(home_w->global_pickups[0].active, false);
+    CHECK_EQ(other_w->global_pickups[0].active, true);
+    PASS(); return 0; END_TEST();
+}
+
 // --- Tier 0: trust / idempotency regressions ---
 
 static int test_add_player_idempotent() {
@@ -377,6 +431,7 @@ int main() {
     failures += test_projectile_hits_other_player();
     failures += test_ammo_pickup_grants_ammo();
     failures += test_ammo_pickup_no_xp_granted();
+    failures += test_collect_pickup_rejects_foreign_world();
     failures += test_add_player_idempotent();
     failures += test_player_position_flag();
     failures += test_npc_death_and_revive();
