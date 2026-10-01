@@ -559,6 +559,73 @@ static int test_respec_skills() {
     PASS(); return 0; END_TEST();
 }
 
+// Regression: RunAction used to leave whatever the body queued sitting in the
+// context. Only on_tick, the use-item path and TriggerEntityAction drained it,
+// so msg / play_sound / heal / damage / playerstat inside on_fire, on_swing,
+// on_hit, on_reload, on_equip, on_unequip and the pawn FSM hooks were silently
+// discarded. All four shipped pawn death messages never displayed.
+static int test_runaction_drains_side_effects() {
+    TEST("RunAction drains queued msg from a weapon hook");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "DrainGun";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["fire_rate"] = 0.1f;
+    EntityAction act;
+    act.name = "on_fire";
+    act.scriptLines.push_back("msg \"boom\"");
+    def.actions.push_back(act);
+    reg.Register(def);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("DrainGun");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+
+    em.ClearPendingMessage();
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    em.FireSelectedWeapon(origin, dir);      // triggers on_fire internally
+    CHECK(em.PendingMessage() == "boom");
+    PASS(); return 0; END_TEST();
+}
+
+// Regression: set_cooldown wrote __cooldown and nothing ever cleared it, so a
+// single `set_cooldown N` permanently replaced the authored fire_rate for the
+// instance's lifetime. Reading it now consumes it.
+static int test_set_cooldown_is_one_shot() {
+    TEST("set_cooldown does not permanently override fire_rate");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "OneShotCd";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["fire_rate"] = 0.05f;
+    EntityAction act;
+    act.name = "on_fire";
+    act.scriptLines.push_back("set_cooldown 0.5");
+    def.actions.push_back(act);
+    reg.Register(def);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("OneShotCd");
+    CHECK(idx >= 0);
+    EntityInstance* inst = em.Get(idx);
+    CHECK(inst != nullptr);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    em.FireSelectedWeapon(origin, dir);
+    // The script value applies once...
+    CHECK(inst->cooldownRemaining > 0.49f && inst->cooldownRemaining < 0.51f);
+
+    // ...and is not still sitting there to re-apply on a later trigger.
+    CHECK(inst->ctx.TakePendingFloat("__cooldown") == 0.0f);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningEntityManager Tests\n");
     fprintf(stdout, "============================\n");
@@ -571,6 +638,8 @@ int main() {
     failures += test_select_slot_out_of_range();
     failures += test_wheel_cycle_skips_empty();
     failures += test_wheel_cycle_all_empty();
+    failures += test_runaction_drains_side_effects();
+    failures += test_set_cooldown_is_one_shot();
     failures += test_selected_entity_empty();
     failures += test_equipment_assign();
     failures += test_equipment_find_free();

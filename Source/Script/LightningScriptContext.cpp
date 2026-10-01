@@ -499,6 +499,13 @@ float LightningScriptContext::GetFloat(const std::string& name, float defaultVal
     auto it = m_floatVars.find(name);
     return (it != m_floatVars.end()) ? it->second : defaultVal;
 }
+float LightningScriptContext::TakePendingFloat(const std::string& name) {
+    auto it = m_floatVars.find(name);
+    if (it == m_floatVars.end()) return 0.0f;
+    const float v = it->second;
+    m_floatVars.erase(it);
+    return v;
+}
 void LightningScriptContext::SetStr(const std::string& name, const std::string& val) { m_strVars[name] = val; }
 std::string LightningScriptContext::GetStr(const std::string& name, const std::string& defaultVal) const {
     auto it = m_strVars.find(name);

@@ -61,11 +61,11 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         float swingSpeed = readStat("swing_speed", readStat("fire_rate", 0.25f));
         ent->cooldownRemaining = swingSpeed;
 
-        // Run on_swing action
-        ent->ctx.RunAction("on_swing", 30);
+        // Run on_swing action (drains queued side-effects)
+        RunAction(ent, "on_swing");
 
         // Honor script-set cooldown override (set_cooldown N)
-        float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+        float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
         if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
 
 #ifndef OMEGA_TEST_ENV
@@ -82,7 +82,7 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             Vector3 closest = Vector3Add(origin, Vector3Scale(direction, t));
             float d = Vector3Distance(closest, pawn.position);
             if (d < 2.0f) {
-                ent->ctx.RunAction("on_hit", 30);
+                RunAction(ent, "on_hit");
                 Pawn* target = PawnSystem::Instance().Get((int)pawn.id);
                 if (target) PawnSystem::Instance().ApplyPawnDamage(*target, (int)projectileDamage);
                 break;
@@ -133,8 +133,8 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
             float reloadTime = readStat("reload_time", 2.0f);
             ent->cooldownRemaining = reloadTime;
             ent->runtimeStats["ammo"] = magazine;
-            ent->ctx.RunAction("on_reload", 30);
-            float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+            RunAction(ent, "on_reload");
+            float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
             if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
             if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
             return -1;
@@ -146,10 +146,10 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     ent->cooldownRemaining = fireRate;
 
     // Trigger on_fire script action if defined
-    ent->ctx.RunAction("on_fire", 30);
+    RunAction(ent, "on_fire");
 
     // Honor script-set cooldown override (set_cooldown N)
-    float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+    float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
     if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
 
 #ifndef OMEGA_TEST_ENV
@@ -223,8 +223,8 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     ent->cooldownRemaining = reloadTime;
     ent->runtimeStats["ammo"] = magazine;
 
-    ent->ctx.RunAction("on_reload", 30);
-    float scriptCd = ent->ctx.GetFloat("__cooldown", 0.0f);
+    RunAction(ent, "on_reload");
+    float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
     if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
     if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
     return true;
@@ -294,7 +294,7 @@ void LightningEntityManager::Update(float dt) {
 
         // Per-frame on_tick hook (only for defs that define it)
         if (inst.ctx.FindJumpLabel("on_tick") >= 0) {
-            inst.ctx.RunAction("on_tick", 30);
+            RunAction(&inst, "on_tick");
             ApplyEntityScriptEffects(inst);
         }
 
@@ -496,6 +496,17 @@ EntityInstance* LightningEntityManager::Get(int index) {
 void LightningEntityManager::RunAction(EntityInstance* inst, const std::string& actionName) {
     if (!inst || !inst->def) return;
     inst->ctx.RunAction(actionName, 30);
+    // Drain the side-effects the body queued (msg / play_sound / heal / damage /
+    // playerstat / spawn_pawn / spawn_pickup).
+    //
+    // This was the single biggest scripting bug: effects were only drained from
+    // on_tick, the use-selected-item path and TriggerEntityAction. Every other
+    // hook - on_fire, on_swing, on_hit, on_reload, on_equip, on_unequip, the
+    // pawn FSM transitions - queued its effects into the context and then
+    // stranded them. All four shipped pawn .ozls death messages never displayed,
+    // and `say` in a weapon action was the only thing that appeared to work
+    // (because say writes straight to stdout rather than queueing).
+    ApplyEntityScriptEffects(*inst);
 }
 
 // ---------------------------------------------------------------------------
@@ -692,11 +703,11 @@ void LightningEntityManager::HandleInput(bool uiBlocking) {
     if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E)) {
         EntityInstance* sel = SelectedEntity();
         if (sel && sel->def) {
-            // Trigger on_use action
-            sel->ctx.RunAction("on_use", 30);
-
-            // Apply side-effects immediately so consumables feel instant
-            ApplyEntityScriptEffects(*sel);
+            // Trigger on_use action. Goes through RunAction so its queued
+            // side-effects (playerstat/heal/damage/msg/play_sound) are drained
+            // like every other hook; the explicit drain that used to follow is
+            // now redundant.
+            RunAction(sel, "on_use");
 
             // 'consume' removes the item from the hotbar after use
             if (sel->ctx.ConsumeRequested()) {
@@ -1007,6 +1018,21 @@ void LightningEntityManager::UnlockSkill(const std::string& name) {
     applyBonus("max_mana_bonus", "max_mana");
     applyBonus("max_psychic_energy_bonus", "max_psychic_energy");
     applyBonus("health_bonus", "health");
+
+    // Run the node's on_unlock body. Every shipped skill def defines one, but
+    // nothing ever invoked it - the label parsed fine and then never fired, so
+    // its msg / play_sound / playerstat lines were dead.
+    //
+    // Needs a live script instance, so spawn a transient one, run the action on
+    // it, then despawn it: skills are unlocked by name from the registry and
+    // have no hotbar/entity instance otherwise.
+    int instIdx = Spawn(name);
+    if (instIdx >= 0) {
+        RunAction(&m_instances[(size_t)instIdx], "on_unlock");
+        Despawn(instIdx);
+    } else {
+        OZ_WARN("UnlockSkill: no instance for '%s' — on_unlock skipped", name.c_str());
+    }
 }
 
 void LightningEntityManager::RespecSkills() {

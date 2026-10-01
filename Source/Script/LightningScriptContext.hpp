@@ -105,6 +105,12 @@ public:
     std::string PopPendingMessage();            // returns __last_msg and clears it
     bool ConsumeRequested() const;              // true until ClearConsume()
     void ClearConsume();
+
+    // Read a one-shot script variable and clear it in the same step.
+    // set_cooldown used to be a permanent override: nothing ever reset
+    // __cooldown, so one `set_cooldown 0.28` in a weapon def silently replaced
+    // the authored fire_rate for the life of the instance.
+    float TakePendingFloat(const std::string& name);
     std::vector<PlayerStatOp> PopPlayerStatOps();  // drains queued stat writes
     PickupSpawnRequest PopPendingPickupSpawn();    // returns __pickup_* data
     bool PopPendingHurt();                         // returns true if a scripted damage flash was requested
