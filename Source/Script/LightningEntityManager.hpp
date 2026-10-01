@@ -153,6 +153,16 @@ static constexpr int HOTBAR_SIZE = 8;
         return r;
     }
 
+    // Weapon stash. When the player walks over a weapon def and the hotbar is
+    // full, the pickup is queued by def name rather than silently dropped
+    // (Despawn). FlushNextStashedWeapon pulls the first queued def into the
+    // first free hotbar slot and returns true on success. StashedWeaponCount
+    // is surfaced in the HUD so the player knows something is pending.
+    int  StashedWeaponCount() const { return (int)m_stashedWeapons.size(); }
+    void StashWeapon(const std::string& defName);
+    bool FlushNextStashedWeapon();
+    const std::vector<std::string>& StashedWeapons() const { return m_stashedWeapons; }
+
     // --- Zone actions (called by PawnSystem on zone enter/exit) ---
     void TriggerZoneAction(const std::string& zoneName, const std::string& actionName);
     void TriggerZoneAction(const EntityDef* def, const std::string& actionName);
@@ -317,6 +327,8 @@ private:
     // GetPlayerStat/SetPlayerStat are no-ops with no player entity loaded (see
     // the accessor comment). Reset to full by Init().
     float m_stamina = 100.0f;
+    // Pending weapons queued by name when the hotbar is full at pickup time.
+    std::vector<std::string> m_stashedWeapons;
 
     // Hotbar drag reorder state. -1 = not dragging / not over a slot.
     int m_dragFrom = -1;

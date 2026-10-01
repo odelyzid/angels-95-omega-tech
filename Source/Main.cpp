@@ -515,6 +515,14 @@ int main(int argc, char** argv){
         OZ_WARN("Protocol handler: angels95:// registration unavailable");
     if (VSYNCToggle) SetConfigFlags(FLAG_VSYNC_HINT);
     if (MXAAToggle)  SetConfigFlags(FLAG_MSAA_4X_HINT);
+    // Borderless splash window: stays hidden while the engine boots, the asset
+    // pipeline resolves, and the first world frame is rendered. PlaySplashScreen
+    // makes the window visible only after that gate fires, so the user never
+    // sees an undecorated title-bar or an empty client area. Honor it only on
+    // the client - the editor owns its own splash and its window configuration
+    // (FLAG_VSYNC_HINT is set in AngelEd/Source/Main.cpp).
+    SetConfigFlags(FLAG_WINDOW_HIDDEN);
+    if (!g_shot.active) SetConfigFlags(FLAG_WINDOW_UNDECORATED);
 
     InitWindow(ConfigWindowWidth, ConfigWindowHeight,
                g_shot.active ? "Angels95 [shot]" : "Angels95");
@@ -556,17 +564,21 @@ int main(int argc, char** argv){
         },
         []() { oz::ui::ShowAboutDialog(); },
     });
-    PlaySplashScreen();
 
     static bool g_returnToMenu = false;
 
-    // Outer loop: return to menu after gameplay
+    // Outer loop: return to menu after gameplay. Splash runs once per world
+    // load (initial and on return-to-menu), after the world has been loaded
+    // and its first frame is rendered, so the user never sees an empty client
+    // area or the title bar.
+    bool splashShown = false;
     while (!WindowShouldClose()) {
     PlayHomeScreen();
     if (WindowShouldClose()) break;
     g_returnToMenu = false;
-    
+
     LoadWorld();
+    if (!splashShown) { PlaySplashScreen(); splashShown = true; }
     g_client.set_on_chat_received([](const std::string& msg) {
         OmegaTechTextSystem.Write(msg);
     });

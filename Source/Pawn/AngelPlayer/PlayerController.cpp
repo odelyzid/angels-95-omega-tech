@@ -1,6 +1,7 @@
 #include "PlayerController.hpp"
 #include "../../Physics/PlayerPhysics.hpp"
 #include "../PlayerMovement.hpp"
+#include "../../Audio/SoundManager.hpp"
 #include <cmath>
 
 // Reads the movement-state global defined once in the client TU (Main).
@@ -69,6 +70,8 @@ void PlayerController::UpdateVertical(float dt, Camera3D& cam, float savedCamY, 
     motion.onGround = g_playerMovement.onGround;
     motion.velocityY = g_playerMovement.velocityY;
 
+    const bool wasOnGround = motion.onGround;
+
     if (g_playerMovement.isNoClip || g_playerMovement.isFlying) {
         // Noclip / flying: direct vertical control (Space up / Ctrl down)
         physics.UpdateFlyVertical(cam, g_playerMovement.BaseSpeed, phys, dt, true, true);
@@ -85,8 +88,15 @@ void PlayerController::UpdateVertical(float dt, Camera3D& cam, float savedCamY, 
         physics.UpdateGroundVertical(cam, motion, savedCamY, uiBlocked, phys, dt);
     }
 
+    if (wasOnGround && !motion.onGround && motion.velocityY > 0.0f)
+        PlayJump();
+
     g_playerMovement.onGround = motion.onGround;
     g_playerMovement.velocityY = motion.velocityY;
+}
+
+void PlayerController::PlayJump() {
+    SoundManager::Instance().PlayJump();
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +154,14 @@ bool PlayerController::DrawGameOver(int& deaths,
                 HideCursor();
                 DisableCursor();
             } else if (i == 1) {
+                // Main Menu. The gameplay loop calls HideCursor/DisableCursor
+                // every frame and PlayHomeScreen otherwise inherits that state,
+                // so the cursor stays invisible and clicks do nothing. Show it
+                // here, then let g_returnToMenu fall out of the game loop and
+                // enter the home screen with the cursor already visible.
                 returnToMenu = true;
+                ShowCursor();
+                EnableCursor();
             }
         }
     }

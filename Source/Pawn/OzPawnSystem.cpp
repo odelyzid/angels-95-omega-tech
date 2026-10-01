@@ -531,10 +531,17 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                     // equipped
                 } else {
                     int instIdx = lem.Spawn(edef->name);
-                    // Was: a bare scan that broke out without despawning, so a
-                    // full hotbar silently orphaned the instance forever.
-                    if (instIdx >= 0 && !lem.HotbarPlaceFirstFree(instIdx))
+                    // Full hotbar used to despawn the instance, so picking up
+                    // a weapon when every cell was occupied silently dropped
+                    // the pickup (user reported: Pistol in slot 1, walked
+                    // over the Etheral_Weaver, etheral_waver vanished with
+                    // itemId=0). Queue the def name so the next flush can
+                    // place it; the HUD shows the pending count.
+                    if (instIdx >= 0 && !lem.HotbarPlaceFirstFree(instIdx)) {
                         lem.Despawn(instIdx);
+                        if (edef->type == EntityType::WEAPON)
+                            lem.StashWeapon(edef->name);
+                    }
                 }
             }
 
@@ -552,6 +559,10 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
             m_pickupFeedback.tint = PickupCategoryTintRGBA(category);
             m_pickupFeedback.category = PickupCategoryName(category);
             m_pickupFeedback.flashTimer = 0.5f;
+
+            // Try to flush a stashed weapon into the now-maybe-free hotbar slot.
+            // If nothing lands, the stash survives until the next pickup.
+            LightningEntityManager::Instance().FlushNextStashedWeapon();
         }
     }
 }

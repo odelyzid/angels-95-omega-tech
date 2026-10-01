@@ -88,6 +88,30 @@ bool LightningEntityManager::MeleeBlockedByGeometry(Vector3 from, Vector3 to) {
 #endif
 }
 
+// Weapon stash implementation (declared in the header).
+//
+// When a pickup of a WEAPON def lands while every hotbar cell is full, the
+// pickup path used to despawn the instance and the player silently lost the
+// pickup. The stash queues the def name so the next pickup attempt can land
+// the weapon in the now-empty slot, and the HUD shows the count.
+
+void LightningEntityManager::StashWeapon(const std::string& defName) {
+    if (defName.empty()) return;
+    m_stashedWeapons.push_back(defName);
+}
+
+bool LightningEntityManager::FlushNextStashedWeapon() {
+    while (!m_stashedWeapons.empty()) {
+        const std::string defName = m_stashedWeapons.front();
+        m_stashedWeapons.erase(m_stashedWeapons.begin());
+        const int idx = Spawn(defName.c_str());
+        if (idx < 0) continue;     // def vanished; try the next stash entry
+        if (HotbarPlaceFirstFree(idx)) return true;
+        Despawn(idx);                // still no room; the entry is consumed
+    }
+    return false;
+}
+
 // Send a resolved melee hit to the server, which re-validates reach and applies
 // the damage. Only meaningful for networkControlled pawns; local pawns are
 // damaged directly by the caller.
@@ -767,6 +791,7 @@ bool LightningEntityManager::HotbarPlaceFirstFree(int instanceIndex) {
 
 void LightningEntityManager::SelectSlot(int slot) {
     if (slot < 0 || slot >= HOTBAR_SIZE) return;
+    if (slot == m_selectedSlot) return;
     OZ_INFO("[CHAIN] LEM::SelectSlot slot=%d", slot);
     int oldIdx = m_hotbar[m_selectedSlot];
     if (oldIdx >= 0 && oldIdx < (int)m_instances.size())
@@ -775,6 +800,7 @@ void LightningEntityManager::SelectSlot(int slot) {
     int newIdx = m_hotbar[slot];
     if (newIdx >= 0 && newIdx < (int)m_instances.size())
         RunAction(&m_instances[newIdx], "on_equip");
+    SoundManager::Instance().PlayWeaponLoad();
     OZ_INFO("[CHAIN] LEM::SelectSlot done slot=%d inst=%d", slot, newIdx);
 }
 

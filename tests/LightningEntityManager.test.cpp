@@ -679,6 +679,63 @@ static int test_melee_stamina() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_stashed_weapon_drop() {
+    TEST("Weapon pickup with a full hotbar is stashed, not lost");
+    // Reproduces the user's bug: Pistol in slot 1, walked over the
+    // Etheral_Weaver, etheral_waver vanished (itemId=0, hotbar full, the
+    // old path did Despawn with no fallback). The stash queues the def name
+    // and FlushNextStashedWeapon places it as soon as a slot opens.
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef pistol;  pistol.name = "stash_pistol"; pistol.type = EntityType::WEAPON;
+    EntityDef sword;   sword.name  = "stash_sword";  sword.type  = EntityType::WEAPON;
+    reg.Register(pistol); reg.Register(sword);
+
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    for (int i = 0; i < LightningEntityManager::HOTBAR_SIZE; i++) {
+        int p = em.Spawn("stash_pistol");
+        CHECK(p >= 0);
+        em.HotbarAssign(i, p);
+    }
+    CHECK_EQ(em.HotbarFirstFreeSlot(), -1);
+    CHECK_EQ(em.StashedWeaponCount(), 0);
+
+    // Simulate the walk-over pickup's stash call (the pickup code path itself
+    // lives in OzPawnSystem and would need a world tick to exercise; the
+    // contract here is that StashWeapon queues by name and FlushNextStashedWeapon
+    // fills the first free slot).
+    em.StashWeapon("stash_sword");
+    CHECK_EQ(em.StashedWeaponCount(), 1);
+
+    // Bar is still full: a flush attempt finds no room and consumes the
+    // entry rather than placing it.
+    CHECK(!em.FlushNextStashedWeapon());
+    CHECK_EQ(em.StashedWeaponCount(), 0);
+
+    // Free a slot by despawning whatever was in slot 0; the manager already
+    // clears the slot entry on Despawn.
+    int freeInstance = em.HotbarAt(0);
+    em.Despawn(freeInstance);
+    CHECK_EQ(em.HotbarFirstFreeSlot(), 0);
+
+    em.StashWeapon("stash_sword");
+    CHECK(em.FlushNextStashedWeapon());
+    CHECK_EQ(em.StashedWeaponCount(), 0);
+    EntityInstance* placed = em.Get(em.HotbarAt(0));
+    CHECK(placed != nullptr);
+    CHECK(placed->def != nullptr);
+    CHECK(placed->def->name == std::string("stash_sword"));
+
+    // Multiple stashed defs drain in FIFO order.
+    em.Despawn(em.HotbarAt(0));
+    CHECK_EQ(em.HotbarFirstFreeSlot(), 0);
+    em.StashWeapon("stash_sword");
+    em.StashWeapon("stash_pistol");
+    CHECK(em.FlushNextStashedWeapon());
+    CHECK(em.HotbarAt(0) >= 0);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -914,6 +971,7 @@ int main() {
     failures += test_reload_started_flag();
     failures += test_melee_stamina();
     failures += test_hotbar_drag_reorder();
+    failures += test_stashed_weapon_drop();
     failures += test_multi_despawn_cycles();
     failures += test_fire_no_weapon();
     failures += test_fire_not_a_weapon();

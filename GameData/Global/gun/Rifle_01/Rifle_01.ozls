@@ -16,9 +16,9 @@ entity "rifle_01" : weapon {
         projectile_submesh = 4
         projectile_scale = 4.0
         projectile_color = (0.6, 1.0, 0.4)
-        viewmodel_offset = (0.3, -0.22, 0.6)
+        viewmodel_offset = (0.3, -0.22, 0.55)
         viewmodel_rot = (0, 90, 0)
-        viewmodel_scale = 1.0
+        viewmodel_scale = 1.3
     }
     actions {
         on_fire {
