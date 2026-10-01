@@ -84,7 +84,7 @@ BUILD_DIR := build
 OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o miniz.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o \
-          OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o PlayerPhysics.o \
+          OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o AutoConvex.o WorldChunk.o PlayerPhysics.o \
           ZoneManager.o SoundManager.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
@@ -229,6 +229,11 @@ $(BUILD_DIR)/SoundManager.o: Source/Audio/SoundManager.cpp Source/Audio/SoundMan
 $(BUILD_DIR)/OzBsp.o: Source/Physics/OzBsp.cpp Source/Physics/OzBsp.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Physics/OzBsp.cpp -o $@
 
+# 5f-b. AutoConvex (voxel-derived convex collision proxies for meshes/brushes).
+# Raylib-free, so it also builds into the headless test_autoconvex target.
+$(BUILD_DIR)/AutoConvex.o: Source/Physics/AutoConvex.cpp Source/Physics/AutoConvex.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Physics/AutoConvex.cpp -o $@
+
 # 5g. Compile WorldChunk spatial partition
 $(BUILD_DIR)/WorldChunk.o: Source/Physics/WorldChunk.cpp Source/Physics/WorldChunk.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Physics/WorldChunk.cpp -o $@
@@ -301,6 +306,10 @@ test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Sourc
 test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
+# AutoConvex is raylib-free, so this suite builds headless with SERVER_CXX.
+test_autoconvex: tests/AutoConvex.test.cpp Source/Physics/AutoConvex.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
 # Static auditor for .ozone worlds: it links OzoneParser from the exact
 # single-source-of-truth source, then checks geometry bounds, lighting, mesh
 # scale, asset references, playerstart sanity and zone naming. Pass a world
@@ -332,7 +341,7 @@ test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
 test_ozls_writer: tests/OzlsWriter.test.cpp Source/Script/OzlsWriter.cpp Source/Script/LightningScriptParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer worldcheck
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex worldcheck
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -369,6 +378,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== OzlsWriter Tests ==="
 	-./test_ozls_writer
 	@echo ""
+	@echo "=== AutoConvex Tests ==="
+	-./test_autoconvex
+	@echo ""
 	@echo "=== Worldcheck (.ozone auditor) ==="
 	# Run worldcheck on every shipped .ozone world (errors are printed, warnings do not fail).
 	@for w in GameData/Worlds/*/World.ozone; do \
@@ -376,4 +388,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	done
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer worldcheck
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex worldcheck

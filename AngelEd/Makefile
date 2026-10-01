@@ -120,6 +120,9 @@ $(BUILD_DIR)/OzoneHeightmap.o: ../Source/World/OzoneHeightmap.cpp ../Source/Worl
 $(BUILD_DIR)/OzBsp.o: ../Source/Physics/OzBsp.cpp ../Source/Physics/OzBsp.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/OzBsp.cpp -o $@
 
+$(BUILD_DIR)/AutoConvex.o: ../Source/Physics/AutoConvex.cpp ../Source/Physics/AutoConvex.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Physics/AutoConvex.cpp -o $@
+
 $(BUILD_DIR)/OzoneParser.o: ../Source/World/OzoneParser.cpp ../Source/World/OzoneParser.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/World/OzoneParser.cpp -o $@
 
@@ -167,6 +170,7 @@ $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Rendere
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/rlights/rlights.cpp -o $@
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
+             $(BUILD_DIR)/AutoConvex.o \
              $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/ZoneManager.o $(BUILD_DIR)/SoundManager.o \
              $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \

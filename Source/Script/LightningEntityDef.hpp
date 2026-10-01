@@ -23,6 +23,11 @@ enum class EntityType : uint8_t {
     SKILL,
     // Declarative UI/HUD layer (data + hooks); drawn by C++ (AngelPlayer).
     GAMEUI,
+    // Light defaults layer. A `light ... name=torch` OZONE line resolves the
+    // def by that name (exactly as a zone's name= resolves its skyzone def) and
+    // takes any value the line itself did not author. intensity/radius/color
+    // stay line-owned so a def can never silently retune a saved level.
+    LIGHT,
     UNKNOWN
 };
 
@@ -42,6 +47,7 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::WIND_ZONE:       return "WindZone";
         case EntityType::SKILL:           return "skill";
         case EntityType::GAMEUI:          return "GameUI";
+        case EntityType::LIGHT:          return "light";
         default:                          return "unknown";
     }
 }
@@ -61,6 +67,7 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "WindZone")      return EntityType::WIND_ZONE;
     if (n == "skill")         return EntityType::SKILL;
     if (n == "GameUI")        return EntityType::GAMEUI;
+    if (n == "light")          return EntityType::LIGHT;
     return EntityType::UNKNOWN;
 }
 

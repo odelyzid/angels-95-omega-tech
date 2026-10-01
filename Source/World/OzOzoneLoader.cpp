@@ -1,4 +1,4 @@
-#include "OzOzoneLoader.hpp"
+﻿#include "OzOzoneLoader.hpp"
 #include "rlgl.h"
 #include "OzoneFrustum.hpp"
 #include "../Renderer/OzAssetMapper.hpp"
@@ -8,6 +8,7 @@
 #include "../Log.hpp"
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Physics/OzBsp.hpp"
+#include "../Physics/AutoConvex.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -25,7 +26,7 @@ static std::string StripQuotes(std::string s) {
 }
 
 // True for primitives that carry entity/level metadata rather than brush
-// geometry — they are handled by ParseOzoneEntities, not the mesh builder.
+// geometry â€” they are handled by ParseOzoneEntities, not the mesh builder.
 static bool IsEntityPrimitive(OzonePrimitiveType t) {
     switch (t) {
         case OzonePrimitiveType::ENTITY_PLAYERSTART:
@@ -46,6 +47,58 @@ static bool IsEntityPrimitive(OzonePrimitiveType t) {
         default:
             return false;
     }
+}
+
+// Fill a light's unauthored fields from its `.ozls` def (EntityType::LIGHT),
+// resolved by the light's `name=` kwarg - the same lookup zones use for their
+// skyzone defs, so a world-scoped `torch.ozls` next to the world works without
+// a new OZONE kwarg.
+//
+// DEFAULTS ONLY. A value the OZONE line authored always wins, which means
+// intensity / radius / color / position / target can never be moved by editing
+// the def: those are positional on every light line, and a def that could
+// override them would silently retune every already saved level.
+static void ApplyLightDefDefaults(LightNode& node, const OzonePrimitive& prim) {
+    if (node.name.empty()) return;
+    const EntityDef* def = LightningEntityRegistry::Instance().Find(node.name);
+    if (!def || def->type != EntityType::LIGHT) return;
+
+    const auto& S = def->stats;
+    auto stat = [&](const char* key, float& dst, bool authored) {
+        if (authored) return;
+        auto it = S.floats.find(key);
+        if (it != S.floats.end()) dst = it->second;
+    };
+
+    // effect / flare / corona apply only when the line omitted them, which the
+    // parser records as -1 (see OzonePrimitive). They are authored as floats in
+    // the def and clamped into the enum's range rather than reinterpret_cast -
+    // a def is data, and a bad value in it must not reach memory as bits.
+    if (prim.lightEffect < 0) {
+        auto it = S.floats.find("effect");
+        if (it != S.floats.end()) {
+            const int e = (int)it->second;
+            if (e >= (int)LitLightEffect::NONE && e <= (int)LitLightEffect::LAMP)
+                node.effect = (LitLightEffect)e;
+        }
+    }
+    if (prim.lightFlare < 0) {
+        auto it = S.floats.find("flare");
+        if (it != S.floats.end()) node.flare = (it->second != 0.0f);
+    }
+    if (prim.lightCorona < 0) {
+        auto it = S.floats.find("corona");
+        if (it != S.floats.end()) node.corona = (it->second != 0.0f);
+    }
+
+    // Always def-owned: the light line cannot express these at all.
+    stat("period", node.period, false);
+    if (auto it = S.floats.find("cast_shadow"); it != S.floats.end())
+        node.castShadow = (it->second != 0.0f);
+    if (auto it = S.floats.find("is_static"); it != S.floats.end())
+        node.isStatic = (it->second != 0.0f);
+    stat("inner_cone", node.innerCone, false);
+    stat("outer_cone", node.outerCone, false);
 }
 
 static bool ParseOzoneEntity(const OzonePrimitive& prim,
@@ -131,7 +184,7 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                     skyNode.intensity = node.intensity;
                     // Look up .ozls SKYZONE entity by name for initial config.
                     // The global registry holds defs from ALL worlds, and zone
-                    // names are generated per world (e.g. "zone_sky_0") — so a
+                    // names are generated per world (e.g. "zone_sky_0") â€” so a
                     // name hit may belong to another world. Disambiguate by
                     // matching the def's skybox path against this world dir.
                     const EntityDef* edef = LightningEntityRegistry::Instance().Find(node.name);
@@ -312,6 +365,7 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 out.emitters.push_back(node);
             }
             return true;
+
         case OzonePrimitiveType::ENTITY_LIGHT: {
             LightNode node;
             node.active = true;
@@ -378,12 +432,23 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
             if (prim.lightFlare  >= 0) node.flare  = prim.lightFlare != 0;
             if (prim.lightCorona >= 0) node.corona = prim.lightCorona != 0;
             if (!prim.name.empty())   node.name = prim.name;
+
+            // `.ozls` defaults layer. `name=` resolves a def exactly the way a
+            // zone's name= resolves its skyzone def, and the def fills only the
+            // values the line did NOT author.
+            //
+            // intensity / radius / color / position / target stay line-owned on
+            // purpose: the OZONE light line always writes them positionally, so a
+            // def that could override them would silently retune every already
+            // saved level the next time the def was touched - the exact hazard
+            // the positional/kwarg split above was added to avoid.
+            ApplyLightDefDefaults(node, prim);
             out.lights.push_back(node);
             return true;
         }
         case OzonePrimitiveType::ENTITY_PORTAL: {
             // portal targetWorld minX minY minZ maxX maxY maxZ [spawnX spawnY spawnZ] [bidir]
-            // Coordinates are OZONE Z-up — convert to engine Y-up.
+            // Coordinates are OZONE Z-up â€” convert to engine Y-up.
             if (prim.args.size() >= 6) {
                 ZonePortal portal;
                 portal.targetWorld = prim.entityType;
@@ -519,7 +584,7 @@ void OzoneLoader::SetLitFogShaderEnabled(bool enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// World texture loading — loads ALL .png from oztex/tileset/ into vector
+// World texture loading â€” loads ALL .png from oztex/tileset/ into vector
 // Textures are indexed 1..N by their sorted filename order.
 // ---------------------------------------------------------------------------
 void OzoneLoader::LoadWorldTextures(const std::string& worldDir) {
@@ -585,7 +650,7 @@ static void ApplyTex(Model& model, Texture2D tex, Color fallback) {
 }
 
 // ---------------------------------------------------------------------------
-// Build* â€” each applies the best texture for its role
+// Build* Ã¢â‚¬â€ each applies the best texture for its role
 // ---------------------------------------------------------------------------
 Model OzoneLoader::BuildBox(float w, float h, float d) {
     Mesh mesh = GenMeshCube(w, h, d);
@@ -751,7 +816,7 @@ Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) 
 }
 
 // ---------------------------------------------------------------------------
-// LoadFile â€” also loads world textures from the .ozone file's directory
+// LoadFile Ã¢â‚¬â€ also loads world textures from the .ozone file's directory
 // ---------------------------------------------------------------------------
 bool OzoneLoader::LoadFile(const char* path) {
     OZ_INFO("OzoneLoader: loading %s", path);
@@ -764,7 +829,7 @@ bool OzoneLoader::LoadFile(const char* path) {
     size_t slash = p.find_last_of("/\\");
     if (slash != std::string::npos) {
         worldDir = p.substr(0, slash + 1);
-        // Extract world name for GameData path resolution (e.g. "world_EngineTest.ozone" → "EngineTest")
+        // Extract world name for GameData path resolution (e.g. "world_EngineTest.ozone" â†’ "EngineTest")
         std::string fname = p.substr(slash + 1);
         std::string prefix = "world_";
         std::string suffix = ".ozone";
@@ -795,7 +860,7 @@ bool OzoneLoader::LoadFile(const char* path) {
     for (auto& prim : primitives) {
         if (IsEntityPrimitive(prim.type)) continue;
 
-        // Heightmap is handled specially — builds its own model from image path
+        // Heightmap is handled specially â€” builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
         OzoneRenderable r;
         r.typeId = (int)prim.type;
@@ -971,13 +1036,17 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
 
 
 // ---------------------------------------------------------------------------
-// Draw — all renderables (backward compat, used by editor)
+// Draw â€” all renderables (backward compat, used by editor)
 // ---------------------------------------------------------------------------
 void OzoneLoader::Draw(Camera3D& camera) {
     FrustumPlane planes[6];
     BuildFrustum(camera, planes);
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
+        // Generated collision proxies are invisible unless the editor has
+        // explicitly asked for them - otherwise a single AutoConvex pass would
+        // bury the level in a wall of grey boxes.
+        if ((r.surfaceFlags & SURF_COLLISION_PROXY) && !m_drawCollisionProxies) continue;
         if (r.hasBounds && (r.bounds.min.x < r.bounds.max.x ||
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
@@ -992,7 +1061,7 @@ void OzoneLoader::Draw(Camera3D& camera) {
 }
 
 // ---------------------------------------------------------------------------
-// DrawWorldGeometry — skip SURF_FAKEBACKDROP flagged brushes
+// DrawWorldGeometry â€” skip SURF_FAKEBACKDROP flagged brushes
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
     FrustumPlane planes[6];
@@ -1000,6 +1069,9 @@ void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
         if (r.surfaceFlags & SURF_FAKEBACKDROP) continue;
+        // Collision proxies are never drawn in-game, whatever the editor toggle
+        // says: they exist to stop the player falling through a prop.
+        if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
         if (r.hasBounds && (r.bounds.min.x < r.bounds.max.x ||
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
@@ -1014,7 +1086,7 @@ void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
 }
 
 // ---------------------------------------------------------------------------
-// ComputeCollisionAABB â€” generate world-space AABB from primitive params
+// ComputeCollisionAABB Ã¢â‚¬â€ generate world-space AABB from primitive params
 // ---------------------------------------------------------------------------
 void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
                                        Vector3 position, BoundingBox& out) {
@@ -1066,7 +1138,7 @@ void OzoneLoader::ComputeCollisionAABB(int type, const std::vector<float>& args,
 }
 
 // ---------------------------------------------------------------------------
-// RebuildCollisionVolumes â€” iterate renderables and generate AABBs
+// RebuildCollisionVolumes Ã¢â‚¬â€ iterate renderables and generate AABBs
 // ---------------------------------------------------------------------------
 void OzoneLoader::RebuildCollisionVolumes() {
     m_collisionVolumes.clear();
@@ -1075,7 +1147,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
     CsgProcessor csg;
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        // Skip entity types â€” handled by PawnSystem
+        // Skip entity types Ã¢â‚¬â€ handled by PawnSystem
         if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
@@ -1106,7 +1178,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
         brush.maxX = r.position.x + mb.max.x * r.scale;
         brush.maxY = r.position.y + mb.max.y * r.scale;
         brush.maxZ = r.position.z + mb.max.z * r.scale;
-        // Zero-thickness geometry (plane slabs) can't overlap in CSG — inflate
+        // Zero-thickness geometry (plane slabs) can't overlap in CSG â€” inflate
         // slightly so SUB/INTERSECT against them still produces a volume.
         if (brush.maxY - brush.minY < 0.02f) {
             brush.minY -= 0.05f;
@@ -1119,7 +1191,7 @@ void OzoneLoader::RebuildCollisionVolumes() {
     // Overflow protection: merge adjacent coplanar AABBs
     int merges = csg.MergePass();
     if (merges > 0) {
-        OZ_INFO("CSG: merged %d adjacent volumes (count: %d â†’ %d)",
+        OZ_INFO("CSG: merged %d adjacent volumes (count: %d Ã¢â€ â€™ %d)",
                 merges, csg.Count() + merges, csg.Count());
     }
 
@@ -1181,11 +1253,11 @@ void OzoneLoader::RebuildCollisionVolumes() {
 }
 
 // ---------------------------------------------------------------------------
-// AddBrushRenderable — editor helper to make a new brush visible
+// AddBrushRenderable â€” editor helper to make a new brush visible
 // ---------------------------------------------------------------------------
 int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
                                     const Vector3& size, float rot,
-                                    float scale, int csgOp) {
+                                    float scale, int csgOp, int surfaceFlags) {
     Model mdl = {0};
     switch (primType) {
         case 0: mdl = BuildBox(size.x, size.y, size.z); break;
@@ -1221,8 +1293,51 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     r.model = mdl;
     r.loaded = true;
     r.csgOp = csgOp;
+    r.surfaceFlags = surfaceFlags;
     m_renderables.push_back(r);
     return (int)m_renderables.size() - 1;
+}
+
+// ---------------------------------------------------------------------------
+// AppendAutoConvexCollision - voxelise a mesh into convex collision boxes.
+//
+// The engine's collision world is AABB-only (CsgProcessor, see OzBsp.hpp), so a
+// placed Mesh.Static prop has no collision whatsoever and the player walks
+// through it. Each generated box is appended as a real SURF_COLLISION_PROXY
+// brush so it exports to the .ozone as a plain `add box ... flags=N` line and
+// survives a save/load round trip - the proxies are authored data, not a
+// derived cache that would be lost on the next edit.
+//
+// Everything is built up front and only committed once the whole set is known
+// to fit inside `maxBoxes`: a half-appended hull would leave a gap the player
+// can fall through, which is exactly the bug this feature exists to fix.
+// ---------------------------------------------------------------------------
+int OzoneLoader::AppendAutoConvexCollision(const float* verts, int vertFloatCount,
+                                           float cellSize, int maxBoxes) {
+    AutoConvexParams params;
+    params.cellSize = cellSize;
+    params.maxBoxes = maxBoxes;
+
+    std::vector<ConvexBox> boxes;
+    int n = AutoConvex_Build(verts, vertFloatCount, params, boxes);
+    if (n <= 0) return 0;
+
+    for (int i = 0; i < n; i++) {
+        const ConvexBox& b = boxes[i];
+        Vector3 size = {b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ};
+        Vector3 center = {(b.minX + b.maxX) * 0.5f,
+                          (b.minY + b.maxY) * 0.5f,
+                          (b.minZ + b.maxZ) * 0.5f};
+        // SOLID (not ADD): a proxy is a plain solid volume, and SOLID is what
+        // CsgProcessor treats as additive - see CsgOp in OzBsp.hpp.
+        AddBrushRenderable((int)OzonePrimitiveType::BOX, center, size,
+                           0.0f, 1.0f, (int)CsgOp::SOLID, SURF_COLLISION_PROXY);
+    }
+
+    RebuildCollisionVolumes();
+    OZ_INFO("AutoConvex: appended %d collision proxies (%zu total renderables)",
+            n, m_renderables.size());
+    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -1394,7 +1509,7 @@ void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vecto
 }
 
 // ---------------------------------------------------------------------------
-// DrawZoneGeometry â€” draw renderables with SURF_FAKEBACKDROP flag set
+// DrawZoneGeometry Ã¢â‚¬â€ draw renderables with SURF_FAKEBACKDROP flag set
 // (with optional bounds filter for backward compat)
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
@@ -1404,7 +1519,7 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
     //   litColor = baseColor * (colDiffuse * lightAccum)
     //            + baseColor * (ambient / 10) * colDiffuse
     // so any panel facing away from the directional sun has colDiffuse ~ 0 and
-    // collapses to black — which is what turned the fortress perimeter into a
+    // collapses to black â€” which is what turned the fortress perimeter into a
     // black void. For this pass only, force colDiffuse to white and ambient to
     // 1.0-in-units, which reduces the expression to exactly the painted texture.
     // Both uniforms are re-applied by the lighting/zone-env passes every frame.

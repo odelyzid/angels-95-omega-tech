@@ -1,0 +1,31 @@
+entity "Light" : light {
+    // Defaults layer for OZONE lights. A light line resolves this def by its
+    // `name=` kwarg, exactly as a zone's name= resolves its skyzone def:
+    //
+    //     light point 0 0 4 255 180 90 1.2 12 name=Light flare=1
+    //
+    // A value the light line authored ALWAYS wins. intensity, radius and colour
+    // are positional on every light line, so they are intentionally absent here
+    // - a def that could override them would silently retune every already
+    // saved level the next time this file was touched.
+    //
+    // Only the values below have effect, and only when the line omits the
+    // equivalent kwarg:
+    //   effect / flare / corona  - the line author omitted effect=/flare=/corona=
+    //   period                   - flicker cycle length, seconds (effect lights)
+    //   cast_shadow / is_static  - LightNode::castShadow / ::isStatic
+    //   inner_cone / outer_cone  - spot cone cosines (LightNode stores cosines)
+    stats {
+        // LitLightEffect: 0 none, 1 watery, 2 torch, 3 fire, 4 lamp.
+        effect = 0
+        flare = 0
+        corona = 0
+        period = 1
+        cast_shadow = 0
+        is_static = 0
+        // Spot half-angles as cosines, matching LightNode (0.95 ~ 18 deg,
+        // 0.80 ~ 37 deg). Only read for `light spot`.
+        inner_cone = 0.95
+        outer_cone = 0.8
+    }
+}

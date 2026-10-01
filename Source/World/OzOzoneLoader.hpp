@@ -19,6 +19,12 @@
 
 // Surface behavior flags for OZONE brush primitives
 #define SURF_FAKEBACKDROP (1 << 3)  // brush renders as sky backdrop
+// Generated convex collision proxy (see OzoneLoader::AppendAutoConvexCollision).
+// Contributes to the CSG collision world like any other brush but is NOT drawn:
+// DrawWorldGeometry skips it unconditionally, and Draw() only shows it when the
+// editor has explicitly asked via SetDrawCollisionProxies. Exports as part of
+// the ordinary `flags=` kwarg, so it round-trips through the .ozone text.
+#define SURF_COLLISION_PROXY (1 << 4)
 
 // ---------------------------------------------------------------------------
 // OzoneLoader — client-side OZONE format loader + mesh renderer
@@ -145,7 +151,23 @@ public:
 
     // Editor: add a brush renderable so it becomes visible in the viewport
     int AddBrushRenderable(int primType, const Vector3& pos, const Vector3& size,
-                           float rot, float scale, int csgOp);
+                           float rot, float scale, int csgOp,
+                           int surfaceFlags = 0);
+
+    // Editor: voxelise a triangle soup into convex collision boxes and append
+    // each one as a SURF_COLLISION_PROXY brush, then rebuild the collision
+    // world. `verts` is a world-space float array (3 floats per vertex) and
+    // `vertFloatCount` counts FLOATS. Returns the number of boxes appended, or
+    // 0 when the source is unusable or the box budget was exceeded - it never
+    // appends a partial hull, because half a collision wall is worse than none.
+    int AppendAutoConvexCollision(const float* verts, int vertFloatCount,
+                                  float cellSize, int maxBoxes);
+
+    // Editor: show/hide SURF_COLLISION_PROXY brushes in Draw() (the editor's
+    // "all renderables" path). DrawWorldGeometry always hides them, so the
+    // client can never see them.
+    void SetDrawCollisionProxies(bool on) { m_drawCollisionProxies = on; }
+    bool GetDrawCollisionProxies() const { return m_drawCollisionProxies; }
 
     // Apply UV transform to a renderable's mesh (updates texcoords on GPU)
     void ApplyRenderableUV(int idx, float su, float sv, float ou, float ov);
@@ -226,6 +248,7 @@ private:
     std::vector<OzoneRenderable> m_renderables;
     std::vector<OzoneCollisionVolume> m_collisionVolumes;
     WorldChunkManager m_chunkManager;
+    bool m_drawCollisionProxies = false;  // editor-only debug view of SURF_COLLISION_PROXY
 
     // Heightmap state (set from OZONE heightmap primitive)
     bool m_hmReady = false;
