@@ -79,6 +79,40 @@ static int test_select_slot_out_of_range() {
     PASS(); return 0; END_TEST();
 }
 
+// Mouse-wheel cycling skips empty slots and wraps; with an empty bar it must
+// not spin or leave the selection somewhere arbitrary.
+static int test_wheel_cycle_skips_empty() {
+    TEST("SelectSlotSkippingEmpty skips empties and wraps");
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    em.HotbarAssign(1, 11);
+    em.HotbarAssign(4, 14);
+    em.SelectSlot(1);
+
+    em.SelectSlotSkippingEmpty(1, +1);   // 2,3 empty -> lands on 4
+    CHECK_EQ(em.SelectedSlot(), 4);
+    em.SelectSlotSkippingEmpty(4, +1);   // 5,6,7,0 empty -> wraps to 1
+    CHECK_EQ(em.SelectedSlot(), 1);
+    em.SelectSlotSkippingEmpty(1, -1);   // back down to 4
+    CHECK_EQ(em.SelectedSlot(), 4);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_wheel_cycle_all_empty() {
+    TEST("SelectSlotSkippingEmpty is a no-op on an empty hotbar");
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    em.SelectSlot(3);
+    em.SelectSlotSkippingEmpty(3, +1);
+    CHECK_EQ(em.SelectedSlot(), 3);
+    em.SelectSlotSkippingEmpty(3, -1);
+    CHECK_EQ(em.SelectedSlot(), 3);
+    // dir 0 must do nothing at all.
+    em.SelectSlotSkippingEmpty(3, 0);
+    CHECK_EQ(em.SelectedSlot(), 3);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_selected_entity_empty() {
     TEST("SelectedEntity returns null when hotbar empty");
     auto& em = LightningEntityManager::Instance();
@@ -535,6 +569,8 @@ int main() {
     failures += test_spawn_unknown();
     failures += test_hotbar_out_of_range();
     failures += test_select_slot_out_of_range();
+    failures += test_wheel_cycle_skips_empty();
+    failures += test_wheel_cycle_all_empty();
     failures += test_selected_entity_empty();
     failures += test_equipment_assign();
     failures += test_equipment_find_free();

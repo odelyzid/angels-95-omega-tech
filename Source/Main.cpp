@@ -925,7 +925,11 @@ int main(int argc, char** argv){
         if (!g_shot.active || !g_shot.hideHud)
             LightningEntityManager::Instance().DrawHotbar();
         if (IsKeyPressed(KEY_R)) oz::ViewModel::Instance().TriggerReload();
-        LightningEntityManager::Instance().HandleInput();
+        // Hotbar input. Suppressed while a modal is up or during --shot captures:
+        // these keys/wheel previously fired underneath the inventory, skill tree
+        // and console.
+        LightningEntityManager::Instance().HandleInput(
+            uiBlocking || (g_shot.active && g_shot.hideHud));
 
         if (FPSEnabled && !(g_shot.active && g_shot.hideHud)){
             DrawFPS(0,0);
@@ -1026,6 +1030,30 @@ int main(int argc, char** argv){
                 flashColor.a = (unsigned char)(peak * fb.flashTimer * 2.0f);
                 if (flashColor.a > 0)
                     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), flashColor);
+            }
+        }
+
+        // Damage vignette (red edge flash on taking damage). Driven by
+        // OmegaTechData.DamageFlash, set by both contact damage and the scripted
+        // `damage` opcode. Drawn under the HUD but over the world.
+        if (OmegaTechData.DamageFlash > 0.0f && !(g_shot.active && g_shot.hideHud)) {
+            OmegaTechData.DamageFlash -= GetFrameTime();
+            if (OmegaTechData.DamageFlash < 0.0f) OmegaTechData.DamageFlash = 0.0f;
+            // ease-out: sharp on impact, gentle fade.
+            const float t = OmegaTechData.DamageFlash / kDamageFlashDuration;
+            const float ease = t * t;
+            const int sw = GetScreenWidth(), sh = GetScreenHeight();
+            const int band = std::max(40, sh / 8);
+            // Four edge bands rather than a full-screen wash, so the centre of
+            // the view stays readable while still reading as "you were hit".
+            const unsigned char a = (unsigned char)(150.0f * ease);
+            if (a > 0) {
+                BeginBlendMode(BLEND_ADDITIVE);
+                DrawRectangle(0, 0, sw, band, {90, 0, 0, a});
+                DrawRectangle(0, sh - band, sw, band, {90, 0, 0, a});
+                DrawRectangle(0, band, band, sh - 2 * band, {90, 0, 0, a});
+                DrawRectangle(sw - band, band, band, sh - 2 * band, {90, 0, 0, a});
+                EndBlendMode();
             }
         }
 

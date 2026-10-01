@@ -553,6 +553,22 @@ void LightningEntityManager::SelectSlot(int slot) {
     OZ_INFO("[CHAIN] LEM::SelectSlot done slot=%d inst=%d", slot, newIdx);
 }
 
+void LightningEntityManager::SelectSlotSkippingEmpty(int from, int dir) {
+    if (dir == 0) return;
+    if (from < 0) from = 0;
+    if (from >= HOTBAR_SIZE) from = HOTBAR_SIZE - 1;
+
+    // Walk at most HOTBAR_SIZE steps so a full ring of empty slots terminates.
+    for (int step = 1; step <= HOTBAR_SIZE; step++) {
+        int slot = ((from + dir * step) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
+        if (m_hotbar[slot] >= 0) {
+            if (slot != m_selectedSlot) SelectSlot(slot);
+            return;
+        }
+    }
+    // Everything is empty: leave the selection alone rather than flailing.
+}
+
 EntityInstance* LightningEntityManager::SelectedEntity() const {
     int idx = m_hotbar[m_selectedSlot];
     EntityInstance* e = (idx >= 0 && idx < (int)m_instances.size())
@@ -627,9 +643,12 @@ void LightningEntityManager::UncacheResource(int idx) {
 }
 
 // ---------------------------------------------------------------------------
-// HandleInput — keyboard 1-8 for hotbar
+// HandleInput — keyboard 1-8 for hotbar, mouse wheel to cycle
 // ---------------------------------------------------------------------------
-void LightningEntityManager::HandleInput() {
+void LightningEntityManager::HandleInput(bool uiBlocking) {
+    // A modal owns the keyboard and the wheel while it is up.
+    if (uiBlocking) return;
+
     if (IsKeyPressed(KEY_ONE))   SelectSlot(0);
     if (IsKeyPressed(KEY_TWO))   SelectSlot(1);
     if (IsKeyPressed(KEY_THREE)) SelectSlot(2);
@@ -638,6 +657,31 @@ void LightningEntityManager::HandleInput() {
     if (IsKeyPressed(KEY_SIX))   SelectSlot(5);
     if (IsKeyPressed(KEY_SEVEN)) SelectSlot(6);
     if (IsKeyPressed(KEY_EIGHT)) SelectSlot(7);
+
+    // Mouse wheel cycles slots. GetMouseWheelMove is the only wheel source in
+    // the engine (raygui's is unused here), and nothing read it before, so the
+    // scroll behaviour documented in the Wiki did not exist.
+    //
+    // Two details keep it from feeling wrong:
+    //  - one notch moves exactly one slot, but high-resolution wheels can emit
+    //    several fractional notches per flick, so a direction is latched rather
+    //    than applied per event;
+    //  - empty slots are skipped, so scrolling lands on a weapon instead of
+    //    landing on nothing. Wraps around both ends.
+    const float wheel = GetMouseWheelMove();
+    if (wheel != 0.0f) {
+        if (wheel > 0.0f)      m_wheelDir = +1;
+        else if (wheel < 0.0f) m_wheelDir = -1;
+    }
+    if (m_wheelDir != 0) {
+        // ~0.15s lockout so one flick is one slot change.
+        if (m_wheelLock > 0.0f) {
+            m_wheelLock -= GetFrameTime();
+        } else {
+            SelectSlotSkippingEmpty(m_selectedSlot + m_wheelDir, m_wheelDir);
+            m_wheelLock = 0.15f;
+        }
+    }
 
     // R to reload selected weapon
     if (IsKeyPressed(KEY_R)) {

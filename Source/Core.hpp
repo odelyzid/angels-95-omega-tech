@@ -26,6 +26,9 @@
 
 #include "Screenshot.hpp"
 
+// How long the damage vignette stays up after a hit, seconds.
+static constexpr float kDamageFlashDuration = 0.45f;
+
 bool FloorCollision = true;
 bool ObjectCollision = false;
 bool g_showCollisionDebug = false;
@@ -191,7 +194,11 @@ public:
     int BadPreformaceCounter = 0;
     bool SkyboxEnabled = false;
     int Ending = 0;
-    int PanicCounter = 0;
+
+    // Damage-flash timer, seconds. Set by contact damage and by the scripted
+    // `damage` opcode; drawn as a red screen vignette by the HUD pass. Was an
+    // int saturating at 240 that nothing ever read.
+    float DamageFlash = 0.0f;
 
     void InitCamera()
     {
@@ -230,7 +237,7 @@ auto LoadWorld()
     ScriptTimer = 0;
 
     {
-        OmegaTechData.PanicCounter = 0;
+        OmegaTechData.DamageFlash = 0.0f;
 
         LightningEntityManager::Instance().SetPlayerHealth(100.0f);
 
@@ -927,8 +934,8 @@ void UpdateEntitiesSim(float dt)
             float mitigated = oz::MitigateDamage(damage, lem.GetPlayerDefense());
             lem.SetPlayerHealth(std::max(0.0f, lem.GetPlayerHealth() - mitigated));
             g_damageCooldown = 1.0f;
-            if (OmegaTechData.PanicCounter != 240)
-                OmegaTechData.PanicCounter += 2;
+            if (OmegaTechData.DamageFlash <= 0.0f)
+                OmegaTechData.DamageFlash = kDamageFlashDuration;
             if (OmegaTechData.Ticker % 2 == 0)
             {
                 SoundManager::Instance().PlayChasing();
@@ -1612,8 +1619,8 @@ if (inSkyZone)
         if (lem.PlayerHurt())
         {
             lem.ClearPlayerHurt();
-            if (OmegaTechData.PanicCounter != 240)
-                OmegaTechData.PanicCounter += 2;
+            if (OmegaTechData.DamageFlash <= 0.0f)
+                OmegaTechData.DamageFlash = kDamageFlashDuration;
         }
     }
 

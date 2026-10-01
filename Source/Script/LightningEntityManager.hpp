@@ -52,6 +52,9 @@ public:
     // and only one of them reported a full bar.
     int  HotbarFirstFreeSlot() const;
     void SelectSlot(int slot);
+    // Move `dir` slots from `from`, skipping empty ones and wrapping. If every
+    // slot is empty the selection is left where it was.
+    void SelectSlotSkippingEmpty(int from, int dir);
     // Place `instanceIndex` in the first free slot. Returns false (leaving the
     // caller to despawn or refund) when the bar is full.
     bool HotbarPlaceFirstFree(int instanceIndex);
@@ -84,7 +87,10 @@ public:
     Model* GetModelByResourceIdx(int idx) const;
 
     // --- Input + rendering ---
-    void HandleInput();
+    // Hotbar input: number keys 1-8 plus mouse-wheel cycling.
+    // `uiBlocking` is the host's "a modal is open" flag (inventory, skill tree,
+    // console, screenshot mode). Without it these keys fired underneath menus.
+    void HandleInput(bool uiBlocking = false);
     void DrawHotbar();
 
     // --- Projectile spawning (for weapon entities) ---
@@ -178,6 +184,12 @@ private:
     std::vector<EntityInstance> m_instances;
     int m_hotbar[HOTBAR_SIZE];
     int m_selectedSlot = 0;
+
+    // Mouse-wheel slot cycling. m_wheelDir latches the last scroll direction so
+    // a high-resolution wheel emitting several sub-notch values per flick still
+    // advances one slot; m_wheelLock throttles repeats while held down.
+    int  m_wheelDir = 0;
+    float m_wheelLock = 0.0f;
 
     // Equipment slots — instance index, -1 = empty
     int m_equipment[EQUIP_SLOT_COUNT];

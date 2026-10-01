@@ -12,7 +12,8 @@
 | Right Click (hold) | Aim Down Sights (tighter crosshair, reduced spread) |
 | R | Reload selected weapon |
 | 1–8 | Select inventory/hotbar slot |
-| Mouse Wheel / Arrow Keys | Cycle slots |
+| Mouse Wheel | Cycle to the next/previous **occupied** slot (wraps; throttled to ~0.15 s per step) |
+| Arrow Keys | Move the cursor within the inventory overlay's backpack grid |
 | E | Collect nearby pickup |
 | Tab | Toggle inventory overlay |
 | Escape | Pause menu (Resume / Settings / Main Menu / Quit) |
