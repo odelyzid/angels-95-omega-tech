@@ -69,3 +69,9 @@ GameData/Screenshots/*
 PLAN_STUBS_*.scratch
 build/
 build-ed/
+
+# Tool build output / python caches
+worldcheck
+worldcheck.exe
+__pycache__/
+*.pyc

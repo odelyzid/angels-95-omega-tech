@@ -559,13 +559,13 @@ Mesh.Static Models/bushes/bush_overgrown_winter.glb -400 200 0 60 scale=1.0
 Mesh.Static Models/bushes/bush_tall_single_winter.glb -280 -200 0 0 scale=1.0
 Mesh.Static Models/bushes/bush_long_single_winter.glb -220 -150 0 -20 scale=1.0
 Mesh.Static Models/forest/forest_pine_1.glb -350 -250 0 0 scale=1.2
-Mesh.Static Models/forest/forest_stump_1.glb -300 -220 0 0 scale=1.0
+Mesh.Static Models/forest/forest_stump_1.glb -300 -220 0 0 scale=3.6
 Mesh.Static Models/forest/forest_log_1.glb -260 -180 0 45 scale=1.0
 # SE corner and rail yard open
 Mesh.Static Models/bushes/bush_long_overgrown_winter.glb 400 -300 0 90 scale=1.0
 Mesh.Static Models/bushes/bush_tall_overgrown_winter.glb 350 -400 0 20 scale=1.0
 Mesh.Static Models/forest/forest_pine_2.glb 450 -450 0 0 scale=1.3
-Mesh.Static Models/forest/forest_stump_2.glb 420 -420 0 0 scale=1.0
+Mesh.Static Models/forest/forest_stump_2.glb 420 -420 0 0 scale=3.0
 # Scatter 2m rocks for cover in open areas
 Mesh.Static Models/rocks/SM_RP_Rock_2m_0.glb -350 120 0 0 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_2_2K.png
 Mesh.Static Models/rocks/SM_RP_Rock_2m_1.glb -280 -120 0 30 scale=1.0 tex=oztex/props/rocks_T_RP_Rocks_0_2K.png
@@ -581,17 +581,28 @@ Mesh.Static Models/rocks/SM_RP_Rock_2m_5.glb 420 -200 0 200 scale=1.0 tex=oztex/
 # expected to remap sub-meshes, so they render with their embedded material.
 # These five whole-building models replace the hand-authored brush shells in
 # zones Z2, Z6, Z7, Z8, and Z9.
+#
+# DO NOT add scale= here. Each GLB bakes scale=100 plus a Y-up -> Z-up node
+# rotation (and a translation that centres the mesh), so it already arrives at
+# world scale: Building_A's 0.12u mesh becomes a 12x6x12u building. Adding
+# scale=0.01 cancels that 100x bake and renders a 0.12u (knee-high) box.
+# tools/worldcheck.cpp flags any mesh whose scaled span drops below 1u.
+#
+# The loader maps the authored third arg onto engine up, so the third value is
+# the vertical offset. Each model's node bake leaves its base below the origin
+# (Building_A spans z -28..-16 pre-placement), so the third arg lifts it onto
+# the concrete pads rather than burying it.
 # ==============================================================================
-# Z9 — Administration Building
-Mesh.Static Models/industrial/Building_A.glb -269 0 0.1 0 scale=0.01
-# Z6 — Power Plant
-Mesh.Static Models/industrial/Building_B.glb 262 95 0.1 90 scale=0.01
-# Z2 — Maintenance Hangars
-Mesh.Static Models/industrial/Building_C.glb -140 330 0.1 0 scale=0.01
-# Z8 — Rail Yard Terminal
-Mesh.Static Models/industrial/Building_D.glb 295 0 0.1 0 scale=0.01
-# Z7 — Security Outpost
-Mesh.Static Models/industrial/Building_E.glb 335 0 0.1 -90 scale=0.01
+# Z9 — Administration Building (12x6x12u)
+Mesh.Static Models/industrial/Building_A.glb -263 3 28.1 0
+# Z6 — Power Plant (15x15x15u)
+Mesh.Static Models/industrial/Building_B.glb 282 -8 12.1 90
+# Z2 — Maintenance Hangars (12x6x12u)
+Mesh.Static Models/industrial/Building_C.glb -134 3 15.1 0
+# Z8 — Rail Yard Terminal (15x30x15u)
+Mesh.Static Models/industrial/Building_D.glb 316 -15 28.1 0
+# Z7 — Security Outpost (12x7x20u)
+Mesh.Static Models/industrial/Building_E.glb 341 -3 2.1 -90
 
 # ==============================================================================
 # PARTICLE EMITTERS

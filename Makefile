@@ -287,6 +287,14 @@ test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Sourc
 test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
+# Static auditor for .ozone worlds: geometry bounds, lighting, mesh scale,
+# asset references, playerstart sanity and zone naming. Pass a world file:
+#   make worldcheck && ./worldcheck GameData/Worlds/<World>/World.ozone
+# Exact model bounds (so mesh scale errors are caught) come from
+# tools/glb_bounds.py; see the Makefile-adjacent README note in the tool.
+worldcheck: tools/worldcheck.cpp Source/World/OzoneParser.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource tools/worldcheck.cpp Source/World/OzoneParser.cpp $(BUILD_DIR)/miniz.o -o $@
+
 test_join_uri: tests/JoinUri.test.cpp Source/Client/JoinUri.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/JoinUri.test.cpp -o $@
 
@@ -337,4 +345,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	-./test_ozanim
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim worldcheck
