@@ -73,10 +73,10 @@ add cyl 60 380 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex
 add cyl 180 380 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
 add cyl 60 300 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
 add cyl 180 300 12 11 11 12 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/11_wall_industrial_checker_a2_48.png
-add cyl 60 380 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 180 380 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 60 300 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
-add cyl 180 300 12.2 11 11 0.400001 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 60 380 12.2 11 11 0.400002 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 180 380 12.2 11 11 0.400002 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 60 300 12.2 11 11 0.400002 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
+add cyl 180 300 12.2 11 11 0.400002 16 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/05_floor_concrete_a1_32.png
 add box 120 340 12.2 140 0.3 6 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
 add box 120 300 12.2 6 0.3 90 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=8 texScaleV=8
 add box 192 288 0.6 1 1 1 0 texPath=GameData/Worlds/World_endless_snow/oztex/tileset/09_wall_industrial_metal_a1_32.png texScaleU=16 texScaleV=16
@@ -269,34 +269,34 @@ npc Walker -140 320 0.1
 npc Brute -64 51 0.1
 npc Skaarj 262 95 0.1
 npc Walker 335 0 0.1
+light point 64 34 24.2 255 140 60 0.911361 40.1432 effect=2
+light point 64 51 16.2 255 150 70 0.911361 40.1432 effect=2
 light directional 0 0 0 120 130 150 1
-light point 120 340 10 255 150 70 0.947601 36.6823 2
-light point 120 345 10 255 150 70 0.947601 36.6823 2
-light point 64 51 16.2 255 150 70 0.947601 36.6823 2
-light point 64 34 24.2 255 140 60 0.947601 36.6823 2
-light point -64 51 16.2 255 150 70 0.947601 36.6823 2
-light point -140 290 6 220 200 170 1 25
-light point -100 360 6 220 200 170 1 25
-light point -90 25 40.5 255 130 50 0.947601 36.6823 2
-light point -180 320 6 220 200 170 1 25
-light point 0 -26 8 255 140 60 0.947601 36.6823 2
+light directional 0 0 0 180 210 230 1
+light point 0 -26 8 255 140 60 0.911361 40.1432 effect=2
+light point -64 51 16.2 255 150 70 0.911361 40.1432 effect=2
+light point -90 25 40.5 255 130 50 0.911361 40.1432 effect=2
 light point 262 95 10 220 200 170 1 30
 light point 295 0 5 200 200 200 1 25
-light point 359 333 35.2 255 140 60 0.947601 36.6823 2
-light point -269 0 12 220 210 200 1 20
-light point -320 333 35.2 255 140 60 0.947601 36.6823 2
-light point -269 0 8 220 210 200 1 20
 light point 295 -45 6 200 200 200 1 20
-light point -269 0 4 220 210 200 1 20
 light point 335 0 6 255 200 170 1 20
 light point 335 -60 6 255 200 170 1 20
-light directional 0 0 0 180 210 230 1
+light point 120 340 10 255 150 70 0.911361 40.1432 effect=2
+light point -140 290 6 220 200 170 1 25
+light point -269 0 12 220 210 200 1 20
+light point -269 0 8 220 210 200 1 20
+light point 120 345 10 255 150 70 0.911361 40.1432 effect=2
+light point -269 0 4 220 210 200 1 20
+light point -100 360 6 220 200 170 1 25
+light point -180 320 6 220 200 170 1 25
 light point 0 -365 8 220 220 230 1 30
 light point 0 -380 6 200 210 255 1 18
+light point 359 333 35.2 255 140 60 0.911361 40.1432 effect=2
 light point 0 -410 4 220 215 210 1 30
+light point -320 333 35.2 255 140 60 0.911361 40.1432 effect=2
 light point 0 -435 3.1 80 180 255 1 12
-light point 320 -403 35.2 255 140 60 0.947601 36.6823 2
-light point -307 -403 35.2 255 140 60 0.947601 36.6823 2
+light point 320 -403 35.2 255 140 60 0.911361 40.1432 effect=2
+light point -307 -403 35.2 255 140 60 0.911361 40.1432 effect=2
 zone sky -600 -600 -50 600 600 300 1 name=endless_snow_sky gravity=18 jump=9 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
 Mesh.Static Models/rocks/SM_RP_Rock_8m_0.glb -500 200 0 45 scale=1.2 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png
 Mesh.Static Models/rocks/SM_RP_Rock_8m_1.glb -490 -50 0 120 scale=1.1 tex=oztex/props/rocks_T_RP_Rocks_0_4K.png

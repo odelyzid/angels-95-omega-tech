@@ -4,7 +4,7 @@
 sub box -2 0 14 128 4 128 0 texScaleU=16 texScaleV=16
 
 # Entities
-playerstart 10 196 95 0
+playerstart -2.04512 15.905 17.3599 0
 pickup rifle_01 3.79373 -18.2151 16.8169 30
 zone sky -1020.21 -1042.22 -1007.18 1027.79 1005.78 1040.82 1 name=zone_sky_0 gravity=18 jump=9 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
 levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/cloud01.dds
