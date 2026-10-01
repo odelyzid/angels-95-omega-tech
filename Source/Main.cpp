@@ -1009,22 +1009,21 @@ int main(int argc, char** argv){
             InventoryBehaviour::Instance().DrawHud(OmegaTechData.MainCamera, OmegaTechData.Ticker,
                                                    g_playerMovement.isCrouching, g_playerMovement.isSprinting);
 
-        // Screen flash on pickup collect (fades out)
+        // Screen flash on pickup collect (fades out). Driven by
+        // PawnSystem::m_pickupFeedback, which both the walk-over path
+        // (UpdatePickups) and the networked collect reply now set.
         {
             auto& fb = PawnSystem::Instance().m_pickupFeedback;
             if (fb.flashTimer > 0.0f) {
                 fb.flashTimer -= GetFrameTime();
-                Color flashColor = {0, 0, 0, 0};
+                if (fb.flashTimer < 0.0f) fb.flashTimer = 0.0f;
+                Color flashColor = {255, 255, 255, 0};
                 const ItemDBEntry* def = GetItemDef(fb.itemId);
-                if (def) {
-                    switch (def->category) {
-                        case ItemCategory::HEALTH_VIAL: flashColor = (Color){255, 50, 50, (unsigned char)(80 * fb.flashTimer * 2)}; break;
-                        case ItemCategory::MANA_VIAL:  flashColor = (Color){50, 100, 255, (unsigned char)(80 * fb.flashTimer * 2)}; break;
-                        case ItemCategory::ENERGY_CRYSTAL: flashColor = (Color){200, 50, 255, (unsigned char)(80 * fb.flashTimer * 2)}; break;
-                        case ItemCategory::COIN:       flashColor = (Color){255, 215, 0, (unsigned char)(80 * fb.flashTimer * 2)}; break;
-                        default:                       flashColor = (Color){255, 255, 255, (unsigned char)(60 * fb.flashTimer * 2)}; break;
-                    }
-                }
+                if (def) flashColor = ItemFlashColor(*def);
+                // 0.5s fade: alpha peaks at 80/160 depending on category.
+                const unsigned char peak = (def && def->category != ItemCategory::WEAPON &&
+                                            def->category != ItemCategory::ARMOR) ? 160 : 80;
+                flashColor.a = (unsigned char)(peak * fb.flashTimer * 2.0f);
                 if (flashColor.a > 0)
                     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), flashColor);
             }

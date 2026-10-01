@@ -74,16 +74,6 @@ void LightningScriptParser::Expect(ParseState& s, const std::string& expected) {
     }
 }
 
-void LightningScriptParser::SkipBlock(ParseState& s) {
-    int depth = 1;
-    while (s.pos < s.content->size() && depth > 0) {
-        std::string tok = ReadToken(s);
-        if (tok == "{") depth++;
-        else if (tok == "}") depth--;
-        if (tok.empty()) break;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // ParseStatBlock — parses key = value / key = (r,g,b) inside { }
 // ---------------------------------------------------------------------------
@@ -131,14 +121,6 @@ EntityStatBlock LightningScriptParser::ParseStatBlock(ParseState& s) {
         }
     }
     return block;
-}
-
-// ---------------------------------------------------------------------------
-// ParseAction — reads name, then parses block
-// ---------------------------------------------------------------------------
-EntityAction LightningScriptParser::ParseAction(ParseState& s) {
-    std::string name = ReadToken(s);
-    return ParseActionWithName(name, s);
 }
 
 // ParseActionWithName — parses { ... lines ... } with name already known

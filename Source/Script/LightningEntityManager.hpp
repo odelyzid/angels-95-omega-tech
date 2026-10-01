@@ -73,8 +73,8 @@ public:
     // Summed `defense` of all equipped items (incoming-damage mitigation).
     float GetPlayerDefense() const;
 
-    // Returns the model pointer from the cache by index
-    void* GetModel(int idx) const;
+    // Returns the texture/icon pointer from the cache by index. Models go
+    // through GetModelByResourceIdx, which returns a typed pointer.
     void* GetTexture(int idx) const;
     void* GetIcon(int idx) const;
 
@@ -211,7 +211,6 @@ private:
     int CacheModel(const std::string& path);
     int CacheTexture(const std::string& path);
     void UncacheResource(int idx);
-    void UnloadAllResources();
 
     // Sum a numeric stat over all equipped items (`key`, e.g. "max_health_bonus").
     float EquipmentStatSum(const char* key) const;

@@ -597,11 +597,6 @@ int LightningEntityManager::CacheTexture(const std::string& path) {
     return (int)m_resources.size() - 1;
 }
 
-void* LightningEntityManager::GetModel(int idx) const {
-    if (idx < 0 || idx >= (int)m_resources.size() || m_resources[idx].type != 1) return nullptr;
-    return (void*)&m_resources[idx].model;
-}
-
 void* LightningEntityManager::GetTexture(int idx) const {
     if (idx < 0 || idx >= (int)m_resources.size() || m_resources[idx].type != 2) return nullptr;
     return (void*)&m_resources[idx].texture;
@@ -629,11 +624,6 @@ void LightningEntityManager::UncacheResource(int idx) {
     m_resources[idx].type = 0; // Mark as unused instead of erasing (avoids index shift)
     m_resources[idx].model = Model{0};
     m_resources[idx].texture = Texture2D{0};
-}
-
-void LightningEntityManager::UnloadAllResources() {
-    for (int i = (int)m_resources.size() - 1; i >= 0; i--)
-        UncacheResource(i);
 }
 
 // ---------------------------------------------------------------------------

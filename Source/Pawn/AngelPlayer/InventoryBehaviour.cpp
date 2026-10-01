@@ -1,5 +1,6 @@
 #include "InventoryBehaviour.hpp"
 #include "../Items.hpp"
+#include "../OzPawnSystem.hpp"
 #include "SlotBar.hpp"
 #include "../../Script/LightningEntityManager.hpp"
 #include "../../Script/LightningEntityRegistry.hpp"
@@ -24,26 +25,12 @@ bool InventoryBehaviour::UseBackpackItem(int slot) {
     const ItemDBEntry* def = GetItemDef(itemId);
     if (!def) return false;
 
-    auto& lem = LightningEntityManager::Instance();
-    switch (def->category) {
-        case ItemCategory::HEALTH_VIAL:
-            lem.SetPlayerHealth(fminf(lem.GetPlayerMaxHealth(),
-                                      lem.GetPlayerHealth() + (float)def->value));
-            break;
-        case ItemCategory::MANA_VIAL:
-            lem.SetPlayerMana(fminf(lem.GetPlayerMaxMana(),
-                                    lem.GetPlayerMana() + (float)def->value));
-            break;
-        case ItemCategory::ENERGY_CRYSTAL:
-            lem.SetPlayerPsychicEnergy(fminf(lem.GetPlayerMaxPsychicEnergy(),
-                                             lem.GetPlayerPsychicEnergy() + (float)def->value));
-            break;
-        case ItemCategory::COIN:
-            gInventory.coins += def->value;
-            break;
-        default:
-            return false; // no on-the-spot use effect
-    }
+    // Single shared effect path (see ApplyItemEffect). Coins are excluded on
+    // purpose: they previously fell into a usable case, so using a coin stack
+    // minted a coin per click instead of doing nothing.
+    if (def->category == ItemCategory::COIN) return false;
+    if (!ApplyItemEffect(*def, 1)) return false;
+
     gInventory.RemoveFromBackpack(slot);
     Emit(std::string("Used ") + def->name);
     return true;
@@ -430,18 +417,25 @@ void InventoryBehaviour::OnItemCollected(int item_id, int quantity) {
     if (def) name = def->name;
     Emit(std::string(TextFormat("Collected: %s x%d", name, quantity)));
 
-    auto& lem = LightningEntityManager::Instance();
-    if (item_id == 13) {
-        gInventory.coins += quantity;
-    } else if (item_id == 1) {
-        float curHp = lem.GetPlayerHealth();
-        lem.SetPlayerHealth(std::min(curHp + 25.0f, lem.GetPlayerMaxHealth()));
-    } else if (item_id == 2) {
-        float curMp = lem.GetPlayerMana();
-        lem.SetPlayerMana(std::min(curMp + 25.0f, lem.GetPlayerMaxMana()));
-    } else if (item_id > 0) {
-        gInventory.AddToBackpack(item_id, quantity);
+    if (!def) {
+        if (item_id > 0) gInventory.AddToBackpack(item_id, quantity);
+    } else if (def->category == ItemCategory::COIN) {
+        gInventory.coins += def->value * quantity;
+    } else if (!ApplyItemEffect(*def, quantity)) {
+        // No instant effect (armor/ammo/powerup/keys): fall back to storage so
+        // the grant is not silently dropped. Previously this branch also
+        // swallowed psychic crystals, sending the energy to the backpack.
+        if (!gInventory.AddToBackpack(item_id, quantity))
+            OZ_WARN("Collect: backpack full, '%s' x%d lost", def->name, quantity);
     }
+
+    // Mirror the single-player path so a networked collect flashes too: the
+    // SP walk-over set this, the networked path never did.
+    auto& fb = PawnSystem::Instance().m_pickupFeedback;
+    fb.collected = false;   // the console line comes from Emit() above
+    fb.typeName = def ? def->name : name;
+    fb.itemId = item_id;
+    fb.flashTimer = 0.5f;
 
     if (m_feedbackSink) m_feedbackSink();
 }

@@ -57,13 +57,6 @@ bool LightningScriptContext::Load(const std::string& scriptText) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Jump label registration — scans for "label_name:" at start of line
-// ---------------------------------------------------------------------------
-void LightningScriptContext::RegisterJumpLabel(const std::string& label, int line) {
-    m_jumpLabels[label] = line;
-}
-
 int LightningScriptContext::FindJumpLabel(const std::string& label) const {
     auto it = m_jumpLabels.find(label);
     if (it != m_jumpLabels.end()) return it->second;

@@ -443,23 +443,12 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
 
             const ItemDBEntry* def = (itemId > 0) ? GetItemDef(itemId) : nullptr;
             if (def) {
-                auto& lem = LightningEntityManager::Instance();
-                switch (def->category) {
-                    case ItemCategory::HEALTH_VIAL:
-                        lem.SetPlayerHealth(std::min(lem.GetPlayerHealth() + (float)def->value, lem.GetPlayerMaxHealth()));
-                        break;
-                    case ItemCategory::MANA_VIAL:
-                        lem.SetPlayerMana(std::min(lem.GetPlayerMana() + (float)def->value, lem.GetPlayerMaxMana()));
-                        break;
-                    case ItemCategory::ENERGY_CRYSTAL:
-                        lem.SetPlayerPsychicEnergy(std::min(lem.GetPlayerPsychicEnergy() + (float)def->value, lem.GetPlayerMaxPsychicEnergy()));
-                        break;
-                    case ItemCategory::COIN:
-                        gInventory.coins += def->value;
-                        break;
-                    default:
-                        gInventory.AddToBackpack(itemId, 1);
-                        break;
+                // Single shared effect path (see Items.hpp ApplyItemEffect).
+                if (def->category == ItemCategory::COIN) {
+                    gInventory.coins += def->value;
+                } else if (!ApplyItemEffect(*def, 1)) {
+                    if (!gInventory.AddToBackpack(itemId, 1))
+                        OZ_WARN("Pickup: backpack full, '%s' lost", def->name);
                 }
             } else if (edef && (edef->type == EntityType::WEAPON ||
                                 edef->type == EntityType::ARMOR ||

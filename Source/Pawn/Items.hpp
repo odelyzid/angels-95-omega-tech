@@ -1,6 +1,8 @@
 #ifndef OMEGA_ITEMS_HPP
 #define OMEGA_ITEMS_HPP
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include "raylib.h"
 #include "../Script/LightningEntityManager.hpp"
@@ -82,6 +84,52 @@ inline const ItemDBEntry* GetItemDef(int id) {
     for (int i = 0; i < ITEM_DB_SIZE; i++)
         if (ItemDB[i].name && ItemDB[i].id == id) return &ItemDB[i];
     return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Shared item-effect application.
+//
+// Three call sites used to switch on ItemCategory themselves: the walk-over
+// pickup path, the backpack "use" path, and the networked collect reply. The
+// third hardcoded item ids 13/1/2 and a flat +25 instead of reading def->value,
+// so any retune of ItemDB silently disagreed between single- and multiplayer.
+//
+// Returns true when the item was consumed by its own effect. False means "this
+// item has no instant effect" and the caller decides the fallback (stash it in
+// the backpack, spawn an entity, and so on).
+//
+// Coins are deliberately NOT consumable: treating COIN as a usable effect let
+// right-clicking a coin stack in the backpack mint a coin per click.
+// ---------------------------------------------------------------------------
+inline bool ApplyItemEffect(const ItemDBEntry& def, int quantity = 1) {
+    auto& lem = LightningEntityManager::Instance();
+    const float amount = (float)def.value * (float)(quantity > 0 ? quantity : 1);
+    switch (def.category) {
+        case ItemCategory::HEALTH_VIAL:
+            lem.SetPlayerHealth(fminf(lem.GetPlayerMaxHealth(), lem.GetPlayerHealth() + amount));
+            return true;
+        case ItemCategory::MANA_VIAL:
+            lem.SetPlayerMana(fminf(lem.GetPlayerMaxMana(), lem.GetPlayerMana() + amount));
+            return true;
+        case ItemCategory::ENERGY_CRYSTAL:
+            lem.SetPlayerPsychicEnergy(fminf(lem.GetPlayerMaxPsychicEnergy(),
+                                             lem.GetPlayerPsychicEnergy() + amount));
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Category colour used by the on-collect screen flash and the HUD.
+inline Color ItemFlashColor(const ItemDBEntry& def) {
+    switch (def.category) {
+        case ItemCategory::HEALTH_VIAL:    return {255, 50, 50, 255};
+        case ItemCategory::MANA_VIAL:      return {50, 100, 255, 255};
+        case ItemCategory::ENERGY_CRYSTAL: return {200, 50, 255, 255};
+        case ItemCategory::COIN:           return {255, 215, 0, 255};
+        case ItemCategory::ARMOR:          return {190, 190, 200, 255};
+        default:                           return {255, 255, 255, 255};
+    }
 }
 
 struct InventorySystem {

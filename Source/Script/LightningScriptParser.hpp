@@ -26,9 +26,7 @@ private:
     static std::string ReadString(ParseState& s);
     static float ReadNumber(ParseState& s);
     static void Expect(ParseState& s, const std::string& expected);
-    static void SkipBlock(ParseState& s);
 
     static EntityStatBlock ParseStatBlock(ParseState& s);
-    static EntityAction ParseAction(ParseState& s);
     static EntityAction ParseActionWithName(const std::string& name, ParseState& s);
 };

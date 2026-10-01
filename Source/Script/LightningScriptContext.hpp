@@ -61,8 +61,7 @@ public:
     // executor).
     void MarkCompleted() { m_pc = (int)m_lines.size(); }
 
-    // Jump label resolution
-    void RegisterJumpLabel(const std::string& label, int line);
+    // Jump label resolution. Labels are collected by Load(); see FindJumpLabel.
     int  FindJumpLabel(const std::string& label) const;
 
     // Next jump label at a line strictly greater than afterLine
