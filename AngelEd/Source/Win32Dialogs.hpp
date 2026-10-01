@@ -344,7 +344,9 @@ struct EditorPanelState {
     WinPos heightmapEditorPos = {120, 100, 520, 480};
     WinPos lightPropsPos = {400, 100, 340, 480};
     WinPos worldGraphPos = {540, 100, 600, 400};
-    WinPos propsPanelPos = {300, 120, 470, 560};
+    // 540 (not 470): the vertical scrollbar costs ~17px of client width, so this
+    // keeps the usable value column as wide as it was before it was added.
+WinPos propsPanelPos = {300, 120, 540, 560};
     WinPos levelListPos = {200, 120, 560, 420};
     WinPos animPanelPos  = {430, 180, 380, 390};
 #endif

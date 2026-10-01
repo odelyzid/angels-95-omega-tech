@@ -4653,6 +4653,130 @@ static std::string FormatStat(float v) {
     return std::string(buf);
 }
 
+// ---------------------------------------------------------------------------
+// Properties-panel vertical scrolling
+//
+// A weapon def generates ~30 editable stat rows on top of the read-only dump,
+// so the panel is far taller than any screen. It used to just grow until the
+// Apply/Close buttons fell off the bottom of the work area, with no way to
+// reach them. Instead the window is capped to the work area and every child is
+// repositioned by -scrollPos.
+//
+// Children are real Win32 controls, so the offset is applied by moving each
+// window rather than by painting (which is what the texture grid does, since it
+// owns no children). Base Y is captured once after Populate builds the rows.
+// ---------------------------------------------------------------------------
+static int  g_propsScroll   = 0;
+static int  g_propsContentH = 0;                       // full height the rows want
+static std::vector<std::pair<HWND, int>> g_propsRows;  // child hwnd, base Y
+
+// Record each row's un-scrolled Y so scrolling can move it without re-deriving
+// the layout. Must run AFTER all children are created.
+static void PropsCaptureRows(HWND hwnd) {
+    g_propsRows.clear();
+    g_propsScroll = 0;
+    for (HWND c = GetWindow(hwnd, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+        RECT r;
+        if (!GetWindowRect(c, &r)) continue;
+        POINT p = { r.left, r.top };
+        ScreenToClient(hwnd, &p);
+        g_propsRows.push_back({ c, p.y });
+    }
+}
+
+static int PropsMaxScroll(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int m = g_propsContentH - rc.bottom;
+    return (m > 0) ? m : 0;
+}
+
+// Publish the scroll range and show the bar only when there is something to
+// scroll.
+//
+// This MUST run after the window has been sized: nPage comes from the client
+// height, so deciding WS_VSCROLL first and resizing afterwards left a panel
+// that was taller than its content before the resize and shorter after it,
+// with no bar to scroll the overflow with.
+static void PropsApplyScroll(HWND hwnd) {
+    const int maxScroll = PropsMaxScroll(hwnd);
+    if (g_propsScroll > maxScroll) g_propsScroll = maxScroll;
+    if (g_propsScroll < 0)          g_propsScroll = 0;
+
+    for (const auto& row : g_propsRows) {
+        if (!IsWindow(row.first)) continue;
+        SetWindowPos(row.first, nullptr, 0, row.second - g_propsScroll, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    SCROLLINFO si = { sizeof(SCROLLINFO), SIF_POS, 0, 0, 0, 0 };
+    si.nPos = g_propsScroll;
+    SetScrollInfo(hwnd, SB_VERT, &si, FALSE);
+}
+
+// Publish the scroll range and show the bar only when there is something to
+// scroll.
+//
+// This MUST run after the window has been sized: nPage comes from the client
+// height, so deciding WS_VSCROLL first and resizing afterwards left a panel
+// that was taller than its content before the resize and shorter after it,
+// with no bar to scroll the overflow with.
+static void PropsUpdateScroll(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    const int clientH = rc.bottom;
+
+    int range = g_propsContentH - clientH;
+    if (range < 0) range = 0;
+
+    const bool needBar = (range > 0);
+    LONG style = GetWindowLong(hwnd, GWL_STYLE);
+    const bool haveBar = (style & WS_VSCROLL) != 0;
+    if (needBar != haveBar) {
+        SetWindowLong(hwnd, GWL_STYLE,
+                      needBar ? (style | WS_VSCROLL)
+                              : (style & ~(LONG)WS_VSCROLL));
+        // Toggling WS_VSCROLL on an overlapped window does not repaint the bar
+        // on its own; SWP_FRAMECHANGED is what makes it appear or disappear.
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                     SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+
+    SCROLLINFO si = { sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS };
+    si.nMin  = 0;
+    si.nMax  = range;
+    si.nPage = (UINT)clientH;
+    si.nPos  = g_propsScroll;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+
+    PropsApplyScroll(hwnd);
+}
+
+// Size the window to what the rows need, but never past the monitor's work
+// area, then publish the scroll range.
+static void PropsFitWindow(HWND hwnd, int neededH) {
+    g_propsContentH = neededH;
+
+    HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(MONITORINFO) };
+    int availH = 0;
+    if (GetMonitorInfo(mon, &mi))
+        availH = mi.rcWork.bottom - mi.rcWork.top;
+    if (availH < 200) availH = 600;   // no monitor info: keep some sane floor
+
+    int wantH = neededH;
+    if (wantH > availH) wantH = availH;
+
+    RECT wr;
+    GetWindowRect(hwnd, &wr);
+    if (wr.bottom - wr.top != wantH)
+        SetWindowPos(hwnd, nullptr, 0, 0, wr.right - wr.left, wantH,
+                     SWP_NOMOVE | SWP_NOZORDER);
+
+    PropsUpdateScroll(hwnd);
+}
+
 static void PopulatePropertiesPanel(HWND hwnd) {
     // Destroy existing controls
     HWND child = GetWindow(hwnd, GW_CHILD);
@@ -4749,8 +4873,8 @@ static void PopulatePropertiesPanel(HWND hwnd) {
             addSection("PawnDefs stats");
             for (auto& f : g_editorPanels.propDefPawnFields) addReadOnlyRow(f.key, f.value);
         }
-        if (!g_editorPanels.propDefFields.empty()) {
-            addSection(".ozls stats");
+if (!g_editorPanels.propDefFields.empty()) {
+            addSection(".ozls stats (keys with no edit field)");
             for (auto& f : g_editorPanels.propDefFields) addReadOnlyRow(f.key, f.value);
         }
         if (!g_editorPanels.propDefActions.empty()) {
@@ -4969,21 +5093,14 @@ static void PopulatePropertiesPanel(HWND hwnd) {
     }
     // ---------------------------------------------------------------------------
 
-    y += 8;
+y += 8;
     CreateButton(hwnd, L"Apply", x, y, bw, 26, ID_PP_APPLY);
     CreateButton(hwnd, L"Close", x + bw + 6, y, bw, 26, ID_PP_CLOSE);
 
-    // Grow the window (never shrink) so every generated row is visible
-    {
-        int needed = y + 26 + 24; // buttons + margin
-        RECT wr;
-        GetWindowRect(hwnd, &wr);
-        int curH = wr.bottom - wr.top;
-        if (needed > curH) {
-            SetWindowPos(hwnd, nullptr, 0, 0, wr.right - wr.left, needed,
-                         SWP_NOMOVE | SWP_NOZORDER);
-        }
-    }
+    // Capture the un-scrolled row positions, then size the window to the work
+    // area and publish the scroll range instead of growing past the screen.
+    PropsCaptureRows(hwnd);
+    PropsFitWindow(hwnd, y + 26 + 24);  // buttons + bottom margin
 }
 
 static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -4992,8 +5109,47 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         PopulatePropertiesPanel(hwnd);
         break;
     }
-    case WM_USER + 50: {
+case WM_USER + 50: {
         PopulatePropertiesPanel(hwnd);
+        break;
+    }
+    case WM_VSCROLL: {
+        // The non-client scrollbar drives g_propsScroll; every child row is
+        // then moved by the difference.
+        SCROLLINFO si = { sizeof(SCROLLINFO), SIF_ALL };
+        GetScrollInfo(hwnd, SB_VERT, &si);
+        const int line = 24;   // one row
+        const int page = si.nPage ? (int)si.nPage : 1;
+
+        int delta = 0;
+        switch (LOWORD(w)) {
+            case SB_LINEUP:   delta = -line; break;
+            case SB_LINEDOWN: delta =  line; break;
+            case SB_PAGEUP:   delta = -page; break;
+            case SB_PAGEDOWN: delta =  page; break;
+            case SB_THUMBTRACK:
+            case SB_THUMBPOSITION: delta = (int)si.nTrackPos - g_propsScroll; break;
+            case SB_TOP:      delta = -g_propsScroll; break;
+            case SB_BOTTOM:   delta = PropsMaxScroll(hwnd) - g_propsScroll; break;
+            default: break;
+        }
+        if (delta != 0) {
+            g_propsScroll += delta;
+            PropsApplyScroll(hwnd);
+        }
+        break;
+    }
+    case WM_MOUSEWHEEL: {
+        // Scrolling a long stat list with the wheel over the panel is far
+        // quicker than dragging the (very short, content-capped) scrollbar.
+        g_propsScroll -= GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA * 24;
+        PropsApplyScroll(hwnd);
+        break;
+    }
+    case WM_SIZE: {
+        // The user resized the panel, so the page size changed: re-publish the
+        // range and re-clamp. PropsFitWindow's own SetWindowPos lands here too.
+        PropsUpdateScroll(hwnd);
         break;
     }
     case WM_COMMAND: {
@@ -5309,6 +5465,22 @@ static void FillDefBlock(const std::string& defName, const std::string& fallback
                 P.propDefEditable.push_back(r);
                 row++;
             }
+
+            // Drop read-only rows whose key the Edit section already shows.
+            // The dump's job is to surface keys the schema does NOT know about
+            // (so nothing hand-authored is hidden); repeating every schema key
+            // there just doubled the panel's height and pushed Apply off the
+            // bottom of the screen. Nothing is lost - a schema key is still
+            // shown, just in the editable row below.
+            std::unordered_set<std::string> shown;
+            shown.reserve(P.propDefEditable.size() * 2);
+            for (const auto& r : P.propDefEditable) shown.insert(r.key);
+            P.propDefFields.erase(
+                std::remove_if(P.propDefFields.begin(), P.propDefFields.end(),
+                               [&](const EditorPanelState::DefField& f) {
+                                   return shown.count(f.key) != 0;
+                               }),
+                P.propDefFields.end());
         }
         return;
     }

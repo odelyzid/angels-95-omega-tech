@@ -304,8 +304,14 @@ because otherwise the panel could only ever edit what already exists.
 - Writes are **surgical line patches**, not a re-serialisation. Comments, key
   order, and any key the editor does not recognise all survive; an edit is a
   one-line diff. New keys are appended at the end of the `stats` block.
-- Stats the schema does not know about still appear in the read-only dump above,
-  so nothing authored by hand is hidden.
+- Stats the schema does **not** know about appear in the read-only dump above,
+  under *".ozls stats (keys with no edit field)"*, so nothing authored by hand
+  is hidden. Keys the schema **does** know about are omitted from that dump —
+  they are already shown in the *Edit stats* section below, where you can change
+  them, and repeating them there only doubled the panel's height.
+- The panel **scrolls**. A weapon def generates ~30 stat rows, so it is capped
+  to the monitor's work area with a vertical scrollbar rather than growing off
+  the bottom of the screen. The mouse wheel works over the panel.
 - **Packaged defs are read-only.** A def resolved from a `.oz*` package has no
   source file to write, so the section says so instead of accepting edits that
   cannot be saved. Edit the `GameData` source and repack.
