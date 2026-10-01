@@ -327,7 +327,12 @@ test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/Wor
 test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim worldcheck
+# .ozls write path (AngelEd Property Window). Links the parser too because the
+# round-trip cases assert that what the writer emits parses back identically.
+test_ozls_writer: tests/OzlsWriter.test.cpp Source/Script/OzlsWriter.cpp Source/Script/LightningScriptParser.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer worldcheck
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -361,6 +366,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== OzAnim Tests ==="
 	-./test_ozanim
 	@echo ""
+	@echo "=== OzlsWriter Tests ==="
+	-./test_ozls_writer
+	@echo ""
 	@echo "=== Worldcheck (.ozone auditor) ==="
 	# Run worldcheck on every shipped .ozone world (errors are printed, warnings do not fail).
 	@for w in GameData/Worlds/*/World.ozone; do \
@@ -368,4 +376,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	done
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim worldcheck
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer worldcheck
