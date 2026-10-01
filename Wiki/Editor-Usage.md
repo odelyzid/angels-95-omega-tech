@@ -177,6 +177,9 @@ auto-expand and folders with no matches are pruned.
   from all of `GameData/` + packages) with name, type and source path
 - Double-click to view the def body; **Edit / New / Delete / Reload** open the
   file in the configured external editor and re-scan the registry after edits
+- **Properties** opens the Entity Properties panel on the selected def. This is
+  the only route to a def with no instance in the open world — `Player.ozls`
+  above all, whose `jump_sound` / `hurt_sound` keys need editing somewhere
 
 ### Zone Properties / Environment Settings
 - **Fog**: color, density, start/end distance
@@ -219,8 +222,42 @@ auto-expand and folders with no matches are pruned.
 - For brushes/zones: edit size (W/H/D)
 - Texture mapping: U/V scale and offset
 - **Def-aligned rows (b60)**: entities backed by a `.ozls` def or `PawnDefs/*.cfg`
-  show read-only stats + hook rows straight from the def (read-only), with
+  show read-only stats + hook rows straight from the def, with
   instance overrides and zone/portal fields editable below them
+- **Editable `.ozls` stats**: an *Edit stats* section lists every documented
+  stat for the def's entity type, and **Apply** writes the changed rows back to
+  the source `.ozls`. See below.
+
+#### Editing `.ozls` stats
+
+The *Edit stats* section is generated from a **per-entity-type schema**, not
+from the keys the def already has — a weapon therefore shows every documented
+stat including ones it has never set. Rows are generated rather than discovered
+because otherwise the panel could only ever edit what already exists.
+
+- Only rows you actually **changed** are written. A blank, unauthored row is not
+  an erase, so opening a panel and pressing Apply never strips a def.
+- Clearing a field removes that key from the file.
+- Sound rows have **Preview** (plays it) and **Browse...**.
+- `Browse...` **rejects a filename containing a space**. A `.ozls` stats value
+  is stored verbatim and stops at the first space, so such a path could never
+  resolve — rename the file instead.
+- Sound paths must be written **unquoted**. The parser does no quote handling on
+  stats strings, so `"my gun.wav"` arrives at the runtime with its quotes and
+  fails to resolve.
+- Writes are **surgical line patches**, not a re-serialisation. Comments, key
+  order, and any key the editor does not recognise all survive; an edit is a
+  one-line diff. New keys are appended at the end of the `stats` block.
+- Stats the schema does not know about still appear in the read-only dump above,
+  so nothing authored by hand is hidden.
+- **Packaged defs are read-only.** A def resolved from a `.oz*` package has no
+  source file to write, so the section says so instead of accepting edits that
+  cannot be saved. Edit the `GameData` source and repack.
+
+**Reaching a def with no world instance:** `Player.ozls` is never placed in a
+level, so the Properties panel cannot reach it from a selection. Use the Script
+Manager's **Properties** button instead — this works for any def by name and
+skips the per-instance position/rotation rows.
 
 ### Animation Tool (b74)
 Opens from the toolbar **Anim** button. Authors **vertex-keyframe (morph)**

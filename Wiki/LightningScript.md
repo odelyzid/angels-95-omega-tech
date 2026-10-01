@@ -68,6 +68,54 @@ stats {
 | `spread` | float | 0 | — | Random spread angle in degrees |
 | `reach` | float | — | 3.0 | Melee attack range in units |
 
+#### Sound Stats
+
+Sound is authored per-entity in the same `stats` block. Values are asset paths;
+they resolve def-relative first, then via the package loader, so a `.wav`
+inside a `.ozsnd` works exactly like a loose file.
+
+| Stat | Type | Applies To | Default | Description |
+|---|---|---|---|---|
+| `fire_sound` | string | ranged weapon | `Sounds/Gun/machgf3b.wav` | One-shot per projectile fired |
+| `swing_sound` | string | melee weapon | *(silent)* | One-shot per melee swing |
+| `hit_sound` | string | melee weapon | *(silent)* | Melee connect that is **not** blocked by geometry |
+| `reload_sound` | string | any weapon | *(silent)* | Once per reload (manual **and** auto) |
+| `equip_sound` | string | any weapon | `Player/weapload.wav` | Selecting the weapon in the hotbar |
+| `fire_volume` / `swing_volume` / `hit_volume` / `reload_volume` / `equip_volume` | float | matching key | 1.0 | Linear gain |
+| `fire_pitch` / `swing_pitch` / `hit_pitch` | float | matching key | 1.0 | Playback rate (`0.85` = deeper) |
+
+Player sound lives on `Player.ozls` (`GameData/Global/Objects/`), read off the
+auto-spawned Player entity: `jump_sound`, `land_sound`, `walk_sound`,
+`run_sound`, `hurt_sound`, `death_sound`, each with a `_volume`.
+
+```
+stats {
+    fire_sound = GameData/Global/Sounds/Gun/machgf3b.wav
+    fire_volume = 0.9
+    fire_pitch = 0.85
+}
+```
+
+**Authoring rules — these fail silently if broken:**
+
+- **No quotes, no spaces.** A `stats` string value is stored *verbatim*; the
+  parser does not strip quotes, and it stops at the first space. Write
+  `fire_sound = a/b.wav`, never `fire_sound = "my gun.wav"`. A space truncates
+  the path and it will simply never resolve.
+- **Deliberate asymmetry:** `fire_sound` and `equip_sound` fall back to a
+  global default, so an unauthored weapon still shoots. `swing_sound`,
+  `hit_sound`, `reload_sound` and `land_sound` have **no** fallback — an
+  unauthored key is simply silent, because there is no honest generic clip for
+  "a blade connected" and borrowing one would make every swing in every level
+  sound identical.
+- `hit_sound` fires only on a connect that cleared geometry. A swing that stops
+  at a wall runs no `on_hit` and makes no connect sound.
+- `run_sound` is chosen off the sprint key while the player is moving;
+  `walk_sound` otherwise. Both are loops.
+
+All of these are editable from the AngelEd Property Window — see
+[Editor-Usage.md](Editor-Usage.md).
+
 ### Action Blocks
 
 Scripts attached to specific events:
