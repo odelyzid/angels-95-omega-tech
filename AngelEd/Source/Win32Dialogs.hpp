@@ -177,6 +177,32 @@ struct EditorPanelState {
     std::vector<DefField> propDefPawnFields; // PawnDefs/*.cfg values (pawns only)
     std::vector<DefField> propDefFields;     // .ozls stats (floats + strings)
     std::vector<DefField> propDefActions;    // action name -> "N lines"
+
+    // --- Editable .ozls stat rows -----------------------------------------
+    //
+    // propDefFields above is the full authored set, rendered read-only.
+    // These are the subset the panel knows how to edit for the selected def's
+    // entity type, with a per-row control ID so Apply can read the values back.
+    //
+    // Keys NOT in this list still render as read-only rows, so an authored stat
+    // the editor has never heard of is visible rather than silently dropped.
+    struct DefStatRow {
+        std::string key;
+        std::string value;
+        int controlId = 0;          // ID_PP_STATS_BASE + index
+        bool isFloat = false;       // right-aligned numeric field
+        bool isSoundPath = false;   // gets a Browse... and a Preview button
+    };
+    std::vector<DefStatRow> propDefEditable;
+    // Collected on Apply and consumed by Main.cpp, which performs the actual
+    // patch via ozls::PatchOzlsStats (Win32Dialogs must not write files itself).
+    std::vector<DefField> propDefPendingEdits;
+    // True when propDefPath names a real file on disk. False means the def came
+    // from a package, which cannot be written back to - the panel shows the
+    // rows read-only in that case rather than failing on Apply.
+    bool propDefWritable = false;
+    // Set when the user presses Preview on a sound row, holding the path.
+    std::string propDefPreviewSound;
     float propHealth = 100;         // NPC instance health override
     float propSpeed = 1.5f;         // NPC instance speed override
     float propRespawnTime = 30;     // pickup instance respawn time
@@ -316,6 +342,11 @@ struct EditorPanelState {
 };
 
 extern EditorPanelState g_editorPanels;
+
+// Open the Entity Properties panel on a DEF by name rather than a world
+// instance. Used by the Script Manager's Properties button, which is the only
+// route to a def with no instance in the open world (Player.ozls).
+void ShowDefPropertiesFor(const std::string& defName);
 
 // --- ZoneProperties replaces old EnvSettings ---
 enum class GameType : uint8_t {

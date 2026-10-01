@@ -249,10 +249,13 @@ jobs:
           # Without it this TU references DrawSlotBar and the link fails on an
           # undefined reference, since SlotBar.cpp is not part of the editor.
           g++ $EDITOR_FLAGS $EDITOR_INC -DOMEGA_TEST_ENV -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o
+          # .ozls writer: raylib-free, used by the Entity Properties panel to
+          # write stat edits back to the source file. Must match AngelEd/Makefile.
+          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/OzlsWriter.cpp -o OzlsWriter.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o SoundManager.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o Win32Dialogs.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o SoundManager.o Log.o OzBsp.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

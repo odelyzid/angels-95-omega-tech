@@ -89,6 +89,11 @@ $(BUILD_DIR)/LightningEntityRegistry.o: ../Source/Script/LightningEntityRegistry
 $(BUILD_DIR)/LightningEntityManager.o: ../Source/Script/LightningEntityManager.cpp ../Source/Script/LightningEntityManager.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -DOMEGA_TEST_ENV -c ../Source/Script/LightningEntityManager.cpp -o $@
 
+# .ozls writer (raylib-free). The Entity Properties panel writes stat edits back
+# to the source .ozls through this.
+$(BUILD_DIR)/OzlsWriter.o: ../Source/Script/OzlsWriter.cpp ../Source/Script/OzlsWriter.hpp ../Source/Script/LightningEntityDef.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Script/OzlsWriter.cpp -o $@
+
 # 4. Compile raygui layer
 $(BUILD_DIR)/raygui.o: Source/raygui/raygui.c | $(BUILD_DIR)
 	$(COMP) -fpermissive $(CFLAGS) -c Source/raygui/raygui.c -shared -DRAYGUI_IMPLEMENTATION -DBUILD_LIBTYPE_SHARED $(LDFLAGS) -o $@
@@ -166,7 +171,8 @@ CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DI
              $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \
              $(BUILD_DIR)/MeshCache.o $(BUILD_DIR)/AnimatedMesh.o $(BUILD_DIR)/OzAnimFormat.o \
-             $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o
+             $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o \
+              $(BUILD_DIR)/OzlsWriter.o
 
 # 5c. Editor Windows resource
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)

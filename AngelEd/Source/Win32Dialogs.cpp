@@ -1937,6 +1937,10 @@ static const int ID_SCRIPT_DETAIL = 107;
 static const int ID_SCRIPT_NEWNAME = 108;
 static const int ID_SCRIPT_NEWTYPE = 109;
 static const int ID_SCRIPT_NEWCREATE = 110;
+// Opens the Entity Properties panel on the selected def. This is the only route
+// to a def with no world instance - Player.ozls is exactly that, and its
+// jump_sound / hurt_sound stats have to be editable somewhere.
+static const int ID_SCRIPT_PROPS  = 111;
 static const int ID_SCRIPT_NEWCANCEL = 111;
 
 struct ScriptListEntry {
@@ -2091,10 +2095,11 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
                 10, 210, 520, 160, hwnd, (HMENU)(INT_PTR)ID_SCRIPT_DETAIL, g_hInst, nullptr);
             CreateButton(hwnd, L"Edit", 10, 378, 90, 28, ID_SCRIPT_EDIT);
-            CreateButton(hwnd, L"New Script...", 106, 378, 110, 28, ID_SCRIPT_NEW);
-            CreateButton(hwnd, L"Delete", 222, 378, 90, 28, ID_SCRIPT_DELETE);
-            CreateButton(hwnd, L"Reload", 318, 378, 90, 28, ID_SCRIPT_RELOAD);
-            CreateButton(hwnd, L"Close", 440, 378, 90, 28, ID_SCRIPT_CLOSE);
+            CreateButton(hwnd, L"Properties", 106, 378, 90, 28, ID_SCRIPT_PROPS);
+            CreateButton(hwnd, L"New Script...", 202, 378, 110, 28, ID_SCRIPT_NEW);
+            CreateButton(hwnd, L"Delete", 318, 378, 90, 28, ID_SCRIPT_DELETE);
+            CreateButton(hwnd, L"Reload", 414, 378, 90, 28, ID_SCRIPT_RELOAD);
+            CreateButton(hwnd, L"Close", 510, 378, 90, 28, ID_SCRIPT_CLOSE);
         }
         SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
         InvalidateRect(hwnd, nullptr, TRUE);
@@ -2209,6 +2214,17 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                 } else {
                     ShellExecuteA(hwnd, "open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 }
+            }
+        } else if (id == ID_SCRIPT_PROPS ||
+                   (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_DBLCLK &&
+                    SendMessage(hList, LB_GETCURSEL, 0, 0) < 0)) {
+            // Open the Entity Properties panel on the selected def. Uses a
+            // def-name target rather than a world-instance selection, so this
+            // works for defs with no instance in the open world (Player.ozls).
+            int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+            if (sel >= 0 && sel < (int)g_scripts.size()) {
+                const std::string& defName = g_scripts[sel].name;
+                ShowDefPropertiesFor(defName);
             }
         } else if (id == ID_SCRIPT_LIST && HIWORD(w) == LBN_SELCHANGE) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
@@ -2918,6 +2934,47 @@ static bool ChooseImageFile(std::string& outPath) {
 
 // Skybox texture picker for the Zone Properties Fog tab.
 static bool ChooseSkyboxFile(std::string& outPath) { return ChooseImageFile(outPath); }
+
+// Sound picker for the editable `.ozls` stat rows (fire_sound, jump_sound, ...).
+// Normalised to a repo-relative GameData/ path like ChooseImageFile, so a
+// committed .ozls stays portable.
+//
+// The value is written bare into the file, and the .ozls stats parser truncates
+// a string at the first space with no quoting, so a filename containing a space
+// would silently resolve to the wrong asset. Reject it here rather than let the
+// author save something that cannot work.
+static bool ChooseSoundFile(std::string& outPath) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW d = {};
+    d.lStructSize = sizeof(d);
+    d.hwndOwner = g_hRaylibWnd;
+    d.lpstrFile = path;
+    d.nMaxFile = MAX_PATH;
+    d.lpstrFilter = L"Sounds (*.wav;*.mp3;*.ogg;*.flac)\0*.wav;*.mp3;*.ogg;*.flac\0All Files (*.*)\0*.*\0\0";
+    d.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
+    if (!GetOpenFileNameW(&d)) return false;
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return false;
+    std::vector<char> utf8((size_t)size);
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), size, nullptr, nullptr);
+    std::string s(utf8.data());
+
+    for (auto& c : s) if (c == '\\') c = '/';
+    size_t gd = s.find("GameData/");
+    outPath = (gd != std::string::npos) ? s.substr(gd) : s;
+
+    if (outPath.find(' ') != std::string::npos || outPath.find('\t') != std::string::npos) {
+        MessageBoxA(g_hRaylibWnd,
+            "This filename contains a space.\n\n"
+            "A .ozls stats value is stored verbatim and stops at the first\n"
+            "space, so the sound would never resolve. Rename the file.",
+            "Cannot use this sound", MB_OK | MB_ICONWARNING);
+        outPath.clear();
+        return false;
+    }
+    return true;
+}
 
 // `.ozanim` vertex-keyframe picker (normalized to a GameData-relative path).
 static bool ChooseAnimFile(std::string& outPath) {
@@ -4374,6 +4431,148 @@ static const int ID_PP_LIGHT_TARGETY  = 482;
 static const int ID_PP_LIGHT_TARGETZ  = 483;
 static const int ID_PP_LIGHT_NAME     = 484;
 
+// Editable .ozls stat rows. The count is a fixed ceiling rather than a
+// per-key constant because rows are generated from the def's stat schema; row
+// N uses ID_PP_STAT_FIELD_0 + N. Per-row IDs (rather than two shared Preview /
+// Browse ids plus a hit-test) mean a click cannot land on the wrong row.
+static const int ID_PP_STAT_FIELD_0    = 485;
+static const int ID_PP_STAT_PREVIEW_0  = 535;
+static const int ID_PP_STAT_BROWSE_0   = 585;
+// Bound on editable rows. A def is free to author more stats than this; the
+// extras still render as read-only rows rather than disappearing.
+static const int ID_PP_STAT_MAX        = 45;
+
+// Read one editable stat row's field as text. Returns "" when the control is
+// absent, which the callers treat as "no edit".
+static std::string readStatRowText(HWND hwnd, int id) {
+    HWND hCtrl = GetDlgItem(hwnd, id);
+    if (!hCtrl) return "";
+    wchar_t buf[512];
+    GetWindowTextW(hCtrl, buf, 512);
+    char out[512] = {0};
+    WideCharToMultiByte(CP_UTF8, 0, buf, -1, out, 512, nullptr, nullptr);
+    return std::string(out);
+}
+
+// ---------------------------------------------------------------------------
+// Editable .ozls stat schema
+//
+// The 1:1 mapping between an authored key and the runtime that reads it. This
+// is deliberately a list rather than "everything numeric is editable": writing
+// a key nothing reads would be a silent no-op, and editing a key the runtime
+// never consults is worse than showing it read-only.
+//
+// `float` keys render as numeric fields; `vec3` keys are edited as three
+// comma-separated floats in one field; sound paths get Browse + Preview.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct StatSpec {
+    const char* key;
+    int kind;                 // 0 = float, 1 = string, 2 = vec3, 3 = sound path
+    const char* label;
+};
+
+const StatSpec kWeaponStats[] = {
+    {"damage",                 0, "Damage"},
+    {"fire_rate",              0, "Fire Rate"},
+    {"swing_speed",            0, "Swing Speed"},
+    {"magazine",               0, "Magazine"},
+    {"reload_time",            0, "Reload Time"},
+    {"spread",                 0, "Spread"},
+    {"reach",                  0, "Melee Reach"},
+    {"stamina_cost",           0, "Stamina Cost"},
+    {"recoil",                 0, "Recoil"},
+    {"projectile_speed",       0, "Proj Speed"},
+    {"projectile_lifetime",    0, "Proj Lifetime"},
+    {"projectile_count",       0, "Proj Count"},
+    {"projectile_submesh",     0, "Proj Submesh"},
+    {"projectile_scale",       0, "Proj Scale"},
+    {"projectile_mesh",        1, "Projectile Mesh"},
+    {"projectile_texture",     1, "Projectile Tex"},
+    {"projectile_color",       2, "Projectile RGB"},
+    {"viewmodel_mesh",         1, "Viewmodel Mesh"},
+    {"viewmodel_texture",      1, "Viewmodel Tex"},
+    {"viewmodel_offset",       2, "Viewmodel Pos"},
+    {"viewmodel_rot",          2, "Viewmodel Rot"},
+    {"viewmodel_scale",        0, "Viewmodel Scale"},
+    // Data-driven audio. Volume/pitch default to 1.0 in the runtime, so an
+    // omitted row plays the authored sound at unity.
+    {"fire_sound",             3, "Fire Sound"},
+    {"fire_volume",            0, "Fire Volume"},
+    {"fire_pitch",             0, "Fire Pitch"},
+    {"swing_sound",            3, "Swing Sound"},
+    {"swing_volume",           0, "Swing Volume"},
+    {"swing_pitch",            0, "Swing Pitch"},
+    {"hit_sound",              3, "Hit Sound"},
+    {"hit_volume",             0, "Hit Volume"},
+    {"reload_sound",           3, "Reload Sound"},
+    {"reload_volume",          0, "Reload Vol"},
+    {"equip_sound",            3, "Equip Sound"},
+    {"equip_volume",           0, "Equip Volume"},
+};
+
+const StatSpec kPlayerStats[] = {
+    {"health",                 0, "Health"},
+    {"max_health",             0, "Max Health"},
+    {"mana",                   0, "Mana"},
+    {"max_mana",               0, "Max Mana"},
+    {"psychic_energy",         0, "Psychic"},
+    {"max_psychic_energy",     0, "Max Psychic"},
+    {"level",                  0, "Level"},
+    {"xp",                     0, "XP"},
+    {"xp_to_next",             0, "XP To Next"},
+    {"jump_sound",             3, "Jump Sound"},
+    {"jump_volume",            0, "Jump Volume"},
+    {"land_sound",             3, "Land Sound"},
+    {"land_volume",            0, "Land Volume"},
+    {"walk_sound",             3, "Walk Sound"},
+    {"walk_volume",            0, "Walk Volume"},
+    {"run_sound",              3, "Run Sound"},
+    {"run_volume",             0, "Run Volume"},
+    {"hurt_sound",             3, "Hurt Sound"},
+    {"hurt_volume",            0, "Hurt Volume"},
+    {"death_sound",            3, "Death Sound"},
+    {"death_volume",           0, "Death Volume"},
+};
+
+const StatSpec kPawnStats[] = {
+    {"speed",                  0, "Speed"},
+    {"aggroRange",             0, "Aggro Range"},
+    {"attackRange",            0, "Attack Range"},
+    {"damage",                 0, "Damage"},
+    {"maxHealth",              0, "Max Health"},
+    {"sprite_path",            1, "Sprite"},
+    {"model_path",             1, "Model"},
+    {"model_texture",          1, "Model Tex"},
+    {"model_scale",            0, "Model Scale"},
+    {"mesh_type",              1, "Mesh Type"},
+    {"anim_idle",              1, "Anim Idle"},
+    {"anim_patrol",            1, "Anim Patrol"},
+    {"anim_chase",             1, "Anim Chase"},
+    {"anim_return",            1, "Anim Return"},
+    {"anim_death",             1, "Anim Death"},
+    {"anim_speed",             0, "Anim Speed"},
+    {"hurt_sound",             3, "Hurt Sound"},
+    {"death_sound",            3, "Death Sound"},
+};
+
+// The schema for `type`, or nullptr when nothing is editable for it. Only
+// entity types whose def the panel can actually write get an entry.
+const StatSpec* StatSchemaFor(EntityType type, int* outCount) {
+    auto set = [&](const StatSpec* s, int n) { *outCount = n; return s; };
+    switch (type) {
+        case EntityType::WEAPON: return set(kWeaponStats, (int)(sizeof(kWeaponStats)/sizeof(StatSpec)));
+        case EntityType::PAWN:   return set(kPawnStats,   (int)(sizeof(kPawnStats)/sizeof(StatSpec)));
+        // Player.ozls is declared `: upgrade` (see GameData/Global/Objects),
+        // so match on the def NAME as well - there is no dedicated player type.
+        case EntityType::UPGRADE: return set(kPlayerStats, (int)(sizeof(kPlayerStats)/sizeof(StatSpec)));
+        default: *outCount = 0; return nullptr;
+    }
+}
+
+}  // namespace
+
 // Build a read-only def summary (stats + actions + PawnDef block). Shared by the
 // Script Manager detail pane and the Properties panel def section.
 static void BuildDefSummary(const EntityDef& def, const std::string& sourcePath,
@@ -4539,6 +4738,48 @@ static void PopulatePropertiesPanel(HWND hwnd) {
             addSection("Actions");
             for (auto& f : g_editorPanels.propDefActions) addReadOnlyRow(f.key, f.value);
         }
+
+        // Editable stat rows for the def's entity type. Separate from the
+        // read-only dump above so the full authored set stays visible, including
+        // keys this schema does not know about.
+        if (!g_editorPanels.propDefEditable.empty()) {
+            addSection(g_editorPanels.propDefWritable
+                           ? "Edit stats (writes to .ozls on Apply)"
+                           : "Stats (read-only: def is packaged)");
+            if (!g_editorPanels.propDefWritable) {
+                CreateLabel(hwnd,
+                    L"Def has no editable source file. Edit the GameData .ozls and repack.",
+                    x, y, rc.right - 20, 18, 0);
+                y += 20;
+            }
+            for (const auto& row : g_editorPanels.propDefEditable) {
+                std::wstring wk(row.key.begin(), row.key.end());
+                CreateLabel(hwnd, wk.c_str(), x, y, defLabelW, 20, 0);
+                std::wstring wv(row.value.begin(), row.value.end());
+                // ES_NUMBER would reject a vec3 "(0.1, 0.2, 0.3)" and a float
+                // field must still allow a leading '-', so numeric validation is
+                // left to Apply rather than enforced by the control.
+                CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", wv.c_str(),
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                    x + defLabelW, y, rc.right - (x + defLabelW) - 20, 22,
+                    hwnd, (HMENU)(INT_PTR)row.controlId, g_hInst, nullptr);
+                y += rowH;
+                // Sound rows get Preview (play it) and Browse (pick a file).
+                // Stacked under the field rather than beside it, because the
+                // panel is narrow and a third column would squeeze the path.
+                if (row.isSoundPath) {
+                    const int idx = ID_PP_STAT_FIELD_0 == row.controlId
+                                        ? row.controlId - ID_PP_STAT_FIELD_0
+                                        : 0;
+                    CreateButton(hwnd, L"Preview", x + defLabelW, y, 70, 22,
+                                 ID_PP_STAT_PREVIEW_0 + idx);
+                    CreateButton(hwnd, L"Browse...", x + defLabelW + 76, y, 80, 22,
+                                 ID_PP_STAT_BROWSE_0 + idx);
+                    y += rowH;
+                }
+            }
+        }
+
         if (!g_editorPanels.propDefPath.empty()) {
             CreateButton(hwnd, L"Edit .ozls", x, y, 100, 24, ID_PP_EDITDEF);
             y += 30;
@@ -4782,6 +5023,27 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             g_editorPanels.actionApplyProperties = true;
             break;
         }
+        // Preview / Browse for a sound row. Each row gets its OWN pair of control IDs
+        // rather than sharing two and hit-testing the cursor: a shared ID needs
+        // the row geometry recomputed here, and any drift from the layout would
+        // silently act on the wrong weapon's sound.
+        if (id >= ID_PP_STAT_PREVIEW_0 && id < ID_PP_STAT_PREVIEW_0 + ID_PP_STAT_MAX) {
+            const int index = id - ID_PP_STAT_PREVIEW_0;
+            if (index < 0 || index >= (int)g_editorPanels.propDefEditable.size()) break;
+            const auto& row = g_editorPanels.propDefEditable[(size_t)index];
+
+            if (id == ID_PP_STAT_PREVIEW_0 + index) {
+                const std::string path = readStatRowText(hwnd, row.controlId);
+                if (path.empty()) break;
+                g_editorPanels.propDefPreviewSound = path;
+                break;
+            }
+            std::string chosen;
+            if (!ChooseSoundFile(chosen)) break;
+            std::wstring w(chosen.begin(), chosen.end());
+            SetWindowTextW(GetDlgItem(hwnd, row.controlId), w.c_str());
+            break;
+        }
         if (id == ID_PP_APPLY) {
             // Read all edit fields and set action flags
             auto readFloat = [hwnd](int id, float def) -> float {
@@ -4836,6 +5098,22 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             if (HWND hb = GetDlgItem(hwnd, ID_PP_PBIDIR))
                 g_editorPanels.propPortalBidir =
                     SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
+            // Collect editable .ozls stat edits. Only rows whose text actually
+            // CHANGED are queued: a row that was never authored starts empty,
+            // and writing those empties would erase nothing while still
+            // producing a spurious file edit on every Apply.
+            g_editorPanels.propDefPendingEdits.clear();
+            for (const auto& row : g_editorPanels.propDefEditable) {
+                const std::string now = readStatRowText(hwnd, row.controlId);
+                // Trim trailing spaces so a stray keystroke does not register
+                // as a change.
+                std::string trimmed = now;
+                while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t'))
+                    trimmed.pop_back();
+                if (trimmed == row.value) continue;
+                g_editorPanels.propDefPendingEdits.push_back({row.key, trimmed});
+            }
             // GameEngine.Mesh object edits
             g_editorPanels.propScale = readFloat(ID_PP_SCALE, g_editorPanels.propScale);
             g_editorPanels.propMeshPath = readString(ID_PP_MESHPATH, g_editorPanels.propMeshPath);
@@ -4913,6 +5191,120 @@ static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
     return 0;
 }
 
+// Fill the structured def rows from the registry by def name (+ a PawnDefs/*.cfg
+// fallback for pawns without an .ozls def).
+//
+// File scope rather than a lambda inside ShowPropertiesPanel, because the Script
+// Manager's Properties button needs it too - that is the only route to a def
+// with no world instance (Player.ozls). Two copies would drift.
+static void FillDefBlock(const std::string& defName, const std::string& fallbackPath) {
+    using DefField = EditorPanelState::DefField;
+    auto& P = g_editorPanels;
+    P.propDefPath.clear(); P.propDefTitle.clear(); P.propDefSource.clear();
+    P.propDefPawnFields.clear(); P.propDefFields.clear(); P.propDefActions.clear();
+    P.propDefEditable.clear(); P.propDefPendingEdits.clear();
+    P.propDefPreviewSound.clear();
+
+    // A def that came from a package has no editable source file, so the panel
+    // shows its stats read-only instead of accepting edits it cannot save. (Same
+    // reasoning as the Script Manager's "edit the source and repack" message.)
+    P.propDefWritable = false;
+
+    auto addPawnDefFields = [&](const std::string& name) {
+        for (const auto& pd : PawnSystem::Instance().GetDefs()) {
+            if (pd.name != name) continue;
+            P.propDefPawnFields.push_back({"speed", FormatStat(pd.speed)});
+            P.propDefPawnFields.push_back({"aggroRange", FormatStat(pd.aggroRange)});
+            P.propDefPawnFields.push_back({"attackRange", FormatStat(pd.attackRange)});
+            P.propDefPawnFields.push_back({"damage", FormatStat(pd.damage)});
+            P.propDefPawnFields.push_back({"maxHealth", std::to_string(pd.maxHealth)});
+            if (!pd.sprite_path.empty()) P.propDefPawnFields.push_back({"sprite", pd.sprite_path});
+            if (!pd.scream_path.empty()) P.propDefPawnFields.push_back({"scream", pd.scream_path});
+            return true;
+        }
+        return false;
+    };
+
+    const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
+    if (def) {
+        P.propDefPath = def->sourcePath;
+        P.propDefTitle = def->name + "  [" + EntityTypeName(def->type) + "]";
+        P.propDefSource = def->sourcePath;
+        if (!def->mesh.empty())    P.propDefFields.push_back({"mesh", def->mesh});
+        if (!def->texture.empty()) P.propDefFields.push_back({"texture", def->texture});
+        if (!def->icon.empty())    P.propDefFields.push_back({"icon", def->icon});
+        if (!def->skybox.empty())  P.propDefFields.push_back({"skybox", def->skybox});
+        if (!def->music.empty())   P.propDefFields.push_back({"music", def->music});
+
+        std::vector<std::pair<std::string, float>> sv(def->stats.floats.begin(), def->stats.floats.end());
+        std::sort(sv.begin(), sv.end());
+        for (auto& [k, v] : sv) P.propDefFields.push_back({k, FormatStat(v)});
+        std::vector<std::pair<std::string, std::string>> ss(def->stats.strings.begin(), def->stats.strings.end());
+        std::sort(ss.begin(), ss.end());
+        for (auto& [k, v] : ss) P.propDefFields.push_back({k, "\"" + v + "\""});
+        for (const auto& a : def->actions)
+            P.propDefActions.push_back({a.name, std::to_string(a.scriptLines.size()) + " lines"});
+        if (def->type == EntityType::PAWN) addPawnDefFields(def->name);
+
+        // Build the editable row set from the SCHEMA rather than from the
+        // authored keys, so a weapon gets every documented stat including ones it
+        // has never set - otherwise the panel could only ever edit what already
+        // exists. Unauthored rows render blank, and Main.cpp only writes a key the
+        // user actually typed into.
+        P.propDefWritable = !P.propDefPath.empty() && fs::exists(P.propDefPath);
+
+        int schemaCount = 0;
+        const StatSpec* schema = StatSchemaFor(def->type, &schemaCount);
+        // Player.ozls is declared `: upgrade`, so the player stat list is chosen
+        // by name rather than by an entity type token.
+        if (def->name == "Player") {
+            schema = kPlayerStats;
+            schemaCount = (int)(sizeof(kPlayerStats) / sizeof(StatSpec));
+        }
+        if (schema && P.propDefWritable) {
+            int row = 0;
+            for (int i = 0; i < schemaCount && row < ID_PP_STAT_MAX; i++) {
+                const StatSpec& sp = schema[i];
+                std::string value;
+                auto fit = def->stats.floats.find(sp.key);
+                if (fit != def->stats.floats.end()) {
+                    value = FormatStat(fit->second);
+                } else {
+                    auto sit = def->stats.strings.find(sp.key);
+                    if (sit != def->stats.strings.end()) {
+                        value = sit->second;
+                    } else {
+                        auto vit = def->stats.vec3s.find(sp.key);
+                        if (vit != def->stats.vec3s.end())
+                            value = "(" + FormatStat(vit->second[0]) + ", " +
+                                    FormatStat(vit->second[1]) + ", " +
+                                    FormatStat(vit->second[2]) + ")";
+                    }
+                }
+                EditorPanelState::DefStatRow r;
+                r.key = sp.key;
+                r.value = value;
+                r.controlId = ID_PP_STAT_FIELD_0 + row;
+                r.isFloat = (sp.kind == 0);
+                r.isSoundPath = (sp.kind == 3);
+                P.propDefEditable.push_back(r);
+                row++;
+            }
+        }
+        return;
+    }
+
+    // No .ozls def - PawnDefs/*.cfg-only pawn fallback.
+    if (addPawnDefFields(defName)) {
+        std::string path = fallbackPath.empty()
+            ? ("GameData/Global/PawnDefs/" + defName + ".cfg") : fallbackPath;
+        if (!fs::exists(path)) path.clear();
+        P.propDefPath = path;
+        P.propDefTitle = defName + "  [pawn - PawnDefs only]";
+        P.propDefSource = path;
+    }
+}
+
 void ShowPropertiesPanel(bool show) {
     g_editorPanels.showPropsPanel = show;
     if (show && g_editorPanels.hPropsPanel) {
@@ -4928,73 +5320,22 @@ void ShowPropertiesPanel(bool show) {
         g_editorPanels.propDefPawnFields.clear();
         g_editorPanels.propDefFields.clear();
         g_editorPanels.propDefActions.clear();
-
-        // Helper: fill the structured def rows from the registry by def name
-        // (+ PawnDefs/*.cfg fallback for pawns without an .ozls def).
-        auto fillDefBlock = [](const std::string& defName, const std::string& fallbackPath) {
-            using DefField = EditorPanelState::DefField;
-            auto& P = g_editorPanels;
-            P.propDefPath.clear(); P.propDefTitle.clear(); P.propDefSource.clear();
-            P.propDefPawnFields.clear(); P.propDefFields.clear(); P.propDefActions.clear();
-
-            auto addPawnDefFields = [&](const std::string& name) {
-                for (const auto& pd : PawnSystem::Instance().GetDefs()) {
-                    if (pd.name != name) continue;
-                    P.propDefPawnFields.push_back({"speed", FormatStat(pd.speed)});
-                    P.propDefPawnFields.push_back({"aggroRange", FormatStat(pd.aggroRange)});
-                    P.propDefPawnFields.push_back({"attackRange", FormatStat(pd.attackRange)});
-                    P.propDefPawnFields.push_back({"damage", FormatStat(pd.damage)});
-                    P.propDefPawnFields.push_back({"maxHealth", std::to_string(pd.maxHealth)});
-                    if (!pd.sprite_path.empty()) P.propDefPawnFields.push_back({"sprite", pd.sprite_path});
-                    if (!pd.scream_path.empty()) P.propDefPawnFields.push_back({"scream", pd.scream_path});
-                    return true;
-                }
-                return false;
-            };
-
-            const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
-            if (def) {
-                P.propDefPath = def->sourcePath;
-                P.propDefTitle = def->name + "  [" + EntityTypeName(def->type) + "]";
-                P.propDefSource = def->sourcePath;
-                if (!def->mesh.empty())    P.propDefFields.push_back({"mesh", def->mesh});
-                if (!def->texture.empty()) P.propDefFields.push_back({"texture", def->texture});
-                if (!def->icon.empty())    P.propDefFields.push_back({"icon", def->icon});
-                if (!def->skybox.empty())  P.propDefFields.push_back({"skybox", def->skybox});
-                if (!def->music.empty())   P.propDefFields.push_back({"music", def->music});
-                std::vector<std::pair<std::string, float>> sv(def->stats.floats.begin(), def->stats.floats.end());
-                std::sort(sv.begin(), sv.end());
-                for (auto& [k, v] : sv) P.propDefFields.push_back({k, FormatStat(v)});
-                std::vector<std::pair<std::string, std::string>> ss(def->stats.strings.begin(), def->stats.strings.end());
-                std::sort(ss.begin(), ss.end());
-                for (auto& [k, v] : ss) P.propDefFields.push_back({k, "\"" + v + "\""});
-                for (const auto& a : def->actions)
-                    P.propDefActions.push_back({a.name, std::to_string(a.scriptLines.size()) + " lines"});
-                if (def->type == EntityType::PAWN) addPawnDefFields(def->name);
-                return;
-            }
-            // No .ozls def — PawnDefs/*.cfg-only pawn fallback
-            if (addPawnDefFields(defName)) {
-                std::string path = fallbackPath.empty()
-                    ? ("GameData/Global/PawnDefs/" + defName + ".cfg") : fallbackPath;
-                if (!fs::exists(path)) path.clear();
-                P.propDefPath = path;
-                P.propDefTitle = defName + "  [pawn - PawnDefs only]";
-                P.propDefSource = path;
-            }
-        };
+        g_editorPanels.propDefEditable.clear();
+        g_editorPanels.propDefPendingEdits.clear();
+        g_editorPanels.propDefPreviewSound.clear();
+        g_editorPanels.propDefWritable = false;
 
         if (g_editorPanels.propsTargetType == 3) { // NPC
             if (Pawn* p = PawnSystem::Instance().Get(g_editorPanels.propsTargetIndex)) {
                 g_editorPanels.propHealth = (float)p->health;
                 g_editorPanels.propSpeed = p->speed;
-                fillDefBlock(p->defName, "");
+                FillDefBlock(p->defName, "");
             }
         } else if (g_editorPanels.propsTargetType == 4) { // PICKUP / weapon
             for (auto& pk : PawnSystem::Instance().GetPickups()) {
                 if ((int)pk.id == g_editorPanels.propsTargetIndex) {
                     g_editorPanels.propRespawnTime = pk.respawnTime;
-                    fillDefBlock(pk.typeName, "");
+                    FillDefBlock(pk.typeName, "");
                     break;
                 }
             }
@@ -5034,7 +5375,7 @@ void ShowPropertiesPanel(bool show) {
             g_editorPanels.propZoneSwimUp = z.physics.swimUpSpeed;
             g_editorPanels.propZoneLadderSpeed = z.physics.ladderSpeed;
             g_editorPanels.propZoneFlyMult = z.physics.flySpeedMult;
-            if (!z.name.empty()) fillDefBlock(z.name, "");
+            if (!z.name.empty()) FillDefBlock(z.name, "");
                     break;
                 }
             }
@@ -5145,13 +5486,34 @@ void ShowPropertiesPanel(bool show) {
             }
         }
 
-        ShowWindow((HWND)g_editorPanels.hPropsPanel, SW_SHOW);
+ShowWindow((HWND)g_editorPanels.hPropsPanel, SW_SHOW);
         SetForegroundWindow((HWND)g_editorPanels.hPropsPanel);
         // Rebuild controls for the current entity type
         SendMessage((HWND)g_editorPanels.hPropsPanel, WM_USER + 50, 0, 0);
     } else if (g_editorPanels.hPropsPanel) {
         ShowWindow((HWND)g_editorPanels.hPropsPanel, SW_HIDE);
     }
+}
+
+// Open the Entity Properties panel on a DEF rather than a world instance.
+//
+// Needed for defs with no instance in the open world - Player.ozls is the
+// motivating case, since the player's sound stats have to be editable and the
+// player is never placed in a level. propsTargetType is left at -1 so the
+// panel's per-SelType position/rotation/size rows are skipped: they belong to a
+// world instance, and there is none here. The def section is what matters.
+void ShowDefPropertiesFor(const std::string& defName) {
+    const EntityDef* def = LightningEntityRegistry::Instance().Find(defName);
+    if (!def) return;
+
+    g_editorPanels.propsTargetType = -1;
+    g_editorPanels.propsTargetIndex = -1;
+    g_editorPanels.propsTargetName = defName;
+
+    // Fill the def block directly rather than via ShowPropertiesPanel, which
+    // derives it from the current world selection and would find nothing.
+    FillDefBlock(defName, "");
+    ShowPropertiesPanel(true);
 }
 
 // =====================================================================
@@ -5678,3 +6040,4 @@ void DestroyAllEditorWindows() {
         g_editorPanels.hPreviewBitmap = nullptr;
     }
 }
+

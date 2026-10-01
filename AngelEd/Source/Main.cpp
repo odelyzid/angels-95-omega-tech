@@ -17,7 +17,9 @@
 #include "../../Source/Pawn/OzPawnSystem.hpp"
 #include "../../Source/Package/Anim/OzAnimFormat.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
-#include "../../Source/World/OzoneParser.hpp"
+#include "../../Source/Script/LightningEntityRegistry.hpp"
+#include "../../Source/Script/OzlsWriter.hpp"
+#include "../../Source/Audio/SoundManager.hpp"
 #include "../../Source/Physics/OzBsp.hpp"
 #include "../../Source/Renderer/LitLightning.hpp"
 #ifdef _WIN32
@@ -3435,6 +3437,72 @@ int main(int argc, char **argv){
             }
             EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), tgtIdx);
             g_editorPanels.actionApplyProperties = false;
+        }
+
+        // --- Editable .ozls stat rows ---------------------------------------
+        //
+        // Separate from the SelType dispatch above on purpose: the stat rows
+        // belong to the DEF, not to the world instance being selected, and the
+        // Script Manager can reach them too. The patcher only touches the
+        // `stats { }` block, so this is independent of every in-memory edit
+        // above and cannot disturb them.
+        if (!g_editorPanels.propDefPendingEdits.empty()) {
+            std::vector<ozls::StatEdit> edits;
+            edits.reserve(g_editorPanels.propDefPendingEdits.size());
+            for (const auto& e : g_editorPanels.propDefPendingEdits) {
+                if (e.key.empty()) continue;
+                ozls::StatKind kind = ozls::StatKind::String;
+                // Infer the kind from the authored value: a parenthesised
+                // triple is a vec3, a bare number is a float, anything else a
+                // string. The writer files it back under the matching map, so
+                // Parse reads it the same way next time.
+                if (e.value.size() > 2 && e.value.front() == '(' && e.value.back() == ')') {
+                    kind = ozls::StatKind::Vec3;
+                } else {
+                    char* end = nullptr;
+                    const float v = std::strtof(e.value.c_str(), &end);
+                    if (end && *end == '\0' && !e.value.empty()) {
+                        (void)v;
+                        kind = ozls::StatKind::Float;
+                    }
+                }
+                edits.push_back({e.key, e.value, kind});
+            }
+
+            if (edits.empty()) {
+                g_editorPanels.propDefPendingEdits.clear();
+            } else if (!g_editorPanels.propDefWritable || g_editorPanels.propDefPath.empty()) {
+                // Packaged def: there is no source file to patch. The panel
+                // already shows these rows read-only, so reaching here means the
+                // state changed underneath us; say so rather than pretend.
+                EditorLog("Stat edits skipped: '%s' has no editable source file",
+                          g_editorPanels.propDefPath.c_str());
+                g_editorPanels.propDefPendingEdits.clear();
+            } else {
+                const ozls::PatchResult res =
+                    ozls::PatchOzlsStats(g_editorPanels.propDefPath, edits);
+                if (res.ok) {
+                    EditorLog("Patched %s: %d updated, %d inserted, %d erased",
+                              g_editorPanels.propDefPath.c_str(),
+                              res.updated, res.inserted, res.erased);
+                    // Re-read the defs so the panel's read-only dump and the
+                    // registry agree with the file immediately.
+                    LightningEntityRegistry::Instance().Init();
+                    SendMessage((HWND)g_editorPanels.hPropsPanel, WM_USER + 50, 0, 0);
+                } else {
+                    EditorLog("Stat patch FAILED for %s: %s",
+                              g_editorPanels.propDefPath.c_str(), res.error.c_str());
+                    MessageBoxA(nullptr, res.error.c_str(),
+                                "Could not write .ozls", MB_OK | MB_ICONERROR);
+                }
+                g_editorPanels.propDefPendingEdits.clear();
+            }
+        }
+
+        // Preview a sound stat without saving.
+        if (!g_editorPanels.propDefPreviewSound.empty()) {
+            SoundManager::Instance().PlayStatSound(g_editorPanels.propDefPreviewSound);
+            g_editorPanels.propDefPreviewSound.clear();
         }
         // "Reload Mesh" — drop the cached asset so it re-resolves next draw
         if (g_editorPanels.actionReloadMesh) {
