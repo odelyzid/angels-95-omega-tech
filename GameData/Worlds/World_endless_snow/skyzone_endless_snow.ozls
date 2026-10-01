@@ -1,0 +1,21 @@
+# World_endless_sky skyzone script.
+# Heavy teal/cyan snow fog, cold ambient, overcast skybox.
+entity "endless_snow_sky" : skyzone {
+    fog_color = (0.45, 0.62, 0.68)
+    fog_density = 0.0030
+    ambient_light = (0.42, 0.48, 0.52)
+    skybox = "GameData/Global/sky/sky_day.dds"
+    actions {
+        on_enter {
+            set_fog 0.45 0.62 0.68 0.0030
+            set_ambient 0.42 0.48 0.52
+            set_skybox "GameData/Global/sky/sky_day.dds"
+            say "World Endless Snow - radar contact lost, visibility zero"
+        }
+        on_exit {
+            restore_fog
+            restore_skybox
+            say "Left the endless snow zone"
+        }
+    }
+}
