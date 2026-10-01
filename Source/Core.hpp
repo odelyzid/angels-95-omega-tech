@@ -14,6 +14,7 @@
 #include "Renderer/EngineBillboard.hpp"
 #include "Renderer/ViewModel.hpp"
 #include "Particle/OzParticleSimulationManager.hpp"
+#include "Pawn/AngelPlayer/PlayerController.hpp"
 #include "Script/LightningEntityRegistry.hpp"
 #include "Script/LightningEntityManager.hpp"
 
@@ -1020,11 +1021,14 @@ void UpdatePlayer()
                 g_playerMovement.HeadBob += (g_playerMovement.HeadBobDirection == 1) ? 1 : -1;
             }
         }
-        SoundManager::Instance().StartWalkLoop();
+        // Footsteps are now gait-aware and .ozls-driven (walk_sound /
+        // run_sound on Player.ozls), with the preloaded WalkingSound as the
+        // fallback when neither is authored.
+        PlayerController::Instance().PlayWalkLoop(g_playerMovement.isSprinting);
     }
     else
     {
-        SoundManager::Instance().StopWalkLoop();
+        PlayerController::Instance().StopWalkLoop();
     }
 
     g_playerMovement.UpdateBounds(OmegaTechData.MainCamera);
@@ -1690,6 +1694,11 @@ if (inSkyZone)
             lem.ClearPlayerHurt();
             if (OmegaTechData.DamageFlash <= 0.0f)
                 OmegaTechData.DamageFlash = kDamageFlashDuration;
+            // Same routed handler as the network PLAYER_HURT path, so a script
+            // `damage` and a server hit cannot double-play and both respect the
+            // authored hurt_sound / death_sound split.
+            PlayerController::Instance().PlayHurt(
+                LightningEntityManager::Instance().GetPlayerHealth() <= 0.0f);
         }
     }
 

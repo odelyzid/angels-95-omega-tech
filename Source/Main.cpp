@@ -590,7 +590,12 @@ int main(int argc, char** argv){
 
     g_client.set_on_player_hurt([](int damage, float remaining_health) {
         LightningEntityManager::Instance().SetPlayerHealth(remaining_health);
-        SoundManager::Instance().PlayDeath();
+        // Split from death: this fires on every point of damage, and it
+        // previously played the death sound for all of them, so a firefight
+        // sounded like a montage of deaths. Routed through PlayerController so
+        // it shares the .ozls hurt_sound / death_sound resolution and the
+        // single-frame dedupe with the script `damage` opcode path.
+        PlayerController::Instance().PlayHurt(remaining_health <= 0.0f);
     });
 
     // Weapon pickup granted by the server (item_id 15) — add to hotbar.

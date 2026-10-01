@@ -116,6 +116,13 @@ static constexpr int HOTBAR_SIZE = 8;
     int FireSelectedWeapon(const Vector3& origin, const Vector3& direction);
     bool ReloadSelectedWeapon();
 
+    // Play a sound stat authored on an entity def (hit_sound, reload_sound,
+    // equip_sound). Volume/pitch default to unity. No-ops when the key is
+    // absent, so an unauthored event is silent rather than borrowing a global
+    // default clip. Paths resolve def-relative, like projectile_mesh.
+    void PlayDefStatSound(EntityInstance* ent, const char* pathKey,
+                          const char* volKey, const char* pitchKey);
+
     // Melee support.
     //
     // Report a resolved melee hit to the server, which re-validates reach and

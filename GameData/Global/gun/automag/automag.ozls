@@ -7,6 +7,9 @@ entity "automag" : weapon {
         range = 50.0
         magazine = 12
         reload_time = 2.0
+        // Sound stats: quote-free, space-free asset paths.
+        fire_sound = GameData/Global/Sounds/Gun/machgf3b.wav
+        fire_volume = 0.95
     }
     actions {
         on_fire {

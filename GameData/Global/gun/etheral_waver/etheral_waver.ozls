@@ -9,6 +9,12 @@ entity "etheral_waver" : weapon {
         viewmodel_offset = (0.30, -0.26, 0.52)
         viewmodel_rot = (0, 90, 0)
         viewmodel_scale = 1.0
+        // Melee sound stats. swing_sound plays on every swing; hit_sound only
+        // on a connect that is not blocked by geometry (see FireSelectedWeapon).
+        swing_sound = GameData/Global/Sounds/Player/boot1.wav
+        swing_volume = 0.7
+        hit_sound = GameData/Global/Sounds/Hurt.mp3
+        hit_volume = 0.8
     }
     actions {
         on_swing {

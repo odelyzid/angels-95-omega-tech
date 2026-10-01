@@ -20,5 +20,16 @@ entity "Player" : upgrade {
         level = 1
         xp = 0
         xp_to_next = 100
+        // Sound stats. Paths are resolved def-relative first, then via the
+        // package loader, so these work loose or inside a .ozsnd package.
+        // Quote-free and space-free: the stats parser stores a string value
+        // verbatim and a single embedded space silently truncates it.
+        jump_sound = GameData/Global/Sounds/Player/jump1.wav
+        land_sound = GameData/Global/Sounds/Player/land.wav
+        hurt_sound = GameData/Global/Sounds/Hurt.mp3
+        // death_sound intentionally left unauthored so a fatal hit keeps the
+        // preloaded death handle; set it to override.
+        walk_volume = 0.8
+        jump_volume = 0.9
     }
 }

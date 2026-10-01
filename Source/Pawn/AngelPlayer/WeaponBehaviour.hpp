@@ -22,7 +22,18 @@ public:
     }
 
     // Read a float stat from the currently selected weapon entity.
+    //
+    // runtimeStats is consulted before the def, matching the readStat lambda in
+    // FireSelectedWeapon. It used to read the def only, so a value set by a
+    // script or by a spawned instance override was invisible here even though
+    // the projectile path saw the same stat's overridden value -- recoil and
+    // damage therefore disagreed with what actually got spawned.
     float SelectedWeaponStat(const std::string& key, float defVal) const;
+
+    // Read a string stat (asset paths, sound paths) from the selected weapon.
+    // Returns `def` when the weapon, the def, or the key is absent.
+    std::string SelectedWeaponString(const std::string& key,
+                                     const std::string& def = "") const;
 
     // Fire the selected weapon (view-model FX, recoil, network damage).
     void FireWeapon(Camera3D& cam);
@@ -41,6 +52,11 @@ public:
 
 private:
     WeaponBehaviour() = default;
+
+    // Play an authored sound stat (fire_sound / swing_sound), falling back to
+    // `fallbackPath` when the weapon def does not declare the key.
+    void PlayWeaponSound(const char* pathKey, const char* volKey,
+                         const char* pitchKey, const std::string& fallbackPath);
 
     OmegaClient* m_client = nullptr;
     bool* m_networkEnabled = nullptr;

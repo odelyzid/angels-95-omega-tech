@@ -124,6 +124,39 @@ public:
     // Age the script sound cache; unloads handles idle for a few seconds.
     void PruneScriptSoundCache(float dt);
 
+    // --- data-driven sound stats (.ozls) ---------------------------------
+
+    // Play a one-shot authored as a path in a .ozls `stats` block
+    // (fire_sound, reload_sound, jump_sound, hurt_sound, ...). Shares the
+    // script-sound cache, so it is package-aware: a path inside a .ozsnd
+    // resolves exactly like a `play_sound` opcode.
+    //
+    // volume/pitch default to 1.0 (unity). They are applied to the handle
+    // immediately before playing rather than baked in at load time, so two
+    // weapons sharing one .wav can play it at different volumes.
+    //
+    // This is the only entry point new stat-driven sound should use; do not
+    // add per-stat Play* methods for one-shots. The preloaded GameSounds
+    // handles stay reserved for UI/menu audio that has no .ozls owner.
+    bool PlayStatSound(const std::string& path, float volume = 1.0f, float pitch = 1.0f);
+
+    // Looping player addressed by key, so unrelated loops cannot stop each
+    // other. The weapon view-model and the player footstep loop both need
+    // this: StartWalkLoop/StopWalkLoop used to fight over a single global
+    // handle, so switching weapons could silence the footsteps.
+    //
+    // Starting a key that is already playing is a no-op unless the path
+    // differs, in which case the old handle is released and the new one
+    // starts (that is what makes walk/run interchangeable). Each loop is
+    // re-triggered from Update() while it is alive, because raylib stops a
+    // sound once its stream drains.
+    void StartLoopSound(const std::string& key, const std::string& path,
+                        float volume = 1.0f, float pitch = 1.0f);
+    void StopLoopSound(const std::string& key);
+    // True while `key` is looping. Used by the footstep layer to keep the
+    // walk/run pair from retriggering each other every frame.
+    bool IsLoopPlaying(const std::string& key) const;
+
     // --- direct handle access ---------------------------------------------
     // For the rare caller that needs the raw handle (editor previews, mixer
     // tweaks). Prefer the methods above.
@@ -156,6 +189,18 @@ private:
         float idle = 0.0f;
     };
     std::unordered_map<std::string, ScriptSound> m_scriptSounds;
+
+    // Data-driven loop slots (walk/run footsteps, weapon view-model loops).
+    // Keyed rather than singular so one loop cannot stop another.
+    struct LoopSound {
+        Sound sound;
+        std::string path;
+        float volume = 1.0f;
+        float pitch = 1.0f;
+    };
+    std::unordered_map<std::string, LoopSound> m_loops;
+
+    void PruneLoops();
 
     // Cached handle for a one-shot played without keeping it around (zone
     // enter stinger). Freed by PruneOneShot.

@@ -2,6 +2,7 @@
 #include "../../Physics/PlayerPhysics.hpp"
 #include "../PlayerMovement.hpp"
 #include "../../Audio/SoundManager.hpp"
+#include "../../Script/LightningEntityManager.hpp"
 #include <cmath>
 
 // Reads the movement-state global defined once in the client TU (Main).
@@ -90,13 +91,125 @@ void PlayerController::UpdateVertical(float dt, Camera3D& cam, float savedCamY, 
 
     if (wasOnGround && !motion.onGround && motion.velocityY > 0.0f)
         PlayJump();
+    // Mirror of the jump edge: the transition back to grounded. Only from
+    // actual airtime (wasOnGround was false), so a jump's own first frame does
+    // not immediately fire a landing on the same step.
+    if (!wasOnGround && motion.onGround)
+        PlayLand();
 
     g_playerMovement.onGround = motion.onGround;
     g_playerMovement.velocityY = motion.velocityY;
 }
 
+// ---------------------------------------------------------------------------
+// Data-driven sound stats (Player.ozls)
+// ---------------------------------------------------------------------------
+namespace {
+
+// Footstep loop slot name. Distinct from any weapon loop so the two cannot
+// stop one another.
+const char* kFootstepLoop = "player_footsteps";
+
+}  // namespace
+
+std::string PlayerController::PlayerStatString(const std::string& key,
+                                              const std::string& def) const {
+    auto& lem = LightningEntityManager::Instance();
+    if (!lem.HasPlayerEntity()) return def;
+    EntityInstance* inst = lem.Get(lem.PlayerEntityIndex());
+    if (!inst || !inst->def) return def;
+
+    auto sit = inst->def->stats.strings.find(key);
+    if (sit == inst->def->stats.strings.end()) return def;
+
+    // The stats parser stores values verbatim (no quote handling, and an
+    // embedded space truncates), so trim defensively -- an all-quotes value
+    // means "absent", which lets the fallback apply.
+    std::string v = sit->second;
+    size_t b = v.find_first_not_of(" \t\r\n\"");
+    if (b == std::string::npos) return def;
+    size_t e = v.find_last_not_of(" \t\r\n\"");
+    v = v.substr(b, e - b + 1);
+    return v.empty() ? def : v;
+}
+
+float PlayerController::PlayerStatFloat(const std::string& key, float def) const {
+    auto& lem = LightningEntityManager::Instance();
+    if (!lem.HasPlayerEntity()) return def;
+    EntityInstance* inst = lem.Get(lem.PlayerEntityIndex());
+    if (!inst || !inst->def) return def;
+    auto rit = inst->runtimeStats.find(key);
+    if (rit != inst->runtimeStats.end()) return rit->second;
+    auto fit = inst->def->stats.floats.find(key);
+    return (fit != inst->def->stats.floats.end()) ? fit->second : def;
+}
+
 void PlayerController::PlayJump() {
-    SoundManager::Instance().PlayJump();
+    const std::string authored = PlayerStatString("jump_sound");
+    if (authored.empty()) {
+        SoundManager::Instance().PlayJump();   // preloaded global fallback
+        return;
+    }
+    SoundManager::Instance().PlayStatSound(authored,
+                                           PlayerStatFloat("jump_volume", 1.0f), 1.0f);
+}
+
+void PlayerController::PlayLand() {
+    const std::string authored = PlayerStatString("land_sound");
+    // No global fallback: land.wav shipped with the commit but is not part of
+    // LoadCoreSounds, and a silent landing is the correct reading of an
+    // unauthored land_sound.
+    if (authored.empty()) return;
+    SoundManager::Instance().PlayStatSound(authored,
+                                           PlayerStatFloat("land_volume", 1.0f), 1.0f);
+}
+
+void PlayerController::PlayHurt(bool fatal) {
+    auto& sm = SoundManager::Instance();
+    const std::string authored = fatal ? PlayerStatString("death_sound")
+                                       : PlayerStatString("hurt_sound");
+    if (!authored.empty()) {
+        const float vol = fatal ? PlayerStatFloat("death_volume", 1.0f)
+                                : PlayerStatFloat("hurt_volume", 1.0f);
+        sm.PlayStatSound(authored, vol, 1.0f);
+        return;
+    }
+
+    // No authored key. There is no dedicated global hurt handle, so a fatal
+    // hit keeps the preloaded death sound -- that is what it played before.
+    //
+    // A NON-fatal hit must NOT fall back to it: PlayDeath() is the death cue,
+    // and reusing it meant every point of damage in a firefight sounded like
+    // the player died. Non-fatal falls back to the collision thump instead,
+    // which is an existing handle rather than a new global.
+    if (fatal) sm.PlayDeath();
+    else      sm.PlayCollision();
+}
+
+void PlayerController::PlayWalkLoop(bool sprinting) {
+    const char* pathKey = sprinting ? "run_sound" : "walk_sound";
+    const char* volKey  = sprinting ? "run_volume" : "walk_volume";
+    const std::string authored = PlayerStatString(pathKey);
+
+    if (authored.empty()) {
+        // Nothing authored for this gait: fall back to the global loop, but
+        // only while walking. Sprinting on the shared WalkingSound would just
+        // be the same clip at the same speed, so leave the existing loop alone
+        // rather than restarting it every frame.
+        if (!sprinting) SoundManager::Instance().StartWalkLoop();
+        return;
+    }
+
+    SoundManager::Instance().StartLoopSound(kFootstepLoop, authored,
+                                            PlayerStatFloat(volKey, 1.0f), 1.0f);
+}
+
+void PlayerController::StopWalkLoop() {
+    // Stop both the authored loop and the global one: if a def authored
+    // walk_sound we never started the global loop, and if it did not we never
+    // started the keyed one. Stopping an absent key is a no-op.
+    SoundManager::Instance().StopLoopSound(kFootstepLoop);
+    SoundManager::Instance().StopWalkLoop();
 }
 
 // ---------------------------------------------------------------------------

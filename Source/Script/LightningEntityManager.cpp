@@ -41,6 +41,48 @@ static std::string DefSourceDir(const std::string& sourcePath) {
     return (s == std::string::npos) ? std::string() : sourcePath.substr(0, s + 1);
 }
 
+// Play a sound stat authored on an entity def (hit_sound, reload_sound,
+// equip_sound, ...). Volume/pitch default to unity so an authored sound is not
+// silent unless the author explicitly asked for silence.
+//
+// No fallback path: unlike fire/swing, these events have no sensible global
+// default. A weapon with no hit_sound is simply a silent weapon, which is the
+// honest reading of an unauthored key -- substituting one global "generic
+// impact" clip would make every melee swing in every level sound identical.
+void LightningEntityManager::PlayDefStatSound(EntityInstance* ent,
+                                              const char* pathKey,
+                                              const char* volKey,
+                                              const char* pitchKey) {
+    if (!ent || !ent->def) return;
+
+    auto sit = ent->def->stats.strings.find(pathKey);
+    if (sit == ent->def->stats.strings.end()) return;
+
+    // Trim defensively: the stats parser stores values verbatim, so a quoted
+    // path would keep its quotes and fail to resolve.
+    std::string path = sit->second;
+    size_t b = path.find_first_not_of(" \t\r\n\"");
+    if (b == std::string::npos) return;
+    size_t e = path.find_last_not_of(" \t\r\n\"");
+    path = path.substr(b, e - b + 1);
+    if (path.empty()) return;
+
+    // Def-relative like projectile_mesh / viewmodel_mesh, so a weapon can
+    // keep its sounds beside itself.
+    path = ResolveDefPath(DefSourceDir(ent->def->sourcePath), path);
+
+    auto readFloat = [&](const char* key, float defVal) {
+        if (!key) return defVal;
+        auto rit = ent->runtimeStats.find(key);
+        if (rit != ent->runtimeStats.end()) return rit->second;
+        auto fit = ent->def->stats.floats.find(key);
+        return (fit != ent->def->stats.floats.end()) ? fit->second : defVal;
+    };
+
+    SoundManager::Instance().PlayStatSound(path, readFloat(volKey, 1.0f),
+                                           readFloat(pitchKey, 1.0f));
+}
+
 namespace {
 
 // Spark normal for a wall strike, where there is no surface normal to use.
@@ -184,6 +226,13 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
 
             if (!blocked) {
                 RunAction(ent, "on_hit");
+
+                // Melee connect. Inside the `!blocked` branch on purpose: a
+                // swing that stops at a wall takes the else-branch below, which
+                // deliberately runs no on_hit, so it must not make a connect
+                // sound either.
+                PlayDefStatSound(ent, "hit_sound", "hit_volume", "hit_pitch");
+
                 Vector3 hitPos = Vector3Add(bestPawn->position, Vector3{0.0f, 0.5f, 0.0f});
                 Vector3 hitNormal = Vector3Normalize(
                     Vector3Subtract(bestPawn->position, origin));
@@ -266,6 +315,7 @@ else {
             if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
             if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
             m_reloadStarted = true;  // auto-reload plays the clip too
+            PlayDefStatSound(ent, "reload_sound", "reload_volume", "reload_pitch");
             return -1;
         }
         ammoIt->second -= 1.0f;
@@ -357,6 +407,7 @@ bool LightningEntityManager::ReloadSelectedWeapon() {
     if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
     if (m_on_ammo_changed) m_on_ammo_changed(SelectedSlot(), (int)magazine, (int)magazine, 1);
     m_reloadStarted = true;
+    PlayDefStatSound(ent, "reload_sound", "reload_volume", "reload_pitch");
     return true;
 }
 
@@ -800,7 +851,20 @@ void LightningEntityManager::SelectSlot(int slot) {
     int newIdx = m_hotbar[slot];
     if (newIdx >= 0 && newIdx < (int)m_instances.size())
         RunAction(&m_instances[newIdx], "on_equip");
-    SoundManager::Instance().PlayWeaponLoad();
+
+    // Per-weapon equip_sound when the def declares one, otherwise the shared
+    // global handle. Preserves the existing behaviour exactly (including the
+    // empty-slot clunk, which the unconditional PlayWeaponLoad() has always
+    // produced) rather than silently changing it as a side effect.
+    EntityInstance* wep = (newIdx >= 0 && newIdx < (int)m_instances.size())
+                              ? &m_instances[newIdx] : nullptr;
+    const bool authoredEquip = wep && wep->def &&
+        wep->def->stats.strings.find("equip_sound") != wep->def->stats.strings.end();
+    if (authoredEquip)
+        PlayDefStatSound(wep, "equip_sound", "equip_volume", "equip_pitch");
+    else
+        SoundManager::Instance().PlayWeaponLoad();
+
     OZ_INFO("[CHAIN] LEM::SelectSlot done slot=%d inst=%d", slot, newIdx);
 }
 

@@ -72,6 +72,17 @@ void SoundManager::ResetWorldAudio() {
             UnloadSound(kv.second.sound);
     }
     m_scriptSounds.clear();
+
+    // Keyed loops (footsteps) would otherwise keep playing from the world
+    // being unloaded, and their handles would leak into the next one.
+    for (auto& [key, loop] : m_loops) {
+        if (loop.sound.frameCount > 0) {
+            StopSound(loop.sound);
+            UnloadSound(loop.sound);
+        }
+    }
+    m_loops.clear();
+
     PruneOneShot(kOneShotLifetime);   // force-release the one-shot handle
 }
 
@@ -217,6 +228,7 @@ void SoundManager::StopWorldMusic() {
 
 void SoundManager::Update() {
     PruneScriptSoundCache(GetFrameTime());
+    PruneLoops();
     PruneOneShot(GetFrameTime());
     if (m_sounds.MusicFound)
         UpdateMusicStream(m_sounds.BackgroundMusic);
@@ -384,6 +396,95 @@ void SoundManager::PruneScriptSoundCache(float dt) {
         } else {
             ++it;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Data-driven sound stats (.ozls)
+// ---------------------------------------------------------------------------
+bool SoundManager::PlayStatSound(const std::string& path, float volume, float pitch) {
+    if (path.empty()) return false;
+
+    // Share the script-sound cache: same package-aware resolution, same
+    // idle-eviction policy, so a .wav referenced by both a `play_sound`
+    // opcode and a fire_sound stat is loaded exactly once.
+    auto it = m_scriptSounds.find(path);
+    if (it == m_scriptSounds.end()) {
+        Sound snd = LoadSoundWithFallback(path.c_str());
+        if (snd.frameCount == 0) {
+            // Not fatal: an unauthored or missing path must not spam every
+            // shot, but the author needs to know the stat did not resolve.
+            OZ_WARN("stat sound: '%s' not found", path.c_str());
+            return false;
+        }
+        it = m_scriptSounds.emplace(path, ScriptSound{snd, 0.0f}).first;
+    } else {
+        it->second.idle = 0.0f;   // keep alive
+    }
+
+    // Clamp rather than reject: a .ozls author writing fire_volume = 200
+    // should get a loud shot, not silence from a rejected load.
+    if (volume < 0.0f) volume = 0.0f;
+    if (pitch <= 0.0f) pitch = 1.0f;
+    if (volume != 1.0f) SetSoundVolume(it->second.sound, volume);
+    if (pitch  != 1.0f) SetSoundPitch(it->second.sound, pitch);
+
+    PlaySound(it->second.sound);
+    return true;
+}
+
+void SoundManager::StartLoopSound(const std::string& key, const std::string& path,
+                                  float volume, float pitch) {
+    if (key.empty() || path.empty()) return;
+    if (volume < 0.0f) volume = 0.0f;
+    if (pitch <= 0.0f)  pitch  = 1.0f;
+
+    auto it = m_loops.find(key);
+    if (it != m_loops.end()) {
+        // Already looping this exact asset: leave it alone rather than
+        // restarting it, which would click and reset the loop phase every
+        // frame the caller polls.
+        if (it->second.path == path) return;
+        StopLoopSound(key);   // asset changed (walk <-> run), swap it
+    }
+
+    LoopSound loop;
+    loop.sound  = LoadSoundWithFallback(path.c_str());
+    if (loop.sound.frameCount == 0) {
+        OZ_WARN("loop sound '%s': '%s' not found", key.c_str(), path.c_str());
+        return;
+    }
+    loop.path   = path;
+    loop.volume = volume;
+    loop.pitch  = pitch;
+    SetSoundVolume(loop.sound, volume);
+    SetSoundPitch(loop.sound, pitch);
+    PlaySound(loop.sound);
+    m_loops.emplace(key, loop);
+}
+
+void SoundManager::StopLoopSound(const std::string& key) {
+    auto it = m_loops.find(key);
+    if (it == m_loops.end()) return;
+    if (it->second.sound.frameCount > 0) {
+        StopSound(it->second.sound);
+        UnloadSound(it->second.sound);
+    }
+    m_loops.erase(it);
+}
+
+bool SoundManager::IsLoopPlaying(const std::string& key) const {
+    auto it = m_loops.find(key);
+    return it != m_loops.end() && it->second.sound.frameCount > 0;
+}
+
+void SoundManager::PruneLoops() {
+    // Keep-alive: raylib stops a sound when its stream drains, so a looping
+    // sound has to be retriggered or it dies mid-walk. Same reason
+    // EnterSoundZone re-plays its ambience handle.
+    for (auto& [key, loop] : m_loops) {
+        if (loop.sound.frameCount > 0 && !IsSoundPlaying(loop.sound))
+            PlaySound(loop.sound);
     }
 }
 

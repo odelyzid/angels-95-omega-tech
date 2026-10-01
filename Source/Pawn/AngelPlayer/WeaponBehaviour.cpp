@@ -4,6 +4,7 @@
 #include "../../Client/Client.hpp"
 #include "../../Renderer/ViewModel.hpp"
 #include "../../Renderer/CombatFX.hpp"
+#include "../../Audio/SoundManager.hpp"
 #include "raymath.h"
 #include "../../Particle/OzParticleSimulationManager.hpp"
 #include <cstdlib>
@@ -15,8 +16,49 @@
 float WeaponBehaviour::SelectedWeaponStat(const std::string& key, float defVal) const {
     EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
     if (!ent || !ent->def) return defVal;
+    auto rit = ent->runtimeStats.find(key);
+    if (rit != ent->runtimeStats.end()) return rit->second;
     auto dit = ent->def->stats.floats.find(key);
     return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
+}
+
+// The stats parser stores string values verbatim: no quote handling, and a
+// single embedded space truncates the value (see GameUi::ParseSlots). Strip any
+// quotes so an author who writes fire_sound = "x.wav" still resolves, and treat
+// a value that is only whitespace/quotes as absent so the fallback applies.
+static std::string TrimStatString(const std::string& in) {
+    size_t b = in.find_first_not_of(" \t\r\n\"");
+    if (b == std::string::npos) return "";
+    size_t e = in.find_last_not_of(" \t\r\n\"");
+    return in.substr(b, e - b + 1);
+}
+
+std::string WeaponBehaviour::SelectedWeaponString(const std::string& key,
+                                                 const std::string& def) const {
+    EntityInstance* ent = LightningEntityManager::Instance().SelectedEntity();
+    if (!ent || !ent->def) return def;
+    auto it = ent->def->stats.strings.find(key);
+    if (it == ent->def->stats.strings.end()) return def;
+    std::string v = TrimStatString(it->second);
+    return v.empty() ? def : v;
+}
+
+// Play one of the weapon's authored sound stats, falling back to a global
+// default when the stat is absent. An authored key wins over the fallback
+// even if the asset fails to load -- the author asked for a specific sound,
+// so silently playing the generic one would hide a broken path.
+void WeaponBehaviour::PlayWeaponSound(const char* pathKey, const char* volKey,
+                                      const char* pitchKey,
+                                      const std::string& fallbackPath) {
+    const std::string authored = SelectedWeaponString(pathKey);
+    const std::string path = authored.empty() ? fallbackPath : authored;
+    if (path.empty()) return;
+
+    // Defaults are unity rather than 0, so an authored sound is not silent
+    // unless the author explicitly asked for silence.
+    float volume = SelectedWeaponStat(volKey, 1.0f);
+    float pitch  = SelectedWeaponStat(pitchKey, 1.0f);
+    SoundManager::Instance().PlayStatSound(path, volume, pitch);
 }
 
 // ---------------------------------------------------------------------------
@@ -28,6 +70,20 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
 
     int result = LightningEntityManager::Instance().FireSelectedWeapon(origin, forward);
     if (result < 0) return; // didn't fire
+
+    // Fire/swing audio goes HERE, after the gate above. FireSelectedWeapon
+    // returns -1 when it refuses to shoot for reasons that produce no report
+    // of their own -- on cooldown, out of stamina, or when it silently
+    // auto-reloaded (LightningEntityManager.cpp:269). Playing before this
+    // check would fire a gunshot on every click of an empty magazine.
+    //
+    // result == 0 is a melee swing; > 0 is the projectile count spawned.
+    if (result == 0) {
+        PlayWeaponSound("swing_sound", "swing_volume", "swing_pitch", "");
+    } else {
+        PlayWeaponSound("fire_sound", "fire_volume", "fire_pitch",
+                        "GameData/Global/Sounds/Gun/machgf3b.wav");
+    }
 
     oz::ViewModel::Instance().TriggerFire();
 
