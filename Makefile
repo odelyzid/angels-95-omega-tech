@@ -75,15 +75,21 @@ SERVER_CXX := $(CCACHE_PREFIX) g++
 SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(RAYLIB_INC)
 
 BUILD_DIR := build
+# Every object Angels95 links. This list is the SINGLE source of truth: OTENGINE
+# depends on $(OBJS), so a new object added here is picked up by the link
+# automatically. It previously kept a second hand-maintained copy in the OTENGINE
+# prerequisite list, and the two drifted -- cf3159c added PlayerProfile.o here but
+# not there, so the link failed on undefined PlayerProfileManager symbols in CI.
+# miniz.o is C (see the note on its rule) but is an ordinary link input here.
 OBJS := $(addprefix $(BUILD_DIR)/, \
-          raygui.o Main.o Network.o Log.o Client.o \
+          raygui.o miniz.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o \
-          OzOzoneLoader.o OzoneParser.o OzBsp.o WorldChunk.o PlayerPhysics.o \
+          OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o WorldChunk.o PlayerPhysics.o \
           ZoneManager.o SoundManager.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
           LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
-          ViewModel.o OzParticleSimulationManager.o rlights.o UiHandler.o \
+          ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o UiHandler.o \
           PlayerProfile.o)
 
 .PHONY: all clean test help
@@ -254,7 +260,7 @@ $(BUILD_DIR)/AngelServ.res: Source/AngelServ.rc GameData/Global/Icon/AngelServ.i
 endif
 
 # 6b. Build Game Binary
-OTENGINE: $(RES_95) $(addprefix $(BUILD_DIR)/, raygui.o miniz.o Main.o Network.o Log.o Client.o OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o SoundManager.o OzBsp.o WorldChunk.o PlayerPhysics.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o UiHandler.o)
+OTENGINE: $(RES_95) $(OBJS)
 	$(COMP) $(LDEXTRA) $^ -o Angels95$(EXE) $(CFLAGS) $(LDFLAGS) $(RPATH)
 
 # 7. Build AngelServ (dedicated server, no raylib; miniz for OZWN package reads)

@@ -1086,8 +1086,12 @@ private:
             }
         }
 
-        DrawText("Saved to " + std::string(PlayerProfileManager::DefaultPath()),
-                 (int)x, L.saveY + 28, 11, (Color){120,150,180,190});
+        // DrawText takes a const char*, so the concatenation has to be
+        // materialised first: "Saved to " + DefaultPath() has no operator+, and
+        // std::string + const char* yields a std::string, which DrawText also
+        // cannot take.
+        const std::string savePath = std::string("Saved to ") + PlayerProfileManager::DefaultPath();
+        DrawText(savePath.c_str(), (int)x, L.saveY + 28, 11, (Color){120,150,180,190});
     }
 
     void DrawMultiplayerPage(Rectangle area) {
