@@ -4557,6 +4557,24 @@ const StatSpec kPawnStats[] = {
     {"death_sound",            3, "Death Sound"},
 };
 
+// A light's `.ozls` def is a DEFAULTS layer (see ApplyLightDefDefaults in
+// OzOzoneLoader.cpp): a value the OZONE light line authored always wins. Only
+// keys the line cannot express are listed - effect/flare/corona apply solely
+// when the line omitted them, and the rest have no line syntax at all.
+// intensity / radius / color are deliberately absent: they are positional on
+// every light line, so offering them here would suggest an edit that the
+// runtime ignores.
+const StatSpec kLightStats[] = {
+    {"effect",               0, "Effect"},
+    {"flare",                0, "Flare"},
+    {"corona",               0, "Corona"},
+    {"period",               0, "Period"},
+    {"cast_shadow",          0, "Cast Shadow"},
+    {"is_static",            0, "Static (baked)"},
+    {"inner_cone",           0, "Inner Cone"},
+    {"outer_cone",           0, "Outer Cone"},
+};
+
 // The schema for `type`, or nullptr when nothing is editable for it. Only
 // entity types whose def the panel can actually write get an entry.
 const StatSpec* StatSchemaFor(EntityType type, int* outCount) {
@@ -4567,6 +4585,7 @@ const StatSpec* StatSchemaFor(EntityType type, int* outCount) {
         // Player.ozls is declared `: upgrade` (see GameData/Global/Objects),
         // so match on the def NAME as well - there is no dedicated player type.
         case EntityType::UPGRADE: return set(kPlayerStats, (int)(sizeof(kPlayerStats)/sizeof(StatSpec)));
+        case EntityType::LIGHT:   return set(kLightStats,  (int)(sizeof(kLightStats)/sizeof(StatSpec)));
         default: *outCount = 0; return nullptr;
     }
 }
@@ -5356,9 +5375,13 @@ void ShowPropertiesPanel(bool show) {
                     acosf(fminf(fmaxf(l->outerCone, -1.0f), 1.0f)) * RAD2DEG;
                 g_editorPanels.propLightFlare = l->flare;
                 g_editorPanels.propLightCorona = l->corona;
-                g_editorPanels.propLightTarget[0] = l->target.x;
+g_editorPanels.propLightTarget[0] = l->target.x;
                 g_editorPanels.propLightTarget[1] = l->target.y;
                 g_editorPanels.propLightTarget[2] = l->target.z;
+                // A light's `name=` resolves an :light .ozls def exactly as a
+                // zone's name= resolves its skyzone def. Without this the Light
+                // properties panel showed no def section at all.
+                if (!l->name.empty()) FillDefBlock(l->name, "");
             }
         } else if (g_editorPanels.propsTargetType == 6) { // ZONE
             for (auto& z : ZoneManager::Instance().GetZones()) {
@@ -5375,9 +5398,21 @@ void ShowPropertiesPanel(bool show) {
             g_editorPanels.propZoneSwimUp = z.physics.swimUpSpeed;
             g_editorPanels.propZoneLadderSpeed = z.physics.ladderSpeed;
             g_editorPanels.propZoneFlyMult = z.physics.flySpeedMult;
-            if (!z.name.empty()) FillDefBlock(z.name, "");
+if (!z.name.empty()) FillDefBlock(z.name, "");
                     break;
                 }
+            }
+        } else if (g_editorPanels.propsTargetType == 7) { // SPAWN
+            // `playerstart x y z yaw` carries no name, so the def is resolved by
+            // a fixed name instead of a world lookup - the player a spawn points
+            // at is always the "Player" def (GameData/Global/Objects/
+            // Player.ozls). This branch did not exist, so a PlayerStart showed
+            // no def section at all and its .ozls stats (health, mana,
+            // jump_sound, ...) were unreachable from the editor.
+            for (const auto& s : PawnSystem::Instance().GetPlayerStarts()) {
+                if ((int)s.id != g_editorPanels.propsTargetIndex) continue;
+                FillDefBlock("Player", "");
+                break;
             }
         } else if (g_editorPanels.propsTargetType == 8) { // PORTAL
             auto& portals = ZoneManager::Instance().GetPortals();
@@ -5544,6 +5579,7 @@ static const int ID_TB_MODE_CAM   = 929;
 static const int ID_TB_MODE_MOVE  = 930;
 static const int ID_TB_MODE_SCALE = 931;
 static const int ID_TB_MODE_ROT   = 932;
+static const int ID_TB_SHOW_COLLISION = 933;
 
 static HWND g_sbPos = nullptr, g_sbSize = nullptr, g_sbRot = nullptr;
 static HWND g_sbColl = nullptr, g_sbChunks = nullptr, g_sbMode = nullptr;
@@ -5582,7 +5618,12 @@ void UpdateStatsSidebar(float posX, float posY, float posZ,
     setA(g_sbSize, buf);
     swprintf(buf, 128, L"Rot: %.0f  Scale: %.1f", rot, scale);
     setA(g_sbRot, buf);
-    swprintf(buf, 128, L"Collision: %d vols", collisionVols);
+swprintf(buf, 128, L"Collision: %d vols", collisionVols);
+    // A Sub/Intersect brush that produced no volume leaves the brush rendering
+    // but the player falling through it, and that is invisible from the
+    // viewport. Say so on the counter until the next brush is committed.
+    if (g_editorPanels.collisionOpWarning)
+        swprintf(buf, 128, L"Collision: %d vols  << NO SOLID", collisionVols);
     setA(g_sbColl, buf);
     swprintf(buf, 128, L"Chunks: %d", chunks);
     setA(g_sbChunks, buf);
@@ -5633,12 +5674,17 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         CreateIconButton(hwnd, L"Sub",      x, y, bw, bh, ID_TB_OP_SUB, "ModeSubtract");
         CreateIconButton(hwnd, L"Inter",    x + bw + gap, y, bw, bh, ID_TB_OP_INTER, "ModeIntersect"); y += bh + 10;
 
-        // --- Tool Mode section (icons) ---
+// --- Tool Mode section (icons) ---
         CreateLabel(hwnd, L"Tool", x, y, lw, 18, 952); y += 22;
         CreateIconButton(hwnd, L"Cam",      x, y, bw, bh, ID_TB_MODE_CAM, "ModeCamera");
         CreateIconButton(hwnd, L"Move",     x + bw + gap, y, bw, bh, ID_TB_MODE_MOVE, "ModeVertex"); y += bh + gap;
         CreateIconButton(hwnd, L"Scale",    x, y, bw, bh, ID_TB_MODE_SCALE, "ModeScale");
-        CreateIconButton(hwnd, L"Rotate",   x + bw + gap, y, bw, bh, ID_TB_MODE_ROT, "ModeRotate");
+        CreateIconButton(hwnd, L"Rotate",   x + bw + gap, y, bw, bh, ID_TB_MODE_ROT, "ModeRotate"); y += bh + 10;
+
+        // --- View section (icons) ---
+        CreateLabel(hwnd, L"View", x, y, lw, 18, 953); y += 22;
+        CreateIconButton(hwnd, L"Collision", x, y, bw, bh, ID_TB_SHOW_COLLISION, "BrushClip");
+        y += bh + 10;
         break;
     }
     case WM_DRAWITEM: {
@@ -5669,6 +5715,11 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
             case ID_TB_MODE_MOVE:  g_editorPanels.currentToolMode = 1; break;
             case ID_TB_MODE_SCALE: g_editorPanels.currentToolMode = 2; break;
             case ID_TB_MODE_ROT:   g_editorPanels.currentToolMode = 3; break;
+            // --- View ---
+            case ID_TB_SHOW_COLLISION:
+                g_editorPanels.showCollisionBounds = !g_editorPanels.showCollisionBounds;
+                OzoneLoader::Instance().SetDrawCollisionProxies(g_editorPanels.showCollisionBounds);
+                break;
         }
         break;
     }

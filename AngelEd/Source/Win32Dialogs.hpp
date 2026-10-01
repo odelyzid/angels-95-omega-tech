@@ -152,6 +152,15 @@ struct EditorPanelState {
 
     // Properties panel (context-sensitive)
     bool showPropsPanel = false;
+
+    // Viewport collision visualisation. Draws the post-CSG collision volumes as
+    // wireframes so it is possible to see what the player will actually stand
+    // on, and also reveals the generated SURF_COLLISION_PROXY boxes.
+    bool showCollisionBounds = false;
+    // Set when a Sub/Intersect brush produced no collision volume at all. The
+    // sidebar paints the collision count red until the next brush is committed.
+    bool collisionOpWarning = false;
+
     int propsTargetType = -1;       // SelType encoded
     int propsTargetIndex = -1;
     std::string propsTargetName;

@@ -326,7 +326,6 @@ void LoadEditor(const char* File){
 }
 
 int EMID = 1;
-bool CollisionToggle = false;
 
 // --- Helper: draw a WDL instruction line for current placed item ---
 static wstring BuildWDLPlaceCommand(const wstring& prefix, int subId) {
