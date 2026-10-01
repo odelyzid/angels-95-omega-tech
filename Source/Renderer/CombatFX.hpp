@@ -20,6 +20,8 @@
 
 #include "raylib.h"
 #include "raymath.h"
+#include "LitLightning.hpp"
+#include "../Log.hpp"
 #include <vector>
 
 // Swept segment vs AABB slab test.
@@ -121,6 +123,9 @@ public:
         m_tracers.clear();
         m_nextDecal = 0;
         for (auto& d : m_decals) d.age = -1.0f;
+        // Transient lights belong to the world that fired them; carrying one
+        // across a map change would leave a glow in empty space.
+        LitLightning_ClearTransientLights();
     }
 
     void ArmMuzzleFlash(Vector3 pos, float duration = 0.12f) {
@@ -128,6 +133,34 @@ public:
         Flash f{pos, duration, duration};
         if (m_flashes.size() >= 8) m_flashes.erase(m_flashes.begin());
         m_flashes.push_back(f);
+        // Also cast real light. The visible flash was an unlit DrawSphere, so it
+        // ignored the room entirely: a shot in an unlit corridor lit nothing.
+        // Transient lights take priority over world lights in the shader budget,
+        // so this cannot be evicted by a busy level.
+        ArmTransientLight(pos, {255, 200, 120, 255}, duration * 1.4f, 7.0f);
+    }
+
+    // Add a short-lived effect light to the transient pool. Reuses an inactive
+    // slot when one is available, otherwise drops the request (MAX_TRANSIENT_LIGHTS).
+    void ArmTransientLight(Vector3 pos, Color color, float duration, float radius) {
+        if (duration <= 0.0f) return;
+        auto& pool = LitLightning_TransientLights();
+        for (auto& n : pool) {
+            if (n.active) continue;
+            n.active = true;
+            n.type = LitLightType::POINT;
+            n.position = pos;
+            n.target = pos;
+            n.color = color;
+            n.intensity = 1.0f;
+            n.radius = radius;
+            n.isStatic = false;
+            n.effect = LitLightEffect::NONE;
+            n.timer = duration;
+            return;
+        }
+        OZ_WARN("CombatFX: transient light pool full, dropping light at %.2f,%.2f,%.2f",
+                pos.x, pos.y, pos.z);
     }
 
     void AddTracer(Vector3 start, Vector3 end, Color color, float life = 0.05f) {
@@ -168,6 +201,17 @@ public:
     }
 
     void Update(float dt) {
+        // Age out transient effect lights; intensity ramps down with the timer so
+        // a muzzle flash fades rather than popping off.
+        for (auto& n : LitLightning_TransientLights()) {
+            if (!n.active) continue;
+            n.timer -= dt;
+            if (n.timer <= 0.0f) {
+                n.active = false;
+            } else if (n.timer < 0.05f) {
+                n.intensity = n.timer / 0.05f;
+            }
+        }
         for (size_t i = 0; i < m_flashes.size();) {
             m_flashes[i].timer -= dt;
             if (m_flashes[i].timer <= 0.0f)

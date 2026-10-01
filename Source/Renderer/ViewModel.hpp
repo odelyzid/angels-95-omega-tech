@@ -33,6 +33,12 @@ public:
     void TriggerReload();
     void Clear();
 
+    // World-space point at the weapon's muzzle, derived from the same transform
+    // the model is drawn with. Used to anchor the muzzle flash / light to the
+    // gun rather than to the camera, which previously put the flash inside the
+    // view-model. Returns false when no weapon is loaded.
+    bool MuzzleWorldPos(Camera3D camera, Vector3* out) const;
+
 private:
     ViewModel() = default;
 

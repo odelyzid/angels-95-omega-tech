@@ -30,8 +30,14 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
 
     oz::ViewModel::Instance().TriggerFire();
 
-    // Muzzle flash
-    CombatFX::Instance().ArmMuzzleFlash(origin, 0.12f);
+    // Muzzle flash, anchored to the weapon rather than the camera. It used to
+    // reuse `origin` (camera + 2u forward), which put the glow inside the
+    // view-model instead of at the barrel; fall back to that only when no
+    // weapon is loaded. The projectile origin is deliberately unchanged.
+    Vector3 muzzle = origin;
+    if (!oz::ViewModel::Instance().MuzzleWorldPos(cam, &muzzle))
+        muzzle = origin;
+    CombatFX::Instance().ArmMuzzleFlash(muzzle, 0.12f);
 
     // Apply recoil
     float recoilKick = SelectedWeaponStat("recoil", result > 0 ? 2.0f : 1.0f);

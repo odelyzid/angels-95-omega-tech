@@ -297,4 +297,37 @@ void ViewModel::Draw(Camera3D& camera, Shader litShader) {
     if (s_trace) OZ_INFO("[CHAIN] VM::Draw post-DrawMatrix");
 }
 
+bool ViewModel::MuzzleWorldPos(Camera3D camera, Vector3* out) const {
+    if (!m_mesh || !m_mesh->Valid() || !out) return false;
+    const float fitScale = m_scale * ComputeFitScale(m_mesh->Bounds());
+    Matrix camWorld = MatrixInvert(GetCameraMatrix(camera));
+    Matrix local = MatrixMultiply(
+        MatrixMultiply(
+            MatrixTranslate(-m_center.x, -m_center.y, -m_center.z),
+            MatrixRotateXYZ({m_rot.x * DEG2RAD, m_rot.y * DEG2RAD, m_rot.z * DEG2RAD})),
+        MatrixMultiply(
+            MatrixScale(fitScale, fitScale, fitScale),
+            MatrixTranslate(m_offset.x, m_offset.y, -m_offset.z)));
+    Matrix world = MatrixMultiply(local, camWorld);
+
+    // Muzzle = the far end of the weapon along its own length. Which axis is
+    // "length" depends on the asset, so use the largest fitted extent and walk to
+    // that end of the bounding box.
+    const BoundingBox& b = m_mesh->Bounds();
+    const float ex = std::fabs(b.max.x - b.min.x) * fitScale;
+    const float ey = std::fabs(b.max.y - b.min.y) * fitScale;
+    const float ez = std::fabs(b.max.z - b.min.z) * fitScale;
+    Vector3 localMuzzle = m_center;
+    if (ex >= ey && ex >= ez)      localMuzzle.x = b.max.x;
+    else if (ey >= ez)             localMuzzle.y = b.max.y;
+    else                           localMuzzle.z = b.max.z;
+
+    // Row-vector convention: result = v * world.
+    const float v[4] = { localMuzzle.x, localMuzzle.y, localMuzzle.z, 1.0f };
+    out->x = v[0]*world.m0 + v[1]*world.m4 + v[2]*world.m8  + v[3]*world.m12;
+    out->y = v[0]*world.m1 + v[1]*world.m5 + v[2]*world.m9  + v[3]*world.m13;
+    out->z = v[0]*world.m2 + v[1]*world.m6 + v[2]*world.m10 + v[3]*world.m14;
+    return true;
+}
+
 } // namespace oz

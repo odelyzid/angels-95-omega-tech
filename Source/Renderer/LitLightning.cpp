@@ -3,6 +3,10 @@
 #include "../Log.hpp"
 #include <cmath>
 
+// Transient effect lights. Static storage: effect lights must outlive any single
+// call site and must not be reallocated per frame.
+static std::vector<LightNode> g_transientLights;
+
 // ---------------------------------------------------------------------------
 // Animate a dynamic light based on effect type
 // ---------------------------------------------------------------------------
@@ -105,8 +109,23 @@ void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D
     // Sort active lights by distance to camera
     LitLightning_SortByDistance(lights, camera.position);
 
-    // Submit lights to shader
+    // Submit lights to shader.
+    //
+    // Transient lights (muzzle flash, impact sparks) are submitted first so they
+    // always win a slot. The frame buffer only has MAX_LIGHTS entries and the
+    // tail is force-disabled, so a transient light pushed through `lights` would
+    // be evicted the moment a world filled the budget - which is presumably why
+    // the muzzle flash was implemented as an unlit DrawSphere in the first place.
     int submitted = 0;
+    for (auto& node : g_transientLights) {
+        if (!node.active) continue;
+        if (submitted >= MAX_TRANSIENT_LIGHTS) break;
+        if (submitted >= MAX_LIGHTS) break;
+        Light rlight = BuildRLight(node, shader, submitted);
+        UpdateLightValues(shader, rlight);
+        submitted++;
+    }
+
     for (auto& node : lights) {
         if (!node.active) continue;
         if (submitted >= MAX_LIGHTS) break;
@@ -129,6 +148,19 @@ void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D
         dummy.enabled = false;
         UpdateLightValues(shader, dummy);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Transient light pool - short-lived effect lights that must never be evicted by
+// world lighting. Kept separate from PawnSystem::m_lights for exactly that
+// reason.
+// ---------------------------------------------------------------------------
+std::vector<LightNode>& LitLightning_TransientLights() {
+    return g_transientLights;
+}
+
+void LitLightning_ClearTransientLights() {
+    for (auto& n : g_transientLights) n.active = false;
 }
 
 // ---------------------------------------------------------------------------

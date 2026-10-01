@@ -53,6 +53,9 @@ struct LightNode {
     bool corona = false;        // draws a larger, dimmer halo billboard
 
     int zoneId = -1;            // -1 = affects all zones, 0+ = only affects matching zone
+    // Remaining lifetime for transient (effect) lights, seconds. World lights
+    // leave this at 0 and are never aged out by CombatFX.
+    float timer = 0.0f;
     std::string name;           // editor label
 };
 
@@ -76,3 +79,17 @@ void LitLightning_Animate(LightNode& node, float dt);
 
 // Sort lights by distance to camera (nearest first)
 void LitLightning_SortByDistance(std::vector<LightNode>& lights, Vector3 cameraPos);
+
+// ---------------------------------------------------------------------------
+// Transient light pool.
+//
+// Short-lived effect lights (muzzle flash, impact sparks, explosions). They are
+// submitted to the shader BEFORE world lights so a busy world can never evict
+// them: the frame buffer holds MAX_LIGHTS entries and everything past that is
+// force-disabled, so a transient light pushed through the normal `lights`
+// vector would flicker out the moment a level filled the budget.
+// ---------------------------------------------------------------------------
+static constexpr int MAX_TRANSIENT_LIGHTS = 8;
+
+std::vector<LightNode>& LitLightning_TransientLights();
+void LitLightning_ClearTransientLights();
