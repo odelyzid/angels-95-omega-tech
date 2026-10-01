@@ -202,7 +202,11 @@ jobs:
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptContext.cpp -o LightningScriptContext.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningScriptParser.cpp -o LightningScriptParser.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningEntityRegistry.cpp -o LightningEntityRegistry.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o
+          # Must match AngelEd/Makefile: -DOMEGA_TEST_ENV compiles out the
+          # DrawSlotBar call in DrawHotbar (the editor draws the fallback bar).
+          # Without it this TU references DrawSlotBar and the link fails on an
+          # undefined reference, since SlotBar.cpp is not part of the editor.
+          g++ $EDITOR_FLAGS $EDITOR_INC -DOMEGA_TEST_ENV -c ../Source/Script/LightningEntityManager.cpp -o LightningEntityManager.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
