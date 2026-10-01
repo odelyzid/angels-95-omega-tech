@@ -24,6 +24,32 @@ add pln    ...
 sub / intersect <primitive> ...   # CSG carve
 ```
 
+### Surface flags
+
+| Bit | Name | Meaning |
+|---|---|---|
+| `1<<3` (8) | `SURF_FAKEBACKDROP` | brush renders as a sky backdrop (drawn by the zone pass, skipped by the world pass) |
+| `1<<4` (16) | `SURF_COLLISION_PROXY` | generated AutoConvex collision box — feeds the CSG collision world but is **never drawn in game** |
+
+`SURF_COLLISION_PROXY` lines are ordinary `add box` lines with a `flags=16`
+kwarg; they round-trip through the text format unchanged. AngelEd writes them
+when you use **Append AutoConvex Collision**, and only shows them when the
+sidebar **View → Collision** toggle is on.
+
+### Collision is AABB-only
+
+The collision world is built by `CsgProcessor` (`Source/Physics/OzBsp.hpp`), which
+consumes **axis-aligned boxes only**. Two consequences:
+
+- `sub` / `intersect` are **modifiers**, not shapes. They subtract from, or
+  intersect with, solids that already exist. A world whose only brush is
+  `sub box ...` has **zero** collision volumes — the brush still renders, so it
+  looks like a floor while the player falls straight through it. Author floors
+  as `add`, and carve openings with `sub`.
+- A placed `Mesh.Static` / `Mesh.Skeletal` entity has **no collision at all**;
+  the mesh entities are client-cosmetic. Use AngelEd's
+  **Append AutoConvex Collision** to generate boxes for it.
+
 ### Entities
 
 | Entity | Syntax |
@@ -59,6 +85,32 @@ Accepted keys: `gravity=`, `jump=`, `terminal=`, `water_gravity=`,
 named kwargs on entity lines: `name=`, `tex=`, `anim=`, `speed=`, `next=`,
 `loop`, `radius=`, `scale=` (see authoring traps below for the positional
 traps).
+
+#### Light `.ozls` defaults (`: light`)
+
+A `light` line's `name=` resolves an `.ozls` def of type `: light` — exactly
+the way a zone's `name=` resolves its skyzone def. A world-scoped `torch.ozls`
+sitting beside `World.ozone` is picked up automatically; the reference def is
+`GameData/Global/Lights/Light.ozls`.
+
+```
+light point 0 0 4 255 180 90 1.2 12 name=torch flare=1
+```
+
+**The def is a defaults layer, not an override.** Anything the light line
+authored always wins, which means:
+
+| Key | Effect | When |
+|---|---|---|
+| `effect` | `LitLightEffect` (0 none, 1 watery, 2 torch, 3 fire, 4 lamp) | line omitted `effect=` |
+| `flare` / `corona` | billboard halo flags | line omitted the matching kwarg |
+| `period` | flicker cycle length, seconds | always |
+| `cast_shadow` / `is_static` | `LightNode::castShadow` / `::isStatic` | always |
+| `inner_cone` / `outer_cone` | spot cone **cosines** (`LightNode` stores cosines, not degrees) | always |
+
+`intensity`, `radius`, `color`, `position` and `target` are **not** in the schema:
+they are positional on every light line, so a def able to override them would
+silently retune every already-saved level the next time the def was touched.
 
 ### Editor
 

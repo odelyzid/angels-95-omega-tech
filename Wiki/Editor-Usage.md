@@ -70,9 +70,49 @@ Click on any entity in the 3D viewport to select it (highlighted red):
 | Properties | Opens the Properties panel with entity details |
 | Delete | Removes the selected entity from the world |
 | Duplicate | Creates a copy offset 2 units on X+Z |
+| Append AutoConvex Collision | **Brush or Mesh only.** Voxelises the selection into convex collision boxes and appends them to the world (see [AutoConvex collision](#autoconvex-collision)) |
 | Apply Texture to Surface | Applies the currently selected texture (if a texture is active in the Texture Manager and the target is a Brush or Model) |
 
 Right-click drag (without an entity under the cursor) orbits the camera.
+
+## AutoConvex collision
+
+The collision world is **AABB-only** (`CsgProcessor` in `Source/Physics/OzBsp.hpp`
+consumes nothing else). That has two consequences you will hit:
+
+- A placed `Mesh.Static` / `Mesh.Skeletal` prop has **no collision at all** —
+  the player walks straight through it.
+- A brush only ever gets the AABB of its *generated primitive*, so a concave
+  brush over-blocks.
+
+**Append AutoConvex Collision** (right-click a Mesh or Brush) closes both gaps.
+It slices the selection's geometry into a grid of small boxes, keeps only the
+cells a triangle actually passes through, and appends each one as a real
+`add box` brush in the `.ozone`.
+
+Notes:
+
+- **Cell size is derived from the selection** (`extent / 16`, floor 0.25), so a
+  crate and a castle wall both get a sane budget.
+- **Budget: 2048 boxes per run.** Over budget the command refuses and logs the
+  reason rather than appending a partial hull — a missing box in a collision
+  wall is the exact failure this feature exists to prevent.
+- **Skeletal meshes are voxelised in their bind pose.** Vertex poses are
+  uploaded per frame at draw time, so no posed geometry exists to sample.
+- Proxies are written as ordinary `add box ... flags=16` lines, so they survive
+  save/reload. Use the **Collision** sidebar toggle to see them; they are never
+  drawn in game.
+
+## Collision visualisation
+
+The **View → Collision** sidebar button (bottom of the stats sidebar) toggles
+the post-CSG collision wireframes — i.e. exactly what the player will stand on.
+It is the only way to see a brush whose render mesh looks solid but whose
+collision volume does not exist.
+
+When a **Sub / Intersect / De-Resc** brush produces *no* collision volume the
+sidebar counter reads `Collision: N vols << NO SOLID` and the wireframes turn
+red. See [Sub needs a solid](#sub-needs-a-solid) below.
 
 ## Lighting Modes
 
@@ -101,12 +141,28 @@ the selection; a failed load is logged.
 The CSG Brushes panel provides:
 
 - **Primitive buttons**: Box, Cylinder, Sphere, Pyramid, Plane
-- **Operation dropdown**: Add (0), Sub (1), Intersect (2), De-Resc (3)
+- **Operation buttons**: Solid (0), Add (1), Sub (2), Intersect (3)
 - **Edit fields**: Position (X/Y/Z), Size (W/H/D), Rotation, Scale
-- **Place Brush** — commits the brush to the collision volume list
-- **Enable Collision** — toggle collision for placed brush
+- Clicking an operation button commits the current brush immediately at the
+  camera target (a 4×4×4 box by default)
 
 The CSG operation value is stored per brush and fed to the backend `CsgProcessor` for **collision** geometry (`OzoneLoader::RebuildCollisionVolumes`); render meshes stay whole (no render-time CSG carving). The OZONE export preserves each brush's `add`/`sub`/`intersect` op.
+
+### Sub needs a solid
+
+> **Sub / Intersect / De-Resc are _modifiers_, not shapes.** They subtract from,
+> or intersect with, solids that **already exist** in the world. A brush's render
+> mesh draws regardless of its op, so a `sub` floor looks exactly like a floor
+> while contributing **zero** collision volume — and the player falls straight
+> through it.
+
+If you commit a modifier op and the world has nothing for it to act on, AngelEd
+logs a warning, raises a dialog, and marks the sidebar counter
+(`Collision: N vols << NO SOLID`). To fix it: add a **Solid** (or **Add**) brush
+for the volume you actually want, then use **Sub** to carve the openings.
+
+> Never author a whole floor as `sub`. Build openings from separate pier/lintel
+> brushes around it instead — `sub` carves collision only, never the render mesh.
 
 ## Panels
 
@@ -254,10 +310,42 @@ because otherwise the panel could only ever edit what already exists.
   source file to write, so the section says so instead of accepting edits that
   cannot be saved. Edit the `GameData` source and repack.
 
-**Reaching a def with no world instance:** `Player.ozls` is never placed in a
-level, so the Properties panel cannot reach it from a selection. Use the Script
-Manager's **Properties** button instead — this works for any def by name and
-skips the per-instance position/rotation rows.
+**Reaching a def with no world instance:** a def with no placed instance cannot
+be reached from a selection. Use the Script Manager's **Properties** button
+instead — this works for any def by name and skips the per-instance
+position/rotation rows.
+
+#### Which selection reaches which def
+
+The Properties panel resolves a def per selection type:
+
+| Selection | Def resolved by | Editable stat schema |
+|---|---|---|
+| NPC | the pawn's `defName` | `kPawnStats` (+ read-only `PawnDefs/*.cfg` rows) |
+| Pickup | the pickup's `typeName` | whatever the def's own type maps to — `: weapon` → `kWeaponStats`; `Player.ozls`-style `: upgrade` → `kPlayerStats`; `: consumable` → read-only |
+| Zone | the zone's `name=` (skyzone def) | read-only (`SKYZONE` has no schema) |
+| **PlayerStart** | **the fixed name `Player`** | `kPlayerStats` |
+| **Light** | **the light's `name=`** | `kLightStats` |
+| Brush / Mesh / Portal / Emitter / PathNode / WindZone | *(instance fields only, no def)* | — |
+
+`playerstart x y z yaw` carries no name, so a PlayerStart always resolves the
+`Player` def (`GameData/Global/Objects/Player.ozls`) — the player the spawn
+points at is the same def whichever spawn you select.
+
+A light's `name=` resolves an `: light` def exactly the way a zone's `name=`
+resolves its skyzone def:
+
+```
+light point 0 0 4 255 180 90 1.2 12 name=torch flare=1
+```
+
+> **A light def is a DEFAULTS layer.** A value the light line authored always
+> wins. Only keys the line cannot express take effect: `effect` / `flare` /
+> `corona` when the line omitted the matching kwarg, plus `period`,
+> `cast_shadow`, `is_static`, `inner_cone`, `outer_cone` which have no line
+> syntax at all. `intensity`, `radius` and `color` are positional on every light
+> line and are deliberately **not** in the schema — offering them would suggest
+> an edit the runtime ignores.
 
 ### Animation Tool (b74)
 Opens from the toolbar **Anim** button. Authors **vertex-keyframe (morph)**
