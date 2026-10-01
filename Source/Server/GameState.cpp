@@ -847,6 +847,9 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
             player->psychic_energy = std::min(player->max_psychic_energy, player->psychic_energy + pickup->value);
             break;
         case PickupType::ARMOR:
+            // Raises the mitigation score consumed by damage_player(). Also
+            // tops health so the pickup is not a pure downgrade.
+            player->armor += (float)pickup->value;
             player->health = std::min(player->max_health + 50, player->health + pickup->value);
             break;
         case PickupType::WEAPON: // Unlocks Object1-5
@@ -923,10 +926,11 @@ void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id) {
 }
 
 void GameState::damage_player(ServerPlayer& player, int amount) {
-    // Simple armor reduction: 20% of damage is absorbed
-    int absorbed = amount * 0.2f;
-    int net_damage = amount - absorbed;
-    player.health -= net_damage;
+    // Armor mitigation is shared with the client via oz::MitigateDamage so both
+    // ends resolve damage identically. This used to be a flat 20% cut that
+    // ignored the defense stat entirely.
+    float mitigated = oz::MitigateDamage((float)amount, (float)player.armor);
+    player.health -= (int)mitigated;
     if (player.health < 0) player.health = 0;
 }
 

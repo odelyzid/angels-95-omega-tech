@@ -268,6 +268,41 @@ static int test_collect_pickup_rejects_foreign_world() {
     PASS(); return 0; END_TEST();
 }
 
+// Regression: the client mitigated with 100/(100+defense) while the server used
+// a flat 20% cut, so a connected player took different damage on each end. Both
+// now call oz::MitigateDamage; assert the server actually honours defense.
+static int test_damage_player_honors_armor() {
+    TEST("damage_player mitigates by the shared armor formula");
+    GameState gs;
+    uint32_t pid = gs.add_player(20, "Armored");
+    ServerPlayer* p = gs.get_player(pid);
+    CHECK(p != nullptr);
+
+    // No armor: full damage.
+    p->health = 100.0f;
+    gs.damage_player(*p, 50);
+    CHECK_APROX(p->health, 50.0f, 0.01f);
+
+    // defense 100 halves incoming damage (100/(100+100) = 0.5).
+    p->health = 100.0f;
+    p->armor = 100.0f;
+    gs.damage_player(*p, 50);
+    CHECK_APROX(p->health, 75.0f, 0.01f);
+
+    // Negative defense must not amplify damage.
+    p->health = 100.0f;
+    p->armor = -50.0f;
+    gs.damage_player(*p, 50);
+    CHECK_APROX(p->health, 50.0f, 0.01f);
+
+    // Health floors at zero rather than going negative.
+    p->health = 5.0f;
+    p->armor = 0.0f;
+    gs.damage_player(*p, 50);
+    CHECK_EQ(p->health, 0.0f);
+    PASS(); return 0; END_TEST();
+}
+
 // --- Tier 0: trust / idempotency regressions ---
 
 static int test_add_player_idempotent() {
@@ -432,6 +467,7 @@ int main() {
     failures += test_ammo_pickup_grants_ammo();
     failures += test_ammo_pickup_no_xp_granted();
     failures += test_collect_pickup_rejects_foreign_world();
+    failures += test_damage_player_honors_armor();
     failures += test_add_player_idempotent();
     failures += test_player_position_flag();
     failures += test_npc_death_and_revive();

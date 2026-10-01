@@ -7,6 +7,7 @@
 #include "Audio/SoundManager.hpp"
 #include "World/OzOzoneLoader.hpp"
 #include "Pawn/OzPawnSystem.hpp"
+#include "Pawn/CombatMath.hpp"
 #include "Package/PackageAssetLoader.hpp"
 #include "Client/MasterList.hpp"
 #include "Renderer/EngineBillboard.hpp"
@@ -921,9 +922,9 @@ void UpdateEntitiesSim(float dt)
         if (g_damageCooldown <= 0.0f && PawnSystem::Instance().IsPlayerAttacked(playerPos, damage))
         {
             // Equipped armor mitigates incoming damage (diminishing returns).
+            // Shared with the server via oz::MitigateDamage so both ends agree.
             auto& lem = LightningEntityManager::Instance();
-            float defense = lem.GetPlayerDefense();
-            float mitigated = damage * (100.0f / (100.0f + std::max(0.0f, defense)));
+            float mitigated = oz::MitigateDamage(damage, lem.GetPlayerDefense());
             lem.SetPlayerHealth(std::max(0.0f, lem.GetPlayerHealth() - mitigated));
             g_damageCooldown = 1.0f;
             if (OmegaTechData.PanicCounter != 240)

@@ -2,6 +2,7 @@
 #define OZGAME_STATE_HPP
 
 #include "../Network/Network.hpp"
+#include "../Pawn/CombatMath.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -36,6 +37,9 @@ struct ServerPlayer {
     int xp_to_next = 100;
     int inventory[5] = {0, 0, 0, 0, 0};  // indices 0-4 match Objects 1-5
     int ammo = 0;                        // shared ammo pool (refilled by AMMO pickups)
+    // Defense score fed to oz::MitigateDamage. Mirrors the client's
+    // LightningEntityManager::GetPlayerDefense() sum of equipped `defense`.
+    float armor = 0.0f;
     int world_index = 0;
     double last_seen;
     bool has_position = false;           // first validated PLAYER_UPDATE received
