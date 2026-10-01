@@ -922,6 +922,10 @@ void UpdateEntitiesSim(float dt)
     // NOTE: pawn/entity drawing moved out to DrawWorld (once per frame after
     // the fixed-step accumulator) so sim steps never double-draw.
 
+    // Melee stamina regen. Runs every frame alongside the contact-damage
+    // check so the pool refills whether or not an NPC is in range.
+    LightningEntityManager::Instance().UpdateStamina(dt);
+
     // Check if any pawn is attacking the player (contact damage)
     {
         g_damageCooldown -= dt;

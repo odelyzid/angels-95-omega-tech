@@ -3,9 +3,16 @@
 #include "../Package/PackageAssetLoader.hpp"
 #include "../Audio/SoundManager.hpp"
 #include "../Log.hpp"
-#ifndef OMEGA_TEST_ENV
+// OMEGA_TEST_ENV builds this TU without raylib, so most of it is compiled out.
+// OMEGA_PAWNSYSTEM_TEST (set only by test_pawn_system) opts back in to the
+// PawnSystem/raylib types, because that target links both raylib and
+// OzPawnSystem.cpp and wants the real melee path under test.
+#if !defined(OMEGA_TEST_ENV) || defined(OMEGA_PAWNSYSTEM_TEST)
+#define OMEGA_HAVE_PAWNSYSTEM 1
 #include "../Pawn/OzPawnSystem.hpp"
 #include "../Pawn/AngelPlayer/SlotBar.hpp"
+#include "../Renderer/CombatFX.hpp"
+#include "../World/OzOzoneLoader.hpp"
 #endif
 #include <algorithm>
 #include <cctype>
@@ -34,10 +41,72 @@ static std::string DefSourceDir(const std::string& sourcePath) {
     return (s == std::string::npos) ? std::string() : sourcePath.substr(0, s + 1);
 }
 
+namespace {
+
+// Spark normal for a wall strike, where there is no surface normal to use.
+Vector3 hitNormalOrAway(Vector3 origin, Vector3 dir) {
+    return Vector3Normalize(dir);
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // FireSelectedWeapon — spawn projectiles (ranged) or swing-check (melee)
 // Returns: >0 projectiles spawned (ranged), 0 melee swing, -1 didn't fire
 // ---------------------------------------------------------------------------
+// Swept segment vs the loaded world's collision volumes. Returns true when solid
+// geometry sits between the two points.
+//
+// Uses the same SegmentVsAABB the projectile tracer/impact path uses, so melee
+// and bullets agree on what counts as a wall. A segment that starts inside a
+// volume reports no hit (the slab test's documented behaviour), which is what
+// we want when the wielder is standing in a doorway or clipping a crate: the
+// swing still lands.
+bool LightningEntityManager::MeleeBlockedByGeometry(Vector3 from, Vector3 to) {
+#if defined(OMEGA_HAVE_PAWNSYSTEM) && !defined(OMEGA_PAWNSYSTEM_TEST)
+    // Only the shipping build reads world geometry. The test target has no
+    // loaded world (and does not link the loader), so occlusion is a stub there.
+    const auto& volumes = OzoneLoader::Instance().GetCollisionVolumes();
+    float bestT = 1.0f;
+    Vector3 n;
+    for (const auto& cv : volumes) {
+        if (cv.isHeightmap) continue;
+        float t;
+        Vector3 hitN;
+        // Only geometry strictly between the two points blocks: a wall face the
+        // segment merely grazes at t ~= 1 (the target standing in a doorway)
+        // should not veto the hit.
+        if (SegmentVsAABB(from, to, cv.aabb, t, hitN) && t > 0.001f && t < 0.999f && t < bestT) {
+            bestT = t;
+            n = hitN;
+        }
+    }
+    return bestT < 1.0f;
+#else
+    (void)from; (void)to;
+    return false;
+#endif
+}
+
+// Send a resolved melee hit to the server, which re-validates reach and applies
+// the damage. Only meaningful for networkControlled pawns; local pawns are
+// damaged directly by the caller.
+void LightningEntityManager::ReportMeleeHit(const struct Pawn& target, int damage, float reach,
+                                            float staminaCost, Vector3 origin, Vector3 dir) {
+#ifdef OMEGA_HAVE_PAWNSYSTEM
+    if (target.netNpcIndex < 0) return;
+    // Routed through the client accessor hook rather than the file-static
+    // OmegaClient in Main.cpp, which this translation unit cannot see.
+    if (!m_on_melee_hit) return;
+    m_on_melee_hit(target.netWorldIndex, target.netNpcIndex, target.netPartitionIndex,
+                   damage, reach, staminaCost,
+                   origin.x, origin.y, origin.z, dir.x, dir.y, dir.z);
+#else
+    (void)target; (void)damage; (void)reach; (void)staminaCost;
+    (void)origin; (void)dir;
+#endif
+}
+
 int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vector3& direction) {
     EntityInstance* ent = SelectedEntity();
     if (!ent || !ent->def) return -1;
@@ -59,7 +128,16 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
     if (reach > 0.0f) {
         // ---- MELEE ----
         float swingSpeed = readStat("swing_speed", readStat("fire_rate", 0.25f));
+
+        // Stamina gate. Both shipped melee defs author stamina_cost (18 / 15)
+        // and it previously had no code reference, so a sword could be swung
+        // as fast as its cooldown allowed with no cost. Refused swings spend
+        // nothing and set no cooldown, so mashing does not bank a free hit.
+        const float staminaCost = readStat("stamina_cost", 0.0f);
+        if (!HasStamina(staminaCost)) return -1;
+
         ent->cooldownRemaining = swingSpeed;
+        SpendStamina(staminaCost);
 
         // Run on_swing action (drains queued side-effects)
         RunAction(ent, "on_swing");
@@ -68,27 +146,53 @@ int LightningEntityManager::FireSelectedWeapon(const Vector3& origin, const Vect
         float scriptCd = ent->ctx.TakePendingFloat("__cooldown");
         if (scriptCd > 0.0f) ent->cooldownRemaining = scriptCd;
 
-#ifndef OMEGA_TEST_ENV
-        // Forward range check against PawnSystem NPCs; apply damage directly
-        // in single-player (the server does it in networked play via
-        // NPC_DAMAGE). MP fires both paths, but server NPCs are
-        // networkControlled locally — ApplyPawnDamage skips those.
-        const auto& pawns = PawnSystem::Instance().GetPawns();
-        for (const auto& pawn : pawns) {
-            if (!pawn.active || pawn.state == PawnState::DEAD) continue;
-            Vector3 toPawn = Vector3Subtract(pawn.position, origin);
-            float t = Vector3DotProduct(toPawn, direction);
-            if (t < 0 || t > reach) continue;
-            Vector3 closest = Vector3Add(origin, Vector3Scale(direction, t));
-            float d = Vector3Distance(closest, pawn.position);
-            if (d < 2.0f) {
+// Target selection lives in PawnSystem::ResolveMeleeTarget so it is
+        // unit-testable headlessly. It returns the NEAREST valid pawn in the arc
+        // — the old inline loop took the first container match, so which NPC you
+        // hit depended on spawn order rather than distance.
+#ifdef OMEGA_HAVE_PAWNSYSTEM
+        const Pawn* bestPawn = PawnSystem::Instance().ResolveMeleeTarget(origin, direction, reach);
+
+        if (bestPawn) {
+            // Wall check: if solid geometry sits between the wielder and the
+            // target, the swing stops at the wall instead of reaching through.
+            const bool blocked = MeleeBlockedByGeometry(origin, bestPawn->position);
+
+            if (!blocked) {
                 RunAction(ent, "on_hit");
-                Pawn* target = PawnSystem::Instance().Get((int)pawn.id);
-                if (target) PawnSystem::Instance().ApplyPawnDamage(*target, (int)projectileDamage);
-                break;
+                Vector3 hitPos = Vector3Add(bestPawn->position, Vector3{0.0f, 0.5f, 0.0f});
+                Vector3 hitNormal = Vector3Normalize(
+                    Vector3Subtract(bestPawn->position, origin));
+
+// Impact FX: sparks at the contact point plus a brief light, so
+                // a melee connect reads in an unlit room like a gunshot did.
+                CombatFX::Instance().SpawnImpact(hitPos, hitNormal,
+                                                 Color{255, 210, 120, 255}, 9, 5.0f);
+                CombatFX::Instance().ArmTransientLight(hitPos,
+                                                        Color{255, 190, 120, 255}, 0.10f, 4.0f);
+                Pawn* target = PawnSystem::Instance().Get((int)bestPawn->id);
+                if (target) {
+                    if (target->networkControlled) {
+                        // Server owns the damage in MP: report the resolved hit
+                        // so the server can re-validate reach and apply it.
+                        // ApplyPawnDamage deliberately skips these pawns.
+                        ReportMeleeHit(*target, (int)projectileDamage, reach,
+                                       staminaCost, origin, direction);
+                    } else {
+                        PawnSystem::Instance().ApplyPawnDamage(*target, (int)projectileDamage);
+                    }
+                }
+            }
+else {
+                // Swung into a wall in front of the target: sparks at the wall,
+                // no damage, and no on_hit (nothing was hit).
+                Vector3 wallHit = Vector3Add(origin, Vector3Scale(direction, reach * 0.6f));
+                CombatFX::Instance().SpawnImpact(wallHit, hitNormalOrAway(origin, direction),
+                                                 Color{200, 200, 210, 255}, 6, 4.0f);
             }
         }
-#endif
+#endif  // OMEGA_HAVE_PAWNSYSTEM
+        (void)staminaCost;
         return 0; // melee swing performed
     }
 
@@ -247,6 +351,7 @@ void LightningEntityManager::Init() {
     for (int i = 0; i < EQUIP_SLOT_COUNT; i++) m_equipment[i] = -1;
     m_selectedSlot = 0;
     m_playerEntityIndex = -1;
+    m_stamina = GetPlayerMaxStamina();
     m_instances.clear();
     m_resources.clear();
     m_pendingFog = false;
@@ -1158,6 +1263,61 @@ float LightningEntityManager::GetPlayerMaxMana() const {
     return GetPlayerStat("max_mana", 100.0f) + EquipmentStatSum("max_mana_bonus");
 }
 void LightningEntityManager::SetPlayerMana(float v) { SetPlayerStat("mana", v); }
+
+// ---------------------------------------------------------------------------
+// Stamina — the melee swing budget.
+//
+// Both shipped melee defs author `stamina_cost`, but nothing ever read it, so
+// stamina was purely decorative. It is backed by ordinary player stats so it
+// participates in the existing max_health/max_mana/... stat machinery and in
+// save/load, and the max is equipment-extensible like the others.
+// ---------------------------------------------------------------------------
+// Stamina is a dedicated member rather than a playerstat, unlike health/mana.
+// GetPlayerStat/SetPlayerStat are no-ops while no player entity exists
+// (m_playerEntityIndex < 0, which is the case before a world is loaded and in
+// every headless test), so a stat-backed pool would silently read 0 and refuse
+// every swing. The max still honours equipment bonuses, so a def can raise the
+// ceiling via max_stamina_bonus.
+float LightningEntityManager::GetPlayerStamina() const { return m_stamina; }
+
+float LightningEntityManager::GetPlayerMaxStamina() const {
+    // 100 default matches the server's SERVER_MAX_STAMINA so both pools agree.
+    return 100.0f + EquipmentStatSum("max_stamina_bonus");
+}
+
+void LightningEntityManager::SetPlayerStamina(float v) {
+    m_stamina = fminf(fmaxf(v, 0.0f), GetPlayerMaxStamina());
+}
+
+bool LightningEntityManager::HasStamina(float cost) const {
+    if (cost <= 0.0f) return true;
+    return GetPlayerStamina() >= cost;
+}
+
+bool LightningEntityManager::SpendStamina(float cost) {
+    if (cost <= 0.0f) return true;
+    const float have = GetPlayerStamina();
+    if (have < cost) {
+        // Fail without spending: a partial spend would let a player chip a
+        // weapon they cannot afford to swing.
+        return false;
+    }
+    SetPlayerStamina(have - cost);
+    return true;
+}
+
+void LightningEntityManager::UpdateStamina(float dt) {
+    if (dt <= 0.0f) return;
+    const float max = GetPlayerMaxStamina();
+    if (max <= 0.0f) return;
+    const float cur = GetPlayerStamina();
+    if (cur >= max) return;
+    // ~6.7s from empty to full (15/s against a 100 pool). Must match
+    // STAMINA_REGEN_PER_SECOND in Server/GameState.hpp, which owns the server
+    // pool; the two are kept in step deliberately rather than shared because
+    // the client cannot include the server header.
+    SetPlayerStamina(cur + 15.0f * dt);
+}
 
 float LightningEntityManager::GetPlayerPsychicEnergy() const { return GetPlayerStat("psychic_energy", 0.0f); }
 float LightningEntityManager::GetPlayerMaxPsychicEnergy() const {

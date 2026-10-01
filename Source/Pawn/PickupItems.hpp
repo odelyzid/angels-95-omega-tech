@@ -2,6 +2,78 @@
 #define OZ_PICKUP_ITEMS_HPP
 
 #include <cstdint>
+#include <cstring>
+
+// ---------------------------------------------------------------------------
+// Pickup categories.
+//
+// Ten pickup defs author `pickup_category = "..."` and nothing read it, so the
+// authored grouping was purely documentary. It is now the canonical label for
+// a pickup: used for the collect flash tint and as the classification the HUD
+// and ItemDB fall back on when a def omits `item_id`.
+//
+// The string form is what .ozls authors; PickupCategoryFromString is the only
+// place that mapping lives, so adding a category is a single edit.
+// ---------------------------------------------------------------------------
+enum class PickupCategory {
+    NONE = -1,        // unknown / unclassified
+    HEALTH_VIAL,
+    MANA_VIAL,
+    ENERGY_CRYSTAL,
+    CONSUMABLE,
+    KEY,
+    COIN,
+    POWERUP,
+    AMMO,
+    QUEST
+};
+
+inline PickupCategory PickupCategoryFromString(const char* s) {
+    if (!s) return PickupCategory::NONE;
+    if (!strcmp(s, "health_vial"))    return PickupCategory::HEALTH_VIAL;
+    if (!strcmp(s, "mana_vial"))      return PickupCategory::MANA_VIAL;
+    if (!strcmp(s, "energy_crystal")) return PickupCategory::ENERGY_CRYSTAL;
+    if (!strcmp(s, "consumable"))     return PickupCategory::CONSUMABLE;
+    if (!strcmp(s, "key"))            return PickupCategory::KEY;
+    if (!strcmp(s, "coin"))           return PickupCategory::COIN;
+    if (!strcmp(s, "powerup"))        return PickupCategory::POWERUP;
+    if (!strcmp(s, "ammo"))           return PickupCategory::AMMO;
+    if (!strcmp(s, "quest"))          return PickupCategory::QUEST;
+    return PickupCategory::NONE;
+}
+
+inline const char* PickupCategoryName(PickupCategory c) {
+    switch (c) {
+        case PickupCategory::HEALTH_VIAL:    return "health_vial";
+        case PickupCategory::MANA_VIAL:      return "mana_vial";
+        case PickupCategory::ENERGY_CRYSTAL: return "energy_crystal";
+        case PickupCategory::CONSUMABLE:     return "consumable";
+        case PickupCategory::KEY:            return "key";
+        case PickupCategory::COIN:           return "coin";
+        case PickupCategory::POWERUP:        return "powerup";
+        case PickupCategory::AMMO:           return "ammo";
+        case PickupCategory::QUEST:          return "quest";
+        default:                             return "unknown";
+    }
+}
+
+// Collect-flash tint per category, as packed RGBA. Deliberately not raylib's
+// Color: this header is shared with the standalone server, which has no raylib.
+// The client converts with unpackColor when it needs a raylib Color.
+inline unsigned int PickupCategoryTintRGBA(PickupCategory c) {
+    switch (c) {
+        case PickupCategory::HEALTH_VIAL:    return 0xFF4646FFu;
+        case PickupCategory::MANA_VIAL:      return 0xFF8246FFu;
+        case PickupCategory::ENERGY_CRYSTAL: return 0xFF46CEFFu;
+        case PickupCategory::CONSUMABLE:     return 0xFF8CDC78u;
+        case PickupCategory::KEY:            return 0xFF6EDCF0u;
+        case PickupCategory::COIN:           return 0xFF00D7FFu;
+        case PickupCategory::POWERUP:        return 0xFF8CBEBEu;
+        case PickupCategory::AMMO:           return 0xFF82B4C8u;
+        case PickupCategory::QUEST:          return 0xFFDCDC78u;
+        default:                             return 0xFFE6E6E6u;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Pickup -> inventory item id mapping, shared by the server and the client.

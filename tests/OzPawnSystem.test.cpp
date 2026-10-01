@@ -8,8 +8,10 @@
 
 #include "../Source/Pawn/OzPawnSystem.hpp"
 #include "../Source/Script/LightningEntityRegistry.hpp"
+#include "../Source/Script/LightningEntityManager.hpp"
 #include "../Source/Script/LightningEntityDef.hpp"
 #include "../Source/Particle/OzParticleSimulationManager.hpp"
+#include "../Source/Pawn/PickupItems.hpp"
 #include "../Source/Renderer/CombatFX.hpp"
 #include <cstdio>
 #include <cassert>
@@ -235,6 +237,122 @@ static int test_emitter_crud() {
 
 // --- Projectile tests (Phase 3) ---
 
+static int test_melee_nearest_target() {
+    TEST("Melee picks the nearest pawn in reach, not the first in the list");
+    reset_pawn_system();
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "StrikeSword";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["damage"] = 50.0f;
+    def.stats.floats["reach"] = 8.0f;
+    def.stats.floats["swing_speed"] = 0.0f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int widx = em.Spawn("StrikeSword");
+    CHECK(widx >= 0);
+    em.HotbarAssign(0, widx);
+    em.SelectSlot(0);
+    em.SetPlayerStamina(100.0f);
+
+    PawnDef pd;
+    pd.name = "MeleeDummy";
+    pd.damage = 1.0f;
+    pd.maxHealth = 100;
+    PawnSystem::Instance().RegisterDef(pd);
+
+    // Two pawns inside the arc: one at 2u (near) and one at 5u (far). They are
+    // registered far-first so a first-match implementation would hit the far one.
+    reset_pawn_system();
+    int near = PawnSystem::Instance().Spawn({0.0f, 0.0f, -2.0f}, "MeleeDummy");
+    int far  = PawnSystem::Instance().Spawn({0.0f, 0.0f, -5.0f}, "MeleeDummy");
+    CHECK(near >= 0); CHECK(far >= 0);
+    Pawn* pn = PawnSystem::Instance().Get(near);
+    Pawn* pf = PawnSystem::Instance().Get(far);
+    CHECK(pn != nullptr); CHECK(pf != nullptr);
+    pn->health = 100; pf->health = 100;
+
+    Vector3 origin = {0, 0, 0}, dir = {0, 0, -1};
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    em.FireSelectedWeapon(origin, dir);
+
+    // The near pawn took the damage; the far one is untouched.
+    CHECK_EQ(pn->health, 50);
+    CHECK_EQ(pf->health, 100);
+    PASS(); return 0; END_TEST();
+}
+
+static int test_melee_out_of_reach_untouched() {
+    TEST("A pawn beyond reach takes no damage");
+    reset_pawn_system();
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "ShortSword";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["damage"] = 50.0f;
+    def.stats.floats["reach"] = 3.0f;
+    def.stats.floats["swing_speed"] = 0.0f;
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int widx = em.Spawn("ShortSword");
+    CHECK(widx >= 0);
+    em.HotbarAssign(0, widx);
+    em.SelectSlot(0);
+    em.SetPlayerStamina(100.0f);
+
+    reset_pawn_system();
+    int far = PawnSystem::Instance().Spawn({0.0f, 0.0f, -6.0f}, "MeleeDummy");
+    CHECK(far >= 0);
+    Pawn* pf = PawnSystem::Instance().Get(far);
+    CHECK(pf != nullptr);
+    pf->health = 100;
+
+    Vector3 origin = {0, 0, 0}, dir = {0, 0, -1};
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(pf->health, 100);   // still outside the 3u arc
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pickup_category_tint() {
+    TEST("pickup_category drives the collect feedback tint");
+    // The ten shipped pickup defs author pickup_category; it previously had no
+    // code reference. Pin the string mapping and that each category has its own
+    // distinct tint, so a health pickup and a coin do not flash identically.
+    CHECK(PickupCategoryFromString("health_vial") == PickupCategory::HEALTH_VIAL);
+    CHECK(PickupCategoryFromString("mana_vial") == PickupCategory::MANA_VIAL);
+    CHECK(PickupCategoryFromString("energy_crystal") == PickupCategory::ENERGY_CRYSTAL);
+    CHECK(PickupCategoryFromString("consumable") == PickupCategory::CONSUMABLE);
+    CHECK(PickupCategoryFromString("key") == PickupCategory::KEY);
+    CHECK(PickupCategoryFromString("coin") == PickupCategory::COIN);
+    CHECK(PickupCategoryFromString("powerup") == PickupCategory::POWERUP);
+    CHECK(PickupCategoryFromString("ammo") == PickupCategory::AMMO);
+    CHECK(PickupCategoryFromString("quest") == PickupCategory::QUEST);
+    // Unauthored / misspelled categories degrade instead of matching by accident.
+    CHECK(PickupCategoryFromString("nonsense") == PickupCategory::NONE);
+    CHECK(PickupCategoryFromString("") == PickupCategory::NONE);
+    CHECK(PickupCategoryFromString(nullptr) == PickupCategory::NONE);
+
+    // Round-trip: every category name maps back to itself.
+    const PickupCategory all[] = {
+        PickupCategory::HEALTH_VIAL, PickupCategory::MANA_VIAL,
+        PickupCategory::ENERGY_CRYSTAL, PickupCategory::CONSUMABLE,
+        PickupCategory::KEY, PickupCategory::COIN, PickupCategory::POWERUP,
+        PickupCategory::AMMO, PickupCategory::QUEST
+    };
+    for (auto c : all) {
+        CHECK(PickupCategoryFromString(PickupCategoryName(c)) == c);
+    }
+    // Distinct tints per category (unknown shares none of the real ones).
+    CHECK(PickupCategoryTintRGBA(PickupCategory::COIN) !=
+          PickupCategoryTintRGBA(PickupCategory::HEALTH_VIAL));
+    CHECK(PickupCategoryTintRGBA(PickupCategory::NONE) !=
+          PickupCategoryTintRGBA(PickupCategory::KEY));
+    PASS(); return 0; END_TEST();
+}
+
 static int test_projectile_spawn() {
     TEST("SpawnProjectile creates active projectile");
     reset_pawn_system();
@@ -437,6 +555,9 @@ int main() {
     failures += test_emitter_crud();
     failures += test_light_crud();
     failures += test_particle_burst();
+    failures += test_melee_nearest_target();
+    failures += test_melee_out_of_reach_untouched();
+    failures += test_pickup_category_tint();
     failures += test_projectile_spawn();
     failures += test_projectile_movement();
     failures += test_projectile_tracer();

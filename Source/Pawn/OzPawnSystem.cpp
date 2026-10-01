@@ -237,6 +237,42 @@ bool PawnSystem::IsPlayerAttacked(Vector3 playerPos, float& outDamage) {
 // ---------------------------------------------------------------------------
 // ApplyPawnDamage � damage + death transition (fires on_death script hook)
 // ---------------------------------------------------------------------------
+// Resolve which pawn a melee swing hits: the NEAREST live pawn inside the
+// forward arc and within `hitRadius` of the swing line. Returns nullptr when
+// nothing qualifies.
+//
+// This lived inline in FireSelectedWeapon and took the first container match,
+// so which NPC you hit depended on spawn order rather than distance — a swing
+// through two enemies could damage the far one. Split out so it can be tested
+// without the render layer.
+const Pawn* PawnSystem::ResolveMeleeTarget(const Vector3& origin,
+                                           const Vector3& direction,
+                                           float reach) {
+    const float hitRadius = 2.0f;  // pawn half-width, matches the prior test
+    const Pawn* best = nullptr;
+    float bestDistSq = 0.0f;
+
+    for (const auto& pawn : m_pawns) {
+        if (!pawn.active || pawn.state == PawnState::DEAD) continue;
+        // Forward arc only: the projection along `direction` must be in
+        // [0, reach], so a swing cannot hit something behind the wielder.
+        Vector3 toPawn = Vector3Subtract(pawn.position, origin);
+        float t = Vector3DotProduct(toPawn, direction);
+        if (t < 0.0f || t > reach) continue;
+        // ...and within hitRadius of the swing line.
+        Vector3 closest = Vector3Add(origin, Vector3Scale(direction, t));
+        if (Vector3Distance(closest, pawn.position) >= hitRadius) continue;
+        // Nearest by distance from the wielder, not from the arc centre: two
+        // NPCs either side of the swing must resolve to the one faced.
+        float distSq = Vector3DistanceSqr(origin, pawn.position);
+        if (!best || distSq < bestDistSq) {
+            best = &pawn;
+            bestDistSq = distSq;
+        }
+    }
+    return best;
+}
+
 void PawnSystem::ApplyPawnDamage(Pawn& p, int damage) {
     if (!p.active || p.state == PawnState::DEAD) return;
     // Server-owned NPCs take damage via NPC_DAMAGE relay, not local hits
@@ -429,11 +465,18 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
 
             // Map typeName to item ID via LightningScript entity registry
             int itemId = 0;
+            PickupCategory category = PickupCategory::NONE;
             const EntityDef* edef = LightningEntityRegistry::Instance().Find(n.typeName);
             if (edef) {
                 auto it = edef->stats.floats.find("item_id");
                 if (it != edef->stats.floats.end())
                     itemId = (int)it->second;
+                // Authored pickup_category. Ten defs carry it and it previously
+                // had no code reference; it now drives the collect-flash tint
+                // and, below, the item-id fallback.
+                auto cit = edef->stats.strings.find("pickup_category");
+                if (cit != edef->stats.strings.end())
+                    category = PickupCategoryFromString(cit->second.c_str());
                 // Def-stat respawn override (0 = never respawns, e.g. Key/Coin)
                 auto rt = edef->stats.floats.find("respawn_time");
                 if (rt != edef->stats.floats.end())
@@ -448,6 +491,22 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
                     // Remove spaces for comparison: "Health Vial" -> "HealthVial"
                     dbName.erase(std::remove(dbName.begin(), dbName.end(), ' '), dbName.end());
                     if (dbName == n.typeName) { itemId = ItemDB[i].id; break; }
+                }
+            }
+            // Second fallback: map pickup_category onto an item id, for defs
+            // that author a category but no item_id. Quest/energy pickups have
+            // no inventory item, so they resolve to nothing here and are granted
+            // by their on_collect hook instead.
+            if (itemId == 0) {
+                switch (category) {
+                    case PickupCategory::HEALTH_VIAL:    itemId = item_id::HEALTH_VIAL; break;
+                    case PickupCategory::MANA_VIAL:      itemId = item_id::MANA_VIAL; break;
+                    case PickupCategory::ENERGY_CRYSTAL: itemId = PickupEnergyCrystalId(111); break;
+                    case PickupCategory::KEY:            itemId = item_id::KEY; break;
+                    case PickupCategory::COIN:           itemId = item_id::COIN; break;
+                    case PickupCategory::POWERUP:        itemId = item_id::POWERUP; break;
+                    case PickupCategory::AMMO:           itemId = item_id::AMMO; break;
+                    default: break;  // consumable / quest: granted by script
                 }
             }
 
@@ -490,6 +549,8 @@ void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBo
             m_pickupFeedback.collected = true;
             m_pickupFeedback.typeName = n.typeName;
             m_pickupFeedback.itemId = itemId;
+            m_pickupFeedback.tint = PickupCategoryTintRGBA(category);
+            m_pickupFeedback.category = PickupCategoryName(category);
             m_pickupFeedback.flashTimer = 0.5f;
         }
     }

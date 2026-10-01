@@ -93,6 +93,15 @@ public:
     // Send NPC damage
     void send_npc_damage(int world_index, int npc_index, int partition_index, int damage);
 
+    // Report a resolved melee hit. The server re-validates reach against the
+    // NPC's own position and applies the damage, so melee is server-authoritative
+    // in MP rather than a local-only ApplyPawnDamage that is skipped for
+    // networkControlled pawns.
+    void send_melee_hit(int world_index, int npc_index, int partition_index,
+                        int damage, float reach, float stamina_cost,
+                        float ox, float oy, float oz,
+                        float dx, float dy, float dz);
+
     // Send weapon fire action
     void send_weapon_fire(float ox, float oy, float oz,
                           float dx, float dy, float dz,

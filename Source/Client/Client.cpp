@@ -159,6 +159,31 @@ void OmegaClient::send_weapon_fire(float ox, float oy, float oz,
     m_client.send_message(msg);
 }
 
+void OmegaClient::send_melee_hit(int world_index, int npc_index, int partition_index,
+                                 int damage, float reach, float stamina_cost,
+                                 float ox, float oy, float oz,
+                                 float dx, float dy, float dz) {
+    if (!m_client.is_connected()) return;
+    net::MeleeHitData mhd;
+    mhd.player_id = 0;  // server stamps the real sender
+    mhd.world_index = world_index;
+    mhd.npc_index = npc_index;
+    mhd.partition_index = partition_index;
+    mhd.damage = damage;
+    mhd.reach = reach;
+    mhd.stamina_cost = stamina_cost;
+    mhd.origin_x = ox; mhd.origin_y = oy; mhd.origin_z = oz;
+    mhd.dir_x = dx;    mhd.dir_y = dy;    mhd.dir_z = dz;
+    net::NetworkMessage msg;
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::MELEE_HIT);
+    msg.size = sizeof(mhd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    std::memcpy(msg.payload, &mhd, sizeof(mhd));
+    m_client.send_message(msg);
+}
+
 void OmegaClient::send_npc_damage(int world_index, int npc_index, int partition_index, int damage) {
     if (!m_client.is_connected()) return;
     net::NpcDamageData ndd;

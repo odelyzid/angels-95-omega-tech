@@ -101,6 +101,13 @@ struct Pawn {
     std::string defName;    // name of the pawn definition (e.g., "Walker", "Skaarj")
     int scriptInstanceIndex = -1; // LightningEntityManager instance index, -1 = none
     bool networkControlled = false; // true = AI/position owned by the server; local FSM skipped
+    // Server identity for a networkControlled pawn, so a local hit can be
+    // reported to the server. Without these, melee could never damage a
+    // server-owned NPC: ApplyPawnDamage skips them and the pawn had no address
+    // to send. -1 = local (single-player) pawn.
+    int netWorldIndex     = -1;
+    int netNpcIndex       = -1;
+    int netPartitionIndex = -1;
 
     // Shared render mesh (GameEngine.Mesh.Static/Skeletal) + per-instance anim state.
     std::shared_ptr<oz::Mesh> mesh;
@@ -295,12 +302,25 @@ public:
     // hook) when its health drops to 0. Used by projectile hits and melee.
     void ApplyPawnDamage(Pawn& p, int damage);
 
+    // Which pawn a melee swing hits: the NEAREST live pawn inside the forward
+    // arc (projection in [0, reach]) and within a 2u radius of the swing line.
+    // Returns nullptr when nothing qualifies. Split out of the weapon manager so
+    // the selection is unit-testable without the render layer.
+    const Pawn* ResolveMeleeTarget(const Vector3& origin, const Vector3& direction,
+                                   float reach);
+
     // Feedback state for UI (last collected pickup info)
     struct PickupFeedback {
         bool collected = false;
         std::string typeName;
         int itemId = 0;
         float flashTimer = 0.0f;
+        // Authored `pickup_category`, packed RGBA (see PickupCategoryTintRGBA).
+        // Ten pickup defs author the key and it had no code reference, so the
+        // collect flash was always the same colour. Drives the HUD tint.
+        unsigned int tint = 0;
+        // Category name, kept for the pickup log / future HUD labelling.
+        const char* category = "unknown";
     };
     PickupFeedback m_pickupFeedback;
 

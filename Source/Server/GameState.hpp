@@ -17,6 +17,10 @@
 // (LightningEntityManager::HOTBAR_SIZE); both sides iterate this many.
 static constexpr int SERVER_WEAPON_SLOTS = 8;
 
+// Melee stamina regeneration, shared with the client so both pools refill at
+// the same rate (the client's UpdateStamina reads this).
+static constexpr float STAMINA_REGEN_PER_SECOND = 15.0f;  // ~6.7s empty -> full
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -55,6 +59,8 @@ struct ServerPlayer {
     int penergy_ticks = 0;
     int exploration_tick = 0; // for exploration XP
     uint32_t last_damage_tick = 0; // throttle NPC_DAMAGE
+    uint32_t last_melee_tick = 0;  // throttle MELEE_HIT (separate: melee is faster)
+    float stamina = net::SERVER_MAX_STAMINA;  // server-authoritative swing budget
 
 // Weapon registry: one entry per hotbar slot, holding the weapon def name.
     // SERVER_WEAPON_SLOTS matches the client's HOTBAR_SIZE; both sides iterate

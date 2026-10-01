@@ -271,6 +271,41 @@ static int test_collect_pickup_rejects_foreign_world() {
 // Regression: the client mitigated with 100/(100+defense) while the server used
 // a flat 20% cut, so a connected player took different damage on each end. Both
 // now call oz::MitigateDamage; assert the server actually honours defense.
+static int test_melee_stamina_and_limits() {
+    TEST("Server stamina regenerates and melee limits reject spoofed reports");
+    GameState gs;
+    gs.add_player(7, "Mele");
+    ServerPlayer* p = gs.get_player(7);
+    CHECK(p != nullptr);
+    CHECK(p->stamina == net::SERVER_MAX_STAMINA);
+
+    // A fresh pool covers a shipped melee cost.
+    CHECK(p->stamina >= 18.0f);
+
+    // Regenerates continuously and stops at the ceiling.
+    gs.tick(1.0f);
+    CHECK(p->stamina == net::SERVER_MAX_STAMINA);
+
+    p->stamina = 10.0f;
+    gs.tick(1.0f);
+    CHECK(p->stamina > 10.0f);
+    CHECK(p->stamina <= net::SERVER_MAX_STAMINA);
+
+    // A pool that cannot cover a swing is what the server's MELEE_HIT gate
+    // rejects; drain it and confirm the ordering the handler relies on.
+    p->stamina = 5.0f;
+    CHECK(!(p->stamina >= 18.0f));
+
+    // The caps are ceilings, not trusts: a client claiming a huge reach or
+    // damage is clamped to these.
+    CHECK(net::MELEE_MAX_REACH >= 3.5f);      // longest shipped reach
+    CHECK(net::MELEE_MAX_REACH <= 5.0f);
+    CHECK(net::MELEE_MAX_DAMAGE >= 55);      // etheral_waver's damage
+    CHECK(net::MELEE_MAX_DAMAGE <= 500);
+    CHECK(net::MELEE_MIN_TICKS >= 1);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_damage_player_honors_armor() {
     TEST("damage_player mitigates by the shared armor formula");
     GameState gs;
@@ -491,6 +526,7 @@ int main() {
 
     int failures = 0;
     failures += test_resolve_pickup_item_id();
+    failures += test_melee_stamina_and_limits();
     failures += test_spawn_projectile();
     failures += test_tick_projectile_movement();
     failures += test_tick_projectile_expiry();

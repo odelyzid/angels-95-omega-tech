@@ -71,8 +71,14 @@ enum class MessageType : uint32_t {
     NPC_DAMAGE = 19,
     WEAPON_AMMO = 20,
     SERVER_CHALLENGE = 21,
-    CLIENT_AUTH = 22
+    CLIENT_AUTH = 22,
+    MELEE_HIT = 23
 };
+
+// Melee stamina: the server keeps its own pool per player so a swinging client
+// cannot bypass stamina_cost. The regen rate lives in Server/GameState.hpp
+// (which the client cannot include); keep the two in step.
+constexpr float SERVER_MAX_STAMINA = 100.0f;
 
 struct NetworkPlayer {
     uint32_t id;
@@ -196,6 +202,24 @@ struct NpcDamageData {
     int npc_index;
     int partition_index; // -1 for global NPCs
     int damage;
+};
+
+// Melee hit reporting to the server. The client resolves the target locally
+// (nearest pawn in reach, unobstructed by geometry) and the server
+// re-validates the distance against the NPC's own position before applying
+// damage, so a client cannot claim a hit it did not make. reach/stamina_cost
+// travel with the report so the server can enforce the same limits and keep
+// its own stamina pool in step with the client.
+struct MeleeHitData {
+    uint32_t player_id;
+    int world_index;
+    int npc_index;
+    int partition_index;   // -1 = global NPC
+    int damage;
+    float reach;
+    float stamina_cost;
+    float origin_x, origin_y, origin_z;
+    float dir_x, dir_y, dir_z;
 };
 
 struct ChatData {
@@ -416,6 +440,17 @@ private:
     uint32_t    m_current_players = 0;
     std::vector<DiscoveredServer> m_discovered;
 };
+
+// ---------------------------------------------------------------------------
+// Melee limits enforced by the server.
+//
+// A melee report is client-originated, so each of these is a ceiling on what a
+// client may claim. Reach is capped rather than trusted outright; damage is
+// capped so a spoofed swing cannot one-shot; the tick gap bounds swing rate.
+// ---------------------------------------------------------------------------
+constexpr float MELEE_MAX_REACH = 5.0f;   // longest shipped reach is 3.5
+constexpr int   MELEE_MAX_DAMAGE = 500;  // above the toughest NPC's health
+constexpr uint32_t MELEE_MIN_TICKS = 1;  // 1 server tick between swings (10/s cap)
 
 // ---------------------------------------------------------------------------
 // Utility

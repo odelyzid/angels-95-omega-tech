@@ -530,6 +530,76 @@ static void on_server_message(const net::NetworkMessage& msg,
             g_game_server->broadcast_message(relay);
             break;
         }
+        case net::MessageType::MELEE_HIT: {
+            if (msg.size < sizeof(net::MeleeHitData)) break;
+            net::MeleeHitData mhd;
+            memcpy(&mhd, msg.payload, sizeof(mhd));
+            mhd.player_id = sender.id;
+            ServerPlayer* attacker = g_game_state.get_player(sender.id);
+            if (!attacker) break;
+            // Reject a hit reported against a world the attacker is not in.
+            if (mhd.world_index != attacker->world_index) {
+                OZ_WARN("MELEE_HIT from player %u — world %d != %d", sender.id,
+                        mhd.world_index, attacker->world_index);
+                break;
+            }
+            WorldState* ws = g_game_state.get_world(mhd.world_index);
+            if (!ws) break;
+            ServerNPC* npc = nullptr;
+            if (mhd.partition_index >= 0) {
+                WorldPartition* part = g_game_state.get_partition(*ws, mhd.partition_index);
+                if (part && mhd.npc_index >= 0 && mhd.npc_index < (int)part->npcs.size())
+                    npc = &part->npcs[mhd.npc_index];
+            } else {
+                if (mhd.npc_index >= 0 && mhd.npc_index < (int)ws->global_npcs.size())
+                    npc = &ws->global_npcs[mhd.npc_index];
+            }
+            if (!npc || !npc->active) break;
+
+            // Authoritative range check against the NPC's real position, using
+            // the reported reach but capped so a client cannot claim a huge
+            // reach to hit across the map. The reported origin/dir are not
+            // trusted for this: distance from the server's own player position
+            // is the only thing that matters.
+            float reach = mhd.reach;
+            if (reach <= 0.0f || reach > net::MELEE_MAX_REACH) reach = net::MELEE_MAX_REACH;
+            float ddx = attacker->position.x - npc->position.x;
+            float ddy = attacker->position.y - npc->position.y;
+            float ddz = attacker->position.z - npc->position.z;
+            float dist = sqrtf(ddx*ddx + ddy*ddy + ddz*ddz);
+            if (dist > reach) break;
+
+            // Server-side stamina gate + throttle. Both ends spend on a swing,
+            // so a client that skips the cost is refused here.
+            float cost = mhd.stamina_cost;
+            if (cost < 0.0f) cost = 0.0f;
+            if (cost > attacker->stamina) {
+                OZ_WARN("MELEE_HIT from player %u — stamina %.1f < cost %.1f",
+                        sender.id, attacker->stamina, cost);
+                break;
+            }
+            attacker->stamina -= cost;
+            if (attacker->last_melee_tick > 0 &&
+                g_game_state.tick_count() - attacker->last_melee_tick < net::MELEE_MIN_TICKS) break;
+            attacker->last_melee_tick = g_game_state.tick_count();
+
+            // Cap client-reported damage so a spoofed swing cannot one-shot.
+            int dmg = mhd.damage;
+            if (dmg < 0) dmg = 0;
+            if (dmg > net::MELEE_MAX_DAMAGE) dmg = net::MELEE_MAX_DAMAGE;
+            g_game_state.damage_npc(*npc, dmg, sender.id);
+
+            net::NpcStateUpdateData nsud = make_npc_state(*ws, mhd.npc_index, mhd.partition_index, *npc);
+            net::NetworkMessage relay;
+            relay.magic = net::MAGIC;
+            relay.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
+            relay.size = sizeof(nsud);
+            relay.sequence = 0;
+            relay.timestamp = static_cast<uint32_t>(time(nullptr));
+            memcpy(relay.payload, &nsud, sizeof(nsud));
+            g_game_server->broadcast_message(relay);
+            break;
+        }
         case net::MessageType::COMMAND: {
             if (msg.size < sizeof(net::CommandData)) break;
             net::CommandData cd;

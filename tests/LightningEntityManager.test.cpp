@@ -22,6 +22,8 @@ static int tests_total = 0, tests_passed = 0;
 #define FAIL(msg) do { fprintf(stdout, "FAIL: %s\n", msg); return 1; } while(0)
 #define CHECK(cond) do { if (!(cond)) { fprintf(stdout, "FAIL: %s\n", #cond); return 1; } } while(0)
 #define CHECK_EQ(a, b) do { if ((a) != (b)) { fprintf(stdout, "FAIL: expected %d, got %d\n", (int)(a), (int)(b)); return 1; } } while(0)
+#define CHECK_APROX(a, b, eps) do { float _d = (a) - (b); if (_d < 0) _d = -_d; \
+    if (_d > (eps)) { fprintf(stdout, "FAIL: expected %f, got %f\n", (float)(b), (float)(a)); return 1; } } while(0)
 #define END_TEST() } while(0)
 
 static int test_init() {
@@ -611,6 +613,72 @@ static int test_hotbar_drag_reorder() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_melee_stamina() {
+    TEST("Melee swing spends stamina_cost and is refused when empty");
+    auto& reg = LightningEntityRegistry::Instance();
+    EntityDef def;
+    def.name = "StaminaSword";
+    def.type = EntityType::WEAPON;
+    def.stats.floats["damage"] = 40.0f;
+    def.stats.floats["reach"] = 3.0f;
+    def.stats.floats["swing_speed"] = 0.1f;
+    def.stats.floats["stamina_cost"] = 18.0f;   // etheral_waver's cost
+    reg.Register(def);
+    auto& em = LightningEntityManager::Instance();
+    em.Init();
+    int idx = em.Spawn("StaminaSword");
+    CHECK(idx >= 0);
+    em.HotbarAssign(0, idx);
+    em.SelectSlot(0);
+    EntityInstance* ent = em.SelectedEntity();
+    CHECK(ent != nullptr);
+
+    // Fresh pool: a full swing budget.
+    em.SetPlayerStamina(100.0f);
+    CHECK_APROX(em.GetPlayerMaxStamina(), 100.0f, 0.001f);
+    CHECK(em.HasStamina(18.0f));
+
+    Vector3 origin = {0,0,0}, dir = {0,0,-1};
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    int r = em.FireSelectedWeapon(origin, dir);
+    CHECK_EQ(r, 0);                      // melee swing performed
+    CHECK_APROX(em.GetPlayerStamina(), 82.0f, 0.001f);
+
+    // A second swing spends again.
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    em.FireSelectedWeapon(origin, dir);
+    CHECK_APROX(em.GetPlayerStamina(), 64.0f, 0.001f);
+
+    // Drain the pool below one swing's cost: the swing must be refused
+    // (-1) and must not spend a partial amount.
+    em.SetPlayerStamina(10.0f);
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    CHECK(!em.HasStamina(18.0f));
+    CHECK_EQ(em.FireSelectedWeapon(origin, dir), -1);
+    CHECK_APROX(em.GetPlayerStamina(), 10.0f, 0.001f);
+
+    // Regen moves the pool back up and never past max.
+    em.UpdateStamina(1.0f);
+    CHECK(em.GetPlayerStamina() > 10.0f);
+    em.SetPlayerStamina(100.0f);
+    em.UpdateStamina(10.0f);
+    CHECK_APROX(em.GetPlayerStamina(), 100.0f, 0.001f);
+
+    // A zero-cost weapon is never gated (stamina_cost omitted entirely).
+    def.name = "FreeSword";
+    def.stats.floats["stamina_cost"] = 0.0f;
+    reg.Register(def);
+    int freeIdx = em.Spawn("FreeSword");
+    CHECK(freeIdx >= 0);
+    em.HotbarAssign(1, freeIdx);
+    em.SelectSlot(1);
+    em.SetPlayerStamina(0.0f);
+    em.SelectedEntity()->cooldownRemaining = 0.0f;
+    CHECK_EQ(em.FireSelectedWeapon(origin, dir), 0);
+    CHECK_APROX(em.GetPlayerStamina(), 0.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -844,6 +912,7 @@ int main() {
     failures += test_run_action_no_crash();
     failures += test_player_stats_default();
     failures += test_reload_started_flag();
+    failures += test_melee_stamina();
     failures += test_hotbar_drag_reorder();
     failures += test_multi_despawn_cycles();
     failures += test_fire_no_weapon();

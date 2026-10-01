@@ -281,8 +281,11 @@ test_registry: tests/LightningEntityRegistry.test.cpp Source/Script/LightningEnt
 test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Audio/SoundManager.cpp Source/World/ZoneManager.cpp Source/Log.cpp
 	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
 
+# OMEGA_PAWNSYSTEM_TEST opts LightningEntityManager.cpp back into the real
+# PawnSystem/raylib melee path (test_pawn_system links raylib + OzPawnSystem.cpp).
+# Without it the file compiles headless and the melee resolution is stubbed out.
 test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/World/ZoneManager.cpp Source/Audio/SoundManager.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Physics/PlayerPhysics.cpp Source/Log.cpp Source/Renderer/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Package/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp Source/Renderer/LitLightning.cpp Source/Renderer/rlights/rlights.cpp
-	$(COMP) $(TEST_FLAGS) $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
+	$(COMP) $(TEST_FLAGS) -DOMEGA_PAWNSYSTEM_TEST $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
 
 test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@

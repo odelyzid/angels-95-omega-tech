@@ -589,6 +589,16 @@ int main(int argc, char** argv){
         if (g_network_enabled) g_client.send_weapon_ammo(slot, ammo, magazine, action);
     });
 
+    // Melee hits are resolved client-side (nearest pawn in reach, unobstructed)
+    // and reported here; the server re-validates reach and applies the damage.
+    LightningEntityManager::Instance().set_on_melee_hit(
+        [](int world, int npc, int part, int dmg, float reach, float cost,
+           float ox, float oy, float oz, float dx, float dy, float dz) {
+            if (g_network_enabled)
+                g_client.send_melee_hit(world, npc, part, dmg, reach, cost,
+                                        ox, oy, oz, dx, dy, dz);
+        });
+
     // Server tells us which world is active — switch to it on mismatch.
     g_client.set_on_scene_received([](const std::string& sceneJson) {
         // Tiny hand-parse of the fixed server template: "active_world":"<name>"
@@ -999,6 +1009,11 @@ int main(int argc, char** argv){
                             Pawn* np = PawnSystem::Instance().Get(pawnId);
                             if (np) {
                                 np->networkControlled = true;
+                                // Server identity, so a local melee hit can be
+                                // reported to the server (which owns the damage).
+                                np->netWorldIndex     = npcs[i].world_index;
+                                np->netNpcIndex       = npcs[i].npc_index;
+                                np->netPartitionIndex = npcs[i].partition_index;
                                 // Server owns AI/position; don't double-simulate locally.
                                 if (strcmp(np->defName.c_str(), type) != 0) np->defName = type;
                             }

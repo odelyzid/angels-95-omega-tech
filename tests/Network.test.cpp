@@ -30,6 +30,10 @@ static void test_message_type_string() {
     if (std::strcmp(net::message_type_string(net::MessageType::PING), "PING") != 0) ok = false;
     if (std::strcmp(net::message_type_string(net::MessageType::PONG), "PONG") != 0) ok = false;
     if (std::strcmp(net::message_type_string(net::MessageType::PLAYER_JOIN), "PLAYER_JOIN") != 0) ok = false;
+    // Every message type must resolve to a name; an unmapped one degrades to
+    // "UNKNOWN" and makes server logs unreadable.
+    if (std::strcmp(net::message_type_string(net::MessageType::MELEE_HIT), "MELEE_HIT") != 0) ok = false;
+    if (std::strcmp(net::message_type_string(net::MessageType::NPC_DAMAGE), "NPC_DAMAGE") != 0) ok = false;
     if (ok) { pass_count++; printf("PASS\n"); }
     else printf("FAIL: wrong string for known type\n");
 }

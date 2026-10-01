@@ -1036,6 +1036,13 @@ void GameState::tick(float dt) {
         p.health_ticks++;
         p.mana_ticks++;
         p.penergy_ticks++;
+        // Stamina regen, so a player who spends it on melee swings recovers.
+        // Continuous (not tick-counted like the others) so both ends regenerate
+        // at the same rate and the client's gate matches the server's.
+        if (p.stamina < net::SERVER_MAX_STAMINA) {
+            p.stamina += STAMINA_REGEN_PER_SECOND * dt;
+            if (p.stamina > net::SERVER_MAX_STAMINA) p.stamina = net::SERVER_MAX_STAMINA;
+        }
         // Health regen: 1 point per 10 ticks (1 second at 10 ticks/s)
         if (p.health > 0 && p.health < p.max_health && p.health_ticks >= 10) {
             p.health++;
