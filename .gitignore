@@ -5,7 +5,14 @@ Angels95
 AngelServ
 AngelMaster
 OzPack
-AngelEd
+# The editor binary lives INSIDE AngelEd/ (Makefile target `AngelEd`), so this has
+# to be the path, not the bare name. A bare `AngelEd` excludes the whole source
+# directory, and git will not descend into an excluded directory - so every NEW file
+# under AngelEd/Source/ was silently ignored while the 59 already-tracked ones kept
+# working. That is the "added in one place, CI breaks silently" trap from AGENTS.md.
+# `*.exe` below already covers AngelEd/AngelEd.exe; this covers the extensionless
+# Linux build. See the GameData/Screenshots note for the same lesson.
+AngelEd/AngelEd
 oz_server
 
 # CI release staging (populated on runners only)

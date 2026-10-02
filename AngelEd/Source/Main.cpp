@@ -51,10 +51,8 @@ enum EditorMenuCmd {
     IDM_TEXTURE_MGR,
     IDM_PAWN_MGR,
     IDM_SCRIPT_MGR,
-    IDM_ZONE_PROPS,
     IDM_NODE_PANEL,
     IDM_PICKUP_PANEL,
-    IDM_LIGHT_PROPS,
     IDM_HEIGHTMAP,
     IDM_WORLD_GRAPH,
     IDM_LEVEL_LIST,
@@ -95,7 +93,10 @@ GameModels WDLModels;
 // ---------------------------------------------------------------------------
 // Entity selection system (hover + click + right-click context menu)
 // ---------------------------------------------------------------------------
-enum class SelType { NONE, BRUSH, MODEL, NPC, PICKUP, LIGHT, ZONE, SPAWN, PORTAL, MESH, PARTICLE, PATHNODE, WINDZONE };
+// SelType itself lives in SelType.hpp because it crosses the Main.cpp <->
+// Win32Dialogs.cpp boundary as a raw int on both sides.
+#include "SelType.hpp"
+
 struct EditorSelection {
     SelType type = SelType::NONE;
     int index = -1;
@@ -623,7 +624,9 @@ static bool EditorPickEntity(bool toggleOffSame = true) {
         OmegaTechEditor.DrawModel = true;
         SnapGizmoToSelection(g_sel);
         if (g_sel.type == SelType::PORTAL) {
-            SetPortalSelection(g_sel.index);
+            // Portals have no list window any more; the Entity Properties panel
+            // edits them, so picking one in the viewport opens it there.
+            ShowPropertiesPanel(true);
             g_editorPanels.portalTargetWorld = g_sel.name;
         }
     } else {
@@ -1046,7 +1049,11 @@ static void ToggleScriptMgr()   { ShowScriptManager(!g_editorPanels.showScriptMg
 static void ToggleModelBrowser(){ ShowModelBrowser(!g_editorPanels.showModelBrowser); }
 static void TogglePickupPanel() { ShowPickupPanel(!g_editorPanels.showPickupPanel); }
 static void ToggleNodePanel()   { ShowNodePanel(!g_editorPanels.showNodePanel); }
-static void ToggleEnvPanel()    { ShowEnvPanel(!g_editorPanels.showEnvPanel); g_placeMode = PlaceMode::ENV; }
+// Zone placement mode. Used to be ToggleEnvPanel(), which toggled the standalone
+// Zone Properties window AND set placement mode — two unrelated things behind one
+// key. The window is gone (its per-zone rows live in Entity Properties and its
+// level-state rows in the Map row), so this is only the placement half.
+static void ToggleZonePlacement() { g_placeMode = PlaceMode::ENV; }
 static void ToggleHeightmapEditor() { ShowHeightmapEditor(!g_editorPanels.showHeightmapEditor); }
 static void ToggleWorldGraph() { ShowWorldGraph(!g_editorPanels.showWorldGraph); }
 static void ToggleAnimPanel()   { ShowAnimPanel(!g_editorPanels.showAnimPanel); }
@@ -1157,9 +1164,35 @@ static bool LoadWorldDocument(const fs::path& path) {
                 meta.timeLimitMinutes = arg(4);
                 meta.scoreLimit = (int)arg(5);
                 meta.friendlyFire = arg(6) != 0.0f;
+
+                // Prefer the human-readable `gametype=<key>` tail when present.
+                // OzoneParser classifies it separately (otherwise it would be
+                // mistaken for the skybox path), and the runtime's ParseLevelInfo
+                // gives the key priority over the numeric id with a warned
+                // fallback. Reading only arg(0) here meant the editor and the
+                // client could resolve a hand-edited file to DIFFERENT modes, and
+                // then disagree on score limit and team count.
+                if (!pr.gametypeKey.empty()) {
+                    // Same rule as ParseLevelInfo (LevelSettings.hpp:59-67):
+                    // GameTypeFromName returns SINGLEPLAYER for an unknown key
+                    // rather than signalling failure, so validity is checked first.
+                    if (oz::gametype::IsGameTypeKey(pr.gametypeKey)) {
+                        meta.gameType = oz::gametype::GameTypeFromName(pr.gametypeKey);
+                    } else {
+                        OZ_WARN("levelinfo: unknown gametype='%s', using positional id %d",
+                                pr.gametypeKey.c_str(), (int)meta.gameType);
+                    }
+                }
+
                 meta.skyboxTexturePath = pr.entityType;
+                // Second path token = side/cap skybox. Previously unread, so it
+                // never reached the model and was then lost on the next save.
+                meta.skyboxSidePath = pr.entitySubType;
                 SetLevelMetadata(meta);
-                EditorLog("OZONE levelinfo: skybox='%s'", meta.skyboxTexturePath.c_str());
+                EditorLog("OZONE levelinfo: mode=%d skybox='%s'%s%s",
+                          (int)meta.gameType, meta.skyboxTexturePath.c_str(),
+                          meta.skyboxSidePath.empty() ? "" : " side=",
+                          meta.skyboxSidePath.c_str());
             } else if (pr.type == OzonePrimitiveType::ENTITY_PARTICLES) {
                 LevelMetadata meta = GetLevelMetadata();
                 auto arg = [&](int i) -> float {
@@ -1190,50 +1223,6 @@ static const char* WDLZoneTypeName(ZoneType t) {
         case ZoneType::ZONE_REVERB: return "reverb";
         case ZoneType::ZONE_GAMEPLAY_SOUND: return "sound";
         default: return "water";
-    }
-}
-
-static void AppendOzoneEntities(std::wofstream& output) {
-    auto& pawns = PawnSystem::Instance();
-    for (const auto& start : pawns.GetPlayerStarts())
-        output << L"Spawn:" << start.position.x << L":" << start.position.y << L":" << start.position.z << L":" << start.yaw << L":\n";
-    for (const auto& pickup : pawns.GetPickups())
-        output << L"Pickup:" << std::wstring(pickup.typeName.begin(), pickup.typeName.end()) << L":"
-               << pickup.position.x << L":" << pickup.position.y << L":" << pickup.position.z << L":\n";
-    for (const auto& pawn : pawns.GetPawns()) {
-        if (!pawn.active || pawn.defName.empty()) continue;
-        output << L"NPC:" << std::wstring(pawn.defName.begin(), pawn.defName.end()) << L":"
-               << pawn.position.x << L":" << pawn.position.y << L":" << pawn.position.z << L":\n";
-    }
-    for (const auto& zone : ZoneManager::Instance().GetZones())
-        output << L"ZoneInfo:" << WDLZoneTypeName(zone.zoneType) << L":"
-               << zone.bounds.min.x << L":" << zone.bounds.min.y << L":" << zone.bounds.min.z << L":"
-               << zone.bounds.max.x << L":" << zone.bounds.max.y << L":" << zone.bounds.max.z << L":"
-               << zone.intensity << L":\n";
-    for (const auto& portal : ZoneManager::Instance().GetPortals())
-        output << L"Portal:" << std::wstring(portal.targetWorld.begin(), portal.targetWorld.end()) << L":"
-               << portal.bounds.min.x << L":" << portal.bounds.min.y << L":" << portal.bounds.min.z << L":"
-               << portal.bounds.max.x << L":" << portal.bounds.max.y << L":" << portal.bounds.max.z << L":"
-               << portal.targetSpawn.x << L":" << portal.targetSpawn.y << L":" << portal.targetSpawn.z << L":"
-               << (portal.bidirectional ? 1 : 0) << L":\n";
-
-    // Level metadata â€” only written when non-default to keep files clean
-    LevelMetadata meta = GetLevelMetadata();
-    bool metaNonDefault = meta.gameType != GameType::SINGLEPLAYER ||
-                          meta.maxPlayers != 8 || meta.respawnTime != 5.0f ||
-                          meta.timeLimitEnabled || meta.scoreLimit != 50 ||
-                          meta.friendlyFire || !meta.skyboxTexturePath.empty();
-    if (metaNonDefault) {
-        output << L"LevelInfo:" << (int)meta.gameType << L":" << meta.maxPlayers << L":"
-               << meta.respawnTime << L":" << (meta.timeLimitEnabled ? 1 : 0) << L":"
-               << meta.timeLimitMinutes << L":" << meta.scoreLimit << L":"
-               << (meta.friendlyFire ? 1 : 0) << L":"
-               << std::wstring(meta.skyboxTexturePath.begin(), meta.skyboxTexturePath.end()) << L":\n";
-    }
-    if (meta.particleType != ParticleType::NONE) {
-        output << L"Particles:" << (int)meta.particleType << L":" << meta.particleDensity << L":"
-               << meta.particleSpeed << L":" << meta.particleColorR << L":" << meta.particleColorG << L":"
-               << meta.particleColorB << L":" << meta.particleWindX << L":" << meta.particleWindZ << L":\n";
     }
 }
 
@@ -1636,15 +1625,29 @@ static void ExportToOzone(std::ostream& output) {
     // Level metadata
     {
         LevelMetadata meta = GetLevelMetadata();
+        // `levelinfo` is omitted entirely when every field is default, to keep
+        // shipped files clean. The test must therefore cover EVERY field the line
+        // can carry — it previously missed timeLimitMinutes and the side skybox,
+        // so changing only a time limit or only the cap texture made the whole
+        // line vanish on save.
         bool metaNonDefault = meta.gameType != GameType::SINGLEPLAYER ||
                               meta.maxPlayers != 8 || meta.respawnTime != 5.0f ||
-                              meta.timeLimitEnabled || meta.scoreLimit != 50 ||
-                              meta.friendlyFire || !meta.skyboxTexturePath.empty();
+                              meta.timeLimitEnabled ||
+                              meta.timeLimitMinutes != 10.0f ||
+                              meta.scoreLimit != 50 ||
+                              meta.friendlyFire ||
+                              !meta.skyboxTexturePath.empty() ||
+                              !meta.skyboxSidePath.empty();
         if (metaNonDefault) {
             output << "levelinfo " << (int)meta.gameType << " " << meta.maxPlayers << " "
                    << meta.respawnTime << " " << (meta.timeLimitEnabled ? 1 : 0) << " "
                    << meta.timeLimitMinutes << " " << meta.scoreLimit << " "
                    << (meta.friendlyFire ? 1 : 0) << " " << meta.skyboxTexturePath;
+            // Second path token: side/cap skybox. Omitted when empty so a level
+            // with only the main path keeps its previous token layout — the parser
+            // classifies tail tokens positionally after `gametype=`.
+            if (!meta.skyboxSidePath.empty())
+                output << " " << meta.skyboxSidePath;
             // Append gametype=<key> when the mode is not the default, so the
             // file carries the human-readable name alongside the numeric id.
             // The parser recognises it in the tail; older tools ignore it.
@@ -1653,7 +1656,18 @@ static void ExportToOzone(std::ostream& output) {
                 output << " gametype=" << gtKey;
             output << "\n";
         }
-        if (meta.particleType != ParticleType::NONE) {
+        // Gate the particles line on ANY field differing from default, not on the
+        // type alone. Type-gating meant a wind value authored in the file was
+        // silently discarded whenever the type happened to be NONE — the data was
+        // in the model, just not in the output.
+        const bool particlesNonDefault =
+            meta.particleType != ParticleType::NONE ||
+            meta.particleDensity != 50.0f ||
+            meta.particleSpeed != 1.0f ||
+            meta.particleColorR != 200 || meta.particleColorG != 200 ||
+            meta.particleColorB != 200 ||
+            meta.particleWindX != 0.0f || meta.particleWindZ != 0.0f;
+        if (particlesNonDefault) {
             output << "particles " << (int)meta.particleType << " " << meta.particleDensity << " "
                    << meta.particleSpeed << " " << meta.particleColorR << " " << meta.particleColorG << " "
                    << meta.particleColorB << " " << meta.particleWindX << " " << meta.particleWindZ << "\n";
@@ -1796,10 +1810,8 @@ static LRESULT CALLBACK EditorWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             case IDM_TEXTURE_MGR:   ToggleTextureMgr(); return 0;
             case IDM_PAWN_MGR:      TogglePawnMgr(); return 0;
             case IDM_SCRIPT_MGR:    ToggleScriptMgr(); return 0;
-            case IDM_ZONE_PROPS:    ToggleEnvPanel(); return 0;
             case IDM_NODE_PANEL:    ToggleNodePanel(); return 0;
             case IDM_PICKUP_PANEL:  TogglePickupPanel(); return 0;
-            case IDM_LIGHT_PROPS:   ShowLightProps(true); return 0;
             case IDM_HEIGHTMAP:     ToggleHeightmapEditor(); return 0;
             case IDM_FULLSCREEN:    ToggleFullscreen(); return 0;
             case IDM_RESET_CAM:     SetViewPerspective(); ResetCamera(); return 0;
@@ -1858,10 +1870,12 @@ static void CreateEditorMenuBar() {
     AppendMenuA(hView, MF_STRING, IDM_PAWN_MGR, "&Pawn Manager\tF8");
     AppendMenuA(hView, MF_STRING, IDM_SCRIPT_MGR, "&Script Manager\tF9");
     AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hView, MF_STRING, IDM_ZONE_PROPS, "&Zone Properties\tF12");
+    // No Zone Properties / Light Properties entries. Their per-zone rows live in
+    // Entity Properties (right-click a zone or light) and their level-state rows
+    // in the WorldGraph "Map (level)" row. Both old windows duplicated that state
+    // in a global that Apply could silently drop.
     AppendMenuA(hView, MF_STRING, IDM_NODE_PANEL, "&Node Panel");
     AppendMenuA(hView, MF_STRING, IDM_PICKUP_PANEL, "&Pickups\tF10");
-    AppendMenuA(hView, MF_STRING, IDM_LIGHT_PROPS, "&Light Properties");
     AppendMenuA(hView, MF_STRING, IDM_HEIGHTMAP, "&Heightmap Editor\tH");
     AppendMenuA(hView, MF_SEPARATOR, 0, NULL);
     AppendMenuA(hView, MF_STRING, IDM_WORLD_GRAPH, "&World Graph Explorer");
@@ -2018,6 +2032,79 @@ static void HistoryPush() {
     g_histRedo.clear();
     g_histUndo.push_back(HistoryCapture());
     if (g_histUndo.size() > kHistMax) g_histUndo.erase(g_histUndo.begin());
+}
+
+// Write the SelType::MAP property rows back into LevelMetadata.
+//
+// Only pushes an undo entry when something actually changed. Every other Apply
+// path calls HistoryPush() unconditionally before dispatching, which is fine for
+// them because their apply always mutates something — but a level's 16 metadata
+// fields are edited in one screen, so re-opening and pressing Apply without
+// touching anything would otherwise stack a no-op snapshot per click and make
+// Ctrl+Z appear to do nothing but burn steps.
+static void ApplyMapProperties() {
+    const auto& P = g_editorPanels;
+    LevelMetadata before = GetLevelMetadata();
+
+    LevelMetadata meta = before;
+    meta.gameType          = static_cast<GameType>(P.propMapGameType);
+    meta.maxPlayers        = P.propMapMaxPlayers;
+    meta.respawnTime       = P.propMapRespawnTime;
+    meta.timeLimitEnabled  = P.propMapTimeLimitEnabled;
+    meta.timeLimitMinutes  = P.propMapTimeLimitMinutes;
+    meta.scoreLimit        = P.propMapScoreLimit;
+    meta.friendlyFire      = P.propMapFriendlyFire;
+    // The skybox path is also applied immediately by the Browse / Use-Active-Tex
+    // handlers (the viewport reads it live), so `before` can already equal the new
+    // value here; that is fine, it simply means the diff below reports no change
+    // for that one field.
+    meta.skyboxTexturePath = P.propMapSkybox;
+    meta.skyboxSidePath    = P.propMapSkyboxSide;
+    meta.particleType      = static_cast<ParticleType>(P.propMapParticleType);
+    meta.particleDensity   = P.propMapParticleDensity;
+    meta.particleSpeed     = P.propMapParticleSpeed;
+    meta.particleColorR    = P.propMapParticleR;
+    meta.particleColorG    = P.propMapParticleG;
+    meta.particleColorB    = P.propMapParticleB;
+    meta.particleWindX     = P.propMapParticleWindX;
+    meta.particleWindZ     = P.propMapParticleWindZ;
+
+    auto differs = [](const LevelMetadata& a, const LevelMetadata& b) {
+        return a.gameType != b.gameType || a.maxPlayers != b.maxPlayers ||
+               a.respawnTime != b.respawnTime ||
+               a.timeLimitEnabled != b.timeLimitEnabled ||
+               a.timeLimitMinutes != b.timeLimitMinutes ||
+               a.scoreLimit != b.scoreLimit ||
+               a.friendlyFire != b.friendlyFire ||
+               a.skyboxTexturePath != b.skyboxTexturePath ||
+               a.skyboxSidePath != b.skyboxSidePath ||
+               a.particleType != b.particleType ||
+               a.particleDensity != b.particleDensity ||
+               a.particleSpeed != b.particleSpeed ||
+               a.particleColorR != b.particleColorR ||
+               a.particleColorG != b.particleColorG ||
+               a.particleColorB != b.particleColorB ||
+               a.particleWindX != b.particleWindX ||
+               a.particleWindZ != b.particleWindZ;
+    };
+
+    if (!differs(before, meta)) {
+        EditorLog("Map properties: no changes");
+        return;
+    }
+
+    HistoryPush();
+    SetLevelMetadata(meta);
+    EditorLog("Applied map properties: mode=%d maxPlayers=%d respawn=%.1f "
+              "timeLimit=%s scoreLimit=%d FF=%s skybox='%s' weather=%d",
+              (int)meta.gameType, meta.maxPlayers, meta.respawnTime,
+              meta.timeLimitEnabled ? "on" : "off", meta.scoreLimit,
+              meta.friendlyFire ? "on" : "off", meta.skyboxTexturePath.c_str(),
+              (int)meta.particleType);
+
+    // RefreshWorldGraph had no callers at all, so nothing repainted the WorldGraph
+    // name after an edit.
+    RefreshWorldGraph();
 }
 
 static void HistoryRestore(const std::string& text) {
@@ -2468,8 +2555,14 @@ int main(int argc, char **argv){
                             AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_RESET, "Reset Surface");
                         }
                         AppendMenuA(hMenu, MF_STRING, IDM_PROPERTIES, "Properties");
-                        AppendMenuA(hMenu, MF_STRING, IDM_DELETE_ENTITY, "Delete");
-                        AppendMenuA(hMenu, MF_STRING, IDM_DUPLICATE_ENTITY, "Duplicate");
+                        // Delete/Duplicate exist only for placed objects. They are
+                        // `else if` chains with no `else`, so offering them on the
+                        // Map row would silently deselect the level and push a
+                        // no-op undo snapshot instead of failing visibly.
+                        if (g_sel.type != SelType::MAP) {
+                            AppendMenuA(hMenu, MF_STRING, IDM_DELETE_ENTITY, "Delete");
+                            AppendMenuA(hMenu, MF_STRING, IDM_DUPLICATE_ENTITY, "Duplicate");
+                        }
                         // A Mesh or a CSG brush carries no usable collision of
                         // its own (the world is AABB-only and a placed prop has
                         // none at all), so offer to derive convex proxies for it.
@@ -2605,63 +2698,64 @@ int main(int argc, char **argv){
             }
         }
         
-        // Apply ZoneProperties fog/ambient/particle settings
-        {
-            ZoneProperties zp = GetZoneProperties();
-            if (zp.applyFog) {
-                if (OTEditor.LitFogShader.id > 0) {
-                    float fogColor[3] = {(float)zp.fogR / 255.0f, (float)zp.fogG / 255.0f, (float)zp.fogB / 255.0f};
-                    float fogDensity = zp.fogDensity;
-                    float fogIntensity = 1.0f;
-                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
-                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
-                    SetShaderValue(OTEditor.LitFogShader, OTEditor.FogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
-                }
-                OTEditor.FogColor = (Color){ (unsigned char)zp.fogR, (unsigned char)zp.fogG, (unsigned char)zp.fogB, 255 };
-                OTEditor.FogDensity = zp.fogDensity;
+        // Per-zone environment preview.
+        //
+        // Reads the SELECTED zone's envOverrides, not the legacy global
+        // ZoneProperties: envOverrides is what Core.hpp/ZoneManager actually
+        // applies at runtime and what ExportToOzone writes, so previewing
+        // anything else shows the author a result the game will never produce.
+        // It also means this block no longer depends on the legacy Zone
+        // Properties window's one-shot apply flags, which is what lets that
+        // window be deleted rather than kept in sync.
+        if (g_sel.type == SelType::ZONE) {
+            const ZoneVolumeNode* selZone = nullptr;
+            for (const auto& z : ZoneManager::Instance().GetZones()) {
+                if ((int)z.id == g_sel.index) { selZone = &z; break; }
             }
-            if (zp.applyAmbient) {
-                OTEditor.AmbientColor = (Color){ (unsigned char)zp.ambR, (unsigned char)zp.ambG, (unsigned char)zp.ambB, 255 };
-                OTEditor.AmbientIntensity = zp.ambIntensity;
-                if (OTEditor.AmbientLoc >= 0 && OTEditor.LitFogShader.id > 0) {
-                    float ambient[4] = {(float)zp.ambR / 255.0f * zp.ambIntensity,
-                                        (float)zp.ambG / 255.0f * zp.ambIntensity,
-                                        (float)zp.ambB / 255.0f * zp.ambIntensity, 1.0f};
-                    SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+            if (selZone) {
+                const auto& eo = selZone->envOverrides;
+                if (eo.applyFog) {
+                    float fogColor[3] = {(float)eo.fogR / 255.0f,
+                                         (float)eo.fogG / 255.0f,
+                                         (float)eo.fogB / 255.0f};
+                    float fogStart = eo.fogStart, fogEnd = eo.fogEnd;
+                    float fogDensity = eo.fogDensity, fogIntensity = 1.0f;
+                    // fogStart/fogEnd were cached on OTEditor and set once at
+                    // startup but never updated again, so the legacy dialog's
+                    // Start/End rows looked live and did nothing — the editor
+                    // stayed pinned at 10/100 while colour and density tracked.
+                    if (OTEditor.LitFogShader.id > 0) {
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogColorLoc,     fogColor,     SHADER_UNIFORM_VEC3);
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogStartLoc,     &fogStart,    SHADER_UNIFORM_FLOAT);
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogEndLoc,       &fogEnd,      SHADER_UNIFORM_FLOAT);
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogDensityLoc,   &fogDensity,  SHADER_UNIFORM_FLOAT);
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.FogIntensityLoc, &fogIntensity,SHADER_UNIFORM_FLOAT);
+                    }
+                    // Publish, so the SurfaceMaterial program and
+                    // DrawZoneGeometry's restore see the same numbers.
+                    OzoneLoader::Instance().SetWorldFog(fogColor, fogStart, fogEnd,
+                                                        fogDensity, fogIntensity);
+                    OTEditor.FogColor = (Color){ (unsigned char)eo.fogR, (unsigned char)eo.fogG, (unsigned char)eo.fogB, 255 };
+                    OTEditor.FogDensity = eo.fogDensity;
+                }
+                if (eo.applyAmbient) {
+                    OTEditor.AmbientColor = (Color){ (unsigned char)eo.ambR, (unsigned char)eo.ambG, (unsigned char)eo.ambB, 255 };
+                    OTEditor.AmbientIntensity = eo.ambIntensity;
+                    float ambient[4] = {(float)eo.ambR / 255.0f * eo.ambIntensity,
+                                        (float)eo.ambG / 255.0f * eo.ambIntensity,
+                                        (float)eo.ambB / 255.0f * eo.ambIntensity, 1.0f};
+                    if (OTEditor.AmbientLoc >= 0 && OTEditor.LitFogShader.id > 0)
+                        SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+                    OzoneLoader::Instance().SetWorldAmbient(ambient[0], ambient[1],
+                                                            ambient[2], ambient[3]);
                 }
             }
-            // GameType / skybox / particles -> level metadata (persisted on save)
-            if (zp.applyGameType || zp.applySkybox || zp.applyParticles) {
-                LevelMetadata meta = GetLevelMetadata();
-                if (zp.applyGameType) {
-                    meta.gameType = zp.gameType;
-                    meta.maxPlayers = zp.maxPlayers;
-                    meta.respawnTime = zp.respawnTime;
-                    meta.timeLimitEnabled = zp.timeLimitEnabled;
-                    meta.timeLimitMinutes = zp.timeLimitMinutes;
-                    meta.scoreLimit = zp.scoreLimit;
-                    meta.friendlyFire = zp.friendlyFire;
-                    EditorLog("Level GameType applied: mode=%d maxPlayers=%d", (int)meta.gameType, meta.maxPlayers);
-                }
-                if (zp.applySkybox) {
-                    meta.skyboxTexturePath = zp.skyboxTexturePath;
-                    EditorLog("Level skybox applied: %s", meta.skyboxTexturePath.c_str());
-                }
-                if (zp.applyParticles) {
-                    meta.particleType = zp.particleType;
-                    meta.particleDensity = zp.particleDensity;
-                    meta.particleSpeed = zp.particleSpeed;
-                    meta.particleColorR = zp.particleColorR;
-                    meta.particleColorG = zp.particleColorG;
-                    meta.particleColorB = zp.particleColorB;
-                    meta.particleWindX = zp.particleWindX;
-                    meta.particleWindZ = zp.particleWindZ;
-                    EditorLog("Level particles applied: type=%d density=%.0f", (int)meta.particleType, meta.particleDensity);
-                }
-                SetLevelMetadata(meta);
-            }
-            ClearZoneApplyFlags();
         }
+// Level state (GameType / skybox / particles) no longer has a per-frame apply path.
+        // It used to: the removed Zone Properties window set one-shot apply flags on a
+        // global, and the next frame this block noticed them and wrote LevelMetadata.
+        // The Map row applies level state directly in ApplyMapProperties(), so the
+        // flags, the global and this block all went together.
 
         // Submit lights and viewPos for Lit mode
         if (OTEditor.ViewMode == LightingMode::LIT && OTEditor.LitFogShader.id > 0) {
@@ -2671,6 +2765,11 @@ int main(int argc, char **argv){
             // The surface program carries its own light uniforms, so a
             // surface-flagged brush would be lit by a stale light set without
             // this. Same lights, same order - one source of truth.
+            //
+            // Ambient and fog are read back from OzoneLoader rather than
+            // recomputed, because the per-zone preview block above publishes
+            // them there. Passing the editor's own copy instead would let the
+            // two drift the moment a zone sets only one of the two.
             if (oz::SurfaceMaterial::Instance().Ready()) {
                 float amb[4] = {0.1f, 0.1f, 0.1f, 1.0f};
                 OzoneLoader::Instance().GetWorldAmbient(amb);
@@ -3442,7 +3541,10 @@ if (g_editorPanels.showCollisionBounds) {
                 if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     if (cmd==0) ToggleModelBrowser(); else if(cmd==1) ToggleSoundMgr();
                     else if(cmd==2) ToggleTextureMgr(); else if(cmd==3) TogglePawnMgr();
-                    else if(cmd==4) ToggleScriptMgr(); else if(cmd==5) ToggleEnvPanel();
+                    else if(cmd==4) ToggleScriptMgr();
+                    // cmd 5 is the toolbar "Zone" button: placement only. It used
+                    // to also toggle the Zone Properties window.
+                    else if(cmd==5) ToggleZonePlacement();
                     else if(cmd==6) TogglePickupPanel(); else if(cmd==7) ToggleNodePanel();
                     else if(cmd==8) ToggleHeightmapEditor(); else if(cmd==9) ToggleAnimPanel();
                     else if(cmd==10) { FileNew(); } else if(cmd==11) { FileOpen(); }
@@ -3619,8 +3721,16 @@ if (g_editorPanels.showCollisionBounds) {
             g_editorPanels.actionSelectFromGraph = -1;
             EditorLog("Selected from WorldGraph: %s (type=%d idx=%d)",
                       g_sel.name.c_str(), (int)selType, idx);
-            OmegaTechEditor.DrawModel = true;
-            SnapGizmoToSelection(g_sel);
+            // SelType::MAP is the level, not a placed object: it has no transform,
+            // so arming the gizmo would put a draggable handle at {0,0,0} that
+            // the Move tool then writes into g_sel.pos every frame. Only an
+            // instance selection gets a gizmo.
+            if (selType != SelType::MAP) {
+                OmegaTechEditor.DrawModel = true;
+                SnapGizmoToSelection(g_sel);
+            } else {
+                OmegaTechEditor.DrawModel = false;
+            }
         }
         // WorldGraph context menu: open properties
         if (g_editorPanels.actionWorldGraphProperties >= 0) {
@@ -3688,6 +3798,13 @@ if (g_editorPanels.showCollisionBounds) {
 
         // Properties apply handler â€” write values back from native panel
         if (g_editorPanels.actionApplyProperties) {
+            // SelType::MAP writes level metadata rather than a scene object and
+            // has its own undo policy, so it is dispatched before the generic
+            // HistoryPush() below.
+            if (g_editorPanels.propsTargetType == sel::MAP) {
+                ApplyMapProperties();
+                g_editorPanels.actionApplyProperties = false;
+            } else {
             HistoryPush();
             float px = g_editorPanels.propPosX;
             float py = g_editorPanels.propPosY;
@@ -3777,6 +3894,28 @@ if (g_editorPanels.showCollisionBounds) {
                         zone.physics.swimUpSpeed = g_editorPanels.propZoneSwimUp;
                         zone.physics.ladderSpeed = g_editorPanels.propZoneLadderSpeed;
                         zone.physics.flySpeedMult = g_editorPanels.propZoneFlyMult;
+                        // Per-zone environment overrides. These are what
+                        // ZoneManager merges into PointRegion::combinedEnv and
+                        // Core.hpp applies on zone entry — the exporter already
+                        // gates on applyFog / applyAmbient / reverbMix, so writing
+                        // them here makes a hand-authored .ozone line editable.
+                        {
+                            auto& eo = zone.envOverrides;
+                            eo.applyFog      = g_editorPanels.propZoneApplyFog;
+                            eo.fogR          = g_editorPanels.propZoneFogR;
+                            eo.fogG          = g_editorPanels.propZoneFogG;
+                            eo.fogB          = g_editorPanels.propZoneFogB;
+                            eo.fogDensity    = g_editorPanels.propZoneFogDensity;
+                            eo.fogStart      = g_editorPanels.propZoneFogStart;
+                            eo.fogEnd        = g_editorPanels.propZoneFogEnd;
+                            eo.applyAmbient  = g_editorPanels.propZoneApplyAmbient;
+                            eo.ambR          = g_editorPanels.propZoneAmbR;
+                            eo.ambG          = g_editorPanels.propZoneAmbG;
+                            eo.ambB          = g_editorPanels.propZoneAmbB;
+                            eo.ambIntensity  = g_editorPanels.propZoneAmbIntensity;
+                            eo.reverbMix     = g_editorPanels.propZoneReverbMix;
+                            eo.reverbDecay   = g_editorPanels.propZoneReverbDecay;
+                        }
                         break;
                     }
                 }
@@ -3937,6 +4076,7 @@ if (g_editorPanels.showCollisionBounds) {
             }
             EditorLog("Applied properties to %s idx=%d", g_sel.name.c_str(), tgtIdx);
             g_editorPanels.actionApplyProperties = false;
+            }
         }
 
         // --- Editable .ozls stat rows ---------------------------------------
@@ -4696,25 +4836,9 @@ if (g_editorPanels.showCollisionBounds) {
             g_editorPanels.actionSpawnPawn.clear();
         }
 
-        // Portal editing actions (Portal tab in Zone Properties)
-        if (g_editorPanels.actionApplyPortal >= 0) {
-            int idx = g_editorPanels.actionApplyPortal;
-            auto& portals = ZoneManager::Instance().GetPortals();
-            if (idx >= 0 && idx < (int)portals.size()) {
-                HistoryPush();
-                PortalEditValues pe = GetPortalEditValues();
-                ZonePortal& p = portals[idx];
-                p.targetWorld = pe.targetWorld;
-                p.targetSpawn = {pe.spawnX, pe.spawnY, pe.spawnZ};
-                p.bidirectional = pe.bidirectional;
-                g_sel.name = pe.targetWorld;
-                EditorLog("Portal %d updated (target=%s spawn=%.1f,%.1f,%.1f bidir=%d)",
-                          idx, pe.targetWorld.c_str(), pe.spawnX, pe.spawnY, pe.spawnZ,
-                          pe.bidirectional ? 1 : 0);
-                RefreshLevelList();
-            }
-            g_editorPanels.actionApplyPortal = -1;
-        }
+        // Portal deletion. Portal *editing* is the Entity Properties panel's PORTAL
+        // section (applied by the generic tgtType == SelType::PORTAL branch); only
+        // delete needs a channel, because it mutates the vector the panel indexes.
         if (g_editorPanels.actionDeletePortal >= 0) {
             int idx = g_editorPanels.actionDeletePortal;
             HistoryPush();
@@ -4722,21 +4846,18 @@ if (g_editorPanels.showCollisionBounds) {
             EditorLog("Portal %d deleted", idx);
             RefreshPortalList();
             RefreshLevelList();
-            g_editorPanels.actionDeletePortal = -1;
-        }
-        if (g_editorPanels.actionSelectPortal >= 0) {
-            int idx = g_editorPanels.actionSelectPortal;
-            auto& portals = ZoneManager::Instance().GetPortals();
-            if (idx >= 0 && idx < (int)portals.size()) {
-                auto& p = portals[idx];
-                g_sel = { SelType::PORTAL, idx, p.targetWorld, {
-                    (p.bounds.min.x + p.bounds.max.x) * 0.5f,
-                    (p.bounds.min.y + p.bounds.max.y) * 0.5f,
-                    (p.bounds.min.z + p.bounds.max.z) * 0.5f }};
-                SnapGizmoToSelection(g_sel);
-                OmegaTechEditor.DrawModel = true;
+            // Drop any selection that pointed at the portal that just went.
+            // The old list refreshed itself so a stale target was invisible,
+            // but the Entity Properties panel keeps propsTargetIndex, and every
+            // portal now shifts down by one — leaving it set means the next
+            // Apply silently edits a *different* portal.
+            if (g_sel.type == SelType::PORTAL && g_sel.index == idx)
+                g_sel = { SelType::NONE, -1, "", {0,0,0} };
+            if (g_editorPanels.propsTargetType == sel::PORTAL &&
+                g_editorPanels.propsTargetIndex == idx) {
+                ShowPropertiesPanel(false);
             }
-            g_editorPanels.actionSelectPortal = -1;
+            g_editorPanels.actionDeletePortal = -1;
         }
 
         // LevelList / Campaign actions
@@ -4776,7 +4897,7 @@ if (g_editorPanels.showCollisionBounds) {
         if (IsKeyPressed(KEY_ONE))   g_placeMode = PlaceMode::MODEL;
         if (IsKeyPressed(KEY_TWO))   g_placeMode = PlaceMode::PICKUP;
         if (IsKeyPressed(KEY_THREE)) g_placeMode = PlaceMode::NODE;
-        if (IsKeyPressed(KEY_FOUR))  { g_placeMode = PlaceMode::ENV; ShowEnvPanel(!g_editorPanels.showEnvPanel); }
+        if (IsKeyPressed(KEY_FOUR))  ToggleZonePlacement();
         if (IsKeyPressed(KEY_FIVE) && g_placeMode != PlaceMode::MODEL)
             g_placeMode = PlaceMode::TERRAIN;
 
@@ -4808,7 +4929,8 @@ if (g_editorPanels.showCollisionBounds) {
         if (IsKeyPressed(KEY_F9))  ToggleScriptMgr();
         if (IsKeyPressed(KEY_F10)) TogglePickupPanel();
         if (IsKeyPressed(KEY_F11)) ToggleFullscreen();  // supersedes old F11 handling
-        if (IsKeyPressed(KEY_F12)) ToggleEnvPanel();
+        // F12 is unbound. It used to open Zone Properties; zone and light editing
+        // is now the Entity Properties panel (right-click the entity).
 
         // Selection shortcuts. Escape must also cancel an active placement ghost
         // (DrawModel true with nothing selected), otherwise there is no keyboard
@@ -4819,10 +4941,16 @@ if (g_editorPanels.showCollisionBounds) {
             g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
             OmegaTechEditor.DrawModel = false;
         }
-        if (IsKeyPressed(KEY_DELETE) && g_sel.type != SelType::NONE) {
+        // Delete/Duplicate are for placed objects only. Both targets are `else if`
+        // chains with no `else`, so gating on `!= NONE` alone would let the Map
+        // row (the level) be "deleted" — silently deselecting it and leaving a
+        // stray undo snapshot behind.
+        const bool selIsPlaceable = g_sel.type != SelType::NONE &&
+                                    g_sel.type != SelType::MAP;
+        if (IsKeyPressed(KEY_DELETE) && selIsPlaceable) {
             DeleteSelectedEntity();
         }
-        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_D) && g_sel.type != SelType::NONE) {
+        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_D) && selIsPlaceable) {
             DuplicateSelectedEntity();
         }
         // Undo / redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z). Deferred to the anim tool

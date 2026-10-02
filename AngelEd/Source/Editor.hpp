@@ -28,7 +28,7 @@ class Editor{
         Color AmbientColor = {180, 180, 200, 255};
         float AmbientIntensity = 0.4f;
         // Window flag
-        bool ShowEnvPanel = false;
+        bool ShowEnvPanel = false;   // obsolete (the Zone window was removed); unused
         bool ShowWireframe = false;
         bool ShowSkybox = true;   // viewport skybox visibility (toolbar "Sky")
         // Shaders for lighting modes

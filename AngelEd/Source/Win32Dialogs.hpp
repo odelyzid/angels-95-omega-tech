@@ -66,7 +66,6 @@ struct EditorPanelState {
     bool showPawnMgr = false;
     bool showScriptMgr = false;
     bool showModelBrowser = false;
-    bool showEnvPanel = false;
     bool showPickupPanel = false;
     bool showNodePanel = false;
     bool showSettingsPanel = false;
@@ -106,8 +105,8 @@ struct EditorPanelState {
     float actionHmScale = 1.0f;
     bool actionGenerateHeightmap = false;
 
-    // Light properties panel
-    bool showLightProps = false;
+    // Light properties. Owned entirely by the Entity Properties panel (see
+    // propLight*); these are the panel's backing store, read on Apply.
     int lightPropTarget = -1;   // index into GameLights
     float lightColorR = 255, lightColorG = 255, lightColorB = 255;
     float lightIntensity = 1.0f, lightRadius = 50.0f;
@@ -161,10 +160,10 @@ struct EditorPanelState {
     std::string actionLevelListLink;        // create portal in current world -> target world
     std::string portalTargetWorld;          // default target for newly placed portals
 
-    // Portal editing actions (Portal tab in ZoneProperties)
-    int  actionApplyPortal = -1;            // portal index to apply panel fields onto
+    // Portal deletion action. Portal *editing* is the Entity Properties panel's
+    // PORTAL section; only the delete needs an out-of-band channel because it
+    // mutates the vector the panel is indexing into.
     int  actionDeletePortal = -1;           // portal index to delete
-    int  actionSelectPortal = -1;           // portal index to select in viewport
 
     // Properties panel (context-sensitive)
     bool showPropsPanel = false;
@@ -219,12 +218,19 @@ struct EditorPanelState {
     //
     // Keys NOT in this list still render as read-only rows, so an authored stat
     // the editor has never heard of is visible rather than silently dropped.
-    struct DefStatRow {
-        std::string key;
-        std::string value;
-        int controlId = 0;          // ID_PP_STATS_BASE + index
-        bool isFloat = false;       // right-aligned numeric field
-        bool isSoundPath = false;   // gets a Browse... and a Preview button
+struct DefStatRow {
+    std::string key;
+    std::string value;
+    // Human label from the schema. The panel used to print only `key`, so every
+    // authored label was dead data — yet the label is what makes the row
+    // readable ("Reload Time" vs "reload_time").
+    std::string label;
+    // Schema group this row belongs under; empty means "continues the previous
+    // group". Drives the sub-headers inside the Edit stats section.
+    std::string group;
+    int controlId = 0;          // ID_PP_STATS_BASE + index
+    bool isFloat = false;       // right-aligned numeric field
+    bool isSoundPath = false;   // gets a Browse... and a Preview button
     };
     std::vector<DefStatRow> propDefEditable;
     // Collected on Apply and consumed by Main.cpp, which performs the actual
@@ -251,9 +257,48 @@ struct EditorPanelState {
     float propZoneSwimUp = 5.0f;
     float propZoneLadderSpeed = 6.0f;
     float propZoneFlyMult = 1.5f;
+    // Per-zone environment overrides (mirrors oz::ZoneEnvOverrides).
+    //
+    // These are the values the GAME reads: ZoneManager merges them per zone into
+    // PointRegion::combinedEnv and Core.hpp applies them on zone entry. Until
+    // these rows existed they had NO editor surface at all — envOverrides was
+    // written nowhere in AngelEd, so per-zone fog in a shipped level could only
+    // be produced by hand-editing the .ozone. The Zone Properties dialog's Fog /
+    // Ambient tabs looked like they did this but were level-global shader pokes.
+    //
+    // applyFog / applyAmbient are the flags the exporter gates on (Main.cpp's
+    // ExportToOzone), so they are per-zone booleans here rather than inferred.
+    bool  propZoneApplyFog = false;
+    int   propZoneFogR = 179, propZoneFogG = 179, propZoneFogB = 204;
+    float propZoneFogDensity = 1.0f;
+    float propZoneFogStart = 10.0f, propZoneFogEnd = 100.0f;
+    bool  propZoneApplyAmbient = false;
+    int   propZoneAmbR = 180, propZoneAmbG = 180, propZoneAmbB = 200;
+    float propZoneAmbIntensity = 0.4f;
+    float propZoneReverbMix = 0.0f, propZoneReverbDecay = 0.0f;
     std::string propPortalWorld;    // portal target world
     float propPortalSpawn[3] = {0,0,0};
     bool  propPortalBidir = true;
+
+    // --- SelType::MAP (the level itself) ---
+    // These mirror LevelMetadata field for field. They are a flat copy rather
+    // than a LevelMetadata member so the panel can show one flat row per field
+    // and diff "changed" against the value the panel was opened with, exactly as
+    // the .ozls stat rows do.
+    int   propMapGameType = 0;            // oz::gametype::GameType index
+    int   propMapMaxPlayers = 8;
+    float propMapRespawnTime = 5.0f;
+    bool  propMapTimeLimitEnabled = false;
+    float propMapTimeLimitMinutes = 10.0f;
+    int   propMapScoreLimit = 50;
+    bool  propMapFriendlyFire = false;
+    std::string propMapSkybox;            // level skybox texture path
+    std::string propMapSkyboxSide;        // side/cap skybox path
+    int   propMapParticleType = 0;        // ParticleType index
+    float propMapParticleDensity = 50.0f;
+    float propMapParticleSpeed = 1.0f;
+    int   propMapParticleR = 200, propMapParticleG = 200, propMapParticleB = 200;
+    float propMapParticleWindX = 0.0f, propMapParticleWindZ = 0.0f;
 
     // GameEngine.Mesh object editing
     std::string propMeshPath;       // model path
@@ -339,12 +384,10 @@ struct EditorPanelState {
     void* hPawnMgr = nullptr;
     void* hScriptMgr = nullptr;
     void* hModelBrowser = nullptr;
-    void* hEnvPanel = nullptr;
     void* hPickupPanel = nullptr;
     void* hNodePanel = nullptr;
     void* hSettingsPanel = nullptr;
     void* hHeightmapEditor = nullptr;
-    void* hLightProps = nullptr;
     void* hWorldGraph = nullptr;
     void* hPropsPanel = nullptr;
     void* hStatsSidebar = nullptr;
@@ -362,12 +405,10 @@ struct EditorPanelState {
     WinPos pawnMgrPos    = {50, 300, 400, 300};
     WinPos scriptMgrPos  = {440, 340, 560, 450};
     WinPos modelBrwPos   = {100, 80, 540, 500};
-    WinPos envPanelPos   = {60, 60, 440, 560};
     WinPos pickPanelPos  = {60, 400, 200, 280};
     WinPos nodePanelPos  = {290, 400, 200, 200};
     WinPos settingsPos        = {50, 50, 400, 600};
     WinPos heightmapEditorPos = {120, 100, 520, 480};
-    WinPos lightPropsPos = {400, 100, 340, 480};
     WinPos worldGraphPos = {540, 100, 600, 400};
     // 540 (not 470): the vertical scrollbar costs ~17px of client width, so this
     // keeps the usable value column as wide as it was before it was added.
@@ -385,7 +426,7 @@ extern EditorPanelState g_editorPanels;
 // route to a def with no instance in the open world (Player.ozls).
 void ShowDefPropertiesFor(const std::string& defName);
 
-// --- ZoneProperties replaces old EnvSettings ---
+// --- Level state ---
 // GameType is now defined in Source/World/GameType.hpp (oz::gametype::GameType)
 // so the editor, server and tests share one source of truth. The numeric values
 // are identical to the legacy enum, so every saved levelinfo line still loads.
@@ -399,37 +440,6 @@ enum class ParticleType : uint8_t {
     PSYCHIC_REALM
 };
 
-struct ZoneProperties {
-    // Fog
-    int fogR = 200, fogG = 200, fogB = 210;
-    float fogDensity = 0.02f;
-    float fogStart = 10.0f, fogEnd = 100.0f;
-    bool applyFog = false;
-    // Ambient
-    int ambR = 180, ambG = 180, ambB = 200;
-    float ambIntensity = 0.4f;
-    bool applyAmbient = false;
-    // GameType
-    GameType gameType = GameType::SINGLEPLAYER;
-    int maxPlayers = 8;
-    float respawnTime = 5.0f;
-    bool timeLimitEnabled = false;
-    float timeLimitMinutes = 10.0f;
-    int scoreLimit = 50;
-    bool friendlyFire = false;
-    bool applyGameType = false;
-    // Particles
-    ParticleType particleType = ParticleType::NONE;
-    float particleDensity = 50.0f;
-    float particleSpeed = 1.0f;
-    int particleColorR = 200, particleColorG = 200, particleColorB = 200;
-    float particleWindX = 0.0f, particleWindZ = 0.0f;
-    bool applyParticles = false;
-    // Skybox
-    std::string skyboxTexturePath;  // path to skybox texture, empty = world default
-    bool applySkybox = false;
-};
-
 // Level metadata — persisted via LevelInfo/Particles instructions in both formats
 struct LevelMetadata {
     // GameType / rules
@@ -441,6 +451,11 @@ struct LevelMetadata {
     int scoreLimit = 50;
     bool friendlyFire = false;
     std::string skyboxTexturePath;
+    // Side/cap skybox, the second path token on the OZONE `levelinfo` line. It
+    // was previously parsed into OzonePrimitive::entitySubType and then dropped:
+    // nothing read it on load and ExportToOzone never wrote it, so opening and
+    // re-saving a world silently deleted it.
+    std::string skyboxSidePath;
     // Ambient particles
     ParticleType particleType = ParticleType::NONE;
     float particleDensity = 50.0f;
@@ -449,30 +464,18 @@ struct LevelMetadata {
     float particleWindX = 0.0f, particleWindZ = 0.0f;
 };
 
-ZoneProperties GetZoneProperties();
-void ClearZoneApplyFlags();
 LevelMetadata GetLevelMetadata();
-void SetLevelMetadata(const LevelMetadata& meta);   // also refreshes ZoneProperties UI values
+void SetLevelMetadata(const LevelMetadata& meta);   // the Map row's only owner
 
-// --- Portal editing (Portal tab in ZoneProperties) ---
-struct PortalEditState {
-    int  selectedIndex = -1;        // PawnSystem portal index, -1 = none
-    char targetWorld[256] = {};     // destination level folder name
-    float spawnX = 0, spawnY = 20, spawnZ = 0;
-    bool bidirectional = true;
-};
-void RefreshPortalList();           // rebuild portal combo from PawnSystem
+// --- Portals ---
+// Portals are edited in the Entity Properties panel's PORTAL section, which reads
+// and writes ZoneManager::GetPortals() directly. These three helpers survive only
+// because Main.cpp already called them; GetPortalCount/GetPortalTargetWorld have
+// no callers at all and are logged as dead in
+// Wiki/Editor-PropertyPanel-Refactor.md (P4).
+void RefreshPortalList();           // intentionally inert now — see the .cpp
 int  GetPortalCount();
 const char* GetPortalTargetWorld(int index);
-void SetPortalSelection(int index); // push viewport selection into the panel
-
-// Edited portal field values (read by Main.cpp when applying)
-struct PortalEditValues {
-    std::string targetWorld;
-    float spawnX = 0, spawnY = 20, spawnZ = 0;
-    bool bidirectional = true;
-};
-PortalEditValues GetPortalEditValues();
 
 // --- Pawn management ---
 void PawnManagerAddPawn(const char* name, const char* meshPath);
@@ -503,15 +506,10 @@ void ShowTextureManager(bool show);
 void ShowPawnManager(bool show);
 void ShowScriptManager(bool show);
 void ShowModelBrowser(bool show);
-void ShowEnvPanel(bool show);
 void ShowPickupPanel(bool show);
 void ShowNodePanel(bool show);
 void ShowHeightmapEditor(bool show);
-// Legacy light window. Superseded by the Entity Properties panel, which
-    // owns light settings (see propLight*); ShowLightProps forwards to it when
-    // a light is selected so the menu entry still works.
-    void ShowLightProps(bool show);
-    void ShowWorldGraph(bool show);
+void ShowWorldGraph(bool show);
 
     // Surface Properties (UT99-style, per-face). `renderable` is an
     // OzoneRenderable index and `faceMask` a bitmask of SurfaceFace, so one
@@ -551,11 +549,9 @@ inline void ShowScriptManager(bool) {}
 inline void ShowModelBrowser(bool) {}
 inline void ShowAnimPanel(bool) {}
 inline void RefreshAnimPanel() {}
-inline void ShowEnvPanel(bool) {}
 inline void ShowPickupPanel(bool) {}
 inline void ShowNodePanel(bool) {}
 inline void ShowHeightmapEditor(bool) {}
-inline void ShowLightProps(bool) {}
 inline void ShowWorldGraph(bool) {}
 inline void ShowPropertiesPanel(bool) {}
 inline void ShowLevelList(bool) {}
@@ -569,15 +565,11 @@ inline bool ChooseSaveWorldFile(std::string&) { return false; }
 inline void UpdateStatsSidebar(float, float, float, float, float, float, float, float, int, int, const char*, float, float, float) {}
 inline void LayoutStatsSidebar(int, int, int, int) {}
 inline int GetStatsSidebarWidth() { return 200; }
-inline ZoneProperties GetZoneProperties() { return {}; }
-inline void ClearZoneApplyFlags() {}
 inline LevelMetadata GetLevelMetadata() { return {}; }
 inline void SetLevelMetadata(const LevelMetadata&) {}
 inline void RefreshPortalList() {}
 inline int GetPortalCount() { return 0; }
 inline const char* GetPortalTargetWorld(int) { return nullptr; }
-inline void SetPortalSelection(int) {}
-inline PortalEditValues GetPortalEditValues() { return {}; }
 inline void PawnManagerAddPawn(const char*, const char*) {}
 inline int GetPawnCount() { return 0; }
 inline const char* GetPawnName(int) { return nullptr; }
