@@ -103,7 +103,16 @@ enum class MessageType : uint32_t {
     // optional field; old clients hit the default case and ignore it.
     // PROTOCOL_VERSION stays at 2 — a new MessageType is forward/backward
     // compatible by definition.
-    SCORE_STATE = 25
+    SCORE_STATE = 25,
+    // Client -> server: "I have no (or stale) pickup state; re-send this
+    // player's pickup list for the world they are in." Answered with a run of
+    // PICKUP_RESPAWN messages. Added because pickups were otherwise only sent on
+    // join and on respawn, so one lost datagram — or a client-side filter that
+    // suppressed the request — left a pickup drawn on the floor that could never
+    // be collected again. Like any new MessageType this is forward/backward
+    // compatible by definition: an older client never sends it, an older server
+    // ignores it. PROTOCOL_VERSION stays at 2.
+    PICKUP_RESYNC = 26
 };
 
 // Melee stamina: the server keeps its own pool per player so a swinging client
@@ -239,6 +248,15 @@ struct PickupCollectData {
     char weapon_def_name[64]; // for weapon pickups
 };
 
+// Server -> client: a pickup is present and active. Also used as the re-sync
+// answer to a rejected collect and for the periodic full snapshot.
+//
+// FORWARD COMPATIBILITY: `typeName` is an optional trailing field, following the
+// same pattern as ClientAuthPayload::structSize. A reader MUST accept a message
+// whose `size` stops before it and treat the name as empty, and must never
+// require it. That is why the client checks against kPickupRespawnSizeBase
+// rather than sizeof(): bumping PROTOCOL_VERSION is for changes that would make
+// an older peer MISPARSE a message, and an unread tail does not.
 struct PickupRespawnData {
     int pickup_id;
     int world_index;
@@ -246,7 +264,12 @@ struct PickupRespawnData {
     int type;       // PickupType as int
     int value;
     char weapon_def_name[64]; // for weapon pickups
+    // --- optional tail; may be absent on an older peer ---
+    char typeName[64];        // authored World.ozone pickup name, "" if unknown
 };
+
+// Bytes a reader must see before it can use everything except `typeName`.
+constexpr uint32_t kPickupRespawnSizeBase = offsetof(PickupRespawnData, typeName);
 
 struct NpcStateUpdateData {
     int world_index;

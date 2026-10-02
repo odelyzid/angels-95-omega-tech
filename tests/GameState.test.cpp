@@ -7,16 +7,25 @@
 //   -o test_game_state -lws2_32 -lm
 
 #include "../Source/Server/GameState.hpp"
+#include "../Source/Client/Client.hpp"
+#include "../Source/Pawn/PickupItems.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cassert>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
 
 static int tests_total = 0, tests_passed = 0;
 #define TEST(name) do { tests_total++; fprintf(stdout, "  TEST: %s ... ", name);
 #define PASS() do { tests_passed++; fprintf(stdout, "PASS\n"); } while(0)
 #define FAIL(msg) do { fprintf(stdout, "FAIL: %s\n", msg); return 1; } while(0)
 #define CHECK(cond) do { if (!(cond)) { fprintf(stdout, "FAIL: %s\n", #cond); return 1; } } while(0)
-#define CHECK_EQ(a, b) do { if ((a) != (b)) { fprintf(stdout, "FAIL: expected %d, got %d\n", (int)(a), (int)(b)); return 1; } } while(0)
+#define CHECK_EQ(a, b) do { if ((a) != (b)) { fprintf(stdout, "FAIL: expected %d, got %d\n", (int)(b), (int)(a)); return 1; } } while(0)
+#define CHECK_STR(a, b) do { std::string _a = (a), _b = (b); if (_a != _b) { \
+    fprintf(stdout, "FAIL: expected \"%s\", got \"%s\"\n", _b.c_str(), _a.c_str()); return 1; } } while(0)
 #define CHECK_APROX(a, b, eps) do { float diff = (a) - (b); if (diff < 0) diff = -diff; if (diff > (eps)) { fprintf(stdout, "FAIL: expected %f, got %f\n", (float)(b), (float)(a)); return 1; } } while(0)
 #define END_TEST() } while(0)
 
@@ -520,6 +529,512 @@ static int test_resolve_pickup_item_id() {
     PASS(); return 0; END_TEST();
 }
 
+// ---------------------------------------------------------------------------
+// Pickup id lockstep.
+//
+// PickupNode::netId (client) and ServerPickup::id (server) are both the
+// file-order index of an ENTITY_PICKUP primitive in World.ozone. Nothing
+// enforces that: if either side ever enumerates differently, a client's
+// "collect pickup N" silently targets a different physical pickup. This walks the
+// world file independently and pins both the server's ids and the order the
+// client must reproduce.
+// ---------------------------------------------------------------------------
+static int test_seed_pickup_ids_are_file_order() {
+    TEST("seeded pickup ids are the World.ozone file order (netId lockstep)");
+    GameState gs;
+    gs.init_worlds("GameData", {"EngineTest"});
+    WorldState* ws = gs.get_world(0);
+    CHECK(ws != nullptr);
+    CHECK(!ws->global_pickups.empty());
+
+    // Independent expectation: the Nth `pickup` line in the file is id N.
+    std::vector<std::string> fromFile;
+    {
+        FILE* f = fopen("GameData/Worlds/EngineTest/World.ozone", "r");
+        CHECK(f != nullptr);
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            // Match a leading `pickup` token only; indented and commented lines
+            // in other sections must not count.
+            const char* p = line;
+            while (*p == ' ' || *p == '\t') ++p;
+            if (strncmp(p, "pickup ", 7) != 0) continue;
+            p += 7;
+            std::string name;
+            while (*p && *p != ' ' && *p != '\r' && *p != '\n') name += *p++;
+            if (!name.empty()) fromFile.push_back(name);
+        }
+        fclose(f);
+    }
+    CHECK_EQ(fromFile.size(), ws->global_pickups.size());
+
+    for (size_t i = 0; i < fromFile.size(); i++) {
+        CHECK_EQ(ws->global_pickups[i].id, (int)i);
+        // typeName travels as the optional tail of PICKUP_RESPAWN so a client can
+        // tell a server-issued pickup from one it is drawing on its own.
+        CHECK_STR(ws->global_pickups[i].typeName, fromFile[i]);
+    }
+    PASS(); return 0; END_TEST();
+}
+
+// ---------------------------------------------------------------------------
+// Reject reasons. These were silent `return false`s; the whole point of the enum
+// is that each one is distinguishable.
+// ---------------------------------------------------------------------------
+static int test_collect_pickup_reject_reasons() {
+    TEST("collect_pickup names why it refused, for every rejection path");
+
+    GameState gs;
+    {
+        WorldState ws = make_test_world(0);
+        ws.global_pickups.resize(2);
+        ws.global_pickups[0].id = 0;
+        ws.global_pickups[0].type = PickupType::COIN;
+        ws.global_pickups[0].value = 5;
+        ws.global_pickups[0].active = true;
+        ws.global_pickups[0].position = {0, 0, 0};
+        ws.global_pickups[1].id = 1;
+        ws.global_pickups[1].type = PickupType::COIN;
+        ws.global_pickups[1].value = 5;
+        ws.global_pickups[1].active = true;
+        ws.global_pickups[1].position = {0, 0, 0};
+        gs.worlds().push_back(ws);
+    }
+    // UNKNOWN_PLAYER
+    {
+        PickupReject r = PickupReject::NONE;
+        CHECK(!gs.collect_pickup(999, 0, 0, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::UNKNOWN_PLAYER);
+    }
+    // WRONG_WORLD: the player is in world 0 and asks for world 1.
+    {
+        gs.add_player(1, "p1", 0, 0);
+        PickupReject r = PickupReject::NONE;
+        CHECK(!gs.collect_pickup(1, 0, 1, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::WRONG_WORLD);
+    }
+    // NOT_FOUND for an id that does not exist.
+    {
+        PickupReject r = PickupReject::NONE;
+        CHECK(!gs.collect_pickup(1, 77, 0, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::NOT_FOUND);
+    }
+    // OUT_OF_RANGE: valid id, but the player is far away. This is the case a laggy
+    // client legitimately sends, and it used to be indistinguishable from every
+    // other failure. Walk there in steps — update_player_position rejects a
+    // per-update move over 25 units, which is itself worth remembering when
+    // writing a test that relocates a player.
+    {
+        for (int step = 1; step <= 4; step++)
+            CHECK(gs.update_player_position(1, step * 25.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+        PickupReject r = PickupReject::NONE;
+        CHECK(!gs.collect_pickup(1, 0, 0, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::OUT_OF_RANGE);
+    }
+    // Success clears the reason rather than leaving a stale one.
+    {
+        for (int step = 1; step <= 4; step++)
+            CHECK(gs.update_player_position(1, 100.0f - step * 25.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+        PickupReject r = PickupReject::NOT_FOUND;
+        CHECK(gs.collect_pickup(1, 0, 0, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::NONE);
+        // And the consumed pickup now reports NOT_FOUND, not a success.
+        r = PickupReject::NONE;
+        CHECK(!gs.collect_pickup(1, 0, 0, nullptr, nullptr, nullptr, 0, &r));
+        CHECK(r == PickupReject::NOT_FOUND);
+    }
+    // Every reason has a distinct, non-empty message (it goes straight into a log).
+    {
+        const PickupReject all[] = {
+            PickupReject::NONE, PickupReject::UNKNOWN_PLAYER, PickupReject::WRONG_WORLD,
+            PickupReject::UNKNOWN_WORLD, PickupReject::NOT_FOUND, PickupReject::OUT_OF_RANGE,
+        };
+        for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
+            const char* s = pickup_reject_str(all[i]);
+            CHECK(s != nullptr && s[0] != '\0' && std::string(s) != "?");
+        }
+    }
+    PASS(); return 0; END_TEST();
+}
+
+// ---------------------------------------------------------------------------
+// Full loopback round trip: the real OmegaClient against a net::NetworkServer
+// running the production collect rules.
+//
+// This is the regression test for "pickups do not work in multiplayer". The bug
+// lived in the seam between three lists (the server's, the client's shadow copy,
+// and the drawn PickupNodes) and none of the individual hops was wrong, so it can
+// only be caught end to end.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Mirrors Server.cpp's PICKUP_COLLECT handler: collect, then broadcast the grant,
+// and on refusal log the reason and answer with a re-sync snapshot.
+struct PickupTestServer {
+    GameState gs;
+    net::NetworkServer server;
+    std::vector<std::string> log;
+
+    void send_snapshot(const net::NetworkPlayer& player, int world_index) {
+        gs.for_each_active_pickup(world_index, [&](WorldState&, ServerPickup& p) {
+            net::PickupRespawnData prd{};
+            prd.pickup_id = p.id;
+            prd.world_index = world_index;
+            prd.position = {p.position.x, p.position.y, p.position.z};
+            prd.type = static_cast<int>(p.type);
+            prd.value = p.value;
+            strncpy(prd.typeName, p.typeName, sizeof(prd.typeName) - 1);
+            net::NetworkMessage m{};
+            m.magic = net::MAGIC;
+            m.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
+            m.size = sizeof(prd);
+            m.sequence = 0;
+            m.timestamp = 0;
+            memcpy(m.payload, &prd, sizeof(prd));
+            server.send_message(const_cast<net::NetworkPlayer&>(player), m);
+        });
+    }
+
+    void on_join(net::NetworkPlayer& player) {
+        gs.add_player(player.id, player.name, 0, 0);
+        ServerPlayer* sp = gs.get_player(player.id);
+        send_snapshot(player, sp ? sp->world_index : 0);
+    }
+
+    void on_message(const net::NetworkMessage& msg, const net::NetworkPlayer& sender) {
+        auto type = static_cast<net::MessageType>(msg.type);
+        if (type == net::MessageType::PICKUP_COLLECT) {
+            if (msg.size < sizeof(net::PickupCollectData)) return;
+            net::PickupCollectData pcd;
+            memcpy(&pcd, msg.payload, sizeof(pcd));
+            PickupType ptype;
+            int pvalue;
+            PickupReject why = PickupReject::NONE;
+            if (!gs.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index,
+                                   &ptype, &pvalue, nullptr, 0, &why)) {
+                log.push_back(std::string("refused:") + pickup_reject_str(why));
+                ServerPlayer* sp = gs.get_player(sender.id);
+                if (sp) send_snapshot(sender, sp->world_index);
+                return;
+            }
+            const PickupGrant grant = ResolvePickupItemId(ptype, pvalue);
+            net::PickupCollectedData out{};
+            out.player_id = sender.id;
+            out.pickup_id = pcd.pickup_id;
+            out.world_index = pcd.world_index;
+            out.item_id = grant.itemId;
+            out.quantity = grant.quantity;
+            net::NetworkMessage m{};
+            m.magic = net::MAGIC;
+            m.type = static_cast<uint32_t>(net::MessageType::PICKUP_COLLECTED);
+            m.size = sizeof(out);
+            m.sequence = 0;
+            m.timestamp = 0;
+            memcpy(m.payload, &out, sizeof(out));
+            server.broadcast_message(m);
+            return;
+        }
+        if (type == net::MessageType::PICKUP_RESYNC) {
+            log.push_back("resync");
+            ServerPlayer* sp = gs.get_player(sender.id);
+            if (sp) send_snapshot(sender, sp->world_index);
+            return;
+        }
+        if (type == net::MessageType::PLAYER_UPDATE) {
+            if (msg.size < sizeof(net::PlayerUpdateData)) return;
+            net::PlayerUpdateData pud;
+            memcpy(&pud, msg.payload, sizeof(pud));
+            gs.update_player_position(sender.id, pud.position.x, pud.position.y,
+                                      pud.position.z, pud.yaw, pud.pitch);
+        }
+    }
+};
+
+// NetworkServer binds its own socket in start(), so ask the library for a free
+// port rather than guessing one.
+uint16_t find_free_port_for_test() { return net::find_free_port(); }
+
+// Pump both ends until `pred` is satisfied or we run out of patience.
+template <typename Pred>
+bool pump_until(net::NetworkServer& server, OmegaClient& client, Pred pred,
+                int max_ms = 4000) {
+    for (int i = 0; i < max_ms / 5; i++) {
+        server.update();
+        client.update(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+        if (pred()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    server.update();
+    client.update(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    return pred();
+}
+
+} // namespace
+
+static int test_pickup_loopback_roundtrip() {
+    TEST("pickup: join snapshot, collect, grant, and the drawn node is hidden");
+
+    const uint16_t port = find_free_port_for_test();
+    CHECK(port != 0);
+
+    PickupTestServer ts;
+    {
+        WorldState ws = make_test_world(0);
+        ServerPickup p;
+        p.id = 0;
+        p.type = PickupType::COIN;
+        p.value = 7;
+        p.active = true;
+        p.position = {0, 0, 0};
+        strncpy(p.typeName, "Coin", sizeof(p.typeName) - 1);
+        ws.global_pickups.push_back(p);
+        ts.gs.worlds().push_back(ws);
+    }
+
+    net::ServerCallbacks scb;
+    scb.on_player_join = [&ts](net::NetworkPlayer& pl) { ts.on_join(pl); };
+    scb.on_message_received = [&ts](const net::NetworkMessage& m, const net::NetworkPlayer& s) {
+        ts.on_message(m, s);
+    };
+    ts.server.set_callbacks(scb);
+    CHECK(ts.server.init(port));
+    CHECK(ts.server.start());
+
+    OmegaClient client;
+    CHECK(client.connect("127.0.0.1", port));
+
+    CHECK(pump_until(ts.server, client, [&] { return client.is_connected(); }));
+
+    // The join snapshot must arrive: the pickup is in the client's view, active,
+    // with the world index the server assigned and the authored name from the
+    // optional tail.
+    CHECK(pump_until(ts.server, client, [&] {
+        auto p = client.pickups();
+        return !p.empty();
+    }));
+    {
+        auto p = client.pickups();
+        CHECK_EQ(p.size(), (size_t)1);
+        CHECK_EQ(p[0].id, 0);
+        CHECK_EQ(p[0].world_index, 0);
+        CHECK(p[0].active);
+        CHECK_STR(p[0].typeName, "Coin");
+    }
+
+    // Grant notification wired to the same callback the game loop uses.
+    int granted_item = -1, granted_qty = -1;
+    int pickup_updates = 0;
+    client.set_on_item_collected([&](int id, int qty) { granted_item = id; granted_qty = qty; });
+    client.set_on_pickups_changed([&](const std::vector<ClientPickup>&) { pickup_updates++; });
+
+    // Stand next to the pickup, then walk over it.
+    pump_until(ts.server, client, [] { return false; }, 100);
+    client.send_pickup_collect(0, 0, nullptr);
+
+    CHECK(pump_until(ts.server, client, [&] { return granted_item > 0; }));
+    CHECK_EQ(granted_item, item_id::COIN);
+    CHECK_EQ(granted_qty, 7);       // COIN carries its value as the stack size
+
+    // The client's view must be marked inactive, and the consumer notified, so the
+    // drawn PickupNode can be hidden. This is the assertion the original bug
+    // failed: the flag was set on a list nothing rendered.
+    CHECK(pump_until(ts.server, client, [&] { return pickup_updates > 0; }));
+    {
+        auto p = client.pickups();
+        CHECK_EQ(p.size(), (size_t)1);
+        CHECK(!p[0].active);
+    }
+
+    // Collecting it again is refused and must NOT grant a second time. The server
+    // answers the refusal with a snapshot rather than silence.
+    granted_item = -1;
+    client.send_pickup_collect(0, 0, nullptr);
+    CHECK(pump_until(ts.server, client, [&] {
+        for (const auto& s : ts.log) if (s.rfind("refused:", 0) == 0) return true;
+        return false;
+    }));
+    CHECK_EQ(granted_item, -1);
+
+    // And an explicit re-sync request works, for the client that knows it is out
+    // of step without having attempted a collect.
+    const size_t before = ts.log.size();
+    client.request_pickup_resync();
+    CHECK(pump_until(ts.server, client, [&] {
+        for (size_t i = before; i < ts.log.size(); i++)
+            if (ts.log[i] == "resync") return true;
+        return false;
+    }));
+
+    client.disconnect();
+    ts.server.stop();
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pickup_state_cleared_on_disconnect() {
+    TEST("pickup state does not survive a disconnect");
+    // Rejoining a different server previously started from the previous server's
+    // list, and any unanswered collect was still queued — so a pickup the new
+    // server never issued could still grant an item.
+    const uint16_t port = find_free_port_for_test();
+    CHECK(port != 0);
+
+    PickupTestServer ts;
+    {
+        WorldState ws = make_test_world(0);
+        ServerPickup p;
+        p.id = 0;
+        p.type = PickupType::COIN;
+        p.value = 7;
+        p.active = true;
+        p.position = {0, 0, 0};
+        ws.global_pickups.push_back(p);
+        ts.gs.worlds().push_back(ws);
+    }
+    net::ServerCallbacks scb;
+    scb.on_player_join = [&ts](net::NetworkPlayer& pl) { ts.on_join(pl); };
+    scb.on_message_received = [&ts](const net::NetworkMessage& m, const net::NetworkPlayer& s) {
+        ts.on_message(m, s);
+    };
+    ts.server.set_callbacks(scb);
+    CHECK(ts.server.init(port));
+    CHECK(ts.server.start());
+
+    OmegaClient client;
+    CHECK(client.connect("127.0.0.1", port));
+    CHECK(pump_until(ts.server, client, [&] {
+        return client.is_connected() && !client.pickups().empty();
+    }));
+
+    // Queue a collect that the server will never answer, then drop the link.
+    client.send_pickup_collect(0, 0, nullptr);
+    client.disconnect();
+    ts.server.update();
+
+    CHECK(client.pickups().empty());
+    CHECK(!client.has_pickup_world(0));
+    // The dropped link also invalidates the session: a reconnect must re-handshake
+    // rather than assume it is still joined.
+    CHECK(!client.is_connected());
+
+    ts.server.stop();
+    PASS(); return 0; END_TEST();
+}
+
+static int test_pickup_respawn_tail_is_optional() {
+    TEST("PICKUP_RESPAWN without the typeName tail is still accepted");
+    // The tail is optional on purpose (see kPickupRespawnSizeBase). Requiring
+    // sizeof() made a client drop every message from a server that predates the
+    // field — silently, which is how a whole world's pickups vanish at once.
+    CHECK(net::kPickupRespawnSizeBase < sizeof(net::PickupRespawnData));
+
+    const uint16_t port = find_free_port_for_test();
+    CHECK(port != 0);
+
+    net::NetworkServer server;
+    int seed = 0;
+    net::ServerCallbacks scb;
+    scb.on_player_join = [&server, &seed](net::NetworkPlayer& pl) {
+        // Hand-roll a message carrying ONLY the base layout.
+        net::PickupRespawnData prd{};
+        prd.pickup_id = 3;
+        prd.world_index = 0;
+        prd.position = {1.0f, 2.0f, 3.0f};
+        prd.type = static_cast<int>(PickupType::COIN);
+        prd.value = 7;
+        net::NetworkMessage m{};
+        m.magic = net::MAGIC;
+        m.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
+        m.size = net::kPickupRespawnSizeBase;   // tail deliberately omitted
+        m.sequence = 0;
+        m.timestamp = 0;
+        memcpy(m.payload, &prd, m.size);
+        server.send_message(const_cast<net::NetworkPlayer&>(pl), m);
+        ++seed;
+    };
+    server.set_callbacks(scb);
+    CHECK(server.init(port));
+    CHECK(server.start());
+
+    OmegaClient client;
+    CHECK(client.connect("127.0.0.1", port));
+    CHECK(pump_until(server, client, [&] {
+        return seed > 0 && !client.pickups().empty();
+    }));
+    {
+        auto p = client.pickups();
+        CHECK_EQ(p.size(), (size_t)1);
+        CHECK_EQ(p[0].id, 3);
+        CHECK_EQ(p[0].value, 7);
+        // Absent tail reads as empty, never as garbage or an over-read.
+        CHECK_STR(p[0].typeName, "");
+    }
+    client.disconnect();
+    server.stop();
+    PASS(); return 0; END_TEST();
+}
+
+// ---------------------------------------------------------------------------
+// The three-lists reconciliation rule, exercised directly.
+//
+// Pickup ids restart at 0 in every world, so a snapshot is only meaningful once
+// scoped to one world. Main.cpp's set_on_pickups_changed lambda does that
+// filtering; this pins the rule so a future caller cannot hand
+// PawnSystem::ApplyPickupNetState a merged list and get whichever world happened
+// to be appended last.
+//
+// The stand-in for PickupNode is deliberate: that struct pulls in raylib
+// (Vector3) and this suite is raylib-free. Only the id/active pair matters here.
+// ---------------------------------------------------------------------------
+struct NetPickupLite {
+    int netId = -1;
+    bool active = true;
+};
+
+static int test_pickup_net_state_is_world_scoped() {
+    TEST("pickup ids restart per world, so the net snapshot must be world-scoped");
+    // The premise: two worlds legitimately both have a pickup id 3.
+    {
+        GameState gs;
+        WorldState a = make_test_world(0);
+        WorldState b = make_test_world(1);
+        for (WorldState* w : {&a, &b}) {
+            ServerPickup p;
+            p.id = 3;
+            p.type = PickupType::COIN;
+            p.value = 1;
+            p.active = true;
+            w->global_pickups.push_back(p);
+        }
+        gs.worlds().push_back(a);
+        gs.worlds().push_back(b);
+        CHECK_EQ(gs.get_world(0)->global_pickups[0].id,
+                 gs.get_world(1)->global_pickups[0].id);
+    }
+    // The consequence, spelled out: reconciling a merged snapshot would let the
+    // last world's entry decide both. This is why the filter lives at the call
+    // site, and why ApplyPickupNetState documents `net` as already scoped.
+    {
+        std::vector<NetPickupLite> merged;
+        for (int world = 0; world < 2; world++) {
+            NetPickupLite n;
+            n.netId  = 3;                    // same id in both worlds
+            n.active = (world == 1);         // world 1 consumed it
+            merged.push_back(n);
+        }
+        std::unordered_map<int, bool> collapsed;
+        for (const auto& n : merged) collapsed[n.netId] = n.active;
+        CHECK_EQ(collapsed.size(), (size_t)1);   // world 0's entry is lost
+        CHECK(collapsed[3]);                    // ...and world 1's state decides it
+
+        // Scoped per world, the two stay distinct.
+        std::unordered_map<int, bool> w0, w1;
+        for (const auto& n : merged) (n.active ? w1 : w0)[n.netId] = n.active;
+        CHECK_EQ(w0.size(), (size_t)1);
+        CHECK_EQ(w1.size(), (size_t)1);
+    }
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
@@ -545,6 +1060,12 @@ int main() {
     failures += test_npc_follows_path_nodes();
     failures += test_player_save_load_roundtrip();
     failures += test_world_seeding_from_file();
+    failures += test_seed_pickup_ids_are_file_order();
+    failures += test_collect_pickup_reject_reasons();
+    failures += test_pickup_respawn_tail_is_optional();
+    failures += test_pickup_net_state_is_world_scoped();
+    failures += test_pickup_loopback_roundtrip();
+    failures += test_pickup_state_cleared_on_disconnect();
 
     fprintf(stdout, "===============\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

@@ -221,7 +221,12 @@ asset-scope tree + pack-on-import (b82).
 - [x] Internet discovery: `AngelMaster` master (UDP heartbeats + HTTP/JSON list, expiry/rate limits), `AngelServ` HTTPS uplink (b70), client Internet browser with direct status/RTT queries (see `Wiki/Master-Server.md`)
 - [x] Server world population from world files + server saves (b59/b61: seed_world_entities, PlayerData.dat, V2 world saves, autosave); join loads the server's map (b72)
 - [ ] Stable entity replication IDs (replace index-triples)
-- [ ] ACK/retry for critical messages (weapon fire, pickup collect)
+- [~] ACK/retry for critical messages — **pickup collect done**: refusals now name
+  their reason and answer with a re-sync of the player's own world, state
+  re-syncs on join / every 15 s / on a client `PICKUP_RESYNC`, and the collected
+  node is actually hidden (`PickupNode::netId` + `ApplyPickupNetState`).
+  Weapon fire still has no ack. Pinned by the loopback round-trip cases in
+  `tests/GameState.test.cpp`.
 - [ ] Client prediction + reconciliation for own player
 - [ ] FILE_TRANSFER: rejected by design (b59 notice + rate limit); implement chunked transfer or drop the packet type
 

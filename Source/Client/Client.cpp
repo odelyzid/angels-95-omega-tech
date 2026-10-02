@@ -245,6 +245,11 @@ void OmegaClient::send_weapon_ammo(int slot, int ammo, int magazine, int action)
 
 void OmegaClient::handle_message(const net::NetworkMessage& msg) {
     auto type = static_cast<net::MessageType>(msg.type);
+    // Set by the pickup handlers, acted on AFTER the switch. Each case scopes
+    // its own lock_guard, so by the time we get here the mutex is free and the
+    // callback can safely call back into the client (it takes the lock again to
+    // build its snapshot).
+    bool pickups_changed = false;
 
     switch (type) {
         case net::MessageType::CHAT: {
@@ -319,10 +324,18 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             break;
         }
         case net::MessageType::PICKUP_RESPAWN: {
-            if (msg.size < sizeof(net::PickupRespawnData)) return;
+            // Accept the base layout and treat a missing typeName as empty: the
+            // tail is optional (see kPickupRespawnSizeBase), so requiring
+            // sizeof() here would silently drop every message from a server that
+            // predates the field.
+            if (msg.size < net::kPickupRespawnSizeBase) return;
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::PickupRespawnData prd;
-            memcpy(&prd, msg.payload, sizeof(prd));
+            memset(&prd, 0, sizeof(prd));
+            memcpy(&prd, msg.payload, std::min<size_t>(msg.size, sizeof(prd)));
+            // Stop at the first NUL so a truncated/unterminated tail cannot run
+            // off the struct (same rule as the CHAT payload read).
+            prd.typeName[sizeof(prd.typeName) - 1] = '\0';
             bool found = false;
             for (auto& p : m_pickups) {
                 if (p.id == prd.pickup_id && p.world_index == prd.world_index) {
@@ -330,6 +343,10 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                     p.position = prd.position;
                     p.type = prd.type;
                     p.value = prd.value;
+                    strncpy(p.weapon_def_name, prd.weapon_def_name, sizeof(p.weapon_def_name) - 1);
+                    p.weapon_def_name[sizeof(p.weapon_def_name) - 1] = '\0';
+                    strncpy(p.typeName, prd.typeName, sizeof(p.typeName) - 1);
+                    p.typeName[sizeof(p.typeName) - 1] = '\0';
                     found = true;
                     break;
                 }
@@ -342,15 +359,22 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 cp.type = prd.type;
                 cp.value = prd.value;
                 cp.active = true;
+                strncpy(cp.weapon_def_name, prd.weapon_def_name, sizeof(cp.weapon_def_name) - 1);
+                cp.weapon_def_name[sizeof(cp.weapon_def_name) - 1] = '\0';
+                strncpy(cp.typeName, prd.typeName, sizeof(cp.typeName) - 1);
+                cp.typeName[sizeof(cp.typeName) - 1] = '\0';
                 m_pickups.push_back(cp);
             }
+            pickups_changed = true;
             break;
         }
         case net::MessageType::PICKUP_COLLECTED: {
             if (msg.size < sizeof(net::PickupCollectedData)) return;
             const std::lock_guard<std::mutex> lock(m_msg_mutex);
             net::PickupCollectedData pcd;
-            memcpy(&pcd, msg.payload, sizeof(pcd));
+            memset(&pcd, 0, sizeof(pcd));
+            memcpy(&pcd, msg.payload, std::min<size_t>(msg.size, sizeof(pcd)));
+            pcd.weapon_def_name[sizeof(pcd.weapon_def_name) - 1] = '\0';
             for (auto& p : m_pickups) {
                 if (p.id == pcd.pickup_id && p.world_index == pcd.world_index) {
                     p.active = false;
@@ -377,6 +401,7 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                     m_on_item_collected(pcd.item_id, pcd.quantity);
                 }
             }
+            pickups_changed = true;
             break;
         }
         case net::MessageType::XP_UPDATE: {
@@ -498,6 +523,48 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
         default:
             break;
     }
+
+    // Notify OUTSIDE the switch so no lock_guard from a case is still held. The
+    // snapshot is a copy: handing a consumer a reference into m_pickups is the
+    // same iterator-invalidation race npcs()/pickups() already had to be fixed
+    // for.
+    if (pickups_changed && m_on_pickups_changed) {
+        std::vector<ClientPickup> snapshot;
+        {
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            snapshot = m_pickups;
+        }
+        m_on_pickups_changed(snapshot);
+    }
+}
+
+void OmegaClient::request_pickup_resync() {
+    if (!m_client.is_connected()) return;
+
+    net::NetworkMessage msg{};
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESYNC);
+    msg.size = 0;
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    m_client.send_message(msg);
+}
+
+std::vector<int> OmegaClient::pickup_worlds() const {
+    const std::lock_guard<std::mutex> l(m_msg_mutex);
+    std::vector<int> out;
+    for (const auto& p : m_pickups) {
+        if (std::find(out.begin(), out.end(), p.world_index) == out.end())
+            out.push_back(p.world_index);
+    }
+    return out;
+}
+
+bool OmegaClient::has_pickup_world(int world_index) const {
+    const std::lock_guard<std::mutex> l(m_msg_mutex);
+    for (const auto& p : m_pickups)
+        if (p.world_index == world_index) return true;
+    return false;
 }
 
 void OmegaClient::on_connected() {
@@ -506,8 +573,16 @@ void OmegaClient::on_connected() {
 
 void OmegaClient::on_disconnected() {
     OZ_INFO("OmegaClient: disconnected from server");
+    const std::lock_guard<std::mutex> lock(m_msg_mutex);
     m_remote_players.clear();
     m_projectiles.clear();
+    // Pickups and in-flight collects are per-session server state. They used to
+    // survive a disconnect, so rejoining (or switching worlds) started from the
+    // previous server's list and any collect that had not been answered was
+    // still queued — granting an item for a pickup the new server never issued.
+    m_pickups.clear();
+    m_pending_collects.clear();
+    m_scores.clear();
 }
 
 std::string OmegaClient::consume_pending_scene_data() {

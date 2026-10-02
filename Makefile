@@ -352,7 +352,10 @@ test_master: tests/Master.test.cpp Source/Network/MasterProtocol.hpp
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ $(SERVER_LIBS)
 
-test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/World/GameType.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp Source/Network/Network.cpp Source/Log.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp
+# Client.cpp + PlayerProfile.cpp are raylib-free (Client.hpp only pulls
+# Network.hpp), so the pickup round-trip cases drive the REAL client handler and
+# the REAL auth handshake over loopback rather than a hand-rolled stub.
+test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/World/GameType.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp Source/Network/Network.cpp Source/Log.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Client/Client.cpp Source/PlayerProfile.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(SERVER_LIBS)
 
 test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp

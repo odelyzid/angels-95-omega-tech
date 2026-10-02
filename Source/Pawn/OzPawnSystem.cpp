@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 
 // ---------------------------------------------------------------------------
 // AssignLightZones — bind each light to the first zone volume that contains it.
@@ -439,6 +440,55 @@ PickupNode* PawnSystem::GetPickup(int id) {
         if (n.id == (uint32_t)id) return &n;
     }
     return nullptr;
+}
+
+void PawnSystem::ApplyPickupNetState(const std::vector<PickupNode>& net, int world_index) {
+    if (world_index < 0) return;   // unknown world: nothing to reconcile against
+
+    // Map the server's ids for this world once, rather than scanning the
+    // snapshot per drawn node.
+    std::unordered_map<int, bool> serverState;
+    for (const auto& n : net) {
+        if (n.netId < 0) continue;
+        serverState[n.netId] = n.active;
+    }
+    if (serverState.empty()) return;   // nothing known yet; leave the level alone
+
+    int hidden = 0, restored = 0, orphans = 0;
+    for (auto& n : m_pickups) {
+        // A node with no netId came from a script `spawn_pickup`, not the world
+        // file. The server never issued it, so leave local authority alone
+        // rather than hiding a scripted pickup that MP never owned.
+        if (n.netId < 0) continue;
+
+        auto it = serverState.find(n.netId);
+        if (it == serverState.end()) {
+            // Drawn but absent from the server's list. Either the server's world
+            // differs from ours, or its snapshot has not arrived yet — both are
+            // reported rather than silently blanking the pickup, because hiding
+            // on a partial snapshot is how a whole level disappears.
+            orphans++;
+            continue;
+        }
+        if (it->second) {
+            if (!n.active) { n.active = true; restored++; }
+        } else if (n.active) {
+            n.active = false;
+            // Stop the single-player respawn clock. In MP the server owns
+            // respawn and will send PICKUP_RESPAWN, so a local timer here would
+            // make the pickup reappear on a clock the server knows nothing about.
+            n.respawnTimer = 0.0f;
+            hidden++;
+        }
+    }
+
+    if (hidden || restored)
+        OZ_INFO("Pickups reconciled (world %d): %d hidden, %d restored",
+                world_index, hidden, restored);
+    if (orphans)
+        OZ_WARN("Pickups: %d drawn pickup(s) have no server entry in world %d "
+                "(world files differ, or the server snapshot has not arrived)",
+                orphans, world_index);
 }
 
 void PawnSystem::UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBounds) {

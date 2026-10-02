@@ -74,8 +74,11 @@ static void signal_handler(int) { g_running = false; }
 // ---------------------------------------------------------------------------
 // Server state management
 // ---------------------------------------------------------------------------
-static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
-                                    int world_index, const ServerPickup& p) {
+// Build the PICKUP_RESPAWN payload for one pickup. Single source of truth for
+// the three places that send it (join snapshot, respawn broadcast, re-sync
+// answer to a rejected collect) — they drifted once already, and a drifted
+// sender silently fails the client's size check and drops the message.
+static net::PickupRespawnData make_pickup_respawn(const ServerPickup& p, int world_index) {
     net::PickupRespawnData prd{};
     prd.pickup_id = p.id;
     prd.world_index = world_index;
@@ -85,6 +88,13 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
     // Zero-init matters: this path used to leave weapon_def_name uninitialised
     // and ship stack garbage on the wire.
     strncpy(prd.weapon_def_name, p.weapon_def_name, sizeof(prd.weapon_def_name) - 1);
+    strncpy(prd.typeName, p.typeName, sizeof(prd.typeName) - 1);
+    return prd;
+}
+
+static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
+                                    int world_index, const ServerPickup& p) {
+    net::PickupRespawnData prd = make_pickup_respawn(p, world_index);
     net::NetworkMessage msg{};
     msg.magic = net::MAGIC;
     msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
@@ -93,6 +103,26 @@ static void send_pickup_respawn_msg(const net::NetworkPlayer& player,
     msg.timestamp = static_cast<uint32_t>(time(nullptr));
     memcpy(msg.payload, &prd, sizeof(prd));
     g_game_server->send_message(const_cast<net::NetworkPlayer&>(player), msg);
+}
+
+// Re-send every ACTIVE pickup in one world to a single player. This is the
+// self-heal path: pickups are otherwise only sent on join and on respawn, so a
+// single lost UDP datagram left a pickup drawn on the floor that could never be
+// collected again for the rest of the session.
+//
+// Scoped to ONE world on purpose — the join snapshot walked every loaded world
+// (all shipped worlds are authored near the origin), which is a lot of traffic
+// for state the client cannot use. Each player gets the world it is standing in.
+static void send_pickup_snapshot(const net::NetworkPlayer& player, int world_index) {
+    int synced = 0;
+    g_game_state.for_each_active_pickup(world_index, [&](WorldState& ws, ServerPickup& p) {
+        (void)ws;
+        send_pickup_respawn_msg(player, world_index, p);
+        synced++;
+    });
+    if (synced)
+        OZ_INFO("Re-synced %d pickup(s) in world %d to player %s",
+                synced, world_index, player.name);
 }
 
 // World-list JSON for a joining player, clamped to the network payload size so
@@ -155,16 +185,12 @@ static void on_player_join(net::NetworkPlayer& player) {
 
     send_join_world_list(player);
 
-    // Sync active pickups (near-spawn first worlds)
-    int synced = 0;
-    for (int wi = 0; wi < g_game_state.world_count(); wi++) {
-        g_game_state.for_each_active_pickup(wi, [&](WorldState& ws, ServerPickup& p) {
-            (void)ws;
-            send_pickup_respawn_msg(player, wi, p);
-            synced++;
-        });
-    }
-    OZ_INFO("Synced %d pickups to player %s", synced, player.name);
+    // Sync active pickups. One world per player (the one they are in) rather
+    // than every loaded world — see send_pickup_snapshot for why, and the
+    // periodic re-sync in the main loop for the lost-datagram case.
+    ServerPlayer* sp = g_game_state.get_player(player.id);
+    const int wi = sp ? sp->world_index : 0;
+    send_pickup_snapshot(player, wi);
 }
 
 static void on_player_leave(net::NetworkPlayer& player) {
@@ -227,7 +253,25 @@ static void on_server_message(const net::NetworkMessage& msg,
             PickupType ptype;
             int pvalue;
             char weapon_def_name[64] = {0};
-            if (g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index, &ptype, &pvalue, weapon_def_name, sizeof(weapon_def_name))) {
+            PickupReject why = PickupReject::NONE;
+            if (!g_game_state.collect_pickup(sender.id, pcd.pickup_id, pcd.world_index,
+                                             &ptype, &pvalue, weapon_def_name,
+                                             sizeof(weapon_def_name), &why)) {
+                // Log the reason and the numbers. OUT_OF_RANGE is a legitimate
+                // thing for a laggy client to send; NOT_FOUND / WRONG_WORLD mean
+                // the two sides disagree about state and the re-sync below is what
+                // repairs it.
+                OZ_WARN("Pickup collect refused for %s (id=%d world=%d): %s",
+                        sender.name, pcd.pickup_id, pcd.world_index,
+                        pickup_reject_str(why));
+                // Answer a refusal with the current truth for the player's own
+                // world. Previously nothing came back at all, so a client whose
+                // list had drifted stayed wrong for the rest of the session.
+                ServerPlayer* rp = g_game_state.get_player(sender.id);
+                if (rp) send_pickup_snapshot(sender, rp->world_index);
+                break;
+            }
+            {
                 ServerPlayer* pl = g_game_state.get_player(sender.id);
                 if (pl) {
                     net::XpUpdateData xud;
@@ -294,6 +338,16 @@ static void on_server_message(const net::NetworkMessage& msg,
                 // Collector gets item; everyone gets deactivate via same message
                 g_game_server->broadcast_message(imsg);
             }
+            break;
+        }
+        case net::MessageType::PICKUP_RESYNC: {
+            // No payload: the server decides which world from its own player
+            // record rather than trusting a client-supplied index.
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
+            if (!sp) break;
+            OZ_INFO("Player %s requested a pickup re-sync (world %d)",
+                    sender.name, sp->world_index);
+            send_pickup_snapshot(sender, sp->world_index);
             break;
         }
         case net::MessageType::CHAT: {
@@ -960,13 +1014,7 @@ int main(int argc, char** argv) {
                         for (auto& p : ws->global_pickups)
                             if (p.id == rp.pickup_id) { pickup = &p; break; }
                     if (!pickup || !pickup->active) continue;
-                    net::PickupRespawnData prd;
-                    prd.pickup_id = pickup->id;
-                    prd.world_index = rp.world_index;
-                    prd.position = {pickup->position.x, pickup->position.y, pickup->position.z};
-                    prd.type = static_cast<int>(pickup->type);
-                    prd.value = pickup->value;
-                    strncpy(prd.weapon_def_name, pickup->weapon_def_name, sizeof(prd.weapon_def_name) - 1);
+                    net::PickupRespawnData prd = make_pickup_respawn(*pickup, rp.world_index);
                     net::NetworkMessage msg{};
                     msg.magic = net::MAGIC;
                     msg.type = static_cast<uint32_t>(net::MessageType::PICKUP_RESPAWN);
@@ -975,6 +1023,29 @@ int main(int argc, char** argv) {
                     msg.timestamp = static_cast<uint32_t>(time(nullptr));
                     memcpy(msg.payload, &prd, sizeof(prd));
                     g_game_server->broadcast_message(msg);
+                }
+            }
+
+            // Periodic pickup re-sync, per player, for that player's own world.
+            //
+            // Pickups are otherwise only sent on join and on respawn, and UDP
+            // gives no delivery guarantee: one lost PICKUP_RESPAWN left the
+            // client drawing a pickup the server had no record of, permanently
+            // uncollectable, with no error anywhere. 15 s is slow enough to be
+            // negligible traffic (~15 x 160 bytes per player) and fast enough
+            // that a lost packet costs a rounding error rather than a session.
+            {
+                static double lastPickupResync = 0.0;
+                constexpr double kPickupResyncInterval = 15.0;
+                double tnow = static_cast<double>(time(nullptr));
+                if (tnow - lastPickupResync >= kPickupResyncInterval) {
+                    lastPickupResync = tnow;
+                    for (const auto& p : g_game_server->players()) {
+                        if (!p.connected) continue;
+                        const ServerPlayer* sp = g_game_state.get_player(p.id);
+                        if (!sp) continue;
+                        send_pickup_snapshot(p, sp->world_index);
+                    }
                 }
             }
 

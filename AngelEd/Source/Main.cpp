@@ -2671,8 +2671,17 @@ int main(int argc, char **argv){
             // The surface program carries its own light uniforms, so a
             // surface-flagged brush would be lit by a stale light set without
             // this. Same lights, same order - one source of truth.
-            if (oz::SurfaceMaterial::Instance().Ready())
-                oz::SurfaceMaterial::Instance().UpdateFrame(pawnLights, OTEditor.MainCamera, dt);
+            if (oz::SurfaceMaterial::Instance().Ready()) {
+                float amb[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+                OzoneLoader::Instance().GetWorldAmbient(amb);
+                float fogCol[3] = {0.7f, 0.7f, 0.8f};
+                float fogStart = 10.0f, fogEnd = 100.0f, fogDensity = 1.0f, fogIntensity = 1.0f;
+                OzoneLoader::Instance().GetWorldFog(fogCol, fogStart, fogEnd,
+                                                    fogDensity, fogIntensity);
+                oz::SurfaceMaterial::Instance().SetFog(fogCol, fogStart, fogEnd,
+                                                       fogDensity, fogIntensity);
+                oz::SurfaceMaterial::Instance().UpdateFrame(pawnLights, OTEditor.MainCamera, dt, amb);
+            }
             if (OTEditor.ViewPosLoc >= 0) {
                 Vector3 camPos = OTEditor.MainCamera.position;
                 SetShaderValue(OTEditor.LitFogShader, OTEditor.ViewPosLoc, &camPos, SHADER_UNIFORM_VEC3);

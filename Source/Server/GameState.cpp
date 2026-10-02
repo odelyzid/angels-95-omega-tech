@@ -367,8 +367,15 @@ static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir)
             bool isWeapon = false;
             PickupType type = pickup_type_from_name(pr.entityType, isWeapon);
             ServerPickup pickup;
+            // LOCKSTEP: this id is the file-order index among ENTITY_PICKUP
+            // primitives and the client stamps the same number onto its drawn
+            // PickupNode::netId (Source/World/OzOzoneLoader.cpp). Both sides must
+            // keep walking the parsed primitives in file order, or a client's
+            // "collect pickup N" targets a different physical pickup.
             pickup.id = nextPickupId++;
             pickup.type = type;
+            strncpy(pickup.typeName, pr.entityType.c_str(), sizeof(pickup.typeName) - 1);
+            pickup.typeName[sizeof(pickup.typeName) - 1] = '\0';
             // Z-up → Y-up
             pickup.position = {pr.args[0], pr.args[2], pr.args[1]};
             pickup.value = pickup_default_value(type);
@@ -817,18 +824,27 @@ void GameState::tick_pickups(WorldState& ws, float dt) {
 
 bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_index,
                                PickupType* out_type, int* out_value,
-                               char* out_weapon_def_name, size_t weapon_def_name_len) {
+                               char* out_weapon_def_name, size_t weapon_def_name_len,
+                               PickupReject* out_reject) {
+    // Every early return below names its reason. A silent `return false` here is
+    // what made this bug undiagnosable from the outside.
+    auto reject = [&](PickupReject why) {
+        if (out_reject) *out_reject = why;
+        return false;
+    };
+    if (out_reject) *out_reject = PickupReject::NONE;
+
     ServerPlayer* player = get_player(player_id);
-    if (!player) return false;
+    if (!player) return reject(PickupReject::UNKNOWN_PLAYER);
 
     // The client's world index is not trusted: it must be the world the player
     // is actually standing in. Without this check a client can reach into any
     // loaded world (all worlds are authored near the origin, so several pickup
     // clusters sit within collect range of one another).
-    if (world_index != player->world_index) return false;
+    if (world_index != player->world_index) return reject(PickupReject::WRONG_WORLD);
 
     WorldState* ws = get_world(world_index);
-    if (!ws) return false;
+    if (!ws) return reject(PickupReject::UNKNOWN_WORLD);
 
     // Find the pickup in partitions or global
     ServerPickup* pickup = nullptr;
@@ -849,14 +865,14 @@ bool GameState::collect_pickup(uint32_t player_id, int pickup_id, int world_inde
             }
         }
     }
-    if (!pickup) return false;
+    if (!pickup) return reject(PickupReject::NOT_FOUND);
 
     // Distance validation — reject if player is too far from pickup
     float dx = player->position.x - pickup->position.x;
     float dy = player->position.y - pickup->position.y;
     float dz = player->position.z - pickup->position.z;
     float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-    if (dist > MAX_COLLECT_RANGE) return false;
+    if (dist > MAX_COLLECT_RANGE) return reject(PickupReject::OUT_OF_RANGE);
 
     // Write out-params before marking inactive
     if (out_type)  *out_type  = pickup->type;

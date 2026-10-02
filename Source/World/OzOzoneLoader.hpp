@@ -158,7 +158,19 @@ public:
     // loaded from <worldDir>/oztex/tileset/ first so texSlot indices resolve
     // (used by the editor's undo/redo snapshot restore).
     bool LoadString(const char* data, const char* worldDir = nullptr);
-    void Draw(Camera3D& camera);
+
+    // Editor "all renderables" pass.
+    //
+    // `cullBackfaces` is the caller's ViewMode-derived intent, passed in rather
+    // than inferred: AngelEd derives it from LightingMode, which this file must
+    // not know about (it also builds into worldcheck and the headless tests).
+    // The value is APPLIED through the shared tracked setter, not merely
+    // inherited, because the editor's culling call used to live inside its
+    // skybox block — a world with no skybox texture never set it and silently
+    // inherited the previous frame's state. Imported meshes drawn after this
+    // pass (PawnSystem::DrawEntities -> oz::Mesh::Draw) opt back out via
+    // oz::ScopedCullOff and restore this value; see Renderer/CullState.hpp.
+    void Draw(Camera3D& camera, bool cullBackfaces = true);
     void Unload();
 
     int Count() const { return (int)m_renderables.size(); }
@@ -278,6 +290,31 @@ public:
     // render with ambient/10 == 0.1.
     void SetWorldAmbient(float r, float g, float b, float a);
 
+    // Read back what SetWorldAmbient published.
+    //
+    // Exists because oz::SurfaceMaterial carries its OWN copy of the `ambient`
+    // uniform and must be fed the same value the world uses — a hardcoded
+    // {0.1,0.1,0.1,1} there lit every surface-flagged brush at a flat 0.1 no
+    // matter how bright the room was. Same "no GetShaderValue" reasoning as
+    // above: the value lives in our code precisely because it also has to be
+    // restorable, so reading it back is legitimate rather than a leak of GL state.
+    void GetWorldAmbient(float out[4]) const {
+        if (!out) return;
+        out[0] = m_worldAmbient[0];
+        out[1] = m_worldAmbient[1];
+        out[2] = m_worldAmbient[2];
+        out[3] = m_worldAmbient[3];
+    }
+
+    // Same story for the five fog uniforms. Core.hpp sets them on the LitFog
+    // program from three separate places (level defaults, zone entry, zone exit),
+    // and the surface program needs the same numbers. Owning the values here
+    // gives UpdateLightSources ONE mirror point instead of three that can drift.
+    void SetWorldFog(const float color[3], float start, float end,
+                     float density, float intensity = 1.0f);
+    void GetWorldFog(float colorOut[3], float& start, float& end,
+                     float& density, float& intensity) const;
+
     // Access loaded tileset textures by 0-based index (0=auto, 0+ = vector index-1)
     int TilesetCount() const { return (int)m_tilesetTex.size(); }
     Texture2D GetTilesetTex(int idx) const {
@@ -303,6 +340,11 @@ private:
     WorldChunkManager m_chunkManager;
     bool m_drawCollisionProxies = false;  // editor-only debug view of SURF_COLLISION_PROXY
     float m_worldAmbient[4] = {0.1f, 0.1f, 0.1f, 1.0f};  // see SetWorldAmbient
+    float m_worldFogColor[3] = {0.7f, 0.7f, 0.8f};      // see SetWorldFog
+    float m_worldFogStart = 10.0f;
+    float m_worldFogEnd = 100.0f;
+    float m_worldFogDensity = 1.0f;
+    float m_worldFogIntensity = 1.0f;
 
     // Heightmap state (set from OZONE heightmap primitive)
     bool m_hmReady = false;

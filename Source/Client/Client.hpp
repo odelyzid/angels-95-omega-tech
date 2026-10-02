@@ -28,7 +28,14 @@ struct ClientNPC {
     char npc_type[32] = {0}; // pawn def name (e.g. .Walker.), from server
 };
 
-// Client-side pickup representation
+// Client-side pickup representation.
+//
+// This is the CLIENT'S VIEW OF SERVER STATE, not the thing that gets drawn.
+// The drawn node is `PickupNode` inside PawnSystem (fed from World.ozone), and
+// the two are reconciled by netId — see PawnSystem::ApplyPickupNetState. Keeping
+// two lists was the original defect: a collect cleared `active` here, on a list
+// nothing renders, so the pickup stayed on the floor and every re-walk asked the
+// server for something it had already consumed.
 struct ClientPickup {
     int id;
     int world_index;
@@ -37,6 +44,9 @@ struct ClientPickup {
     int value = 0;
     bool active = true;
     char weapon_def_name[64] = {0};
+    // Authored World.ozone name, replicated as an optional tail. Empty when the
+    // server predates the field or the pickup came from the procedural fallback.
+    char typeName[64] = {0};
 };
 
 // Remote player representation (other players connected)
@@ -167,6 +177,28 @@ public:
         m_on_player_hurt = std::move(cb);
     }
 
+    // Fired whenever the server's pickup view changed (a respawn, a collect, a
+    // re-sync snapshot). The argument is a SNAPSHOT taken under m_msg_mutex and
+    // released before the callback runs — calling a consumer that touched the
+    // client again from inside the lock would deadlock. Consumers reconcile their
+    // drawn nodes from this; see PawnSystem::ApplyPickupNetState.
+    void set_on_pickups_changed(std::function<void(const std::vector<ClientPickup>&)> cb) {
+        m_on_pickups_changed = std::move(cb);
+    }
+
+    // Worlds the server has actually issued pickups for. Preferred over parsing
+    // the world list out of the SCENE_UPDATE JSON: this is stated by the server
+    // in the same packet that carries the pickups, so it cannot disagree with
+    // them. Empty means "no pickups known yet".
+    bool has_pickup_world(int world_index) const;
+
+    // Ask the server to re-send this player's pickup list for their own world.
+    // Cheap; the server answers with a full PICKUP_RESPAWN snapshot.
+    void request_pickup_resync();
+
+    // Worlds the server has issued pickups for (world indices only).
+    std::vector<int> pickup_worlds() const;
+
 private:
     net::NetworkClient m_client;
     std::string m_pending_scene;
@@ -192,6 +224,7 @@ private:
     std::function<void(int item_id, int quantity)> m_on_item_collected;
     std::function<void(const char* weapon_def_name)> m_on_weapon_collected;
     std::function<void(int damage, float remaining_health)> m_on_player_hurt;
+    std::function<void(const std::vector<ClientPickup>&)> m_on_pickups_changed;
     // Pickup collects we have requested but not yet seen acknowledged, keyed by
     // (pickup_id, world_index). A set rather than a single slot: overwriting one
     // entry with another used to drop the earlier grant on the floor even though

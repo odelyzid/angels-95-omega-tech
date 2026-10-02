@@ -13,6 +13,8 @@
 #include "Client/MasterList.hpp"
 #include "Renderer/EngineBillboard.hpp"
 #include "Renderer/ViewModel.hpp"
+#include "Renderer/PlayerModel.hpp"
+#include "Renderer/CullState.hpp"
 #include "Particle/OzParticleSimulationManager.hpp"
 #include "Pawn/AngelPlayer/PlayerController.hpp"
 #include "Script/LightningEntityRegistry.hpp"
@@ -77,7 +79,7 @@ int SetServerJoinPort = 27015;
 
 void LoadSave();
 void SaveGame();
-void DrawRemotePlayers3D();
+    void DrawRemotePlayers3D(Shader litShader);
 
 #include "Renderer/CombatFX.hpp"
 #include "Renderer/SurfaceMaterial.hpp"
@@ -273,6 +275,11 @@ auto LoadWorld()
         // letting DrawPickup hand DrawBillboard a dangling Texture2D id.
         EngineBillboard::InvalidateIconCache();
 
+        // Same reasoning for the player character: it resolves through the
+        // "Player" def, which the override pass above may have just replaced.
+        // Re-resolve rather than keep drawing the previous world's answer.
+        oz::PlayerModel::Instance().Invalidate();
+
         // World skybox: filesystem first, then packages (resolves "Skybox.png"
         // inside the world's .ozone container in packaged builds)
         {
@@ -416,14 +423,28 @@ void UpdateLightSources()
                              OmegaTechData.MainCamera, OmegaTechData.GameLights[0],
                              GetFrameTime());
 
-    // The surface program carries its OWN copy of the lights[]/viewPos/ambient
+    // The surface program carries its OWN copy of the lights[]/viewPos/ambient/fog
     // uniforms, so it has to be refreshed here too. Skipping it would light
     // surface-flagged brushes with whatever the previous world's lights were,
     // which is invisible in an empty map and baffling in a real one.
+    //
+    // Ambient and fog are read back from OzoneLoader, which owns them: the world
+    // pushes them to LitFog from several places (level defaults, zone entry,
+    // zone exit) and the surface program needs the SAME numbers, or a decorated
+    // brush disagrees with the room around it. Mirroring here means one place to
+    // keep in step instead of one per fog-setting site.
     if (oz::SurfaceMaterial::Instance().Ready()) {
+        float amb[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+        OzoneLoader::Instance().GetWorldAmbient(amb);
+        float fogCol[3] = {0.7f, 0.7f, 0.8f};
+        float fogStart = 10.0f, fogEnd = 100.0f, fogDensity = 1.0f, fogIntensity = 1.0f;
+        OzoneLoader::Instance().GetWorldFog(fogCol, fogStart, fogEnd,
+                                            fogDensity, fogIntensity);
+        oz::SurfaceMaterial::Instance().SetFog(fogCol, fogStart, fogEnd,
+                                               fogDensity, fogIntensity);
         oz::SurfaceMaterial::Instance().UpdateFrame(PawnSystem::Instance().GetLights(),
                                                 OmegaTechData.MainCamera,
-                                                GetFrameTime());
+                                                GetFrameTime(), amb);
     }
 }
 
@@ -690,6 +711,11 @@ void OmegaTechInit()
     SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &fogDensity, SHADER_UNIFORM_FLOAT);
     SetShaderValue(OmegaTechData.Lights, fogColorLoc, fogColor, SHADER_UNIFORM_VEC3);
     SetShaderValue(OmegaTechData.Lights, fogIntensityLoc, &fogIntensity, SHADER_UNIFORM_FLOAT);
+    // Publish the same defaults so the surface program starts in sync (its fog
+    // uniforms were previously never set at all and stayed at the GLSL defaults,
+    // which happened to match only by coincidence).
+    OzoneLoader::Instance().SetWorldFog(fogColor, fogStart, fogEnd,
+                                        fogDensity, fogIntensity);
 
     // uTime uniform for GPU light animation
     static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");
@@ -1294,7 +1320,7 @@ void DrawWorld()
         if (capTex.id > 0 || sideTex.id > 0) {
             Vector3 camPos = OmegaTechData.MainCamera.position;
             rlDisableDepthMask();
-            rlDisableBackfaceCulling();
+            oz::SetBackfaceCulling(false);
 
             // Top face (index 0) — at y=+1000, normal -Y (faces down)
             {
@@ -1385,7 +1411,11 @@ void DrawWorld()
                 }
                 rlPopMatrix();
             }
-            rlEnableBackfaceCulling();
+            // Culling ON for the rest of the frame: the generated OZONE brushes
+            // have correct winding and want it. Imported meshes opt back out via
+            // oz::ScopedCullOff in oz::Mesh::Draw (see Renderer/CullState.hpp —
+            // this used to be a raw call that nothing ever turned back off).
+            oz::SetBackfaceCulling(true);
             rlEnableDepthMask();
         }
     }
@@ -1480,7 +1510,7 @@ if (inSkyZone)
         CombatFX::Instance().Update(GetFrameTime());
         PawnSystem::Instance().DrawProjectiles(OmegaTechData.MainCamera, OmegaTechData.Lights);
         CombatFX::Instance().Draw3D(OmegaTechData.MainCamera);
-        DrawRemotePlayers3D();
+        DrawRemotePlayers3D(OmegaTechData.Lights);
     }
 
     if (Debug)
@@ -1671,6 +1701,9 @@ if (inSkyZone)
                     float fs = eo.fogStart, fe = eo.fogEnd;
                     SetShaderValue(OmegaTechData.Lights, fogStartLoc, &fs, SHADER_UNIFORM_FLOAT);
                     SetShaderValue(OmegaTechData.Lights, fogEndLoc, &fe, SHADER_UNIFORM_FLOAT);
+                    // Publish alongside the uniform so the surface program gets
+                    // the same fog from UpdateLightSources' single mirror point.
+                    OzoneLoader::Instance().SetWorldFog(fc, fs, fe, fd);
                     FogEnabled = true;
                     FogIntensity = (fd > 0) ? fd : 0.3f;
                     FogTint = {(unsigned char)eo.fogR, (unsigned char)eo.fogG, (unsigned char)eo.fogB, 255};
@@ -1706,7 +1739,10 @@ if (inSkyZone)
                     SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &defFogDensity, SHADER_UNIFORM_FLOAT);
                     SetShaderValue(OmegaTechData.Lights, fogStartLoc, &defFogStart, SHADER_UNIFORM_FLOAT);
                     SetShaderValue(OmegaTechData.Lights, fogEndLoc, &defFogEnd, SHADER_UNIFORM_FLOAT);
+                    OzoneLoader::Instance().SetWorldFog(defFogColor, defFogStart,
+                                                        defFogEnd, defFogDensity);
                 }
+                OzoneLoader::Instance().SetWorldAmbient(0.1f, 0.1f, 0.1f, 1.0f);
                 FogEnabled = false;
                 FogIntensity = 0.3f;
                 FogTint = {200, 200, 210, 255};

@@ -1,5 +1,6 @@
 #include "Mesh.hpp"
 #include "../../Package/PackageAssetLoader.hpp"
+#include "../CullState.hpp"
 #include "raymath.h"
 #include <cstddef>
 
@@ -102,6 +103,13 @@ void Mesh::Draw(const MeshTransform& t, Shader litShader) {
         }
     }
 
+    // Imported assets opt out of backface culling. The world pass turns culling
+    // on for the generated OZONE brushes (correct winding, and culling them is
+    // faster), but the FBX->glTF pipeline bakes a Z-up -> Y-up rotation into the
+    // character/pawn/weapon GLBs which flips triangle winding on a lot of them —
+    // drawn culled, those models vanish completely. Scoped, so the caller's
+    // state is restored rather than assumed.
+    ScopedCullOff noCull;
     DrawModelEx(m_model, t.position, {0.0f, 1.0f, 0.0f}, t.yaw, t.scale, WHITE);
 }
 
@@ -121,6 +129,7 @@ void Mesh::DrawSubmesh(int index, const MeshTransform& t, Shader litShader, Colo
     }
     mat.maps[MATERIAL_MAP_DIFFUSE].color = tint;
 
+    ScopedCullOff noCull;
     Matrix matScale = MatrixScale(t.scale.x, t.scale.y, t.scale.z);
     Matrix matRot   = MatrixRotateY(t.yaw * DEG2RAD);
     Matrix matTrans = MatrixTranslate(t.position.x, t.position.y, t.position.z);
@@ -134,6 +143,7 @@ void Mesh::DrawMatrix(const Matrix& transform, Shader litShader) {
         if (litShader.id > 0) m_model.materials[i].shader = litShader;
         else if ((size_t)i < m_baseShaders.size()) m_model.materials[i].shader = m_baseShaders[(size_t)i];
     }
+    ScopedCullOff noCull;
     for (int i = 0; i < m_model.meshCount; i++) {
         int mi = m_model.meshMaterial ? m_model.meshMaterial[i] : 0;
         if (mi < 0 || mi >= m_model.materialCount) mi = 0;

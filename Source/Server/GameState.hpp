@@ -160,6 +160,35 @@ constexpr const char* pickup_type_str(PickupType t) {
     }
 }
 
+// Why GameState::collect_pickup refused a request.
+//
+// Every failure used to be a bare `return false` with no log and no reply, which
+// turned "pickups do not work in multiplayer" into a four-way guess between an
+// unknown id, a stale world index, an already-consumed pickup and a distance
+// check — with nothing on either side of the wire to tell them apart. The enum
+// exists so the caller can name the reason, and so a refusal can be answered
+// with a re-sync of the player's own world.
+enum class PickupReject : uint8_t {
+    NONE = 0,
+    UNKNOWN_PLAYER,
+    WRONG_WORLD,     // client asked for a world the player is not in
+    UNKNOWN_WORLD,   // that world is not loaded on this server
+    NOT_FOUND,       // no such pickup, or it is already consumed
+    OUT_OF_RANGE,    // further than MAX_COLLECT_RANGE from the player
+};
+
+constexpr const char* pickup_reject_str(PickupReject r) {
+    switch (r) {
+        case PickupReject::NONE:           return "none";
+        case PickupReject::UNKNOWN_PLAYER: return "unknown player";
+        case PickupReject::WRONG_WORLD:    return "world index is not the player's world";
+        case PickupReject::UNKNOWN_WORLD:  return "world not loaded on this server";
+        case PickupReject::NOT_FOUND:      return "no such pickup, or already collected";
+        case PickupReject::OUT_OF_RANGE:   return "out of collect range";
+    }
+    return "?";
+}
+
 constexpr int pickup_default_value(PickupType t) {
     switch (t) {
         case PickupType::HEALTH:   return 25;
@@ -205,6 +234,12 @@ struct ServerPickup {
     bool active = true;          // visible and collectable
     bool respawnable = true;
     char weapon_def_name[64] = {0}; // for WEAPON pickups
+    // Authored pickup name from the World.ozone line ("HealthVial", "rifle_01",
+    // ...). Replicated as the optional tail of PickupRespawnData so a client can
+    // tell "the server has this pickup" from "I am drawing a node the server
+    // never issued", which is otherwise indistinguishable. Empty for the
+    // procedural fallback worlds.
+    char typeName[64] = {0};
 };
 
 // ---------------------------------------------------------------------------
@@ -302,10 +337,12 @@ public:
     // Pickup tick
     void tick_pickups(WorldState& ws, float dt);
 
-    // Collect a pickup
+    // Collect a pickup. `out_reject` (optional) receives the reason on failure;
+    // it is set to NONE on success. Never dereference it on a `true` return.
     bool collect_pickup(uint32_t player_id, int pickup_id, int world_index,
                         PickupType* out_type = nullptr, int* out_value = nullptr,
-                        char* out_weapon_def_name = nullptr, size_t weapon_def_name_len = 0);
+                        char* out_weapon_def_name = nullptr, size_t weapon_def_name_len = 0,
+                        PickupReject* out_reject = nullptr);
     void respawn_pickup(WorldState& ws, ServerPickup& pickup);
 
     // Enumerate active pickups (for join sync)

@@ -141,17 +141,32 @@ struct RemoteAnimState {
     int clip = -1;
 };
 
-void DrawRemotePlayers3D() {
+void DrawRemotePlayers3D(Shader litShader) {
     if (!g_network_enabled || !g_client.is_connected()) return;
 
-    // Shared player character (Player def model, else the Player convention).
-    // STUB: falls back to the primitive capsule when no model loads.
+    // Shared player character. oz::PlayerModel walks a fallback chain, so a
+    // remote player is a model unless every rung failed — in which case we draw
+    // a primitive placeholder rather than nothing.
     auto& pm = oz::PlayerModel::Instance();
     oz::Mesh* mesh = pm.Get();
     oz::SkeletalMesh* skel = pm.Skeletal();
     const bool animated = skel != nullptr;
     const EntityDef* pdef = LightningEntityRegistry::Instance().Find("Player");
     const float dt = GetFrameTime();
+
+    // Scale the character to the local player's collision silhouette. The
+    // character GLBs are authored in metres while PlayerMovement::Height is 3.0,
+    // so drawing them unscaled leaves remote players at roughly half size.
+    // A `model_height` stat on the Player def overrides the target; a NEGATIVE
+    // value means "draw at the authored scale, do not normalise".
+    float modelScale = pm.NormalisedScale(g_playerMovement.Height);
+    if (pdef) {
+        auto mh = pdef->stats.floats.find("model_height");
+        if (mh != pdef->stats.floats.end()) {
+            if (mh->second < 0.0f) modelScale = 1.0f;
+            else if (mh->second > 0.0f) modelScale = pm.NormalisedScale(mh->second);
+        }
+    }
 
     static std::unordered_map<uint32_t, RemoteAnimState> anim;
     const auto& players = g_client.remote_players();
@@ -190,8 +205,12 @@ void DrawRemotePlayers3D() {
             // Replicated crouch: squash the model from the feet so it reads as
             // a lowered stance (static stub - no skeletal crouch clip yet).
             float yScale = (rp.stance == net::STANCE_CROUCH) ? 0.65f : 1.0f;
-            mt.scale = {1.0f, yScale, 1.0f};
-            pm.DrawInstance(mt, {0}, clip, clipTime);
+            mt.scale = {modelScale, modelScale * yScale, modelScale};
+            // Real lit shader, not {0}: passing a zero Shader made oz::Mesh fall
+            // back to the model's own materials, so remote players were drawn
+            // outside the game's lighting pass and read as unlit/invisible in a
+            // dim room while every other mesh in the scene was lit.
+            pm.DrawInstance(mt, litShader, clip, clipTime);
         } else {
             // Fallback capsule scaled to the local player box so remote avatars
             // match the collision silhouette (body Height, width/2 radius).
@@ -625,6 +644,32 @@ int main(int argc, char** argv){
         InventoryBehaviour::Instance().OnWeaponCollected(weapon_def_name);
     });
 
+    // The server's pickup list drives the DRAWN PickupNodes. Without this the
+    // networked collect only flipped `active` on OmegaClient's own copy of the
+    // list, which nothing renders — so a collected pickup stayed on the floor and
+    // every walk back over it re-requested something already consumed.
+    g_client.set_on_pickups_changed([](const std::vector<ClientPickup>& snapshot) {
+        // Convert to PickupNode so PawnSystem stays unaware of the wire type.
+        //
+        // Filtered to OUR world here, on purpose: pickup ids restart at 0 in every
+        // world, so a snapshot holding several worlds would collide (world 1's
+        // pickup 3 and world 0's pickup 3 are different things with the same id)
+        // and whichever came last would win. The filter lives next to
+        // cp.world_index so the collision is visible.
+        std::vector<PickupNode> net;
+        net.reserve(snapshot.size());
+        for (const auto& cp : snapshot) {
+            if (cp.world_index != g_network_world_index) continue;
+            PickupNode n;
+            n.netId    = cp.id;
+            n.position = {cp.position.x, cp.position.y, cp.position.z};
+            n.active   = cp.active;
+            n.typeName = cp.typeName;
+            net.push_back(std::move(n));
+        }
+        PawnSystem::Instance().ApplyPickupNetState(net, g_network_world_index);
+    });
+
     // Ammo changes (fire/reload) are reported to the server for remote sync.
     LightningEntityManager::Instance().set_on_ammo_changed([](int slot, int ammo, int magazine, int action) {
         if (g_network_enabled) g_client.send_weapon_ammo(slot, ammo, magazine, action);
@@ -658,6 +703,13 @@ int main(int argc, char** argv){
         // worlds by their position in the "worlds":[...] array it sent, so the
         // index is that array position — this is the id the pickup/NPC packets
         // carry and the only one collect_pickup() will accept.
+        //
+        // On a parse miss we leave the previous value in place and ask for a
+        // pickup re-sync. This used to assign -1, which made PickupPawns'
+        // `p.world_index != local_world` filter reject EVERY pickup and the
+        // server's own world check reject every collect — silently, with no log,
+        // no request ever sent, and pickups drawn on the floor that could not be
+        // picked up. A stale-but-plausible index is strictly better than -1.
         {
             static const std::string wkey = "\"worlds\":[";
             size_t wpos = sceneJson.find(wkey);
@@ -676,7 +728,10 @@ int main(int argc, char** argv){
                     ++idx;
                     if (p < sceneJson.size()) ++p;
                 }
-                if (!found) g_network_world_index = -1;
+                if (!found)
+                    OZ_WARN("Network: active world '%s' is not in the server's world list — "
+                            "keeping world index %d",
+                            activeWorld.c_str(), g_network_world_index);
             }
         }
 
@@ -1077,8 +1132,11 @@ int main(int argc, char** argv){
                                                    g_playerMovement.isCrouching, g_playerMovement.isSprinting);
 
         // Screen flash on pickup collect (fades out). Driven by
-        // PawnSystem::m_pickupFeedback, which both the walk-over path
-        // (UpdatePickups) and the networked collect reply now set.
+        // PawnSystem::m_pickupFeedback. In SP the walk-over path sets it; in MP
+        // the grant path InventoryBehaviour::OnItemCollected sets it when the
+        // server's PICKUP_COLLECTED arrives. (This comment used to claim the
+        // networked reply set it directly — it does not, and the flash is why
+        // that indirection matters.)
         {
             auto& fb = PawnSystem::Instance().m_pickupFeedback;
             if (fb.flashTimer > 0.0f) {

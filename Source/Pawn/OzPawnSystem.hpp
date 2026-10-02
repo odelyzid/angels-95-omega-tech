@@ -197,6 +197,22 @@ struct ProjectileNode {
 // Pickup node - collectible items in the world
 struct PickupNode {
     uint32_t id = 0;
+    // Server-side pickup id for this node, or -1 when it has none.
+    //
+    // `id` above is a LOCAL handle from a counter shared with every other entity
+    // type, so it is meaningless to the server. In multiplayer the server owns
+    // pickup state, so the drawn node has to be reconcilable against the server's
+    // list or a collect never hides it (the mesh stays on the floor and every
+    // re-walk re-requests an already-consumed pickup).
+    //
+    // LOCKSTEP REQUIREMENT: this is stamped with the file-order index of the
+    // ENTITY_PICKUP primitive in World.ozone, which must match the numbering
+    // GameState::seed_world_entities assigns (`nextPickupId++`, Server/
+    // GameState.cpp). Both sides walk the same parsed primitives in the same
+    // order, so the Nth pickup line is id N on both — but that only holds while
+    // both enumerations stay in file order. tests/GameState.test.cpp asserts the
+    // server side is 0..N-1 to catch a reordering here.
+    int netId = -1;
     Vector3 position{0, 0, 0};
     std::string typeName;   // e.g., "HealthVial", "ManaVial", "EnergyCrystal", "Key", "Coin", "Powerup"
     bool active = true;
@@ -363,6 +379,26 @@ public:
     const std::vector<PickupNode>& GetPickups() const { return m_pickups; }
     PickupNode* GetPickup(int id);
     void UpdatePickups(float dt, Vector3 playerPos, BoundingBox playerBounds);
+
+    // Reconcile the DRAWN pickup nodes against the server's pickup state
+    // (multiplayer only). `net` is the client's view of the server's list; see
+    // Client.hpp's ClientPickup.
+    //
+    // Why this exists: the networked collect used to flip `active` on
+    // OmegaClient's own copy of the list, which nothing renders. The node the
+    // player actually sees stayed `active` forever, so the mesh never vanished
+    // and every walk back over it re-requested a pickup the server had already
+    // consumed. The server's state is the truth in MP, so it drives the nodes.
+    //
+    // Matching is by `netId`, not by id: `PickupNode::id` is a local handle
+    // from a counter shared with every other entity type.
+    //
+    // `net` MUST already be scoped to ONE world. Pickup ids restart at 0 per
+    // world, so a multi-world snapshot collides on id and the last one silently
+    // wins. The caller filters on `world_index` (Main.cpp's
+    // set_on_pickups_changed lambda, next to the field that makes it visible);
+    // the parameter here is for logging only.
+    void ApplyPickupNetState(const std::vector<PickupNode>& net, int world_index);
 
     // Zone volumes, level portals and player region tracking live in
     // World/ZoneManager.hpp (ZoneManager::Instance()).

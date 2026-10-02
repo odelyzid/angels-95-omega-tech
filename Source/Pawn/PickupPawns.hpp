@@ -7,8 +7,10 @@ class OmegaClient;
 //
 // Owns the throttled auto-collect loop (E key / walk-over) that queries the
 // server-replicated pickup list and sends collect requests. Local/offline
-// pickups remain owned by PawnSystem::UpdatePickups (Authoritative pickups are
-// granted server-side; this handler only asks the server to collect).
+// pickups remain owned by PawnSystem::UpdatePickups. Authoritative pickups are
+// granted server-side; this handler only asks the server to collect, and the
+// server's answer drives what is drawn via OmegaClient::set_on_pickups_changed
+// -> PawnSystem::ApplyPickupNetState.
 class PickupPawns {
 public:
     static PickupPawns& Instance() {
@@ -31,7 +33,14 @@ private:
     static constexpr float kInteractRange = 5.0f;
     static constexpr float kWalkoverRange = 2.0f;
 
+    // How long to wait before asking the server to re-send its pickup list. Only
+    // fires when we are connected, we have local pickups to collect, and we have
+    // none from the server — i.e. exactly the "pickups do not work in MP" state
+    // that used to be indistinguishable from "nothing is nearby".
+    static constexpr double kResyncInterval = 5.0;
+
     OmegaClient* m_client = nullptr;
     double m_lastCollectTry = 0.0;
+    double m_lastResyncTry = -1e9;   // negative so the first frame may try
+    bool m_warnedNoWorld = false;
 };
-

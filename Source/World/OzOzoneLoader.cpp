@@ -3,6 +3,7 @@
 #include "OzoneFrustum.hpp"
 #include "../Renderer/OzAssetMapper.hpp"
 #include "../Renderer/SurfaceMaterial.hpp"
+#include "../Renderer/CullState.hpp"
 #include "../Pawn/OzPawnSystem.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
 #include "OzoneParser.hpp"
@@ -145,6 +146,10 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 node.position = {prim.args[0], prim.args[2], prim.args[1]};
                 node.typeName = prim.entityType;
                 if (prim.args.size() >= 4) node.respawnTime = prim.args[3];
+                // Server id = file-order index among ENTITY_PICKUP primitives.
+                // Must stay in lockstep with seed_world_entities' nextPickupId++;
+                // see the PickupNode::netId comment for why.
+                node.netId = (int)out.pickups.size();
                 out.pickups.push_back(node);
             }
             return true;
@@ -1302,9 +1307,14 @@ static inline void DrawRenderable(OzoneRenderable& r) {
 }
 
 // ---------------------------------------------------------------------------
-// Draw â€” all renderables (backward compat, used by editor)
+// Draw — all renderables (backward compat, used by editor)
 // ---------------------------------------------------------------------------
-void OzoneLoader::Draw(Camera3D& camera) {
+void OzoneLoader::Draw(Camera3D& camera, bool cullBackfaces) {
+    // Establish the frame's culling intent explicitly rather than inheriting it
+    // from whatever ran before. See the declaration in OzOzoneLoader.hpp for why
+    // the editor passes this in instead of the skybox block setting it.
+    oz::SetBackfaceCulling(cullBackfaces);
+
     FrustumPlane planes[6];
     BuildFrustum(camera, planes);
     for (auto& r : m_renderables) {
@@ -1915,6 +1925,32 @@ void OzoneLoader::SetWorldAmbient(float r, float g, float b, float a) {
     m_worldAmbient[1] = g;
     m_worldAmbient[2] = b;
     m_worldAmbient[3] = a;
+}
+
+void OzoneLoader::SetWorldFog(const float color[3], float start, float end,
+                              float density, float intensity) {
+    if (color) {
+        m_worldFogColor[0] = color[0];
+        m_worldFogColor[1] = color[1];
+        m_worldFogColor[2] = color[2];
+    }
+    m_worldFogStart = start;
+    m_worldFogEnd = end;
+    m_worldFogDensity = density;
+    m_worldFogIntensity = intensity;
+}
+
+void OzoneLoader::GetWorldFog(float colorOut[3], float& start, float& end,
+                              float& density, float& intensity) const {
+    if (colorOut) {
+        colorOut[0] = m_worldFogColor[0];
+        colorOut[1] = m_worldFogColor[1];
+        colorOut[2] = m_worldFogColor[2];
+    }
+    start = m_worldFogStart;
+    end = m_worldFogEnd;
+    density = m_worldFogDensity;
+    intensity = m_worldFogIntensity;
 }
 
 // ---------------------------------------------------------------------------
