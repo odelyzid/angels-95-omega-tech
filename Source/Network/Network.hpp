@@ -98,7 +98,12 @@ enum class MessageType : uint32_t {
     // Server -> client: the profile the server actually accepted for this
     // player, after sanitising and de-duplicating it. The client's requested
     // values are advisory, so it must echo this rather than assume its own.
-    PROFILE_STATE = 24
+    PROFILE_STATE = 24,
+    // Server -> client: per-player score + team + match-over flag. Additive
+    // optional field; old clients hit the default case and ignore it.
+    // PROTOCOL_VERSION stays at 2 — a new MessageType is forward/backward
+    // compatible by definition.
+    SCORE_STATE = 25
 };
 
 // Melee stamina: the server keeps its own pool per player so a swinging client
@@ -329,6 +334,14 @@ struct MeleeHitData {
 
 struct ChatData {
     char text[256];
+};
+
+struct ScoreStateData {
+    uint32_t player_id;
+    int32_t  score;
+    int32_t  team;          // server-assigned, authoritative
+    int32_t  winningTeam;   // -1 when match not over
+    uint8_t  matchOver;
 };
 
 struct CommandData {

@@ -26,6 +26,11 @@ public:
         m_feedbackSink = std::move(sink);
     }
 
+    // Set the OmegaClient instance for scoreboard rendering. Called once from
+    // Main.cpp after the client is created; the client is a file-static there,
+    // not a singleton.
+    void SetClient(class OmegaClient* client) { m_client = client; }
+
     // Consume one backpack item and apply its effect. Returns true if used.
     bool UseBackpackItem(int slot);
 
@@ -43,6 +48,8 @@ private:
     InventoryBehaviour() = default;
 
     void Emit(const std::string& msg);
+
+    class OmegaClient* m_client = nullptr;  // scoreboard rendering; not owned
 
     int m_selectedBpSlot = -1;
     std::function<void(const std::string&)> m_messageSink;

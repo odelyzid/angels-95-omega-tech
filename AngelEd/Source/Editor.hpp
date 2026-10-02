@@ -1,6 +1,7 @@
 #include "PPGIO.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Renderer/EngineBillboard.hpp"
+#include "../../Source/Renderer/SurfaceMaterial.hpp"
 #include "../../Source/World/OzOzoneLoader.hpp"
 #include "../../Source/Script/LightningEntityRegistry.hpp"
 #include <cstring>
@@ -267,6 +268,14 @@ void Init(){
 
     // Initialize engine billboard system
     EngineBillboard::Init();
+
+    // Per-face surface shader. The editor resolves shaders through OTEditor.Path
+    // (which is the GameData parent when cwd=System/), so reuse it rather than
+    // hardcoding a path that only works from the repo root.
+    {
+        std::string sdir = std::string(OTEditor.Path) + "Shaders/";
+        oz::SurfaceMaterial::Instance().Init(sdir.c_str());
+    }
 
     if (IsPathFile(TextFormat("%s/Models/HeightMap.png", OTEditor.Path)))
     {

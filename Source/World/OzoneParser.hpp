@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstdint>
 #include "../Physics/PhysicsInfo.hpp"
+#include "SurfaceFlags.hpp"
 
 // Standalone .ozone parser - no raylib dependency.
 // Parses the OZONE text format used by the OzWorld editor.
@@ -31,6 +32,7 @@ enum class OzonePrimitiveType : uint8_t {
     ENTITY_PARTICLE_EMITTER, // GameEngine.ParticleEmitter (local 3D particles)
     ENTITY_PATH_NODE,    // GameEngine.PathNode (NPC waypoint)
     ENTITY_WIND_ZONE,    // WindZone (foliage wind region)
+    SKYBOX,             // skybox (projected inner faces, render-only)
     HEIGHTMAP,           // Terrain heightmap (grayscale image)
     UNKNOWN
 };
@@ -64,6 +66,15 @@ struct OzonePrimitive {
     int  lightEffect = -1;          // LitLightEffect index
     int  lightFlare  = -1;          // 0/1
     int  lightCorona = -1;          // 0/1
+    // levelinfo: optional `gametype=<name>` kwarg in the tail. Overrides the
+    // positional arg(0) when it resolves to a known mode; unknown names warn
+    // and fall back to arg(0) rather than silently becoming 0.
+    std::string gametypeKey;
+    // Brush surface state: a brush-wide default plus up to six per-face
+    // overrides, parsed from the `face<name>_<field>=` kwargs. See
+    // World/SurfaceFlags.hpp for the bit allocation and the face/axis mapping.
+    // Raylib-free, so the server's worldcheck and tests can inspect it.
+    oz::surface::BrushSurface surface;
 };
 
 class OzoneParser {
@@ -71,5 +82,10 @@ public:
     static std::vector<OzonePrimitive> parse_file(const std::string& path);
     static std::vector<OzonePrimitive> parse_string(const std::string& content);
 };
+
+// Strip surrounding quote characters (U+0022) from a string if present.
+// Shared by OzOzoneLoader and GameState so both strip levelinfo paths
+// identically. External linkage (not static) so it links across TUs.
+std::string StripQuotes(std::string s);
 
 #endif // OMEGA_OZONE_PARSER_HPP

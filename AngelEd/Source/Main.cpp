@@ -72,7 +72,9 @@ enum EditorMenuCmd {
     IDM_DUPLICATE_ENTITY,
     IDM_CANCEL,
     IDM_APPLY_TEXTURE,
-    IDM_APPEND_AUTOCONVEX,
+IDM_APPEND_AUTOCONVEX,
+IDM_SURFACE_PROPS,
+IDM_SURFACE_RESET,
 };
 
 // Box budget for one "Append AutoConvex Collision" run. Past this the command
@@ -101,6 +103,15 @@ struct EditorSelection {
     Vector3 pos{0,0,0};
     float scale = 1.0f;
     float rotation = 0.0f;
+    // True only when `rotation` above was actually populated by the raycast
+    // that produced this selection. Most entity types have no yaw concept at
+    // all (zones, pickups, lights, portals), so they leave `rotation` at its
+    // 0.0f default. The properties panel still seeds a "Rot" row from that
+    // default, and the apply handler used to write it straight back - which
+    // silently reset the authored `playerstart` yaw to 0 on any Apply. Same
+    // trap as scale. Anything that consumes `rotation` on write must gate on
+    // this flag.
+    bool hasRotation = false;
 };
 static EditorSelection g_sel;       // left-click selected (red)
 static EditorSelection g_hoverSel;  // mouse hover (yellow)
@@ -114,7 +125,7 @@ static bool g_lbDown = false;
 static Vector2 g_lbDownPos{0,0};
 
 // Gizmo drag: moving a SELECTED entity requires an intentional gesture (Move
-// tool active, or the press landing on the selection) — a plain viewport click
+// tool active, or the press landing on the selection) â€” a plain viewport click
 // must never translate it. g_suppressViewportDrag swallows stale mouse input
 // for the frame(s) around a native context menu.
 static bool g_gizmoDrag = false;
@@ -159,7 +170,7 @@ static RayCollision RaycastTestOzPrimitives(Ray ray, EditorSelection& out) {
             // Store ACTUAL mesh center as selection position, not r->position
             Vector3 center = {(wMin.x + wMax.x) * 0.5f, (wMin.y + wMax.y) * 0.5f, (wMin.z + wMax.z) * 0.5f};
             out = { SelType::BRUSH, i, TextFormat("OzPrimitive %d", i),
-                    center, r->scale, r->rotation * RAD2DEG }; // UI works in degrees
+                    center, r->scale, r->rotation * RAD2DEG, true }; // UI works in degrees
         }
     }
     return best;
@@ -180,7 +191,7 @@ static RayCollision RaycastTestModels(Ray ray, EditorSelection& out) {
         RayCollision hit = GetRayCollisionBox(ray, box);
         if (hit.hit && hit.distance < best.distance) {
             best = hit;
-            out = { SelType::MODEL, i, TextFormat("Model%d", mid), pos, sx, CachedModels[i].R };
+            out = { SelType::MODEL, i, TextFormat("Model%d", mid), pos, sx, CachedModels[i].R, true };
         }
     }
     return best;
@@ -223,7 +234,7 @@ static RayCollision RaycastTestZones(Ray ray, EditorSelection& out) {
     auto& zones = ZoneManager::Instance().GetZones();
     Vector3 camPos = OTEditor.MainCamera.position;
     for (auto& z : zones) {
-        // Skip zones containing the camera — can't select the boundary you're inside
+        // Skip zones containing the camera â€” can't select the boundary you're inside
         if (camPos.x >= z.bounds.min.x && camPos.x <= z.bounds.max.x &&
             camPos.y >= z.bounds.min.y && camPos.y <= z.bounds.max.y &&
             camPos.z >= z.bounds.min.z && camPos.z <= z.bounds.max.z)
@@ -270,7 +281,7 @@ static RayCollision RaycastTestStarts(Ray ray, EditorSelection& out) {
         RayCollision hit = GetRayCollisionBox(ray, box);
         if (hit.hit && hit.distance < best.distance) {
             best = hit;
-            out = { SelType::SPAWN, (int)s.id, "PlayerStart", s.position };
+            out = { SelType::SPAWN, (int)s.id, "PlayerStart", s.position, 1.0f, s.yaw, true };
         }
     }
     return best;
@@ -320,7 +331,7 @@ static RayCollision RaycastTestMeshObjects(Ray ray, EditorSelection& out) {
             best = hit;
             out = { SelType::MESH, (int)n.id,
                     n.skeletal ? "Mesh.Skeletal" : "Mesh.Static",
-                    center, n.scale, n.yaw };
+                    center, n.scale, n.yaw, true };
         }
     }
     return best;
@@ -336,7 +347,7 @@ static RayCollision RaycastTestParticleEmitters(Ray ray, EditorSelection& out) {
         RayCollision hit = GetRayCollisionBox(ray, box);
         if (hit.hit && hit.distance < best.distance) {
             best = hit;
-            out = { SelType::PARTICLE, (int)e.id, "ParticleEmitter", e.position, 1.0f, e.yaw };
+            out = { SelType::PARTICLE, (int)e.id, "ParticleEmitter", e.position, 1.0f, e.yaw, true };
         }
     }
     return best;
@@ -419,6 +430,117 @@ static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     out = bestSel;
     return best.hit;
 }
+
+// ---------------------------------------------------------------------------
+// Per-face surface picking (UT99-style: right-click a FACE, not a brush)
+//
+// The brush raycast above only returns the renderable, so Surface Properties
+// had no idea which of the six faces was clicked. This intersects the actual
+// triangles of the renderable's mesh and derives the face from the dominant
+// axis of the hit triangle's normal - the same rule SurfaceMaterial's per-face
+// mesh split uses, so the face the user clicks is provably the face whose
+// properties the dialog will edit.
+//
+// Self-contained Moeller-Trumbore rather than raylib's triangle helper, which
+// is not part of the public API in every supported raylib version.
+// ---------------------------------------------------------------------------
+struct SurfaceFacePick {
+    bool hit = false;
+    int  renderable = -1;
+    oz::surface::SurfaceFace face = oz::surface::FACE_NONE;
+    Vector3 point{0, 0, 0};
+    Vector3 normal{0, 1, 0};
+    float  distance = 0.0f;
+};
+
+static bool RayTri(const Ray& ray, const Vector3& v0, const Vector3& v1, const Vector3& v2,
+                   float& tOut, Vector3& nOut) {
+    const Vector3 e1 = Vector3Subtract(v1, v0);
+    const Vector3 e2 = Vector3Subtract(v2, v0);
+    const Vector3 p = Vector3CrossProduct(ray.direction, e2);
+    const float det = Vector3DotProduct(e1, p);
+    if (fabsf(det) < 1e-8f) return false;          // parallel
+    const float invDet = 1.0f / det;
+    const Vector3 tv = Vector3Subtract(ray.position, v0);
+    const float u = Vector3DotProduct(tv, p) * invDet;
+    if (u < 0.0f || u > 1.0f) return false;
+    const Vector3 q = Vector3CrossProduct(tv, e1);
+    const float v = Vector3DotProduct(ray.direction, q) * invDet;
+    if (v < 0.0f || u + v > 1.0f) return false;
+    const float t = Vector3DotProduct(e2, q) * invDet;
+    if (t <= 1e-4f) return false;                  // behind the camera
+    tOut = t;
+    nOut = Vector3Normalize(Vector3CrossProduct(e1, e2));
+    return true;
+}
+
+static SurfaceFacePick PickSurfaceFace(Vector2 mousePos) {
+    SurfaceFacePick best;
+    Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
+    int count = OzoneLoader::Instance().Count();
+    for (int i = 0; i < count; i++) {
+        OzoneRenderable* r = OzoneLoader::Instance().Get(i);
+        if (!r || !r->loaded || r->model.meshCount == 0) continue;
+        Mesh& m = r->model.meshes[0];
+        if (!m.vertices || !m.indices) continue;
+        for (int t = 0; t < m.triangleCount; t++) {
+            unsigned short i0 = m.indices[t * 3 + 0];
+            unsigned short i1 = m.indices[t * 3 + 1];
+            unsigned short i2 = m.indices[t * 3 + 2];
+            if ((int)i0 >= m.vertexCount || (int)i1 >= m.vertexCount ||
+                (int)i2 >= m.vertexCount) continue;
+            Vector3 a, b, c;
+            // Local -> world, matching Draw()/DrawSurface(): position + scale,
+            // yaw about Y. Picking in local space instead would report the
+            // wrong face on any rotated brush.
+            float rad = r->rotation;
+            float cs = cosf(rad), sn = sinf(rad);
+            const float* vs[3] = { m.vertices + (size_t)i0 * 3,
+                                   m.vertices + (size_t)i1 * 3,
+                                   m.vertices + (size_t)i2 * 3 };
+            Vector3 out[3];
+            for (int k = 0; k < 3; k++) {
+                float lx = vs[k][0] * r->scale;
+                float ly = vs[k][1] * r->scale;
+                float lz = vs[k][2] * r->scale;
+                out[k] = { r->position.x + (lx * cs + lz * sn),
+                           r->position.y + ly,
+                           r->position.z + (-lx * sn + lz * cs) };
+            }
+            a = out[0]; b = out[1]; c = out[2];
+            float dist = 0.0f; Vector3 n{0, 1, 0};
+            if (!RayTri(ray, a, b, c, dist, n)) continue;
+            if (best.hit && dist >= best.distance) continue;
+            best.hit = true;
+            best.renderable = i;
+            best.distance = dist;
+            best.normal = n;
+            best.point = Vector3Add(ray.position, Vector3Scale(ray.direction, dist));
+            // The triangle normal is in world space and the buckets are engine
+            // Y-up, so no axis swap here.
+            best.face = oz::surface::FaceFromNormal(n.x, n.y, n.z);
+        }
+    }
+    return best;
+}
+
+// Enter selection adds to the current set instead of replacing it, which is how
+// the "(N Selected)" count in the context menu is built up. Plain left-click
+// still replaces, so ordinary picking is unchanged.
+static std::vector<SurfaceFacePick> g_selectedSurfaces;
+
+static void ToggleSurfacePick(const SurfaceFacePick& sp) {
+    for (size_t i = 0; i < g_selectedSurfaces.size(); i++) {
+        if (g_selectedSurfaces[i].renderable == sp.renderable &&
+            g_selectedSurfaces[i].face == sp.face) {
+            g_selectedSurfaces.erase(g_selectedSurfaces.begin() + i);
+            return;
+        }
+    }
+    g_selectedSurfaces.push_back(sp);
+}
+
+static void ClearSurfacePicks() { g_selectedSurfaces.clear(); }
 
 static int ClampPropInt(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -533,7 +655,7 @@ static void DeleteSelectedEntity() {
         if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
             OzoneLoader::Instance().RemoveRenderable(g_sel.index);
         } else {
-            // Index is a collision volume index — find matching renderable
+            // Index is a collision volume index â€” find matching renderable
             int rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(g_sel.index);
             if (rIdx >= 0) OzoneLoader::Instance().RemoveRenderable(rIdx);
         }
@@ -676,6 +798,7 @@ static void OpenPropertiesForSelection() {
     g_editorPanels.propsTargetPos[2] = g_sel.pos.z;
     g_editorPanels.propsTargetScale = g_sel.scale;
     g_editorPanels.propsTargetRotation = g_sel.rotation;
+    g_editorPanels.propsTargetHasRotation = g_sel.hasRotation;
     ShowPropertiesPanel(true);
     EditorLog("Properties for %s idx=%d", g_sel.name.c_str(), g_sel.index);
 }
@@ -1094,7 +1217,7 @@ static void AppendOzoneEntities(std::wofstream& output) {
                << portal.targetSpawn.x << L":" << portal.targetSpawn.y << L":" << portal.targetSpawn.z << L":"
                << (portal.bidirectional ? 1 : 0) << L":\n";
 
-    // Level metadata — only written when non-default to keep files clean
+    // Level metadata â€” only written when non-default to keep files clean
     LevelMetadata meta = GetLevelMetadata();
     bool metaNonDefault = meta.gameType != GameType::SINGLEPLAYER ||
                           meta.maxPlayers != 8 || meta.respawnTime != 5.0f ||
@@ -1157,10 +1280,31 @@ static void ExportToOzone(std::ostream& output) {
 
     // Geometry: export the AUTHORED renderables (original primitives + CSG ops +
     // material kwargs). Exporting post-CSG collision volumes here would re-apply
-    // add/sub on already-carved hulls (double subtraction → empty world) and
+    // add/sub on already-carved hulls (double subtraction â†’ empty world) and
     // lose textures/csg ops.
     // (OZONE is Z-up: file y/z swapped vs engine coords)
     auto& loader = OzoneLoader::Instance();
+    // Skyboxes are render-only rooms, exported before the solid brushes so the
+    // shell that surrounds them reads naturally in the file.
+    for (int i = 0; i < loader.Count(); i++) {
+        OzoneRenderable* r = loader.Get(i);
+        if (!r || !r->loaded) continue;
+        if (r->typeId != (int)OzonePrimitiveType::SKYBOX) continue;
+        // The mesh is unit-sized around its own origin, so recover the authored
+        // extent from the bounds rather than the (always 1.0) renderable scale.
+        BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+        const float size = (mb.max.x - mb.min.x) * (r->scale > 0.0001f ? r->scale : 1.0f);
+        // OZONE is Z-up, engine is Y-up (the same swap the zup lambda below
+        // applies to every other entity; spelled out here because this loop runs
+        // before that lambda is declared).
+        const Vector3 p = { r->position.x, r->position.z, r->position.y };
+        output << "skybox " << MakeWorldRelativePath(r->texPath)
+               << " " << p.x << " " << p.y << " " << p.z
+               << " " << (size > 0.01f ? size : 512.0f);
+        if (r->surface.def.panU != 0.0f) output << " panU=" << r->surface.def.panU;
+        if (r->surface.def.panV != 0.0f) output << " panV=" << r->surface.def.panV;
+        output << "\n";
+    }
     for (int i = 0; i < loader.Count(); i++) {
         OzoneRenderable* r = loader.Get(i);
         if (!r || !r->loaded) continue;
@@ -1177,13 +1321,13 @@ static void ExportToOzone(std::ostream& output) {
         if (d < 0.01f) d = 1.0f;
 
         // Cylinder/pyramid meshes sit with their bottom at Y=0 (the loader
-        // re-centers them on import) — undo the offset so position round-trips.
+        // re-centers them on import) â€” undo the offset so position round-trips.
         Vector3 center = r->position;
         if (r->typeId == (int)OzonePrimitiveType::CYLINDER ||
             r->typeId == (int)OzonePrimitiveType::PYRAMID)
             center.y += h * 0.5f;
 
-        // Engine Y-up → OZONE Z-up
+        // Engine Y-up â†’ OZONE Z-up
         Vector3 c = {center.x, center.z, center.y};
         float rotDeg = r->rotation * RAD2DEG;
 
@@ -1207,11 +1351,16 @@ static void ExportToOzone(std::ostream& output) {
             // pyr x y z w d h [texSlot]
             output << " " << w << " " << d << " " << h;
             if (r->texSlot > 0) output << " " << r->texSlot;
-        } else { // PLANE — orientation is not stored by the loader yet
+        } else { // PLANE â€” orientation is not stored by the loader yet
             output << " 0 1 0 0";
         }
 
-        // Material kwargs (consumed by the OZONE brush parser)
+        // Material kwargs (consumed by the OZONE brush parser).
+        //
+        // texPath / texScale* / texOffset* are now VIEWS onto
+        // OzoneRenderable::surface.def (see OzoneParser's DeriveLegacySurface-
+        // Fields), so writing them from the legacy fields cannot disagree with
+        // the surface block below.
         if (!r->texPath.empty()) {
             std::string tp = MakeWorldRelativePath(r->texPath);
             bool quote = tp.find(' ') != std::string::npos;
@@ -1221,12 +1370,61 @@ static void ExportToOzone(std::ostream& output) {
             output << " texScaleU=" << r->texScaleU << " texScaleV=" << r->texScaleV;
         if (r->texOffsetU != 0.0f || r->texOffsetV != 0.0f)
             output << " texOffsetU=" << r->texOffsetU << " texOffsetV=" << r->texOffsetV;
-        if (r->surfaceFlags != 0)
-            output << " flags=" << r->surfaceFlags;
+
+        // Per-face surface properties, as `face<name>_<field>=` kwargs. Only
+        // fields the author actually set are emitted, so a face override stays
+        // a small readable diff and an untouched face inherits the brush
+        // default on reload. The face NAMES are engine Y-up (see
+        // World/SurfaceFlags.hpp) - OZONE is Z-up, but surface faces are a
+        // renderer concept, not world coordinates, so they are NOT swapped.
+        {
+            const oz::surface::BrushSurface& bs = r->surface;
+            const oz::surface::SurfaceProps& d = bs.def;
+            // Brush-wide surface fields the legacy kwargs above do not cover.
+            if (d.flags != (uint32_t)r->surfaceFlags)
+                output << " flags=" << d.flags;
+            if (d.texSlot > 0) output << " surfTexSlot=" << d.texSlot;
+            if (!d.texPath.empty() && r->texPath.empty())
+                output << " surfTex=" << MakeWorldRelativePath(d.texPath);
+            if (d.panU != 0.0f) output << " panU=" << d.panU;
+            if (d.panV != 0.0f) output << " panV=" << d.panV;
+            if (d.alpha != 1.0f) output << " surfAlpha=" << d.alpha;
+            if (d.alphaCutoff != 0.0f) output << " surfCutoff=" << d.alphaCutoff;
+            if (d.glowR != 0.0f || d.glowG != 0.0f || d.glowB != 0.0f)
+                output << " surfGlow=(" << d.glowR << "," << d.glowG << "," << d.glowB << ")";
+            if (d.glowScale != 1.0f) output << " surfGlowScale=" << d.glowScale;
+
+            for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+                if (!bs.IsFaceOverridden((oz::surface::SurfaceFace)f)) continue;
+                const std::string pfx =
+                    std::string("face") + oz::surface::FaceName((oz::surface::SurfaceFace)f) + "_";
+                // Resolve against the brush default so only the DIFFERENCE is
+                // written; the parser re-seeds a face from the default, so this
+                // round-trips exactly.
+                const oz::surface::SurfaceProps& p = bs.Resolve((oz::surface::SurfaceFace)f);
+                if (p.flags != d.flags)     output << " " << pfx << "flags=" << p.flags;
+                if (p.texSlot != d.texSlot)  output << " " << pfx << "texSlot=" << p.texSlot;
+                if (p.texPath != d.texPath)
+                    output << " " << pfx << "tex=" << MakeWorldRelativePath(p.texPath);
+                if (p.uvScaleU != d.uvScaleU)  output << " " << pfx << "uvScaleU=" << p.uvScaleU;
+                if (p.uvScaleV != d.uvScaleV)  output << " " << pfx << "uvScaleV=" << p.uvScaleV;
+                if (p.uvOffsetU != d.uvOffsetU) output << " " << pfx << "uvOffsetU=" << p.uvOffsetU;
+                if (p.uvOffsetV != d.uvOffsetV) output << " " << pfx << "uvOffsetV=" << p.uvOffsetV;
+                if (p.panU != d.panU)   output << " " << pfx << "panU=" << p.panU;
+                if (p.panV != d.panV)   output << " " << pfx << "panV=" << p.panV;
+                if (p.alpha != d.alpha) output << " " << pfx << "alpha=" << p.alpha;
+                if (p.alphaCutoff != d.alphaCutoff)
+                    output << " " << pfx << "cutoff=" << p.alphaCutoff;
+                if (p.glowR != d.glowR || p.glowG != d.glowG || p.glowB != d.glowB)
+                    output << " " << pfx << "glow=(" << p.glowR << "," << p.glowG << "," << p.glowB << ")";
+                if (p.glowScale != d.glowScale)
+                    output << " " << pfx << "glowScale=" << p.glowScale;
+            }
+        }
         output << "\n";
     }
 
-    // Heightmap — prefer the OZONE loader's terrain (authored in this document),
+    // Heightmap â€” prefer the OZONE loader's terrain (authored in this document),
     // fall back to the legacy WDL heightmap.
     if (loader.HasHeightmap() && !loader.GetHeightmapImagePath().empty()) {
         Vector3 hp = loader.GetHeightmapPosition();
@@ -1287,7 +1485,7 @@ static void ExportToOzone(std::ostream& output) {
         if (!light.active) continue;
         Vector3 p = zup(light.position);
         Vector3 t = zup(light.target);
-        // Color components are unsigned char — stream them as integers, never as
+        // Color components are unsigned char â€” stream them as integers, never as
         // raw bytes (a raw byte >= 0x80 corrupts the UTF-8 text file and breaks
         // the client's numeric light parser).
         int r = (int)light.color.r, g = (int)light.color.g, b = (int)light.color.b;
@@ -1446,7 +1644,14 @@ static void ExportToOzone(std::ostream& output) {
             output << "levelinfo " << (int)meta.gameType << " " << meta.maxPlayers << " "
                    << meta.respawnTime << " " << (meta.timeLimitEnabled ? 1 : 0) << " "
                    << meta.timeLimitMinutes << " " << meta.scoreLimit << " "
-                   << (meta.friendlyFire ? 1 : 0) << " " << meta.skyboxTexturePath << "\n";
+                   << (meta.friendlyFire ? 1 : 0) << " " << meta.skyboxTexturePath;
+            // Append gametype=<key> when the mode is not the default, so the
+            // file carries the human-readable name alongside the numeric id.
+            // The parser recognises it in the tail; older tools ignore it.
+            const char* gtKey = oz::gametype::GameTypeKey(meta.gameType);
+            if (gtKey && std::string(gtKey) != "singleplayer")
+                output << " gametype=" << gtKey;
+            output << "\n";
         }
         if (meta.particleType != ParticleType::NONE) {
             output << "particles " << (int)meta.particleType << " " << meta.particleDensity << " "
@@ -1545,7 +1750,7 @@ int Editor_GetPlaceMode() { return (int)g_placeMode; }
 void Editor_SetPlaceMode(int mode) { g_placeMode = (PlaceMode)mode; }
 
 // ---------------------------------------------------------------------------
-// Native Win32 Menu Bar — window subclass intercepts WM_COMMAND from menus
+// Native Win32 Menu Bar â€” window subclass intercepts WM_COMMAND from menus
 // ---------------------------------------------------------------------------
 static WNDPROC g_originalWndProc = nullptr;
 
@@ -1789,7 +1994,7 @@ static void AnimRedo() {
 }
 
 // ---------------------------------------------------------------------------
-// Editor History — full-document undo/redo via OZONE text snapshots.
+// Editor History â€” full-document undo/redo via OZONE text snapshots.
 // A snapshot captures geometry, entities, level metadata and the heightmap
 // (everything ExportToOzone writes). Camera and selection are left untouched.
 // ---------------------------------------------------------------------------
@@ -1979,7 +2184,7 @@ int main(int argc, char **argv){
 
     // The editor windows (and their Actor Hierarchy tree) were created before
     // the PawnDefs were registered, so rebuild the Pawn Manager tree now that
-    // every registry is populated — otherwise EnemyPawn is empty and nothing
+    // every registry is populated â€” otherwise EnemyPawn is empty and nothing
     // can be spawned from it.
     RefreshPawnManager();
 
@@ -2052,7 +2257,7 @@ int main(int argc, char **argv){
             g_editorPanels.actionTexturePath.clear();
         }
 
-        // Viewport bounds check — all raycasts only fire when mouse is inside 3D viewport
+        // Viewport bounds check â€” all raycasts only fire when mouse is inside 3D viewport
         Vector2 _mp = GetMousePosition();
         bool _inViewport = (_mp.x >= (float)GetStatsSidebarWidth() && _mp.y >= 28.0f);
 
@@ -2097,10 +2302,10 @@ int main(int argc, char **argv){
                 }
             }
         }
-        // Left-click: select entity (red highlight) — suppressed while editing verts.
+        // Left-click: select entity (red highlight) â€” suppressed while editing verts.
         // The pick fires on RELEASE, not press, so holding LMB to drag a placement
         // ghost still works: a drag cancels the pick via the movement threshold.
-        // Picking is deliberately independent of DrawModel — DrawModel only means
+        // Picking is deliberately independent of DrawModel â€” DrawModel only means
         // "a gizmo/placement ghost is drawn". Gating picks on it made the viewport
         // unselectable whenever a placement ghost was active with nothing selected
         // (e.g. after using the CSG toolbox), with no way to recover via Escape.
@@ -2212,7 +2417,7 @@ int main(int argc, char **argv){
 
         // Right-click: drag resizes placement ghost; click picks entity + native
         // context menu. It must NEVER commit a placement (that added duplicate
-        // entities when right-clicking to delete/duplicate) — commit is Enter only.
+        // entities when right-clicking to delete/duplicate) â€” commit is Enter only.
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             g_rbDown = true;
             g_rbDownPos = GetMousePosition();
@@ -2229,9 +2434,14 @@ int main(int argc, char **argv){
             // Re-check viewport bounds with fresh cursor position
             Vector2 _mp_rel = GetMousePosition();
             bool _inVpRel = (_mp_rel.x >= (float)GetStatsSidebarWidth() && _mp_rel.y >= 28.0f);
+            // Per-FACE surface pick, done BEFORE the entity pick so the menu can
+            // offer "Surface Properties (N Selected)". Triangle-level rather than
+            // AABB-level, so clicking the top of a wall selects the +Y face and
+            // not the brush as a whole.
+            const SurfaceFacePick spfPick = _inVpRel ? PickSurfaceFace(_mp_rel) : SurfaceFacePick{};
             // Pick without the left-click toggle so right-clicking the already
             // selected entity opens its menu instead of deselecting it. Gate on
-            // the hit result — on a miss g_sel still holds the previous entity,
+            // the hit result â€” on a miss g_sel still holds the previous entity,
             // so a stale selection would otherwise pop a Delete menu onto
             // whatever the user right-clicked next (or on empty space).
             if (_inVpRel) {
@@ -2241,6 +2451,22 @@ int main(int argc, char **argv){
                     HWND hWnd = (HWND)GetWindowHandle();
                     if (hWnd) {
                         HMENU hMenu = CreatePopupMenu();
+                        // Surface Properties first, like the UT99 viewport menu:
+                        // it is the per-FACE editor and the most-used entry when
+                        // texturing a brush.
+                        if (spfPick.hit && spfPick.renderable >= 0) {
+                            // Hold Shift to keep the previous face selection and
+                            // add this face ("(N Selected)"). Plain right-click
+                            // starts a fresh single-face selection.
+                            if (!(IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)))
+                                ClearSurfacePicks();
+                            ToggleSurfacePick(spfPick);
+                            const int nSurf = (int)g_selectedSurfaces.size();
+                            char lbl[96];
+                            snprintf(lbl, sizeof(lbl), "Surface Properties (%d Selected)", nSurf);
+                            AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_PROPS, lbl);
+                            AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_RESET, "Reset Surface");
+                        }
                         AppendMenuA(hMenu, MF_STRING, IDM_PROPERTIES, "Properties");
                         AppendMenuA(hMenu, MF_STRING, IDM_DELETE_ENTITY, "Delete");
                         AppendMenuA(hMenu, MF_STRING, IDM_DUPLICATE_ENTITY, "Duplicate");
@@ -2282,6 +2508,30 @@ int main(int argc, char **argv){
                         else if (cmd == IDM_DUPLICATE_ENTITY) DuplicateSelectedEntity();
                         else if (cmd == IDM_APPLY_TEXTURE) g_editorPanels.actionApplyTextureToSel = true;
                         else if (cmd == IDM_APPEND_AUTOCONVEX) AppendAutoConvexForSelection();
+                        else if (cmd == IDM_SURFACE_PROPS) {
+                            // Every picked face must belong to ONE renderable:
+                            // the dialog edits a single BrushSurface, and mixing
+                            // two brushes' faces into one mask would write face 3
+                            // of brush A onto face 3 of brush B.
+                            int rIdx = -1; uint32_t mask = 0; bool mixed = false;
+                            for (const auto& sp : g_selectedSurfaces) {
+                                if (rIdx < 0) rIdx = sp.renderable;
+                                else if (sp.renderable != rIdx) { mixed = true; break; }
+                                if (sp.face >= 0) mask |= (1u << (int)sp.face);
+                            }
+                            if (mixed || rIdx < 0 || mask == 0) {
+                                MessageBoxA(hWnd,
+                                    "Surfaces from more than one brush were selected.\n\n"
+                                    "Right-click without Shift to start a new selection.",
+                                    "Surface Properties", MB_OK | MB_ICONWARNING);
+                            } else {
+                                ShowSurfaceProps(true, rIdx, mask);
+                            }
+                        }
+                        else if (cmd == IDM_SURFACE_RESET) {
+                            if (spfPick.hit && spfPick.renderable >= 0)
+                                g_editorPanels.actionResetSurface = true;
+                        }
                     }
                     #endif
                 }
@@ -2418,6 +2668,11 @@ int main(int argc, char **argv){
             auto& pawnLights = PawnSystem::Instance().GetLights();
             float dt = GetFrameTime();
             LitLightning_Update(pawnLights, OTEditor.LitFogShader, OTEditor.MainCamera, dt);
+            // The surface program carries its own light uniforms, so a
+            // surface-flagged brush would be lit by a stale light set without
+            // this. Same lights, same order - one source of truth.
+            if (oz::SurfaceMaterial::Instance().Ready())
+                oz::SurfaceMaterial::Instance().UpdateFrame(pawnLights, OTEditor.MainCamera, dt);
             if (OTEditor.ViewPosLoc >= 0) {
                 Vector3 camPos = OTEditor.MainCamera.position;
                 SetShaderValue(OTEditor.LitFogShader, OTEditor.ViewPosLoc, &camPos, SHADER_UNIFORM_VEC3);
@@ -2439,7 +2694,7 @@ int main(int argc, char **argv){
         BeginMode3D(OTEditor.MainCamera);
 
         // -------------------------------------------------------------------
-        // Skybox cube (viewport backdrop) — toggled by the toolbar "Sky" button.
+        // Skybox cube (viewport backdrop) â€” toggled by the toolbar "Sky" button.
         // Mirrors the client: top/bottom use the cap texture, sides reuse it
         // unless a dedicated side skybox is authored.
         // -------------------------------------------------------------------
@@ -2650,7 +2905,7 @@ if (g_editorPanels.showCollisionBounds) {
                     LoadedModel* lm = WDLModels.GetModelByWDLId(EMID);
                     if (lm) DrawModelEx(lm->model, {px,py,pz},{0,pr,0},pr,{ps,ps,ps},WHITE);
                 } else if (EMID == 0) {
-                    // User-selected model from the Model Browser — ghost preview.
+                    // User-selected model from the Model Browser â€” ghost preview.
                     int bidx = g_editorPanels.selectedModel;
                     if (bidx >= 0 && bidx < (int)g_editorPanels.modelEntries.size()) {
                         static Model s_browsePreview = {0};
@@ -2786,7 +3041,7 @@ if (g_editorPanels.showCollisionBounds) {
             if (IsKeyPressed(KEY_O)) OmegaTechEditor.R += 90.0f;
             if (IsKeyPressed(KEY_L)) OmegaTechEditor.R -= 90.0f;
             if (IsKeyDown(KEY_T)) OmegaTechEditor.S += 0.5f;
-            // NOTE: scale-down is B, not G — G cycles the CSG op in MODEL mode.
+            // NOTE: scale-down is B, not G â€” G cycles the CSG op in MODEL mode.
             if (IsKeyDown(KEY_B)) OmegaTechEditor.S -= 0.5f;
 
             // Vertex-edit transform (Phase C): the movement/rotate keys deform
@@ -2917,7 +3172,7 @@ if (g_editorPanels.showCollisionBounds) {
                         // primitives (EMID >= 200) are committed below.
                     } else {
                         if (EMID == 0) {
-                            // Model Browser selection → GameEngine.Mesh.* entity.
+                            // Model Browser selection â†’ GameEngine.Mesh.* entity.
                             int bidx = g_editorPanels.selectedModel;
                             if (bidx >= 0 && bidx < (int)g_editorPanels.modelEntries.size()) {
                                 const std::string& path = g_editorPanels.modelEntries[bidx].path;
@@ -3018,10 +3273,10 @@ if (g_editorPanels.showCollisionBounds) {
             }
 
             // Tool modes (toolbar Cam/Move/Scale/Rotate) while placing:
-            //   Cam (0)    — wheel shifts ghost depth (default, below)
-            //   Move (1)   — LMB drag moves the ghost (same as Cam)
-            //   Scale (2)  — wheel scales the ghost
-            //   Rotate (3) — wheel rotates the ghost in 15 degree steps
+            //   Cam (0)    â€” wheel shifts ghost depth (default, below)
+            //   Move (1)   â€” LMB drag moves the ghost (same as Cam)
+            //   Scale (2)  â€” wheel scales the ghost
+            //   Rotate (3) â€” wheel rotates the ghost in 15 degree steps
             if (g_editorPanels.currentToolMode == 2) {
                 float wheel = GetMouseWheelMove();
                 if (wheel != 0) OmegaTechEditor.S += wheel * 0.25f;
@@ -3341,7 +3596,7 @@ if (g_editorPanels.showCollisionBounds) {
                        (Rectangle){(float)sbW, (float)tbH, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - tbH)}, (Vector2){0,0}, 0, WHITE);
         DrawFPS(GetScreenWidth() - 60, 36);
 
-        // WorldGraph selection handler — set g_sel from explorer double-click
+        // WorldGraph selection handler â€” set g_sel from explorer double-click
         if (g_editorPanels.actionSelectFromGraph >= 0) {
             int idx = g_editorPanels.actionSelectFromGraph;
             SelType selType = (SelType)g_editorPanels.actionSelectFromGraphType;
@@ -3374,7 +3629,55 @@ if (g_editorPanels.showCollisionBounds) {
             g_editorPanels.actionWorldGraphDup = -1;
         }
 
-        // Properties apply handler — write values back from native panel
+        // --- Surface Properties apply / reset ------------------------------
+        //
+        // The dialog hands over the working copy it was showing. Both the
+        // per-face mask and the brush index come from the panel, never from the
+        // mouse, so an Apply that lands a frame late still writes to the faces
+        // the user was looking at.
+        if (g_editorPanels.actionApplySurface) {
+            g_editorPanels.actionApplySurface = false;
+            const int rIdx = g_editorPanels.surfaceRenderable;
+            OzoneRenderable* r = OzoneLoader::Instance().Get(rIdx);
+            if (!r) {
+                EditorLog("Surface: apply ignored - renderable %d no longer exists", rIdx);
+            } else if (g_editorPanels.surfaceFaceMask == 0) {
+                // Guarded on purpose: an empty mask must never be treated as
+                // "apply to all six faces".
+                EditorLog("Surface: apply ignored - no face selected");
+            } else {
+                HistoryPush();
+                for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+                    if (!(g_editorPanels.surfaceFaceMask & (1u << f))) continue;
+                    OzoneLoader::Instance().SetRenderableFace(
+                        rIdx, (oz::surface::SurfaceFace)f, g_editorPanels.surfaceEdit);
+                }
+                EditorLog("Surface: applied to %d face(s) of renderable %d (flags=0x%X)",
+                          __builtin_popcount(g_editorPanels.surfaceFaceMask),
+                          rIdx, g_editorPanels.surfaceEdit.flags);
+                SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
+            }
+        }
+        if (g_editorPanels.actionResetSurface) {
+            g_editorPanels.actionResetSurface = false;
+            const int rIdx = g_editorPanels.surfaceRenderable;
+            OzoneRenderable* r = OzoneLoader::Instance().Get(rIdx);
+            if (r && g_editorPanels.surfaceFaceMask != 0) {
+                HistoryPush();
+                for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+                    if (!(g_editorPanels.surfaceFaceMask & (1u << f))) continue;
+                    r->surface.ClearFace((oz::surface::SurfaceFace)f);
+                }
+                // Face meshes only exist while a brush is decorated, so
+                // dropping the last override has to release them.
+                OzoneLoader::Instance().RebuildSurfaceMeshes(rIdx);
+                EditorLog("Surface: reset %d face(s) of renderable %d",
+                          __builtin_popcount(g_editorPanels.surfaceFaceMask), rIdx);
+                SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
+            }
+        }
+
+        // Properties apply handler â€” write values back from native panel
         if (g_editorPanels.actionApplyProperties) {
             HistoryPush();
             float px = g_editorPanels.propPosX;
@@ -3432,9 +3735,6 @@ if (g_editorPanels.showCollisionBounds) {
                 }
                 // Rebuild collision volumes from the updated renderable
                 OzoneLoader::Instance().RebuildCollisionVolumes();
-            } else if (tgtType == SelType::LIGHT) {
-                LightNode* l = PawnSystem::Instance().GetLight(tgtIdx);
-                if (l) l->position = {px, py, pz};
             } else if (tgtType == SelType::ZONE) {
                 auto& zones = ZoneManager::Instance().GetZones();
                 for (auto& zone : zones) {
@@ -3474,7 +3774,12 @@ if (g_editorPanels.showCollisionBounds) {
             } else if (tgtType == SelType::SPAWN) {
                 if (PlayerStartNode* s = FindPlayerStartById(tgtIdx)) {
                     s->position = {px, py, pz};
-                    s->yaw = prot;
+                    // Only when the selection actually carried a yaw. The Rot row
+                    // is seeded from propsTargetRotation, which defaults to 0 for
+                    // any selection whose raycast did not populate it, so
+                    // writing it unconditionally turned a PlayerStart's authored
+                    // `playerstart` yaw into 0 on every Apply.
+                    if (g_editorPanels.propsTargetHasRotation) s->yaw = prot;
                 }
             } else if (tgtType == SelType::LIGHT) {
                 if (LightNode* l = PawnSystem::Instance().GetLight(tgtIdx)) {
@@ -3537,7 +3842,7 @@ if (g_editorPanels.showCollisionBounds) {
                 MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(tgtIdx);
                 if (m) {
                     m->position = {px, py, pz};
-                    m->yaw = prot;
+                    if (g_editorPanels.propsTargetHasRotation) m->yaw = prot;
                     if (g_editorPanels.propScale > 0.001f) m->scale = g_editorPanels.propScale;
                     bool pathChanged = (g_editorPanels.propMeshPath != m->meshPath) ||
                                        (g_editorPanels.propMeshTex != m->texturePath);
@@ -3559,7 +3864,7 @@ if (g_editorPanels.showCollisionBounds) {
                 ParticleEmitterNode* e = PawnSystem::Instance().GetParticleEmitter(tgtIdx);
                 if (e) {
                     e->position = {px, py, pz};
-                    e->yaw = prot;
+                    if (g_editorPanels.propsTargetHasRotation) e->yaw = prot;
                     if (!g_editorPanels.propEmitterType.empty()) e->type = g_editorPanels.propEmitterType;
                     e->texturePath = g_editorPanels.propEmitterTex;
                     if (g_editorPanels.propEmitterRate >= 0.0f) e->rate = g_editorPanels.propEmitterRate;
@@ -3576,7 +3881,7 @@ if (g_editorPanels.showCollisionBounds) {
                 if (pn) {
                     pn->position = {px, py, pz};
                     if (g_editorPanels.propPathRadius > 0.0f) pn->radius = g_editorPanels.propPathRadius;
-                    // Rename — retarget any links that referenced the old name
+                    // Rename â€” retarget any links that referenced the old name
                     std::string newName = g_editorPanels.propPathName;
                     if (!newName.empty() && newName != pn->name) {
                         std::string oldName = pn->name;
@@ -3674,6 +3979,9 @@ if (g_editorPanels.showCollisionBounds) {
                     // Re-read the defs so the panel's read-only dump and the
                     // registry agree with the file immediately.
                     LightningEntityRegistry::Instance().Init();
+                    // The defs just changed on disk, so any icon EngineBillboard
+                    // memoised for these names is now stale.
+                    EngineBillboard::InvalidateIconCache();
                     SendMessage((HWND)g_editorPanels.hPropsPanel, WM_USER + 50, 0, 0);
                 } else {
                     EditorLog("Stat patch FAILED for %s: %s",
@@ -3690,7 +3998,7 @@ if (g_editorPanels.showCollisionBounds) {
             SoundManager::Instance().PlayStatSound(g_editorPanels.propDefPreviewSound);
             g_editorPanels.propDefPreviewSound.clear();
         }
-        // "Reload Mesh" — drop the cached asset so it re-resolves next draw
+        // "Reload Mesh" â€” drop the cached asset so it re-resolves next draw
         if (g_editorPanels.actionReloadMesh) {
             if (MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(g_sel.index)) {
                 if (g_sel.type == SelType::MESH) m->mesh.reset();
@@ -3847,7 +4155,7 @@ if (g_editorPanels.showCollisionBounds) {
                 }
             }
         }
-        // FPS / loop edited in the panel → update the current clip.
+        // FPS / loop edited in the panel â†’ update the current clip.
         if (g_editorPanels.actionAnimApplyClipMeta) {
             g_editorPanels.actionAnimApplyClipMeta = false;
             if (oz::AnimatedMesh* am = AnimTarget()) {
@@ -3958,7 +4266,7 @@ if (g_editorPanels.showCollisionBounds) {
                     // renderable (the export reads renderables, not collision vols).
                     int rIdx = -1;
                     if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
-                        // Direct renderable hit — verify it matches the selection point
+                        // Direct renderable hit â€” verify it matches the selection point
                         OzoneRenderable* r = OzoneLoader::Instance().Get(g_sel.index);
                         if (r && r->loaded) {
                             BoundingBox b = GetMeshBoundingBox(r->model.meshes[0]);
@@ -4144,7 +4452,7 @@ if (g_editorPanels.showCollisionBounds) {
             g_editorPanels.actionNodeType = -1;
         }
         if (!g_editorPanels.actionSpawnPickup.empty()) {
-            // Pawn Manager weapon/item leaf → spawn the pickup immediately at the
+            // Pawn Manager weapon/item leaf â†’ spawn the pickup immediately at the
             // camera aim point (the Pickups panel still offers ghosted placement).
             HistoryPush();
             PickupNode node;
@@ -4156,7 +4464,7 @@ if (g_editorPanels.showCollisionBounds) {
             g_editorPanels.actionSpawnPickup.clear();
         }
         if (!g_editorPanels.actionSpawnMesh.empty()) {
-            // GameEngine.Mesh placement — uses the model selected in the Model
+            // GameEngine.Mesh placement â€” uses the model selected in the Model
             // Browser, spawned at the camera target as an OZONE Mesh.* entity.
             int idx = g_editorPanels.selectedModel;
             if (idx >= 0 && idx < (int)g_editorPanels.modelEntries.size()) {
@@ -4309,7 +4617,7 @@ if (g_editorPanels.showCollisionBounds) {
                               op, primType, center.x, center.y, center.z, size.x, size.y, size.z);
                 }
             }
-            // Placing via the toolbox is done — drop the ghost so the viewport
+            // Placing via the toolbox is done â€” drop the ghost so the viewport
             // returns to normal selection (Enter does the same for the ghost).
             if (g_sel.type == SelType::NONE) OmegaTechEditor.DrawModel = false;
             g_editorPanels.actionCsgCommitNow = -1;
@@ -4480,7 +4788,7 @@ if (g_editorPanels.showCollisionBounds) {
             OmegaTechEditor.CSGOperation = (OmegaTechEditor.CSGOperation + 1) % 5;
         }
 
-        // Heightmap editor toggle (H key) — suppressed in vertex-edit mode (H moves verts)
+        // Heightmap editor toggle (H key) â€” suppressed in vertex-edit mode (H moves verts)
         if (IsKeyPressed(KEY_H) && !g_editorPanels.animEditVerts) ToggleHeightmapEditor();
 
         // Panel keyboard shortcuts (F5-F12 replace old top menu bar)

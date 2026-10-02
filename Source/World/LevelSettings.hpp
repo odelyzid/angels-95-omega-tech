@@ -14,6 +14,11 @@
 #include <string>
 #include <vector>
 
+#include "GameType.hpp"   // ParseLevelInfo resolves gametype=<name>
+#include "../Log.hpp"     // OZ_WARN for the unknown-gametype fallback
+#include "../Log.hpp"
+#include "GameType.hpp"
+
 // Level metadata — per-world game rules + environment defaults (LevelInfo/Particles)
 struct LevelSettings {
     int gameType = 0;              // matches editor GameType enum order
@@ -36,14 +41,30 @@ struct LevelSettings {
 };
 
 // OZONE `levelinfo gameType maxPlayers respawnTime timeLimitEnabled
-// timeLimitMinutes scoreLimit friendlyFire skyboxPath [skyboxSidePath]`
+// timeLimitMinutes scoreLimit friendlyFire skyboxPath [skyboxSidePath] [gametype=<name>]`
+//
+// `gametypeKey` is the optional trailing `gametype=<name>` kwarg. When it
+// resolves to a known mode it overrides the positional arg(0); when it does
+// NOT resolve it warns and falls back to arg(0) rather than silently
+// becoming 0 (the failure mode GameData/Worlds/EngineTest/World.ozone:282
+// documents for the old bare-token parse).
 inline void ParseLevelInfo(LevelSettings& s, const std::vector<float>& args,
                            const std::string& skyboxPath,
-                           const std::string& skyboxSidePath) {
+                           const std::string& skyboxSidePath,
+                           const std::string& gametypeKey = "") {
     auto arg = [&](int i) -> float {
         return (i >= 0 && i < (int)args.size()) ? args[i] : 0.0f;
     };
     s.gameType = (int)arg(0);
+    if (!gametypeKey.empty()) {
+        oz::gametype::GameType named = oz::gametype::GameTypeFromName(gametypeKey);
+        if (oz::gametype::IsGameTypeKey(gametypeKey)) {
+            s.gameType = (int)named;
+        } else {
+            OZ_WARN("levelinfo: unknown gametype='%s', using positional id %d",
+                    gametypeKey.c_str(), (int)s.gameType);
+        }
+    }
     s.maxPlayers = (int)arg(1);
     s.respawnTime = arg(2);
     s.timeLimitEnabled = arg(3) != 0.0f;

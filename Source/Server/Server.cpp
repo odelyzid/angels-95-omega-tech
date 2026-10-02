@@ -978,6 +978,48 @@ int main(int argc, char** argv) {
                 }
             }
 
+            // Broadcast score state (throttled to ~1 Hz, or immediately on change)
+            {
+                static double lastScoreBroadcast = 0.0;
+                double now = static_cast<double>(time(nullptr));
+                bool matchOver = g_game_state.match_over();
+                if (now - lastScoreBroadcast >= 1.0 || matchOver) {
+                    for (auto& p : g_game_state.players()) {
+                        if (!p.connected) continue;
+                        net::ScoreStateData ss{};
+                        ss.player_id = p.id;
+                        ss.score = p.score;
+                        ss.team = p.team;
+                        ss.winningTeam = matchOver ? g_game_state.winning_team() : -1;
+                        ss.matchOver = matchOver ? 1 : 0;
+                        net::NetworkMessage msg{};
+                        msg.magic = net::MAGIC;
+                        msg.type = static_cast<uint32_t>(net::MessageType::SCORE_STATE);
+                        msg.size = sizeof(ss);
+                        msg.sequence = 0;
+                        msg.timestamp = static_cast<uint32_t>(now);
+                        memcpy(msg.payload, &ss, sizeof(ss));
+                        g_game_server->broadcast_message(msg);
+                    }
+                    if (matchOver) {
+                        std::string text = g_game_state.winning_team() >= 0
+                            ? "Match ended: Team " + std::to_string(g_game_state.winning_team()) + " wins!"
+                            : "Match ended: Draw";
+                        net::ChatData cd;
+                        strncpy(cd.text, text.c_str(), sizeof(cd.text) - 1);
+                        net::NetworkMessage msg{};
+                        msg.magic = net::MAGIC;
+                        msg.type = static_cast<uint32_t>(net::MessageType::CHAT);
+                        msg.size = sizeof(cd);
+                        msg.sequence = 0;
+                        msg.timestamp = static_cast<uint32_t>(now);
+                        memcpy(msg.payload, &cd, sizeof(cd));
+                        g_game_server->broadcast_message(msg);
+                    }
+                    lastScoreBroadcast = now;
+                }
+            }
+
             // Broadcast NPC state to all players every 4 ticks (2.5/sec)
             if (tick % 4 == 0) {
                 for (const auto& world : g_game_state.worlds()) {

@@ -16,6 +16,11 @@
 class EngineBillboard {
 private:
     inline static Model s_BillboardModel{0};
+    // Memoised def->icon textures. A class member, not a function-local static,
+    // so InvalidateIconCache() can actually reach and free them - a local static
+    // outlived every reload and handed out Texture2D handles for textures
+    // AssetMapper had already unloaded.
+    inline static std::unordered_map<std::string, Texture2D> s_defIconCache;
 
     // A 1x1 quad in the XY plane (normal +Z), centred on the origin.
     //
@@ -26,6 +31,14 @@ private:
     // was therefore edge-on to the camera and effectively invisible - the whole
     // gizmo/billboard layer silently rendered nothing. A vertical quad yawed to
     // face the camera is the only correct shape here.
+    //
+    // The NORMALS ARE NOT OPTIONAL. Lighting.vs declares `in vec3 vertexNormal`
+    // and feeds it through matNormal; a mesh built without a normals array has
+    // that attribute disabled, so the vertex shader reads (0,0,0),
+    // `normalize(vec3(0))` is NaN, and LitFog.fs's NdotL degenerates. The sprite
+    // then renders at just the `ambient / 10` term - roughly 2% brightness, i.e.
+    // effectively invisible on a dark viewport. Every quad normal is +Z, which
+    // after the camera-facing yaw points at the viewer.
     static Mesh MakeBillboardQuad() {
         static const float v[] = {
             // x     y     z      u     v
@@ -34,12 +47,19 @@ private:
              0.5f,  0.5f, 0.0f,  1.0f, 0.0f,
             -0.5f,  0.5f, 0.0f,  0.0f, 0.0f,
         };
+        static const float n[] = {
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+        };
         static const unsigned short idx[] = { 0, 1, 2, 0, 2, 3 };
         Mesh mesh = {0};
         mesh.vertexCount = 4;
         mesh.triangleCount = 6;
         mesh.vertices = (float*)v;
         mesh.texcoords = (float*)(v + 12);
+        mesh.normals = (float*)n;
         mesh.indices = (unsigned short*)idx;
         return mesh;
     }
@@ -52,10 +72,25 @@ public:
     }
 
     static void Shutdown() {
+        InvalidateIconCache();
         AssetMapper::Instance().UnloadCategory("engine");
         AssetMapper::Instance().UnloadCategory("items");
         if (s_BillboardModel.meshCount > 0)
             UnloadModel(s_BillboardModel);
+        s_BillboardModel = Model{0};
+    }
+
+    // Drop the memoised def->icon textures. MUST be called whenever the entity
+    // registry is reloaded (a world load / undo-restore re-scans .ozls): the
+    // cached Texture2D handles belong to textures AssetMapper may have already
+    // unloaded, and handing a stale id to DrawBillboard draws a freed texture.
+    static void InvalidateIconCache() {
+        for (auto& kv : s_defIconCache) {
+            // Def icons are loaded by us (not owned by an AssetMapEntry), so
+            // they are ours to free.
+            if (kv.second.id > 0) UnloadTexture(kv.second);
+        }
+        s_defIconCache.clear();
     }
 
     // Draw a shader-lit billboard using the cached model.
@@ -104,7 +139,6 @@ public:
 // HealthVial.png, PistonPart reuses key.png - fall through to the magenta
 // missing-icon grid. Consult the entity def's own `icon` first and cache it.
 inline static Texture2D ResolvePickupIcon(const char* itemName) {
-    static std::unordered_map<std::string, Texture2D> s_defIconCache;
     auto cached = s_defIconCache.find(itemName ? itemName : "");
     if (cached != s_defIconCache.end())
         return cached->second;

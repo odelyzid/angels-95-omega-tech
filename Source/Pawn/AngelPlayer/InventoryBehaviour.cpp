@@ -1,3 +1,4 @@
+#include "../../WindowsCompat.hpp"
 #include "InventoryBehaviour.hpp"
 #include "../Items.hpp"
 #include "../OzPawnSystem.hpp"
@@ -5,6 +6,7 @@
 #include "../../Script/LightningEntityManager.hpp"
 #include "../../Script/LightningEntityRegistry.hpp"
 #include "../../Renderer/OzAssetMapper.hpp"
+#include "../../Client/Client.hpp"
 #include "../../Log.hpp"
 #include "raymath.h"
 #include <algorithm>
@@ -134,6 +136,50 @@ void InventoryBehaviour::DrawHud(const Camera3D& cam, int ticker, bool isCrouchi
         DrawText("CROUCH", pad, sh - 46, 16, (Color){120, 200, 255, 255});
     else if (isSprinting)
         DrawText("SPRINT", pad, sh - 46, 16, (Color){255, 210, 120, 255});
+
+    // Scoreboard (top-right, below position/rotation)
+    {
+        if (!m_client) return;
+        const auto& scores = m_client->scores();
+        if (!scores.empty()) {
+            int sbX = sw - 200;
+            int sbY = 60;
+            int rowH = 18;
+            int sbH = (int)scores.size() * rowH + 8;
+            DrawRectangle(sbX - 4, sbY - 4, 196, sbH, (Color){0, 0, 0, 160});
+            int row = 0;
+            for (const auto& [pid, ss] : scores) {
+                DrawText(TextFormat("P%d  %d", pid, ss.score),
+                         sbX, sbY + row * rowH, 14,
+                         ss.team == 0 ? (Color){255, 200, 100, 255} : (Color){100, 200, 255, 255});
+                row++;
+            }
+        }
+    }
+
+    // Match-over banner with fade (1.0s in, hold, 3.0s out)
+    {
+        if (!m_client) return;
+        if (m_client->match_over()) {
+            double elapsed = GetTime() - m_client->match_over_at();
+            float alpha = 1.0f;
+            if (elapsed < 1.0f) {
+                alpha = (float)elapsed;
+            } else if (elapsed > 4.0f) {
+                alpha = 0.0f;
+            } else if (elapsed > 1.0f) {
+                alpha = 1.0f - (float)(elapsed - 1.0f) / 3.0f;
+            }
+            if (alpha > 0.0f) {
+                const char* banner = m_client->winning_team() >= 0
+                    ? TextFormat("Team %d wins!", m_client->winning_team())
+                    : "Draw";
+                int w = MeasureText(banner, 28);
+                DrawText(banner, (sw - w) / 2, sh / 2 - 40, 28,
+                         (Color){255, 220, 100, (unsigned char)(alpha * 255)});
+            }
+        }
+    }
 
     // Coordinates (top-right)
     float yaw = -atan2f(cam.target.x - cam.position.x, cam.target.z - cam.position.z) * RAD2DEG;

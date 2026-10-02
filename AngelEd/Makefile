@@ -123,11 +123,20 @@ $(BUILD_DIR)/OzBsp.o: ../Source/Physics/OzBsp.cpp ../Source/Physics/OzBsp.hpp | 
 $(BUILD_DIR)/AutoConvex.o: ../Source/Physics/AutoConvex.cpp ../Source/Physics/AutoConvex.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Physics/AutoConvex.cpp -o $@
 
-$(BUILD_DIR)/OzoneParser.o: ../Source/World/OzoneParser.cpp ../Source/World/OzoneParser.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/OzoneParser.o: ../Source/World/OzoneParser.cpp ../Source/World/OzoneParser.hpp ../Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/World/OzoneParser.cpp -o $@
 
 $(BUILD_DIR)/ZoneManager.o: ../Source/World/ZoneManager.cpp ../Source/World/ZoneManager.hpp ../Source/World/ZoneTypes.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/World/ZoneManager.cpp -o $@
+
+$(BUILD_DIR)/SurfaceFlags.o: ../Source/World/SurfaceFlags.cpp ../Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/SurfaceFlags.cpp -o $@
+
+$(BUILD_DIR)/SurfaceMaterial.o: ../Source/Renderer/SurfaceMaterial.cpp ../Source/Renderer/SurfaceMaterial.hpp ../Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/Renderer/SurfaceMaterial.cpp -o $@
+
+$(BUILD_DIR)/GameType.o: ../Source/World/GameType.cpp ../Source/World/GameType.hpp ../Source/World/LevelSettings.hpp ../Source/Script/LightningEntityRegistry.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c ../Source/World/GameType.cpp -o $@
 
 $(BUILD_DIR)/SoundManager.o: ../Source/Audio/SoundManager.cpp ../Source/Audio/SoundManager.hpp ../Source/Audio/DspReverb.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Audio/SoundManager.cpp -o $@
@@ -171,8 +180,8 @@ $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Rendere
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/AutoConvex.o \
-             $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/ZoneManager.o $(BUILD_DIR)/SoundManager.o \
-             $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
+             $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/ZoneManager.o $(BUILD_DIR)/SoundManager.o $(BUILD_DIR)/GameType.o \
+             $(BUILD_DIR)/SurfaceFlags.o $(BUILD_DIR)/SurfaceMaterial.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/OzAssetMapper.o \
              $(BUILD_DIR)/WorldChunk.o $(BUILD_DIR)/LitLightning.o $(BUILD_DIR)/Mesh.o $(BUILD_DIR)/SkeletalMesh.o \
              $(BUILD_DIR)/MeshCache.o $(BUILD_DIR)/AnimatedMesh.o $(BUILD_DIR)/OzAnimFormat.o \
              $(BUILD_DIR)/OzParticleSimulationManager.o $(BUILD_DIR)/rlights.o $(BUILD_DIR)/miniz.o \

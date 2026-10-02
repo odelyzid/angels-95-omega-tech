@@ -84,6 +84,14 @@ static OmegaClient g_client;
 // Network session state lives in Network/NetworkSession.hpp because Core.hpp is
 // included above (line 1) and needs to read it.
 bool g_network_enabled = false;
+
+// Wire the client into InventoryBehaviour so the scoreboard can read SCORE_STATE.
+// Done here (not in InventoryBehaviour) because g_client is a file-static.
+static struct InventoryClientBinder {
+    InventoryClientBinder() {
+        InventoryBehaviour::Instance().SetClient(&g_client);
+    }
+} g_inventoryClientBinder;
 int g_network_world_index = -1;
 static bool ShowInventory = false;
 static bool ShowSkillTree = false;
@@ -1175,6 +1183,7 @@ int main(int argc, char** argv){
     if (!g_shot.active) {
         UnloadRenderTexture(Target);
         EngineBillboard::Shutdown();
+        oz::SurfaceMaterial::Instance().Shutdown();
         for (int i = 0; i < 6; i++) {
             if (OmegaTechData.SkyboxFace[i].meshCount > 0) {
                 UnloadModel(OmegaTechData.SkyboxFace[i]);

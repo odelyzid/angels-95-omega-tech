@@ -409,6 +409,18 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
                 m_on_player_hurt(pud.damage, pud.remaining_health);
             break;
         }
+        case net::MessageType::SCORE_STATE: {
+            if (msg.size < sizeof(net::ScoreStateData)) break;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::ScoreStateData ss;
+            memcpy(&ss, msg.payload, sizeof(ss));
+            m_scores[ss.player_id] = ss;
+            if (ss.matchOver) {
+                m_matchOver = true;
+                m_matchOverAt = now_seconds();
+            }
+            break;
+        }
         case net::MessageType::PLAYER_UPDATE: {
             // Relayed player update from another player
             if (msg.size < sizeof(net::PlayerUpdateData)) return;

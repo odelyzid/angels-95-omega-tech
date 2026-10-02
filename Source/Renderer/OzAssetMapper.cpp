@@ -4,6 +4,8 @@
 #include <cstring>
 #include <cctype>
 #include <cstdio>
+#include <algorithm>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Case-insensitive filename matching helper
@@ -19,6 +21,12 @@ static bool iequals(const char* a, const char* b) {
 
 static void to_lower_inplace(std::string& s) {
     for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+}
+
+static std::string to_lower_copy(const char* s) {
+    std::string out(s ? s : "");
+    to_lower_inplace(out);
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +93,11 @@ AssetMapEntry* AssetMapper::Find(const char* alias) {
 // Init — register all known Engine and Items textures
 // ---------------------------------------------------------------------------
 void AssetMapper::Init() {
+    // Idempotent: a second Init() used to append a duplicate copy of every
+    // entry (m_entries grew unbounded) and leave the previously loaded textures
+    // orphaned on the GPU.
+    UnloadAll();
+    m_entries.clear();
     RegisterEngineTextures();
     RegisterItemTextures();
 }
@@ -109,9 +122,8 @@ void AssetMapper::RegisterEngineTextures() {
     };
     const char* baseDir = "GameData/Global/Engine";
     for (auto& ic : engineIcons) {
-        std::string path = probe_path(baseDir, ic.alias, ".png");
-        m_strings.push_back(path);
-        m_entries.push_back({ic.alias, m_strings.back().c_str(), "engine", {0}});
+        m_entries.push_back({ic.alias, probe_path(baseDir, ic.alias, ".png"),
+                             "engine", {0}, true});
     }
 }
 
@@ -130,61 +142,69 @@ void AssetMapper::RegisterItemTextures() {
     const char* baseDir = "GameData/Global/Items";
     for (auto& ic : itemIcons) {
         // Try .gif first (animated billboard), fall back to .png
-        std::string path = probe_path(baseDir, ic.alias, ".gif");
-        m_strings.push_back(path);
-        m_entries.push_back({ic.alias, m_strings.back().c_str(), "items", {0}});
+        m_entries.push_back({ic.alias, probe_path(baseDir, ic.alias, ".gif"),
+                             "items", {0}, true});
     }
 
     // Key — file on disk is lowercase "key.png"
-    {
-        std::string keyPath = probe_path(baseDir, "Key", ".png");
-        m_strings.push_back(keyPath);
-        m_entries.push_back({"Key", m_strings.back().c_str(), "items", {0}});
-    }
+    m_entries.push_back({"Key", probe_path(baseDir, "Key", ".png"), "items", {0}, true});
 
     // alpha_key — file on disk is lowercase "alpha_key.png"
-    {
-        std::string akPath = probe_path(baseDir, "alpha_key", ".png");
-        m_strings.push_back(akPath);
-        m_entries.push_back({"alpha_key", m_strings.back().c_str(), "items", {0}});
-    }
+    m_entries.push_back({"alpha_key", probe_path(baseDir, "alpha_key", ".png"),
+                         "items", {0}, true});
 }
 
 // ---------------------------------------------------------------------------
 // ResolvePath — returns full relative path for alias, or nullptr
 // ---------------------------------------------------------------------------
 const char* AssetMapper::ResolvePath(const char* alias) const {
+    if (!alias) return nullptr;
     for (auto& e : m_entries) {
         if (iequals(e.alias, alias))
-            return e.path;
+            return e.path.c_str();
     }
     return nullptr;
+}
+
+// Shared magenta grid for unknown aliases. Lazily created ONCE: the old code
+// minted a fresh grid per unknown alias into m_cache, and because those grids
+// were never referenced from m_entries, neither UnloadCategory() nor
+// UnloadAll() could ever free them - one leaked GL texture per unknown alias.
+Texture2D AssetMapper::MissingGrid() {
+    if (m_missingGrid.id == 0) m_missingGrid = MakeGridTexture();
+    return m_missingGrid;
 }
 
 // ---------------------------------------------------------------------------
 // GetTexture — load on first access, cache, fallback to grid
 // ---------------------------------------------------------------------------
 Texture2D AssetMapper::GetTexture(const char* alias) {
+    if (!alias) return MissingGrid();
+    const std::string key = to_lower_copy(alias);
+
     // Check cache first
-    auto it = m_cache.find(alias);
+    auto it = m_cache.find(key);
     if (it != m_cache.end())
         return it->second;
 
     // Find entry
     AssetMapEntry* e = Find(alias);
     if (!e) {
-        // Unknown alias — return grid texture
-        Texture2D grid = MakeGridTexture();
-        m_cache[alias] = grid;
+        // Unknown alias — the shared grid. Still cached (and still owned by
+        // m_cache, so UnloadAll frees it) so we do not re-hit the map each draw.
+        Texture2D grid = MissingGrid();
+        m_cache[key] = grid;
         return grid;
     }
 
     // If texture already loaded on entry, return it
-    if (e->texture.id > 0)
+    if (e->texture.id > 0) {
+        m_cache[key] = e->texture;
         return e->texture;
+    }
 
     // Try loading the path (filesystem first, then packages)
-    Texture2D tex = LoadTextureWithFallback(e->path);
+    Texture2D tex = LoadTextureWithFallback(e->path.c_str());
     if (tex.id > 0)
         SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
 
@@ -202,12 +222,15 @@ Texture2D AssetMapper::GetTexture(const char* alias) {
 
     // Fallback to grid
     if (tex.id == 0) {
-        OZ_WARN("AssetMapper: missing texture '%s' at '%s' — using grid", alias, e->path);
-        tex = MakeGridTexture();
+        OZ_WARN("AssetMapper: missing texture '%s' at '%s' — using grid", alias, e->path.c_str());
+        tex = MissingGrid();
+        e->ownsTexture = false;
+    } else {
+        e->ownsTexture = true;
     }
 
     e->texture = tex;
-    m_cache[alias] = tex;
+    m_cache[key] = tex;
     return tex;
 }
 
@@ -225,25 +248,30 @@ void AssetMapper::PreloadCategory(const char* category) {
 // UnloadCategory
 // ---------------------------------------------------------------------------
 void AssetMapper::UnloadCategory(const char* category) {
+    if (!category) return;
     for (auto& e : m_entries) {
-        if (category && strcmp(e.category, category) == 0) {
-            if (e.texture.id > 0) {
+        if (strcmp(e.category, category) == 0) {
+            // The grid is shared by every unknown alias; never unload it here,
+            // it outlives the category and UnloadAll() frees it once.
+            if (e.texture.id > 0 && e.ownsTexture) {
                 UnloadTexture(e.texture);
                 e.texture = {0};
             }
+            e.texture = {0};
         }
     }
-    // Remove from cache
-    for (auto it = m_cache.begin(); it != m_cache.end(); ) {
-        bool inCat = false;
-        for (auto& e : m_entries) {
-            if (category && strcmp(e.category, category) == 0 && iequals(e.alias, it->first.c_str())) {
-                inCat = true;
-                break;
-            }
-        }
-        if (inCat) it = m_cache.erase(it);
-        else ++it;
+    // Drop every cache row that resolves into this category. Comparing against
+    // the (now reset) entries still works because we only need the alias set.
+    std::vector<std::string> drop;
+    for (const auto& e : m_entries) {
+        if (strcmp(e.category, category) == 0) drop.push_back(to_lower_copy(e.alias));
+    }
+    for (const auto& k : drop) {
+        // Only erase if the cached texture is not the shared grid.
+        auto it = m_cache.find(k);
+        if (it == m_cache.end()) continue;
+        if (it->second.id != m_missingGrid.id) UnloadTexture(it->second);
+        m_cache.erase(it);
     }
 }
 
@@ -251,11 +279,33 @@ void AssetMapper::UnloadCategory(const char* category) {
 // UnloadAll
 // ---------------------------------------------------------------------------
 void AssetMapper::UnloadAll() {
-    for (auto& e : m_entries) {
-        if (e.texture.id > 0) {
-            UnloadTexture(e.texture);
-            e.texture = {0};
-        }
+    // m_cache is the single record of every texture this class owns, including
+    // the shared grid and every previously-mapped fallback.
+    // m_cache is the SINGLE owner record: every texture this class created is
+    // inserted there exactly once (including the shared grid and every
+    // unknown-alias fallback), and an entry's `texture` is only ever a copy of
+    // a cached handle. Iterating both lists would double-free, so only the
+    // cache is unloaded here and the entries are just reset.
+    //
+    // Dedupe by id: the shared grid is reachable from every unknown alias, so a
+    // naive loop would unload it once per alias.
+    std::vector<int> freed;
+    freed.reserve(m_cache.size() + 1);
+    for (auto& kv : m_cache) {
+        if (kv.second.id <= 0) continue;
+        if (std::find(freed.begin(), freed.end(), kv.second.id) != freed.end()) continue;
+        freed.push_back(kv.second.id);
+        UnloadTexture(kv.second);
     }
+    if (m_missingGrid.id > 0 &&
+        std::find(freed.begin(), freed.end(), m_missingGrid.id) == freed.end()) {
+        UnloadTexture(m_missingGrid);
+    }
+    m_missingGrid = {0};
     m_cache.clear();
+
+    for (auto& e : m_entries) {
+        e.texture = {0};
+        e.ownsTexture = true;
+    }
 }

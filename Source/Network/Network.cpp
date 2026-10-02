@@ -82,6 +82,7 @@ const char* message_type_string(MessageType type) {
         case MessageType::NPC_DAMAGE:       return "NPC_DAMAGE";
     case MessageType::MELEE_HIT:         return "MELEE_HIT";
         case MessageType::PROFILE_STATE:     return "PROFILE_STATE";
+        case MessageType::SCORE_STATE:       return "SCORE_STATE";
         case MessageType::WEAPON_AMMO:      return "WEAPON_AMMO";
         case MessageType::SERVER_CHALLENGE: return "SERVER_CHALLENGE";
         case MessageType::CLIENT_AUTH:      return "CLIENT_AUTH";

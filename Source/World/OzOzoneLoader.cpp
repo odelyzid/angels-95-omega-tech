@@ -1,7 +1,8 @@
-﻿#include "OzOzoneLoader.hpp"
+#include "OzOzoneLoader.hpp"
 #include "rlgl.h"
 #include "OzoneFrustum.hpp"
 #include "../Renderer/OzAssetMapper.hpp"
+#include "../Renderer/SurfaceMaterial.hpp"
 #include "../Pawn/OzPawnSystem.hpp"
 #include "../Script/LightningEntityRegistry.hpp"
 #include "OzoneParser.hpp"
@@ -12,21 +13,26 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+
+// Defined with the other per-face surface helpers further down, but needed by
+// DrawSurface() which comes first.
+static void BuildFaceMeshes(OzoneRenderable& r);
 #include <algorithm>
 #include <fstream>
 #include <unordered_map>
 #include <filesystem>
 namespace fs = std::filesystem;
 
-// Strip surrounding quote characters (U+0022) from a string if present
-static std::string StripQuotes(std::string s) {
-    if (s.size() >= 2 && s.front() == '\"' && s.back() == '\"')
-        return s.substr(1, s.size() - 2);
-    return s;
-}
+// StripQuotes is defined in OzoneParser.cpp (linked into both client and
+// server) and declared in OzoneParser.hpp. It used to be static here, which
+// meant GameState.cpp could not link against it.
 
 // True for primitives that carry entity/level metadata rather than brush
 // geometry â€” they are handled by ParseOzoneEntities, not the mesh builder.
+//
+// SKYBOX is a GEOMETRY primitive, so it is deliberately NOT in this list. It is
+// filtered out of the collision pass instead, because a skybox is a hollow room:
+// treating it as a solid would put an invisible wall around the player.
 static bool IsEntityPrimitive(OzonePrimitiveType t) {
     switch (t) {
         case OzonePrimitiveType::ENTITY_PLAYERSTART:
@@ -99,6 +105,25 @@ static void ApplyLightDefDefaults(LightNode& node, const OzonePrimitive& prim) {
         node.isStatic = (it->second != 0.0f);
     stat("inner_cone", node.innerCone, false);
     stat("outer_cone", node.outerCone, false);
+}
+
+// Apply the same defaults layer to a light built in CODE rather than parsed from
+// an OZONE line (the editor's GameEngine.Light placement). A code-built node
+// authored nothing, so it behaves as if every optional field on the line was
+// omitted: effect / flare / corona and the def-owned period / cast_shadow /
+// is_static / inner_cone / outer_cone all come from the def.
+//
+// Without this the editor hardcoded WHITE / 1.0 / radius 20 / cone 0.95,0.80 in
+// the spawn handler, so editing Light.Point.ozls changed loaded worlds but not
+// newly placed lights - two different sources of truth for the same thing.
+void ApplyLightDefDefaultsToNode(LightNode& node) {
+    OzonePrimitive prim;
+    prim.type = OzonePrimitiveType::ENTITY_LIGHT;
+    prim.name = node.name;
+    prim.lightEffect = -1;
+    prim.lightFlare = -1;
+    prim.lightCorona = -1;
+    ApplyLightDefDefaults(node, prim);
 }
 
 static bool ParseOzoneEntity(const OzonePrimitive& prim,
@@ -480,8 +505,9 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
             // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes
             //           scoreLimit friendlyFire skyboxPath [skyboxSidePath]
             ParseLevelInfo(settings, prim.args,
-                           StripQuotes(prim.entityType),
-                           StripQuotes(prim.entitySubType));
+                            StripQuotes(prim.entityType),
+                            StripQuotes(prim.entitySubType),
+                            StripQuotes(prim.gametypeKey));
             return true;
         case OzonePrimitiveType::ENTITY_PARTICLES:
             // particles type density speed r g b windX windZ
@@ -777,6 +803,101 @@ static std::string ResolveWorldAssetPath(const std::string& raw,
 // ---------------------------------------------------------------------------
 // BuildFromPrimitive
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// BuildSkybox — six INWARD-facing quads with projected UVs.
+//
+// OZONE:  skybox <texPath> cx cy cz size [topTex=]
+//
+// Each face's UVs are derived from its vertex direction relative to the cube
+// centre, so the six authored textures behave like a cube-map seen from inside
+// rather than six independently stretched pictures. Winding is reversed versus
+// BuildBox so the faces are visible from the interior, and the surface carries
+// SURF_UNLIT + SURF_TWO_SIDED so it is drawn at full value and survives the
+// camera clipping into a corner.
+//
+// Render-only: a skybox contributes NOTHING to the CSG collision world, so
+// subtracting the shell around it never removes the player's floor.
+// ---------------------------------------------------------------------------
+Model OzoneLoader::BuildSkybox(float cx, float cy, float cz, float size,
+                               const char* topPath) {
+    const float h = size * 0.5f;
+    // 8 corners, then 6 quads of 4 verts each, wound so the normal points IN.
+    //   +X, -X, +Y, -Y, +Z, -Z   (matches the SurfaceFace order)
+    static const float kCorners[8][3] = {
+        { -1, -1, -1 }, {  1, -1, -1 }, { -1,  1, -1 }, {  1,  1, -1 },
+        { -1, -1,  1 }, {  1, -1,  1 }, { -1,  1,  1 }, {  1,  1,  1 },
+    };
+    // Corner indices per face, wound clockwise seen from OUTSIDE so the visible
+    // side (from inside) is front-facing after the reversal.
+    static const int kFaceCorners[6][4] = {
+        { 1, 5, 7, 3 },   // +X
+        { 4, 0, 2, 6 },   // -X
+        { 2, 6, 7, 3 },   // +Y (ceiling in engine space)
+        { 4, 0, 1, 5 },   // -Y (floor)
+        { 5, 1, 0, 4 },   // +Z
+        { 6, 2, 3, 7 },   // -Z
+    };
+
+    Mesh mesh = {0};
+    mesh.vertexCount = 6 * 4;
+    mesh.triangleCount = 6 * 2;
+    float* verts  = (float*)RL_MALLOC((size_t)mesh.vertexCount * 3 * sizeof(float));
+    float* norms  = (float*)RL_MALLOC((size_t)mesh.vertexCount * 3 * sizeof(float));
+    float* uvs    = (float*)RL_MALLOC((size_t)mesh.vertexCount * 2 * sizeof(float));
+    unsigned short* idx = (unsigned short*)RL_MALLOC((size_t)mesh.triangleCount * 3 * sizeof(unsigned short));
+    if (!verts || !norms || !uvs || !idx) {
+        if (verts)  RL_FREE(verts);
+        if (norms)  RL_FREE(norms);
+        if (uvs)    RL_FREE(uvs);
+        if (idx)    RL_FREE(idx);
+        return Model{0};
+    }
+    mesh.vertices = verts;
+    mesh.normals = norms;
+    mesh.texcoords = uvs;
+    mesh.indices = idx;
+
+    for (int f = 0; f < 6; f++) {
+        for (int v = 0; v < 4; v++) {
+            const int ci = kFaceCorners[f][v];
+            const int o = (f * 4 + v);
+            const float lx = kCorners[ci][0] * h;
+            const float ly = kCorners[ci][1] * h;
+            const float lz = kCorners[ci][2] * h;
+            verts[o * 3 + 0] = lx;
+            verts[o * 3 + 1] = ly;
+            verts[o * 3 + 2] = lz;
+            // Inward normal: from the face axis towards the centre.
+            static const float kAxis[6][3] = {
+                { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 },
+            };
+            norms[o * 3 + 0] = kAxis[f][0];
+            norms[o * 3 + 1] = kAxis[f][1];
+            norms[o * 3 + 2] = kAxis[f][2];
+            // Projected UV: the corner direction, normalised on the face's own
+            // plane, mapped to 0..1. Simple planar projection per face - stable,
+            // seam-free inside one face, and the six faces line up because the
+            // mapping is a function of direction alone.
+            const float du = (f == 0 || f == 1) ? lz : lx;
+            const float dv = (f == 2 || f == 3) ? lz : ly;
+            uvs[o * 2 + 0] = du / (2.0f * h) + 0.5f;
+            uvs[o * 2 + 1] = dv / (2.0f * h) + 0.5f;
+        }
+        const int base = f * 4;
+        idx[(f * 2 + 0) * 3 + 0] = (unsigned short)(base + 0);
+        idx[(f * 2 + 0) * 3 + 1] = (unsigned short)(base + 1);
+        idx[(f * 2 + 0) * 3 + 2] = (unsigned short)(base + 2);
+        idx[(f * 2 + 1) * 3 + 0] = (unsigned short)(base + 0);
+        idx[(f * 2 + 1) * 3 + 1] = (unsigned short)(base + 2);
+        idx[(f * 2 + 1) * 3 + 2] = (unsigned short)(base + 3);
+    }
+
+    Model model = LoadModelFromMesh(mesh);   // takes ownership of the buffers
+    // Texture is applied by the caller: only it knows the world directory, and a
+    // skybox's path is authored relative to the world.
+    return model;
+}
+
 Model OzoneLoader::BuildFromPrimitive(int type, const std::vector<float>& args) {
     switch ((OzonePrimitiveType)type) {
         case OzonePrimitiveType::BOX: {
@@ -860,6 +981,54 @@ bool OzoneLoader::LoadFile(const char* path) {
     for (auto& prim : primitives) {
         if (IsEntityPrimitive(prim.type)) continue;
 
+        // Skybox: a render-only room. Handled before the generic brush path
+        // because it is NOT a solid - adding it to the CSG world would put an
+        // invisible wall around the player.
+        if (prim.type == OzonePrimitiveType::SKYBOX) {
+            OzoneRenderable sb;
+            sb.typeId = (int)OzonePrimitiveType::SKYBOX;
+            sb.csgOp = 0;
+            sb.surface = prim.surface;
+            // args: cx cy cz size [scale]
+            const float cx = prim.args.size() > 0 ? prim.args[0] : 0.0f;
+            const float cy = prim.args.size() > 1 ? prim.args[1] : 0.0f;
+            const float cz = prim.args.size() > 2 ? prim.args[2] : 0.0f;
+            float size = prim.args.size() > 3 ? prim.args[3] : 512.0f;
+            if (size <= 0.0f) size = 512.0f;
+            if (prim.args.size() > 4 && prim.args[4] > 0.0f) size *= prim.args[4];
+            // OZONE is Z-up; the engine is Y-up.
+            sb.position = { cx, cz, cy };
+            sb.model = BuildSkybox(0.0f, 0.0f, 0.0f, size, nullptr);
+            sb.loaded = (sb.model.meshCount > 0);
+            sb.scale = 1.0f;
+            sb.surfaceFlags = (int)(sb.surface.def.flags &
+                                    (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY | SURF_INVISIBLE));
+            if (sb.loaded) {
+                // Unlit + two-sided so the interior is visible from inside, and
+                // no-fog so a sky never greys out at distance.
+                sb.surface.def.Set(SURF_UNLIT, true);
+                sb.surface.def.Set(SURF_TWO_SIDED, true);
+                sb.surface.def.Set(SURF_NO_FOG, true);
+                // Bind the surface shader so the flags actually take effect.
+                if (oz::SurfaceMaterial::Instance().Ready())
+                    sb.model.materials[0].shader = oz::SurfaceMaterial::Instance().Get();
+                const std::string tp = ResolveWorldAssetPath(
+                    prim.entityType, gameDataWorldDir, worldDir);
+                Texture2D tex = LoadTextureWithFallback(tp.c_str());
+                if (tex.id > 0) {
+                    sb.customTex = tex;
+                    sb.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+                } else {
+                    OZ_WARN("skybox: texture '%s' not found - falling back to flat colour",
+                            tp.c_str());
+                }
+            } else {
+                OZ_WARN("skybox: geometry build failed for '%s'", prim.entityType.c_str());
+            }
+            m_renderables.push_back(sb);
+            continue;
+        }
+
         // Heightmap is handled specially â€” builds its own model from image path
         if (prim.type == OzonePrimitiveType::HEIGHTMAP) {
         OzoneRenderable r;
@@ -885,6 +1054,7 @@ bool OzoneLoader::LoadFile(const char* path) {
     r.typeId = (int)prim.type;
     r.csgOp = prim.csgOp;
     r.surfaceFlags = prim.surfaceFlags;
+    r.surface = prim.surface;   // per-face surface props (flags/texture/UV/pan/alpha/glow)
 
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
@@ -903,13 +1073,11 @@ bool OzoneLoader::LoadFile(const char* path) {
 
     r.model = BuildFromPrimitive((int)prim.type, prim.args);
     r.loaded = (r.model.meshCount > 0);
-    // Sync texScaleU/V with BuildBox's default tiling so that
-    // ApplyRenderableUV correctly undoes it before applying overrides
-    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 5) {
-        float h = prim.args[4];
-        r.texScaleU = (h >= 1.0f) ? 16.0f : 8.0f;
-        r.texScaleV = (h >= 1.0f) ? 16.0f : 8.0f;
-    }
+    // NOTE: deliberately NOT seeding texScaleU/V from BuildBox's baked tiling
+    // any more. texScaleU/V are extra multipliers ON TOP of the generated mesh
+    // UVs (which already carry the tiling); seeding them with that same value
+    // made every export write `texScaleU=16` for a 16x-tiled box, which on the
+    // next load applied 16 to already-16x UVs -> 256x.
     // Parse optional texSlot after rotation: box has 7+1=8 args, cyl has 8+1=9
     if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
         r.texSlot = (int)prim.args[7];
@@ -988,6 +1156,7 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
     r.typeId = (int)prim.type;
     r.csgOp = prim.csgOp;
     r.surfaceFlags = prim.surfaceFlags;
+    r.surface = prim.surface;   // per-face surface props (flags/texture/UV/pan/alpha/glow)
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
 
@@ -1002,12 +1171,10 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
     // World-space AABB for frustum culling
     ComputeCollisionAABB((int)prim.type, prim.args, r.position, r.bounds);
     r.hasBounds = true;
-    // Sync texScaleU/V with BuildBox's default tiling
-    if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 5) {
-        float h = prim.args[4];
-        r.texScaleU = (h >= 1.0f) ? 16.0f : 8.0f;
-        r.texScaleV = (h >= 1.0f) ? 16.0f : 8.0f;
-    }
+    // texScaleU/V stay at 1.0 here on purpose: they are extra multipliers on top
+    // of the generated mesh UVs, not an absolute. Seeding them with BuildBox's
+    // baked tiling (as this used to) meant an export wrote `texScaleU=16` for an
+    // already-16x-tiled box and the next load applied 16 on top of 16 -> 256x.
     if (prim.type == OzonePrimitiveType::BOX && prim.args.size() >= 8)
         r.texSlot = (int)prim.args[7];
     else if (prim.type == OzonePrimitiveType::CYLINDER && prim.args.size() >= 9)
@@ -1036,6 +1203,105 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
 
 
 // ---------------------------------------------------------------------------
+// DrawGlowGeometry — additive re-draw of every SURF_GLOW face.
+//
+// Runs after the opaque world pass, with depth TESTING still on but depth WRITE
+// off and the blend additive. Without the depth test a glowing floor panel
+// would shine through the wall in front of it; without the depth write it would
+// also erase the very lighting it is meant to add.
+//
+// The glow term itself is already in Surface.fs (added after lighting, so a
+// glowing sign stays bright in an unlit room). This pass is the HALO on top:
+// the same face drawn again, additively, so the emissive area spills over its
+// own silhouette instead of being clipped to the texture's alpha.
+// ---------------------------------------------------------------------------
+void OzoneLoader::DrawGlowGeometry(Camera3D& camera) {
+    using namespace oz::surface;
+    auto& sm = oz::SurfaceMaterial::Instance();
+    if (!sm.Ready()) return;
+
+    bool any = false;
+    for (auto& r : m_renderables) {
+        if (!r.loaded || (r.surfaceFlags & SURF_COLLISION_PROXY)) continue;
+        for (int f = 0; f < FACE_COUNT; f++)
+            if (r.surface.Resolve((SurfaceFace)f).Has(SURF_GLOW)) { any = true; break; }
+        if (any) break;
+    }
+    if (!any) return;
+
+    BeginBlendMode(BLEND_ADDITIVE);
+    rlDisableDepthMask();
+    for (auto& r : m_renderables) {
+        if (!r.loaded || (r.surfaceFlags & SURF_COLLISION_PROXY)) continue;
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP) continue;
+        bool glows = false;
+        for (int f = 0; f < FACE_COUNT; f++)
+            if (r.surface.Resolve((SurfaceFace)f).Has(SURF_GLOW)) { glows = true; break; }
+        if (!glows) continue;
+        DrawSurface(r);
+    }
+    rlEnableDepthMask();
+    EndBlendMode();
+}
+
+// ---------------------------------------------------------------------------
+// DrawSurface — the surface-flagged draw path.
+//
+// A brush with any non-default surface property is drawn one face at a time so
+// each face can carry its own uniforms. A brush with nothing set keeps the
+// original single DrawModel call, so the overwhelming majority of geometry is
+// untouched (same shader, same batching, same cost).
+//
+// Invisible faces are skipped. SURF_FAKEBACKDROP is included in the shader's
+// full-bright path, which is what finally lets a backdrop be drawn at its
+// painted value WITHOUT mutating the shared LitFog uniforms the way the old
+// DrawZoneGeometry did.
+// ---------------------------------------------------------------------------
+void OzoneLoader::DrawSurface(OzoneRenderable& r) {
+    using namespace oz::surface;
+    auto& sm = oz::SurfaceMaterial::Instance();
+    if (!sm.Ready() || r.model.meshCount == 0) {
+        // Shader missing: fall back to the plain path so the brush still draws.
+        DrawModel(r.model, r.position, r.scale, WHITE);
+        return;
+    }
+    if (!r.faceMeshesBuilt) BuildFaceMeshes(r);
+
+    // pos/rot/scale mirrors what DrawModel would have applied, so the geometry
+    // lands in exactly the same place as the non-surface path.
+    Matrix mdl = MatrixTranslate(r.position.x, r.position.y, r.position.z);
+    if (r.rotation != 0.0f)
+        mdl = MatrixMultiply(MatrixRotateY(r.rotation), mdl);
+    if (r.scale != 1.0f)
+        mdl = MatrixMultiply(MatrixScale(r.scale, r.scale, r.scale), mdl);
+
+    Material mat = r.model.materials[0];
+
+    for (int f = 0; f < FACE_COUNT; f++) {
+        const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+        if (p.Has(SURF_INVISIBLE)) continue;
+        if (r.faceMesh[f].vaoId == 0) continue;   // no geometry on this axis
+
+        mat.shader = sm.Get();
+        sm.ApplyUniforms(p);
+        sm.BeginSurfaceState(p);
+        DrawMesh(r.faceMesh[f], mat, mdl);
+        sm.EndSurfaceState();
+    }
+}
+
+// Route a renderable through the right path. Callers use this instead of
+// DrawModel so the fast path and the surface path cannot drift apart.
+static inline void DrawRenderable(OzoneRenderable& r) {
+    if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP) return;  // handled by caller
+    if (r.surface.NeedsPerFaceDraw()) {
+        OzoneLoader::Instance().DrawSurface(r);
+        return;
+    }
+    DrawModel(r.model, r.position, r.scale, WHITE);
+}
+
+// ---------------------------------------------------------------------------
 // Draw â€” all renderables (backward compat, used by editor)
 // ---------------------------------------------------------------------------
 void OzoneLoader::Draw(Camera3D& camera) {
@@ -1047,6 +1313,7 @@ void OzoneLoader::Draw(Camera3D& camera) {
         // explicitly asked for them - otherwise a single AutoConvex pass would
         // bury the level in a wall of grey boxes.
         if ((r.surfaceFlags & SURF_COLLISION_PROXY) && !m_drawCollisionProxies) continue;
+        if (r.surface.def.flags & (uint32_t)oz::surface::SURF_INVISIBLE) continue;
         if (r.hasBounds && (r.bounds.min.x < r.bounds.max.x ||
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
@@ -1055,7 +1322,7 @@ void OzoneLoader::Draw(Camera3D& camera) {
             DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
                         (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
         } else {
-            DrawModel(r.model, r.position, r.scale, WHITE);
+            DrawRenderable(r);
         }
     }
 }
@@ -1076,11 +1343,12 @@ void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
             !AabbInFrustum(planes, r.bounds)) continue;
+        if (r.surface.def.flags & (uint32_t)oz::surface::SURF_INVISIBLE) continue;
         if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
             DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
                         (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
         } else {
-            DrawModel(r.model, r.position, r.scale, WHITE);
+            DrawRenderable(r);
         }
     }
 }
@@ -1147,6 +1415,10 @@ void OzoneLoader::RebuildCollisionVolumes() {
     CsgProcessor csg;
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
+        // A skybox is a hollow room, not a solid. Feeding it to CSG would put an
+        // invisible wall around the player and, worse, any `sub` against it would
+        // carve away the sky. Render-only by construction.
+        if (r.typeId == (int)OzonePrimitiveType::SKYBOX) continue;
         // Skip entity types Ã¢â‚¬â€ handled by PawnSystem
         if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
@@ -1342,9 +1614,10 @@ int OzoneLoader::AppendAutoConvexCollision(const float* verts, int vertFloatCoun
 
 // ---------------------------------------------------------------------------
 // ApplyRenderableUV -- modify texture UV tiling/offset on a renderable's mesh
-// The transform is: new_u = old_u * su + ou, new_v = old_v * sv + ov
-// This updates both the CPU-side texcoords and the GPU vertex buffer.
-// Stores the params on the renderable so they can be re-applied after rebuild.
+// The transform is: new_u = uvBaseU * su + ou, new_v = uvBaseV * sv + ov
+// Always recomputed from OzoneRenderable::uvBase, the pristine texcoords the
+// primitive generator produced. Deriving from the base rather than trying to
+// invert the previous transform is what makes repeated Apply non-compounding.
 // ---------------------------------------------------------------------------
 void OzoneLoader::ApplyRenderableUV(int idx, float su, float sv, float ou, float ov) {
     OzoneRenderable* r = Get(idx);
@@ -1352,14 +1625,14 @@ void OzoneLoader::ApplyRenderableUV(int idx, float su, float sv, float ou, float
     Mesh& mesh = r->model.meshes[0];
     if (!mesh.texcoords) return;
 
-    // Undo previous transform first so transforms don't compound
-    float invSu = (r->texScaleU != 0.0f) ? 1.0f / r->texScaleU : 1.0f;
-    float invSv = (r->texScaleV != 0.0f) ? 1.0f / r->texScaleV : 1.0f;
+    const size_t need = (size_t)mesh.vertexCount * 2;
+    if (r->uvBase.size() != need) {
+        r->uvBase.assign(mesh.texcoords, mesh.texcoords + need);
+    }
+
     for (int i = 0; i < mesh.vertexCount; i++) {
-        float baseU = (mesh.texcoords[i*2 + 0] - r->texOffsetU) * invSu;
-        float baseV = (mesh.texcoords[i*2 + 1] - r->texOffsetV) * invSv;
-        mesh.texcoords[i*2 + 0] = baseU * su + ou;
-        mesh.texcoords[i*2 + 1] = baseV * sv + ov;
+        mesh.texcoords[i*2 + 0] = r->uvBase[i*2 + 0] * su + ou;
+        mesh.texcoords[i*2 + 1] = r->uvBase[i*2 + 1] * sv + ov;
     }
 
     // Store new params
@@ -1402,12 +1675,130 @@ bool OzoneLoader::ApplyRenderableTexture(int idx, const char* path) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-face surface meshes
+//
+// A brush mesh is one raylib Mesh, but surface properties (unlit, masked,
+// translucent, glow, pan, per-face texture) are SHADER UNIFORMS, and a uniform
+// is per draw call. So a brush with any per-face difference has to be drawn as up
+// to six DrawMesh calls, one per face, each with its own uniforms.
+//
+// Triangles are bucketed by the dominant axis of their normal, which works for
+// every primitive generator (box, cylinder, sphere, pyramid, plane) instead of
+// depending on raylib's internal face ordering.
+//
+// The sub-meshes are built lazily and cached on the renderable: an undecorated
+// brush never pays for the split, and there is no per-frame cost either way.
+// ---------------------------------------------------------------------------
+static void BuildFaceMeshes(OzoneRenderable& r) {
+    if (r.faceMeshesBuilt) return;
+    r.faceMeshesBuilt = true;
+    if (!r.loaded || r.model.meshCount <= 0) return;
+
+    Mesh& src = r.model.meshes[0];
+    if (!src.vertices || !src.indices || src.vertexCount <= 0) return;
+
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++)
+        r.faceMesh[f] = Mesh{0};
+
+    // First pass: which triangles belong to which face.
+    std::vector<unsigned short> tris[oz::surface::FACE_COUNT];
+    for (int t = 0; t < src.triangleCount; t++) {
+        unsigned short i0 = src.indices[t * 3 + 0];
+        unsigned short i1 = src.indices[t * 3 + 1];
+        unsigned short i2 = src.indices[t * 3 + 2];
+        if ((int)i0 >= src.vertexCount || (int)i1 >= src.vertexCount ||
+            (int)i2 >= src.vertexCount) continue;
+        const float* a = src.vertices + (size_t)i0 * 3;
+        const float* b = src.vertices + (size_t)i1 * 3;
+        const float* c = src.vertices + (size_t)i2 * 3;
+        const float e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+        const float e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+        // Unnormalised cross product: only the direction matters for bucketing.
+        const float nx = e1y * e2z - e1z * e2y;
+        const float ny = e1z * e2x - e1x * e2z;
+        const float nz = e1x * e2y - e1y * e2x;
+        const int face = (int)oz::surface::FaceFromNormal(nx, ny, nz);
+        if (face < 0 || face >= oz::surface::FACE_COUNT) continue;
+        tris[face].push_back(i0);
+        tris[face].push_back(i1);
+        tris[face].push_back(i2);
+    }
+
+    // Second pass: one Mesh per face, sharing the source's vertex arrays. A Mesh
+    // may reference arrays it does not own when vaoId/vboId are set from
+    // UploadMesh, so copy the triangle list into fresh buffers instead of
+    // aliasing the source indices (which UnloadModel would free).
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        const size_t n = tris[f].size();
+        if (n < 3) continue;   // primitive has no geometry on this axis
+        Mesh m = {0};
+        m.vertexCount = src.vertexCount;
+        m.triangleCount = (int)(n / 3);
+        m.vertices = src.vertices;
+        m.texcoords = src.texcoords;
+        m.normals = src.normals;
+        m.colors = src.colors;
+        // UploadMesh copies the indices and generates the VAO sharing the
+        // existing VBO ids for the other streams.
+        m.indices = (unsigned short*)RL_MALLOC(n * sizeof(unsigned short));
+        if (!m.indices) continue;
+        memcpy(m.indices, tris[f].data(), n * sizeof(unsigned short));
+        UploadMesh(&m, false);
+        r.faceMesh[f] = m;
+    }
+}
+
+void OzoneLoader::RebuildSurfaceMeshes(int idx) {
+    OzoneRenderable* r = Get(idx);
+    if (!r) return;
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        if (r->faceMesh[f].vaoId > 0) UnloadMesh(r->faceMesh[f]);
+        r->faceMesh[f] = Mesh{0};
+    }
+    r->faceMeshesBuilt = false;
+    if (r->surface.NeedsPerFaceDraw()) BuildFaceMeshes(*r);
+}
+
+void OzoneLoader::SetRenderableFace(int idx, oz::surface::SurfaceFace face,
+                                    const oz::surface::SurfaceProps& p) {
+    OzoneRenderable* r = Get(idx);
+    if (!r) return;
+    if (face == oz::surface::FACE_NONE) r->surface.def = p;
+    else                                       r->surface.SetFace(face, p);
+    // The surface flags that the existing pipeline branches on are derived from
+    // the resolved state so DrawWorldGeometry / DrawZoneGeometry stay correct.
+    const uint32_t f0 = r->surface.def.flags;
+    r->surfaceFlags = (int)(f0 & (oz::surface::SURF_FAKEBACKDROP |
+                                  oz::surface::SURF_COLLISION_PROXY |
+                                  oz::surface::SURF_INVISIBLE));
+    RebuildSurfaceMeshes(idx);
+}
+
+void OzoneLoader::ResetRenderableSurface(int idx) {
+    OzoneRenderable* r = Get(idx);
+    if (!r) return;
+    r->surface.ResetToDefault();
+    r->surfaceFlags = (int)(r->surface.def.flags & (oz::surface::SURF_FAKEBACKDROP |
+                                                    oz::surface::SURF_COLLISION_PROXY |
+                                                    oz::surface::SURF_INVISIBLE));
+    RebuildSurfaceMeshes(idx);
+}
+
+// ---------------------------------------------------------------------------
 // RemoveRenderable -- remove a brush renderable at the given index.
 // Unloads the model and custom texture, then erases from the list.
 // ---------------------------------------------------------------------------
 void OzoneLoader::RemoveRenderable(int idx) {
     OzoneRenderable* r = Get(idx);
     if (!r) return;
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        // The face sub-meshes own their own index buffers, so UnloadModel (which
+        // only knows about r->model) never freed them: a leak on every surface-
+        // flagged brush deletion, and a dangling vaoId if the indices were reused.
+        if (r->faceMesh[f].vaoId > 0) UnloadMesh(r->faceMesh[f]);
+        r->faceMesh[f] = Mesh{0};
+    }
+    r->faceMeshesBuilt = false;
     if (r->customTex.id > 0) UnloadTexture(r->customTex);
     if (r->loaded) UnloadModel(r->model);
     m_renderables.erase(m_renderables.begin() + idx);
@@ -1498,6 +1889,17 @@ void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vecto
     // Replace old model
     UnloadModel(r->model);
     r->model = newModel;
+    // The mesh is brand new, so its pristine UVs are different (a bigger box
+    // tiles differently). Drop the stale snapshot or the next ApplyRenderableUV
+    // would scale the OLD base.
+    r->uvBase.clear();
+    // Face sub-meshes reference the old vertex streams; they must be rebuilt.
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        if (r->faceMesh[f].vaoId > 0) UnloadMesh(r->faceMesh[f]);
+        r->faceMesh[f] = Mesh{0};
+    }
+    r->faceMeshesBuilt = false;
+    if (r->surface.NeedsPerFaceDraw()) BuildFaceMeshes(*r);
 
     // Update transform
     r->position = pos;
@@ -1508,8 +1910,15 @@ void OzoneLoader::UpdateBrushRenderable(int idx, const Vector3& pos, const Vecto
     if (r->typeId == 3) r->position.y -= size.y / 2.0f;  // pyramid: h = size.y
 }
 
+void OzoneLoader::SetWorldAmbient(float r, float g, float b, float a) {
+    m_worldAmbient[0] = r;
+    m_worldAmbient[1] = g;
+    m_worldAmbient[2] = b;
+    m_worldAmbient[3] = a;
+}
+
 // ---------------------------------------------------------------------------
-// DrawZoneGeometry Ã¢â‚¬â€ draw renderables with SURF_FAKEBACKDROP flag set
+// DrawZoneGeometry — draw renderables with SURF_FAKEBACKDROP flag set
 // (with optional bounds filter for backward compat)
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
@@ -1522,9 +1931,22 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
     // collapses to black â€” which is what turned the fortress perimeter into a
     // black void. For this pass only, force colDiffuse to white and ambient to
     // 1.0-in-units, which reduces the expression to exactly the painted texture.
-    // Both uniforms are re-applied by the lighting/zone-env passes every frame.
+    //
+    // These are SHARED shader uniforms, so whatever is left behind is inherited
+    // by whatever draws next. This function is called from Core.hpp's sky pass
+    // immediately BEFORE DrawWorldGeometry() in the same frame, so the "restore"
+    // must put back the world's REAL ambient - restoring a hardcoded 1.0 meant
+    // every world surface in a sky zone rendered with ambient/10 == 0.1 instead
+    // of its authored value. Read the live values first and write them back.
     Shader lit = s_litFogShader;
     static int locDiffuse = -1, locAmbient = -1;
+    // raylib has no GetShaderValue, so the "current" ambient is whatever the
+    // owner last published via SetWorldAmbient (default 0.1 matches the client's
+    // initial uniform). Restoring that instead of a hardcoded 1.0 is what stops
+    // the sky pass from flattening the ambient of everything drawn after it.
+    float savedDiffuse[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float savedAmbient[4] = {m_worldAmbient[0], m_worldAmbient[1],
+                             m_worldAmbient[2], m_worldAmbient[3]};
     const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     // 5.5 rather than 10.0: full value (10.0) renders the painted panels at 100%
     // and blows the pale stone out to flat white. 5.5 keeps them clearly brighter
@@ -1574,12 +1996,12 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
         DrawModel(r.model, r.position, r.scale, WHITE);
     }
 
-    // Restore a neutral ambient. The env/lighting passes re-apply the world's
-    // real value next frame, but leaving ambient=10 here would leak into
-    // anything drawn after this function.
-    if (lit.id > 0 && locAmbient >= 0) {
-        const float one[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        SetShaderValue(lit, locAmbient, one, SHADER_UNIFORM_VEC4);
+    // Restore exactly what was in effect before this pass. The next frame's
+    // lighting pass re-applies the world's ambient anyway, but DrawWorldGeometry
+    // runs later in THIS frame and would otherwise inherit the backdrop value.
+    if (lit.id > 0) {
+        if (locDiffuse >= 0) SetShaderValue(lit, locDiffuse, savedDiffuse, SHADER_UNIFORM_VEC4);
+        if (locAmbient >= 0) SetShaderValue(lit, locAmbient, savedAmbient, SHADER_UNIFORM_VEC4);
     }
 }
 
@@ -1602,6 +2024,11 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera) {
 void OzoneLoader::Unload() {
     for (auto& r : m_renderables) {
         if (r.customTex.id > 0) UnloadTexture(r.customTex);
+        for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+            if (r.faceMesh[f].vaoId > 0) UnloadMesh(r.faceMesh[f]);
+            r.faceMesh[f] = Mesh{0};
+        }
+        r.faceMeshesBuilt = false;
         // Heightmap model is owned by m_hmModel (unloaded in UnloadHeightmap)
         if (r.loaded && r.typeId != (int)OzonePrimitiveType::HEIGHTMAP)
             UnloadModel(r.model);

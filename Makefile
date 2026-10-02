@@ -85,10 +85,10 @@ OBJS := $(addprefix $(BUILD_DIR)/, \
           raygui.o miniz.o Main.o Network.o Log.o Client.o \
           OzAssetMapper.o OzPawnSystem.o GameUi.o SlotBar.o InventoryBehaviour.o WeaponBehaviour.o PlayerController.o PickupPawns.o \
           OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o OzBsp.o AutoConvex.o WorldChunk.o PlayerPhysics.o \
-          ZoneManager.o SoundManager.o \
+          ZoneManager.o SoundManager.o GameType.o SurfaceFlags.o \
           LightningScriptContext.o LightningScriptParser.o \
           LightningEntityRegistry.o LightningEntityManager.o \
-          LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
+          LitLightning.o SurfaceMaterial.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o \
           ViewModel.o PlayerModel.o OzParticleSimulationManager.o rlights.o UiHandler.o \
           PlayerProfile.o)
 
@@ -214,12 +214,25 @@ $(BUILD_DIR)/OzoneHeightmap.o: Source/World/OzoneHeightmap.cpp Source/World/OzOz
 	$(COMP) $(CFLAGS) -c Source/World/OzoneHeightmap.cpp -o $@
 
 # 5e. Compile OzoneParser (used by both client and server)
-$(BUILD_DIR)/OzoneParser.o: Source/World/OzoneParser.cpp Source/World/OzoneParser.hpp | $(BUILD_DIR)
+$(BUILD_DIR)/OzoneParser.o: Source/World/OzoneParser.cpp Source/World/OzoneParser.hpp Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/World/OzoneParser.cpp -o $@
 
 # 5e2. Zone volume storage + runtime queries (extracted from PawnSystem)
 $(BUILD_DIR)/ZoneManager.o: Source/World/ZoneManager.cpp Source/World/ZoneManager.hpp Source/World/ZoneTypes.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/World/ZoneManager.cpp -o $@
+
+# 5e2b. Game-mode taxonomy + ruleset data (raylib-free; server + editor + tests)
+$(BUILD_DIR)/GameType.o: Source/World/GameType.cpp Source/World/GameType.hpp Source/World/LevelSettings.hpp Source/Script/LightningEntityRegistry.hpp | $(BUILD_DIR)
+	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/World/GameType.cpp -o $@
+
+# 5e2c. Surface flag registry + per-face surface props (raylib-free; links the
+# OZONE parser, the server's worldcheck, the editor and the tests)
+$(BUILD_DIR)/SurfaceFlags.o: Source/World/SurfaceFlags.cpp Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
+	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/World/SurfaceFlags.cpp -o $@
+
+# 5e2d. Surface shader CPU half (per-face uniforms + GL state bracketing)
+$(BUILD_DIR)/SurfaceMaterial.o: Source/Renderer/SurfaceMaterial.cpp Source/Renderer/SurfaceMaterial.hpp Source/World/SurfaceFlags.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Renderer/SurfaceMaterial.cpp -o $@
 
 # 5e3. Audio facade (one-shots, world music, sound zones, reverb, script SFX)
 $(BUILD_DIR)/SoundManager.o: Source/Audio/SoundManager.cpp Source/Audio/SoundManager.hpp Source/Audio/DspReverb.hpp | $(BUILD_DIR)
@@ -272,8 +285,8 @@ OTENGINE: $(RES_95) $(OBJS)
 $(BUILD_DIR)/GameState.o: Source/Server/GameState.cpp Source/Server/GameState.hpp | $(BUILD_DIR)
 	$(SERVER_CXX) $(SERVER_FLAGS) -c Source/Server/GameState.cpp -o $@
 
-AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/Server/ServerInternal.hpp Source/Network/Network.hpp Source/World/OzoneParser.hpp Source/World/OzoneParser.cpp Source/Server/Master/MasterClient.hpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
-	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/World/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS) $(LDEXTRA)
+AngelServ: $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/GameType.o $(BUILD_DIR)/SurfaceFlags.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/LightningEntityRegistry.o $(BUILD_DIR)/LightningScriptParser.o $(BUILD_DIR)/LightningScriptContext.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/Server/ServerInternal.hpp Source/Network/Network.hpp Source/World/OzoneParser.hpp Source/World/OzoneParser.cpp Source/Server/Master/MasterClient.hpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
+	$(SERVER_CXX) $(SERVER_FLAGS) $(RES_SRV) $(BUILD_DIR)/Network.o $(BUILD_DIR)/GameState.o $(BUILD_DIR)/GameType.o $(BUILD_DIR)/SurfaceFlags.o $(BUILD_DIR)/Log.o $(BUILD_DIR)/LightningEntityRegistry.o $(BUILD_DIR)/LightningScriptParser.o $(BUILD_DIR)/LightningScriptContext.o $(BUILD_DIR)/miniz.o Source/Server/Server.cpp Source/Server/ServerHttp.cpp Source/World/OzoneParser.cpp -o AngelServ$(EXE) $(SERVER_LIBS) $(LDEXTRA)
 
 # 7b. Build AngelMaster (standalone master server, no raylib)
 AngelMaster: $(BUILD_DIR)/Log.o Source/Server/Master/Master.cpp Source/Network/MasterProtocol.hpp Source/Network/MasterHttp.hpp
@@ -303,7 +316,16 @@ test_entity_manager: tests/LightningEntityManager.test.cpp Source/Script/Lightni
 test_pawn_system: tests/OzPawnSystem.test.cpp Source/Pawn/OzPawnSystem.cpp Source/World/ZoneManager.cpp Source/Audio/SoundManager.cpp Source/Physics/OzBsp.cpp Source/Physics/WorldChunk.cpp Source/Physics/PlayerPhysics.cpp Source/Log.cpp Source/Renderer/OzAssetMapper.cpp Source/Script/LightningEntityManager.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptContext.cpp Source/Script/LightningScriptParser.cpp Source/Renderer/Mesh/Mesh.cpp Source/Renderer/Mesh/SkeletalMesh.cpp Source/Renderer/Mesh/MeshCache.cpp Source/Renderer/Mesh/AnimatedMesh.cpp Source/Package/Anim/OzAnimFormat.cpp Source/Particle/OzParticleSimulationManager.cpp Source/Renderer/LitLightning.cpp Source/Renderer/rlights/rlights.cpp
 	$(COMP) $(TEST_FLAGS) -DOMEGA_PAWNSYSTEM_TEST $(RAYLIB_INC) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(LDFLAGS) $(LDEXTRA)
 
-test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp
+test_ozone_parser: tests/OzoneParser.test.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
+
+# Surface flag registry + per-face surface props. Raylib-free, so headless.
+test_surface: tests/Surface.test.cpp Source/World/SurfaceFlags.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
+
+# Game-mode taxonomy + ruleset data. Raylib-free; links the registry because
+# GameTypeInfoFromOverride resolves EntityType::GAMETYPE .ozls defs.
+test_gametype: tests/GameType.test.cpp Source/World/GameType.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@
 
 # AutoConvex is raylib-free, so this suite builds headless with SERVER_CXX.
@@ -318,8 +340,8 @@ test_autoconvex: tests/AutoConvex.test.cpp Source/Physics/AutoConvex.cpp
 #   python3 tools/glb_bounds.py > bounds.json
 #   ./worldcheck GameData/Worlds/<World>/World.ozone --glb-bounds bounds.json
 # CI runs worldcheck on every shipped world.
-worldcheck: tools/worldcheck.cpp Source/World/OzoneParser.cpp
-	$(SERVER_CXX) $(TEST_FLAGS) -ISource tools/worldcheck.cpp Source/World/OzoneParser.cpp $(BUILD_DIR)/miniz.o -o $@
+worldcheck: tools/worldcheck.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp
+	$(SERVER_CXX) $(TEST_FLAGS) -ISource tools/worldcheck.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp $(BUILD_DIR)/miniz.o -o $@
 
 test_join_uri: tests/JoinUri.test.cpp Source/Client/JoinUri.hpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource tests/JoinUri.test.cpp -o $@
@@ -330,7 +352,7 @@ test_master: tests/Master.test.cpp Source/Network/MasterProtocol.hpp
 test_network: tests/Network.test.cpp Source/Network/Network.cpp Source/Log.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@ $(SERVER_LIBS)
 
-test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/World/OzoneParser.cpp Source/Network/Network.cpp Source/Log.cpp
+test_game_state: tests/GameState.test.cpp Source/Server/GameState.cpp Source/World/GameType.cpp Source/World/OzoneParser.cpp Source/World/SurfaceFlags.cpp Source/Network/Network.cpp Source/Log.cpp Source/Script/LightningEntityRegistry.cpp Source/Script/LightningScriptParser.cpp Source/Script/LightningScriptContext.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ $(BUILD_DIR)/miniz.o -o $@ $(SERVER_LIBS)
 
 test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
@@ -341,7 +363,7 @@ test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
 test_ozls_writer: tests/OzlsWriter.test.cpp Source/Script/OzlsWriter.cpp Source/Script/LightningScriptParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex worldcheck
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype worldcheck
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -381,6 +403,12 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo "=== AutoConvex Tests ==="
 	-./test_autoconvex
 	@echo ""
+	@echo "=== Surface Tests ==="
+	-./test_surface
+	@echo ""
+	@echo "=== GameType Tests ==="
+	-./test_gametype
+	@echo ""
 	@echo "=== Worldcheck (.ozone auditor) ==="
 	# Run worldcheck on every shipped .ozone world (errors are printed, warnings do not fail).
 	@for w in GameData/Worlds/*/World.ozone; do \
@@ -388,4 +416,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	done
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex worldcheck
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype worldcheck

@@ -6,6 +6,7 @@
 #include "../Pawn/OzPawnSystem.hpp"
 #include "../Physics/WorldChunk.hpp"
 #include "OzoneParser.hpp"
+#include "SurfaceFlags.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -17,14 +18,13 @@
 #undef LoadString
 #endif
 
-// Surface behavior flags for OZONE brush primitives
-#define SURF_FAKEBACKDROP (1 << 3)  // brush renders as sky backdrop
-// Generated convex collision proxy (see OzoneLoader::AppendAutoConvexCollision).
-// Contributes to the CSG collision world like any other brush but is NOT drawn:
-// DrawWorldGeometry skips it unconditionally, and Draw() only shows it when the
-// editor has explicitly asked via SetDrawCollisionProxies. Exports as part of
-// the ordinary `flags=` kwarg, so it round-trips through the .ozone text.
-#define SURF_COLLISION_PROXY (1 << 4)
+// Surface behavior flags for OZONE brush primitives now live in
+// World/SurfaceFlags.hpp (included above) as typed constants rather than the
+// `#define SURF_FAKEBACKDROP / SURF_COLLISION_PROXY` pair that used to live
+// here. The values and the unqualified spellings are unchanged - the 299
+// `flags=8` painted backdrops in the shipped worlds still resolve - but a
+// macro could not coexist with a scoped type of the same name, which is what
+// blocked the per-face surface flag set.
 
 // ---------------------------------------------------------------------------
 // OzoneLoader — client-side OZONE format loader + mesh renderer
@@ -53,10 +53,30 @@ struct OzoneRenderable {
     int csgOp = 0;               // CSG operation (0=SOLID, 1=ADD, 2=SUB, 3=INTERSECT, 4=DE_RESC)
     int texSlot = 0;             // 0=auto, 1..N = index into tileset textures
     int surfaceFlags = 0;        // SURF_* bitmask for surface behavior
-    float texScaleU = 1.0f;      // texture tiling/repeat U
-    float texScaleV = 1.0f;      // texture tiling/repeat V
+    // Per-face surface properties (flags, texture, UV, U/V pan, alpha, glow).
+    // The brush-wide default lives in .def; a face only overrides what the
+    // author changed. `faceMeshes` caches the per-face sub-mesh split so the
+    // renderer can issue one DrawMesh per face with its own uniforms.
+    oz::surface::BrushSurface surface;
+    bool faceMeshesBuilt = false;
+    // One sub-mesh per dominant-axis face, built lazily by BuildFaceMeshes().
+    // vaoId == 0 means "not built" (or "this face has no geometry").
+    Mesh faceMesh[oz::surface::FACE_COUNT] = {};
+    float texScaleU = 1.0f;      // extra texture tiling ON TOP of the generated
+    float texScaleV = 1.0f;      // mesh UVs (multiplier, not an absolute)
     float texOffsetU = 0.0f;     // texture shift U
     float texOffsetV = 0.0f;     // texture shift V
+    // Pristine texcoords exactly as BuildFromPrimitive generated them (which for
+    // a box already includes its baked tiling). ApplyRenderableUV always
+    // recomputes `final = uvBase * scale + offset` from this snapshot.
+    //
+    // It replaces the previous scheme, which tried to UNDO the last transform by
+    // dividing by r->texScaleU. That only worked when texScaleU had been seeded
+    // with the baked tiling - and it was seeded for BOX only, so for
+    // cyl/sph/pyr/pln the division was by 1 while the UVs were already tiled.
+    // The first edit then scaled on top of the tiling and every later edit
+    // compounded again.
+    std::vector<float> uvBase;
     std::string texPath;         // filesystem/package path to custom texture (empty = use tileset)
     Texture2D customTex = {0};   // loaded custom texture (id=0 if using tileset)
     BoundingBox bounds{{0,0,0},{0,0,0}}; // world-space AABB for frustum culling
@@ -184,6 +204,23 @@ public:
     // Editor: apply a custom texture file to a renderable's model material
     bool ApplyRenderableTexture(int idx, const char* path);
 
+    // --- Surface properties (UT99-style per-face) ---------------------------
+    // Read/modify a renderable's brush-wide default and per-face overrides.
+    // The editor's Surface Properties dialog writes through SetRenderableFace
+    // and then calls RebuildSurfaceMeshes so the per-face sub-meshes match.
+    oz::surface::BrushSurface* GetSurface(int idx) {
+        OzoneRenderable* r = Get(idx);
+        return r ? &r->surface : nullptr;
+    }
+    // Set one face (or the brush default when `face` is FACE_NONE).
+    void SetRenderableFace(int idx, oz::surface::SurfaceFace face,
+                           const oz::surface::SurfaceProps& p);
+    // Drop every per-face override, leaving the brush-wide default.
+    void ResetRenderableSurface(int idx);
+    // Split mesh 0 into per-face sub-meshes and re-upload. No-op until the brush
+    // actually needs per-face drawing.
+    void RebuildSurfaceMeshes(int idx);
+
     // Spatial partitioning for efficient collision queries
     const WorldChunkManager& GetChunkManager() const { return m_chunkManager; }
 
@@ -216,6 +253,13 @@ public:
     // Draw all non-FAKEBACKDROP renderables (main world pass)
     void DrawWorldGeometry(Camera3D& camera);
 
+    // Draw one renderable through the surface-flagged path: up to six per-face
+    // DrawMesh calls, each with its own SurfaceProps uniforms. Public because the
+    // glow pass re-draws glowing faces additively after the world pass.
+    void DrawSurface(OzoneRenderable& r);
+    // Faces carrying SURF_GLOW, re-drawn additively over the composited frame.
+    void DrawGlowGeometry(Camera3D& camera);
+
     // Editor integration — heightmap generation (called from editor main loop)
     Model BuildHeightmap(const std::string& imagePath, const std::string& texPath,
                          const std::vector<float>& args);
@@ -224,6 +268,15 @@ public:
     void SetLitFogShader(Shader shader);
     void SetLitFogShaderEnabled(bool enabled);
     void ApplyTexSlotToModel(Model& model, int slot);
+
+    // Publish the world's current `ambient` uniform so DrawZoneGeometry can put
+    // it back. raylib has no GetShaderValue (and adding one would not help: the
+    // value lives on the GL program, not in our code), so the owner of the
+    // uniform has to declare it. DrawZoneGeometry runs from Core.hpp's sky pass
+    // immediately before DrawWorldGeometry in the same frame, so restoring a
+    // constant instead of the real value made every world surface in a sky zone
+    // render with ambient/10 == 0.1.
+    void SetWorldAmbient(float r, float g, float b, float a);
 
     // Access loaded tileset textures by 0-based index (0=auto, 0+ = vector index-1)
     int TilesetCount() const { return (int)m_tilesetTex.size(); }
@@ -249,6 +302,7 @@ private:
     std::vector<OzoneCollisionVolume> m_collisionVolumes;
     WorldChunkManager m_chunkManager;
     bool m_drawCollisionProxies = false;  // editor-only debug view of SURF_COLLISION_PROXY
+    float m_worldAmbient[4] = {0.1f, 0.1f, 0.1f, 1.0f};  // see SetWorldAmbient
 
     // Heightmap state (set from OZONE heightmap primitive)
     bool m_hmReady = false;
@@ -275,6 +329,9 @@ private:
     void ComputeCollisionAABB(int type, const std::vector<float>& args, Vector3 position, BoundingBox& out);
 
     Model BuildFromPrimitive(int type, const std::vector<float>& args);
+    // Six inward-facing quads with projected UVs. Render-only: never contributes
+    // to the CSG collision world. The texture is applied by the caller.
+    Model BuildSkybox(float cx, float cy, float cz, float size, const char* topPath);
 
     Model BuildBox(float w, float h, float d);
     Model BuildCylinder(float rTop, float rBot, float h, int slices);
@@ -302,3 +359,10 @@ void ParseOzoneEntities(const std::vector<struct OzonePrimitive>& primitives,
 // and copy the level metadata into the world's WorldInfo. Lights are bound to
 // the zone volume that contains them. Safe to call on an empty set.
 void InjectOzoneEntities(const OzoneEntitySet& entities, class PawnSystem& pawns);
+
+// Apply the EntityType::LIGHT .ozls defaults layer to a light built in code.
+// The OZONE load path uses the file-static ApplyLightDefDefaults, which needs
+// the primitive to know which optional fields the line authored; a node built by
+// the editor authored none, so every def-owned field applies. Resolved by the
+// node's `name`, exactly as the load path does.
+void ApplyLightDefDefaultsToNode(class LightNode& node);

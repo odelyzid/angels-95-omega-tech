@@ -1,6 +1,9 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
+#include "../../Source/World/GameType.hpp"
+#include "../../Source/World/SurfaceFlags.hpp"
 
 // =====================================================================
 // Win32Dialogs â€” Real OS-level window panels for AngelEd
@@ -114,6 +117,19 @@ struct EditorPanelState {
     float lightInnerAngle = 15.0f;   // spot inner cone half-angle (degrees)
     float lightOuterAngle = 45.0f;   // spot outer cone half-angle (degrees)
     bool actionApplyLight = false;
+    // --- Surface Properties (UT99-style, per-face) -------------------------
+    // The dialog edits one BrushSurface at a time. `surfaceFaces` is the set of
+    // faces the current selection covers (a bitmask, so "(3 Selected)" is just a
+    // popcount); Apply writes to every one of them.
+    bool showSurfaceProps = false;
+    int  surfaceRenderable = -1;      // OzoneRenderable index
+    uint32_t surfaceFaceMask = 0;     // bitmask of SurfaceFace
+    bool actionApplySurface = false;
+    bool actionResetSurface = false;
+    // Working copy handed from the dialog to the main loop on Apply. Carrying
+    // the values rather than a "read the controls" flag means an Apply that is
+    // processed a frame later still writes exactly what the user saw.
+    oz::surface::SurfaceProps surfaceEdit;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
     int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
     std::string actionSpawnPickup;   // Pawn Manager "Spawn Selected" — weapon/item pickup def name
@@ -160,6 +176,9 @@ struct EditorPanelState {
     // Set when a Sub/Intersect brush produced no collision volume at all. The
     // sidebar paints the collision count red until the next brush is committed.
     bool collisionOpWarning = false;
+    // Pawn Manager: show metadata-only defs (EntityType::GAMETYPE) that are not
+    // placeable. Off by default so the tree stays focused on placeable actors.
+    bool showHidden = false;
 
     int propsTargetType = -1;       // SelType encoded
     int propsTargetIndex = -1;
@@ -167,6 +186,11 @@ struct EditorPanelState {
     float propsTargetPos[3] = {0,0,0};
     float propsTargetScale = 1.0f;
     float propsTargetRotation = 0.0f;
+    // False when the selection has no yaw concept (zones, pickups, portals...).
+    // The apply handler must not write propsTargetRotation in that case: the
+    // Rot row is seeded from a 0.0f default and used to overwrite the authored
+    // value (notably `playerstart`'s yaw) on every Apply.
+    bool propsTargetHasRotation = false;
     // Apply results (set by panel, consumed by Main.cpp)
     bool actionApplyProperties = false;
     float propPosX = 0, propPosY = 0, propPosZ = 0;
@@ -326,6 +350,7 @@ struct EditorPanelState {
     void* hStatsSidebar = nullptr;
     void* hLevelList = nullptr;
     void* hAnimPanel = nullptr;
+    void* hSurfaceProps = nullptr;
 
     // Preview bitmap (Windows only)
     void* hPreviewBitmap = nullptr;
@@ -349,6 +374,7 @@ struct EditorPanelState {
 WinPos propsPanelPos = {300, 120, 540, 560};
     WinPos levelListPos = {200, 120, 560, 420};
     WinPos animPanelPos  = {430, 180, 380, 390};
+    WinPos surfacePropsPos = {760, 140, 520, 440};
 #endif
 };
 
@@ -360,15 +386,10 @@ extern EditorPanelState g_editorPanels;
 void ShowDefPropertiesFor(const std::string& defName);
 
 // --- ZoneProperties replaces old EnvSettings ---
-enum class GameType : uint8_t {
-    SINGLEPLAYER,
-    COOP,
-    ETHERAL_MATCH,
-    ANGEL_TEAM_GAME,
-    ANGEL_RUN,
-    CAPTURE_THE_ORB,
-    TIME_SHIFT
-};
+// GameType is now defined in Source/World/GameType.hpp (oz::gametype::GameType)
+// so the editor, server and tests share one source of truth. The numeric values
+// are identical to the legacy enum, so every saved levelinfo line still loads.
+using oz::gametype::GameType;
 
 enum class ParticleType : uint8_t {
     NONE,
@@ -490,7 +511,15 @@ void ShowHeightmapEditor(bool show);
     // owns light settings (see propLight*); ShowLightProps forwards to it when
     // a light is selected so the menu entry still works.
     void ShowLightProps(bool show);
-void ShowWorldGraph(bool show);
+    void ShowWorldGraph(bool show);
+
+    // Surface Properties (UT99-style, per-face). `renderable` is an
+    // OzoneRenderable index and `faceMask` a bitmask of SurfaceFace, so one
+    // dialog can edit "(3 Selected)" at once. Rebuilds the controls on open.
+    void ShowSurfaceProps(bool show, int renderable, uint32_t faceMask);
+    // Re-read from the renderable and rebuild the controls, so the dialog shows
+    // what was actually stored after an Apply.
+    void SurfacePropsRefresh(void* hwnd);
 void ShowPropertiesPanel(bool show);
 void ShowAnimPanel(bool show);
 void RefreshAnimPanel();

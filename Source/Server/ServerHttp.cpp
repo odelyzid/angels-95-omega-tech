@@ -193,6 +193,8 @@ void append_ozone_json(std::string& out, const OzonePrimitive& p, bool first) {
                          p.args[6] != 0.0f ? 1 : 0);
                 out += buf;
             }
+            if (!p.gametypeKey.empty())
+                out += R"(,"gametype":)" + esc(p.gametypeKey);
             if (!p.entityType.empty())
                 out += R"(,"skybox":)" + esc(p.entityType);
             break;

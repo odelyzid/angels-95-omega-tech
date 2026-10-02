@@ -43,7 +43,7 @@ extern int Editor_GetCsgOperation();
 extern void Editor_SetCsgOperation(int op);
 extern int Editor_GetPlaceMode();
 extern void Editor_SetPlaceMode(int mode);
-// Current world directory (absolute) — used by the Texture Manager import feature
+// Current world directory (absolute) â€” used by the Texture Manager import feature
 extern std::string Editor_GetCurrentWorldDir();
 extern std::string Editor_GetCurrentWorldName();
 
@@ -190,7 +190,6 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LightPropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK LevelListProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
-static LRESULT CALLBACK PropsPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l);
 
 // =====================================================================
@@ -349,7 +348,7 @@ static LRESULT DrawIconButton(LPDRAWITEMSTRUCT dis) {
 }
 
 // =====================================================================
-// Sound Manager v2 Ã¢â‚¬â€ Category tabs, volume, loop, source info
+// Sound Manager v2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Category tabs, volume, loop, source info
 // =====================================================================
 static const int ID_SOUND_LIST     = 101;
 static const int ID_SOUND_REFRESH  = 102;
@@ -485,7 +484,7 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Texture Manager v2 ��� oztex integration, preview, source info
+// Texture Manager v2 ï¿½ï¿½ï¿½ oztex integration, preview, source info
 // =====================================================================
 static const int ID_TEX_LIST       = 101;
 static const int ID_TEX_REFRESH    = 102;
@@ -502,7 +501,7 @@ static const int ID_TEX_SCOPE      = 112;   // scope tree
 static const int ID_TEX_SEARCH     = 113;   // search edit box
 
 // =====================================================================
-// Asset scoping — shared by the Model Browser and the Texture Manager.
+// Asset scoping â€” shared by the Model Browser and the Texture Manager.
 // See the AssetScopeItem/AssetScopeNode docs in Win32Dialogs.hpp.
 // =====================================================================
 static std::string LowerAscii(std::string s) {
@@ -734,7 +733,7 @@ void SetTextureTargetNames(const std::vector<std::string>& names) {
 }
 
 // ---------------------------------------------------------------------
-// Import helpers — every import is PACKED immediately (Phase F).
+// Import helpers â€” every import is PACKED immediately (Phase F).
 //
 // Imports used to drop loose files into GameData/, which meant the asset only
 // became visible after a rescan and shipped builds (which run from packed
@@ -806,7 +805,7 @@ static bool HotLoadPackage(const fs::path& pkgPath, std::string& err) {
 }
 
 // ---------------------------------------------------------------------
-// Import Textures — pack image file(s) straight into System/Data.
+// Import Textures â€” pack image file(s) straight into System/Data.
 //
 // These are FREELY PLACEABLE assets (Phase G): they can be assigned with `tex=`
 // on Mesh.Static / Mesh.Skeletal entities and as a model's texture, but they are
@@ -857,7 +856,7 @@ static void ImportTexturesIntoWorld(HWND hwnd) {
     if (files.empty()) return;
 
     // Pack into System/Data/imported_textures.oztex (OZTX). Entry keys are
-    // "Textures/<file>" — PackageAssetLoader strips the first segment when
+    // "Textures/<file>" â€” PackageAssetLoader strips the first segment when
     // resolving a bare name, matching build-data.ps1's per-subdirectory packs.
     fs::path pkg = fs::current_path() / "System" / "Data" / "imported_textures.oztex";
     std::vector<std::pair<std::string, std::vector<uint8_t>>> add;
@@ -899,7 +898,7 @@ static void ImportTexturesIntoWorld(HWND hwnd) {
 }
 
 // =====================================================================
-// Texture Grid View — custom control drawing thumbnails in a responsive grid
+// Texture Grid View â€” custom control drawing thumbnails in a responsive grid
 // =====================================================================
 struct TextureGridState {
     int selectedIdx = -1;   // grid position, NOT a g_textureFiles index
@@ -1056,14 +1055,14 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 }
 
 // =====================================================================
-// Texture Manager v3 — Grid-based texture browser, dynamic resize, package-only
+// Texture Manager v3 â€” Grid-based texture browser, dynamic resize, package-only
 // =====================================================================
 // Rebuilds the (GameData)/(Packages) scope tree from g_textureFiles, honouring
 // the search box, then republishes the grid's visible set. Mirrors
 // FillModelScopeTree in the Model Browser.
 // Republish the grid's visible set from the tree's current selection and
 // refresh it. Split out from FillTextureScopeTree so a selection change can
-// refresh the grid WITHOUT rebuilding the tree — rebuilding from inside the
+// refresh the grid WITHOUT rebuilding the tree â€” rebuilding from inside the
 // tree's own TVN_SELCHANGED notification would destroy the very selection that
 // triggered it.
 static void UpdateTextureScopeSelection(HWND hwnd, HWND hTree, HWND hGrid) {
@@ -1220,7 +1219,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_REFRESH), NULL, x + 228, 10, 70, 24, SWP_NOZORDER);
         SetWindowPos(GetDlgItem(hwnd, ID_TEX_CLOSE), NULL, x + bw - 80, 10, 80, 24, SWP_NOZORDER);
 
-        // Grid — fill most of the window, to the right of the scope tree
+        // Grid â€” fill most of the window, to the right of the scope tree
         int gridBot = winH - 280;
         if (gridBot < 60) gridBot = 60;
         int gridH = gridBot - 40;
@@ -1374,7 +1373,7 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             // memory), so typing does not hit the filesystem.
             FillTextureScopeTree(hwnd, hScope, hGrid);
         } else if (id == ID_TEX_LIST && notify == 1) {
-            // Grid selection changed — update preview
+            // Grid selection changed â€” update preview
             if (hGrid) {
                 auto* gs = (TextureGridState*)GetWindowLongPtr(hGrid, GWLP_USERDATA);
                 int sel = TexEntryAt(gs ? gs->selectedIdx : -1);
@@ -1479,11 +1478,12 @@ bool ChooseOpenWorldFile(std::string& outPath) { return ChooseWorldFile(false, o
 bool ChooseSaveWorldFile(std::string& outPath) { return ChooseWorldFile(true, outPath); }
 
 // =====================================================================
-// Pawn Manager — Hierarchical Tree View
+// Pawn Manager â€” Hierarchical Tree View
 // =====================================================================
 static const int ID_PAWN_CLOSE     = 100;
 static const int ID_PAWN_SPAWN     = 103;
 static const int ID_PAWN_REFRESH   = 104;
+static const int ID_PAWN_SHOW_HIDDEN = 105;
 static const int ID_PAWN_TREE      = 105;
 
 static HTREEITEM AddTreeItem(HWND hTree, HTREEITEM hParent, const wchar_t* text, LPARAM lParam) {
@@ -1496,26 +1496,30 @@ static HTREEITEM AddTreeItem(HWND hTree, HTREEITEM hParent, const wchar_t* text,
     return (HTREEITEM)SendMessage(hTree, TVM_INSERTITEMW, 0, (LPARAM)&tvis);
 }
 
+// Recursive tree filler. File scope, NOT a static member of a function-local
+// struct: PopulateTreeView() rebuilt the whole tree on ID_PAWN_SHOW_HIDDEN and
+// needed the same helper, and a struct declared inside PopulateTreeView was
+// invisible from PawnMgrProc, so that call failed to compile.
+static void AddChildren(HWND hTree, HTREEITEM hParent, const PawnTreeNode& node) {
+    for (const auto& child : node.children) {
+        std::wstring wlabel(child.label.begin(), child.label.end());
+        // lParam encodes type + defName: "type|defName" or just "leaf|defName" or "category|"
+        std::string paramStr = child.typeTag + "|" + child.defName;
+        // Owned by the treeview and released with it (TVN_DESTROYED /
+        // TVM_DELETEITEM reclaim it). Freed explicitly when the item is removed
+        // via the destroy callback in InitActorHierarchy.
+        LPARAM lParam = (LPARAM)_strdup(paramStr.c_str());
+        HTREEITEM hItem = AddTreeItem(hTree, hParent, wlabel.c_str(), lParam);
+        if (child.isExpanded)
+            SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)hItem);
+        AddChildren(hTree, hItem, child);
+    }
+}
+
 static void PopulateTreeView(HWND hTree) {
     SendMessage(hTree, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
     PawnTreeNode root = BuildPawnTree();
-
-    // Recursive helper
-    struct Recursor {
-        static void AddChildren(HWND hTree, HTREEITEM hParent, const PawnTreeNode& node) {
-            for (const auto& child : node.children) {
-                std::wstring wlabel(child.label.begin(), child.label.end());
-                // lParam encodes type + defName: "type|defName" or just "leaf|defName" or "category|"
-                std::string paramStr = child.typeTag + "|" + child.defName;
-                LPARAM lParam = (LPARAM)_strdup(paramStr.c_str());
-                HTREEITEM hItem = AddTreeItem(hTree, hParent, wlabel.c_str(), lParam);
-                if (child.isExpanded)
-                    SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)hItem);
-                AddChildren(hTree, hItem, child);
-            }
-        }
-    };
-    Recursor::AddChildren(hTree, TVI_ROOT, root);
+    AddChildren(hTree, TVI_ROOT, root);
     // Expand root
     HTREEITEM hRoot = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_ROOT, 0);
     if (hRoot) SendMessage(hTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)hRoot);
@@ -1545,7 +1549,7 @@ static void SplitTreeParam(const char* paramStr, std::string& typeTag, std::stri
 }
 
 void PawnManagerAddPawn(const char*, const char*) {
-    // Legacy no-op — defs managed by PawnSystem
+    // Legacy no-op â€” defs managed by PawnSystem
 }
 
 PawnTreeNode BuildPawnTree() {
@@ -1571,7 +1575,7 @@ PawnTreeNode BuildPawnTree() {
     playerBranch.children.push_back(omegaPlayer);
     pawnBranch.children.push_back(playerBranch);
 
-    // EnemyPawn branch — populated from PawnSystem registered defs
+    // EnemyPawn branch â€” populated from PawnSystem registered defs
     PawnTreeNode enemyBranch;
     enemyBranch.label = "EnemyPawn";
     enemyBranch.isExpanded = true;
@@ -1586,7 +1590,7 @@ PawnTreeNode BuildPawnTree() {
     }
     pawnBranch.children.push_back(enemyBranch);
 
-    // InventoryPawn branch — pickups (data-driven from LightningScript entity registry)
+    // InventoryPawn branch â€” pickups (data-driven from LightningScript entity registry)
     PawnTreeNode invBranch;
     invBranch.label = "InventoryPawn";
     invBranch.isExpanded = false;
@@ -1609,7 +1613,7 @@ PawnTreeNode BuildPawnTree() {
     }
     invBranch.children.push_back(pickupBranch);
 
-    // Weapons branch — weapon .ozls defs; placing one creates a weapon pickup
+    // Weapons branch â€” weapon .ozls defs; placing one creates a weapon pickup
     // (world files represent weapons as `pickup <weaponDefName>`).
     PawnTreeNode weaponBranch;
     weaponBranch.label = "Weapons";
@@ -1669,7 +1673,7 @@ PawnTreeNode BuildPawnTree() {
     }
     volBranch.children.push_back(zoneBranch);
 
-    // GameEngine.Mesh branch — places the model currently selected in the
+    // GameEngine.Mesh branch â€” places the model currently selected in the
     // Model Browser as a Mesh.Static / Mesh.Skeletal world object.
     PawnTreeNode meshBranch;
     meshBranch.label = "GameEngine.Mesh";
@@ -1689,7 +1693,7 @@ PawnTreeNode BuildPawnTree() {
     }
     volBranch.children.push_back(meshBranch);
 
-    // GameEngine.Light — light nodes. Placement writes an OZONE
+    // GameEngine.Light â€” light nodes. Placement writes an OZONE
     // `light <point|spot|directional>` line; every other property (colour,
     // intensity, radius, effect, flare, corona, spot cone) lives in the
     // Entity Properties panel on the selected light.
@@ -1713,21 +1717,21 @@ PawnTreeNode BuildPawnTree() {
     }
     volBranch.children.push_back(lightBranch);
 
-    // GameEngine.ParticleEmitter — local 3D particles (fire/sparks/smoke)
+    // GameEngine.ParticleEmitter â€” local 3D particles (fire/sparks/smoke)
     PawnTreeNode particleLeaf;
     particleLeaf.label = "ParticleEmitter";
     particleLeaf.defName = "ParticleEmitter";
     particleLeaf.typeTag = "particle";
     volBranch.children.push_back(particleLeaf);
 
-    // GameEngine.PathNode — NPC patrol waypoint
+    // GameEngine.PathNode â€” NPC patrol waypoint
     PawnTreeNode pathLeaf;
     pathLeaf.label = "PathNode";
     pathLeaf.defName = "PathNode";
     pathLeaf.typeTag = "pathnode";
     volBranch.children.push_back(pathLeaf);
 
-    // WindZone — foliage sway region
+    // WindZone â€” foliage sway region
     PawnTreeNode windLeaf;
     windLeaf.label = "WindZone";
     windLeaf.defName = "WindZone";
@@ -1735,6 +1739,27 @@ PawnTreeNode BuildPawnTree() {
     volBranch.children.push_back(windLeaf);
 
     pawnBranch.children.push_back(volBranch);
+
+    // Metadata-only defs (EntityType::GAMETYPE). Not placeable; shown only
+    // when the Pawn Manager's "Show Hidden" toggle is on so the tree stays
+    // focused on placeable actors by default.
+    if (g_editorPanels.showHidden) {
+        PawnTreeNode metaBranch;
+        metaBranch.label = "Metadata";
+        metaBranch.isExpanded = false;
+        metaBranch.typeTag = "category";
+        std::vector<const EntityDef*> metaDefs;
+        LightningEntityRegistry::Instance().FindByType(EntityType::GAMETYPE, metaDefs);
+        for (auto* def : metaDefs) {
+            PawnTreeNode leaf;
+            leaf.label = def->name + " [metadata]";
+            leaf.defName = def->name;
+            leaf.typeTag = "metadata";
+            metaBranch.children.push_back(leaf);
+        }
+        pawnBranch.children.push_back(metaBranch);
+    }
+
     root.children.push_back(pawnBranch);
     return root;
 }
@@ -1803,15 +1828,19 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
             n.intensity = 0.8f;
         } else if (typeTag == "light_spot") {
             n.type = LitLightType::SPOT;
-            // Default aim: straight down from the emitter, matching the
-            // engine's inner/outer cone defaults (cos 18deg / cos 37deg).
+            // Default aim: straight down from the emitter. inner_cone/outer_cone
+            // are left at their engine defaults here and filled from the def
+            // below, so Light.Spot.ozls owns the cone instead of this function.
             n.target = {pos.x, pos.y - 10.0f, pos.z};
-            n.innerCone = 0.95f;
-            n.outerCone = 0.80f;
         } else {
             n.type = LitLightType::POINT;
         }
         n.name = defName;
+        // Same defaults layer the OZONE load path uses, so editing
+        // Light.Spot.ozls affects newly placed lights as well as loaded worlds.
+        // color / intensity / radius / position / target stay local: they are
+        // line-owned on every `light` line, so no def may move them.
+        ApplyLightDefDefaultsToNode(n);
         ps.AddLight(n);
     } else if (typeTag == "particle") {
         ParticleEmitterNode n;
@@ -1831,6 +1860,10 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
         n.bounds.max = {pos.x + 5.0f, pos.y + 5.0f, pos.z + 5.0f};
         n.direction = {1, 0, 0}; n.strength = 1.0f; n.frequency = 1.0f;
         ps.AddWindZone(n);
+    } else if (typeTag == "metadata") {
+        // Metadata-only defs (EntityType::GAMETYPE) are not placeable.
+        // Clicking one is a no-op: no OZONE export entry, no placement.
+        return false;
     } else {
         ps.Spawn(pos, defName.c_str());
     }
@@ -1866,6 +1899,7 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         hSpawn   = CreateButton(hwnd, L"Spawn Selected", 10, 228, 110, 28, ID_PAWN_SPAWN);
         hRefresh = CreateButton(hwnd, L"Refresh", 128, 228, 80, 28, ID_PAWN_REFRESH);
         hClose   = CreateButton(hwnd, L"Close", 216, 228, 80, 28, ID_PAWN_CLOSE);
+        CreateCtrl(hwnd, L"BUTTON", L"Show Hidden", 304, 228, 90, 24, ID_PAWN_SHOW_HIDDEN, BS_AUTOCHECKBOX);
         LayoutPawnMgr(hwnd, hLabel, hTree, hSpawn, hRefresh, hClose);
         SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
@@ -1880,7 +1914,7 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_NOTIFY: {
         NMHDR* nm = (NMHDR*)l;
         if (nm->idFrom == ID_PAWN_TREE && nm->code == NM_DBLCLK) {
-            // Informational only — spawning is done via the "Spawn Selected"
+            // Informational only â€” spawning is done via the "Spawn Selected"
             // button so a context-menu right-click never adds duplicates.
             TVITEMW item;
             item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
@@ -1902,6 +1936,10 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_COMMAND: {
         int id = LOWORD(w);
         if (id == ID_PAWN_CLOSE) ShowPawnManager(false);
+        else if (id == ID_PAWN_SHOW_HIDDEN) {
+            g_editorPanels.showHidden = (SendMessage((HWND)l, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            PopulateTreeView(hTree);
+        }
         else if (id == ID_PAWN_REFRESH) {
             SendMessage(hwnd, WM_USER + 50, 0, 0);
         } else if (id == ID_PAWN_SPAWN) {
@@ -1924,7 +1962,7 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Script Manager — LightningScript (.ozls) browser + editor launcher
+// Script Manager â€” LightningScript (.ozls) browser + editor launcher
 // =====================================================================
 static const int ID_SCRIPT_CLOSE  = 100;
 static const int ID_SCRIPT_LIST   = 101;
@@ -2040,7 +2078,7 @@ static void BuildScriptDetail(int sel, std::string& out) {
     if (e.defIndex < 0) {
         out += e.name + "  [" + e.typeName + "]\n";
         out += "source: " + e.path + "\n";
-        out += "\n(parse error — file did not produce an entity definition)\n";
+        out += "\n(parse error â€” file did not produce an entity definition)\n";
         return;
     }
     auto& defs = LightningEntityRegistry::Instance().GetAllDefs();
@@ -2086,10 +2124,10 @@ static LRESULT CALLBACK ScriptMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             SendMessage(hCombo, CB_SETCURSEL, 0, 0);
             CreateButton(hwnd, L"Create", 320, 10, 90, 26, ID_SCRIPT_NEWCREATE);
             CreateButton(hwnd, L"Cancel", 320, 40, 90, 26, ID_SCRIPT_NEWCANCEL);
-            CreateLabel(hwnd, L"Folder: GameData/Global/<type>  —  opened in your editor after creation.",
+            CreateLabel(hwnd, L"Folder: GameData/Global/<type>  â€”  opened in your editor after creation.",
                         10, 72, 500, 20, 0);
         } else {
-            CreateLabel(hwnd, L"LightningScript files (.ozls — GameData/ + packages):", 10, 10, 520, 20, 1);
+            CreateLabel(hwnd, L"LightningScript files (.ozls â€” GameData/ + packages):", 10, 10, 520, 20, 1);
             hList = CreateListBox(hwnd, 10, 32, 520, 170, ID_SCRIPT_LIST);
             hDetail = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
@@ -2630,7 +2668,7 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 // Environment Settings
 // =====================================================================
 // =====================================================================
-// ZoneProperties Ã¢â‚¬â€ replaces EnvPanel with Fog/Ambient/GameType/Particles
+// ZoneProperties ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â replaces EnvPanel with Fog/Ambient/GameType/Particles
 // =====================================================================
 static int g_zoneTab = 0; // 0=Fog, 1=Ambient, 2=GameType, 3=Particles
 
@@ -2716,7 +2754,7 @@ static const int ID_SB_FOG_DENSITY = 113;
 static const int ID_SF_FOG_START = 114, ID_SF_FOG_END = 115;
 static const int ID_SF_SKYBOX_PATH = 116;
 static const int ID_ZONE_APPLY_FOG = 140;
-// Fog tab — skybox pickers (browse file / use Texture Manager selection / apply)
+// Fog tab â€” skybox pickers (browse file / use Texture Manager selection / apply)
 static const int ID_SF_SKYBOX_BROWSE = 117;
 static const int ID_SF_SKYBOX_ACTIVE = 118;
 static const int ID_ZONE_APPLY_SKY   = 119;
@@ -2735,6 +2773,8 @@ static const int ID_SF_TIMELIMIT   = 154;
 static const int ID_SF_SCORELIMIT  = 155;
 static const int ID_CHK_FRIENDLY   = 156;
 static const int ID_ZONE_APPLY_GT  = 157;
+static const int ID_LB_GT_SUMMARY  = 158;
+static const int ID_BTN_GT_PREVIEW = 159;
 
 // Particle controls
 static const int ID_CMB_PARTICLETYPE = 160;
@@ -2812,7 +2852,7 @@ const char* GetPortalTargetWorld(int index) {
 
 void RefreshPortalList() {
     // Called on portal tab open and after world changes; rebuilds combo contents
-    // (deferred until controls exist — guarded by panel handle)
+    // (deferred until controls exist â€” guarded by panel handle)
     if (!g_editorPanels.hEnvPanel) return;
     HWND hList = GetDlgItem((HWND)g_editorPanels.hEnvPanel, ID_CMB_PORTAL_LIST);
     if (!hList) return;
@@ -3099,11 +3139,11 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         g_zoneControlGroups[2].push_back(GetDlgItem(hwnd, 30));
         HWND hGT = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
                                   x + 85, y, 180, 200, hwnd, (HMENU)(INT_PTR)ID_CMB_GAMETYPE, g_hInst, nullptr);
-        const wchar_t* gameTypes[] = {
-            L"Single Player", L"Coop", L"Etheral Match (DM)",
-            L"Angel Team Game (TDM)", L"Angel Run", L"Capture The Orb", L"Time Shift"
-        };
-        for (auto& gt : gameTypes) SendMessage(hGT, CB_ADDSTRING, 0, (LPARAM)gt);
+        for (oz::gametype::GameType t : oz::gametype::AllGameTypes()) {
+            const char* label = oz::gametype::GameTypeName(t);
+            std::wstring wlabel(label, label + std::strlen(label));
+            SendMessage(hGT, CB_ADDSTRING, 0, (LPARAM)wlabel.c_str());
+        }
         SendMessage(hGT, CB_SETCURSEL, (int)g_zoneProps.gameType, 0);
         g_zoneControlGroups[2].push_back(hGT);
         y += 28;
@@ -3127,7 +3167,31 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
         y += 30;
         HWND hGTApply = CreateButton(hwnd, L"Apply GameType", x, y, 140, 26, ID_ZONE_APPLY_GT);
         g_zoneControlGroups[2].push_back(hGTApply);
-        y += 32;
+        y += 30;
+
+        // Resolved-ruleset summary + preview. The summary is a static label
+        // refreshed whenever the combo selection changes; Preview opens a
+        // modeless dialog with the same fields in a wider layout.
+        LevelMetadata meta = GetLevelMetadata();
+        const oz::gametype::GameTypeInfo& info =
+            oz::gametype::GameTypeInfoFor(static_cast<oz::gametype::GameType>((int)meta.gameType));
+        wchar_t summary[512];
+        _snwprintf(summary, 511,
+            L"%s | teams=%d | FF=%s | kill=%d | scoreLimit=%d%s | timeLimit=%s",
+            std::wstring(info.label, info.label + strlen(info.label)).c_str(),
+            info.teamCount,
+            info.friendlyFire ? L"on" : L"off",
+            info.killScore,
+            info.scoreLimitEnabled ? info.scoreLimit : 0,
+            info.scoreLimitEnabled ? L"" : L" (off)",
+            info.timeLimitEnabled ? L"on" : L"off");
+        summary[511] = 0;
+        CreateLabel(hwnd, summary, x, y, 420, 20, ID_LB_GT_SUMMARY);
+        g_zoneControlGroups[2].push_back(GetDlgItem(hwnd, ID_LB_GT_SUMMARY));
+        y += 24;
+        HWND hPreview = CreateButton(hwnd, L"Preview", x, y, 80, 24, ID_BTN_GT_PREVIEW);
+        g_zoneControlGroups[2].push_back(hPreview);
+        y += 28;
 
         // --- Particles tab (3) ---
         y = tabTop;
@@ -3437,7 +3501,7 @@ static LRESULT CALLBACK ZonePropertiesProc(HWND hwnd, UINT msg, WPARAM w, LPARAM
 }
 
 // =====================================================================
-// Pickup Panel — dynamically generated from LightningScript entity registry
+// Pickup Panel â€” dynamically generated from LightningScript entity registry
 // =====================================================================
 static const int ID_PICK_CLOSE   = 100;
 static const int ID_PICKUP_BASE  = 101;
@@ -3674,7 +3738,7 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 // =====================================================================
-// Light Properties panel — color, type, effect, flare, corona
+// Light Properties panel â€” color, type, effect, flare, corona
 // =====================================================================
 static const int ID_LP_CLOSE  = 400;
 static const int ID_LP_APPLY  = 401;
@@ -4156,7 +4220,7 @@ void RefreshWorldGraph() {
 }
 
 // =====================================================================
-// LevelList / Campaign panel — worlds + portal connections
+// LevelList / Campaign panel â€” worlds + portal connections
 // =====================================================================
 static const int ID_LL_LIST   = 500;
 static const int ID_LL_OPEN   = 501;
@@ -4371,14 +4435,24 @@ static const int ID_PP_ZONEWDRAG   = 427; // zone water drag
 static const int ID_PP_ZONESWIM    = 428; // zone swim-up speed
 static const int ID_PP_ZONELADDER  = 429; // zone ladder speed
 static const int ID_PP_ZONEFLYMULT = 430; // zone fly/noclip speed multiplier
-static const int ID_PP_PORTALWORLD = 423;
-static const int ID_PP_PSPAWNX  = 424;
-static const int ID_PP_PSPAWNY  = 425;
-static const int ID_PP_PSPAWNZ  = 426;
-static const int ID_PP_PBIDIR   = 427;
-static const int ID_PP_PORTALBROWSE = 428; // browse target world
-static const int ID_PP_SCALE    = 429;    // GameEngine.Mesh uniform scale
-static const int ID_PP_MESHPATH = 430;    // GameEngine.Mesh model path
+// Portal fields get their OWN range (465+). They previously reused 423-428,
+// colliding with the eight zone-physics IDs above: GetDlgItem(id) resolves per
+// window, so this only stayed harmless because zones and portals are mutually
+// exclusive SelTypes. Any future section showing both would cross-wire silently.
+// ID_PP_MESHPATH likewise moved off 430 (it aliased ID_PP_ZONEFLYMULT).
+// Nothing else is renumbered, so no call site outside this block can be stale.
+static const int ID_PP_PORTALWORLD  = 465;
+static const int ID_PP_PSPAWNX      = 466;
+static const int ID_PP_PSPAWNY      = 467;
+static const int ID_PP_PSPAWNZ      = 468;
+static const int ID_PP_PBIDIR       = 469;
+static const int ID_PP_PORTALBROWSE = 470; // browse target world
+// GameEngine.Mesh scale/model-path fields. 471 was the last free slot inside the
+// 401-470 layout; 637 is just past the end of the generated stat-row window
+// (487 + 50 rows + 50 previews + 50 browses = 636). Both used to alias
+// zone-physics / light IDs.
+static const int ID_PP_SCALE    = 471;    // GameEngine.Mesh uniform scale
+static const int ID_PP_MESHPATH = 637;    // GameEngine.Mesh model path
 static const int ID_PP_MESHTEX  = 431;    // GameEngine.Mesh texture path
 static const int ID_PP_ANIMCLIP = 432;    // GameEngine.Mesh.Skeletal clip
 static const int ID_PP_MESHRELOAD = 433;  // force mesh reload button
@@ -4413,31 +4487,34 @@ static const int ID_PP_MESHANIMFILE       = 461;
 static const int ID_PP_MESHANIMFILE_BROWSE = 462;
 static const int ID_PP_MESHANIMSPEED      = 463;
 static const int ID_PP_CONVERT_ANIMATED   = 464;
-// Light editing (SelType::LIGHT) — these IDs continue the ID_PP_* block; the
-// window is rebuilt per entity type so no two live controls ever collide.
-static const int ID_PP_LIGHT_TYPE     = 470;
-static const int ID_PP_LIGHT_EFFECT   = 471;
-static const int ID_PP_LIGHT_R        = 472;
-static const int ID_PP_LIGHT_G        = 473;
-static const int ID_PP_LIGHT_B        = 474;
-static const int ID_PP_LIGHT_INTENS   = 475;
-static const int ID_PP_LIGHT_RADIUS   = 476;
-static const int ID_PP_LIGHT_INNER    = 477;
-static const int ID_PP_LIGHT_OUTER    = 478;
-static const int ID_PP_LIGHT_FLARE    = 479;
-static const int ID_PP_LIGHT_CORONA   = 480;
-static const int ID_PP_LIGHT_TARGETX  = 481;
-static const int ID_PP_LIGHT_TARGETY  = 482;
-static const int ID_PP_LIGHT_TARGETZ  = 483;
-static const int ID_PP_LIGHT_NAME     = 484;
+// Light editing (SelType::LIGHT). Own range 472-486: the old 470-484 overlapped
+// the portal block (465-470) at 470 and, once MESHPATH moved to 471, at 471 too.
+// The panel is rebuilt per entity type so live controls never collide in
+// practice, but the constant namespace still must be disjoint so a future
+// combined section cannot silently cross-wire two entities' fields.
+static const int ID_PP_LIGHT_TYPE     = 472;
+static const int ID_PP_LIGHT_EFFECT   = 473;
+static const int ID_PP_LIGHT_R        = 474;
+static const int ID_PP_LIGHT_G        = 475;
+static const int ID_PP_LIGHT_B        = 476;
+static const int ID_PP_LIGHT_INTENS   = 477;
+static const int ID_PP_LIGHT_RADIUS   = 478;
+static const int ID_PP_LIGHT_INNER    = 479;
+static const int ID_PP_LIGHT_OUTER    = 480;
+static const int ID_PP_LIGHT_FLARE    = 481;
+static const int ID_PP_LIGHT_CORONA   = 482;
+static const int ID_PP_LIGHT_TARGETX  = 483;
+static const int ID_PP_LIGHT_TARGETY  = 484;
+static const int ID_PP_LIGHT_TARGETZ  = 485;
+static const int ID_PP_LIGHT_NAME     = 486;
 
 // Editable .ozls stat rows. The count is a fixed ceiling rather than a
 // per-key constant because rows are generated from the def's stat schema; row
 // N uses ID_PP_STAT_FIELD_0 + N. Per-row IDs (rather than two shared Preview /
 // Browse ids plus a hit-test) mean a click cannot land on the wrong row.
-static const int ID_PP_STAT_FIELD_0    = 485;
-static const int ID_PP_STAT_PREVIEW_0  = 535;
-static const int ID_PP_STAT_BROWSE_0   = 585;
+static const int ID_PP_STAT_FIELD_0    = 487;
+static const int ID_PP_STAT_PREVIEW_0  = 537;
+static const int ID_PP_STAT_BROWSE_0   = 587;
 // Bound on editable rows. A def is free to author more stats than this; the
 // extras still render as read-only rows rather than disappearing.
 static const int ID_PP_STAT_MAX        = 45;
@@ -4818,7 +4895,7 @@ static void PopulatePropertiesPanel(HWND hwnd) {
     addField(L"Pos Z:", ID_PP_POSZ, g_editorPanels.propPosZ);
 
     // Type-specific fields
-    if (selType == 1 || selType == 6 || selType == 8) { // Brush, Zone, or Portal — add size fields
+    if (selType == 1 || selType == 6 || selType == 8) { // Brush, Zone, or Portal â€” add size fields
         addField(L"Size X:", ID_PP_SX, g_editorPanels.propSizeX);
         addField(L"Size Y:", ID_PP_SY, g_editorPanels.propSizeY);
         addField(L"Size Z:", ID_PP_SZ, g_editorPanels.propSizeZ);
@@ -4863,7 +4940,7 @@ static void PopulatePropertiesPanel(HWND hwnd) {
         return h;
     };
 
-    // Definition block (read-only, per-key rows) — shown for NPC/pickup/zone
+    // Definition block (read-only, per-key rows) â€” shown for NPC/pickup/zone
     if (!g_editorPanels.propDefTitle.empty()) {
         addSection("Definition (read-only)");
         addReadOnlyRow("type", g_editorPanels.propDefTitle);
@@ -4929,7 +5006,7 @@ if (!g_editorPanels.propDefFields.empty()) {
         }
     }
 
-    if (selType == 3) { // NPC — instance overrides
+    if (selType == 3) { // NPC â€” instance overrides
         addSection("Instance overrides");
         addField(L"Health:", ID_PP_HEALTH, g_editorPanels.propHealth);
         addField(L"Speed:", ID_PP_SPEED, g_editorPanels.propSpeed);
@@ -4986,7 +5063,7 @@ if (!g_editorPanels.propDefFields.empty()) {
         SendMessage(GetDlgItem(hwnd, ID_PP_LIGHT_CORONA), BM_SETCHECK,
                     g_editorPanels.propLightCorona ? BST_CHECKED : BST_UNCHECKED, 0);
         y += rowH;
-    } else if (selType == 4) { // PICKUP / weapon — instance overrides
+    } else if (selType == 4) { // PICKUP / weapon â€” instance overrides
         addSection("Instance overrides");
         addField(L"Respawn:", ID_PP_RESPAWN, g_editorPanels.propRespawnTime);
     } else if (selType == 6) { // ZONE
@@ -5166,7 +5243,7 @@ case WM_USER + 50: {
             g_editorPanels.actionReloadMesh = true;
             break;
         }
-        // Texture pickers for mesh / particle-emitter properties — pick from the
+        // Texture pickers for mesh / particle-emitter properties â€” pick from the
         // Texture Manager ("Use Active Tex") or the OS dialog ("Browse Tex...")
         // instead of hand-copying a path, then apply immediately.
         if (id == ID_PP_MESHANIMFILE_BROWSE) {
@@ -5724,7 +5801,7 @@ void ShowDefPropertiesFor(const std::string& defName) {
 }
 
 // =====================================================================
-// Stats Sidebar â€” docked native left panel (stats + toolbox)
+// Stats Sidebar Ã¢â‚¬â€ docked native left panel (stats + toolbox)
 // =====================================================================
 static const int ID_SB_TITLE   = 900;
 static const int ID_SB_POS     = 901;
@@ -6126,8 +6203,398 @@ void RefreshAnimPanel() {
 }
 
 // =====================================================================
-// Public API — Create / Destroy
+// Public API â€” Create / Destroy
 // =====================================================================
+// =====================================================================
+// Surface Properties (UT99-style, per-face)
+//
+// Right-click a brush FACE in the viewport -> "Surface Properties (N
+// Selected)" -> this window. Modelled on the UT99 dialog: a Flags tab of
+// checkboxes, an Alignment tab for UV/pan/texture, and a Stats tab for alpha
+// and glow.
+//
+// The face is identified geometrically (dominant axis of the clicked
+// triangle's normal) by Main.cpp's PickSurfaceFace, using the same rule the
+// renderer's per-face mesh split uses, so the face the user clicks is provably
+// the face whose properties are edited here.
+//
+// A selection can span several faces of one brush; Apply writes to all of them,
+// which is why the title reads "(N Selected)".
+// =====================================================================
+static const wchar_t* CLASS_SURFACEPROPS = L"OzSurfaceProps";
+
+// Flag checkboxes in the three-column layout of the UT99 dialog.
+struct SurfaceFlagRow { const wchar_t* label; uint32_t bit; };
+static const SurfaceFlagRow kSurfaceFlagRows[] = {
+    // column 1
+    { L"Invisible",           SURF_INVISIBLE },
+    { L"Masked",              SURF_MASKED },
+    { L"Translucent",         SURF_TRANSLUCENT },
+    { L"Force View Zone",     SURF_FORCE_VIEW_ZONE },
+    { L"Modulated",           SURF_MODULATED },
+    { L"Fake Backdrop",       SURF_FAKEBACKDROP },
+    { L"Two Sided",           SURF_TWO_SIDED },
+    { L"U-Pan",               SURF_PAN_U },
+    { L"V-Pan",               SURF_PAN_V },
+    { L"High Shadow Detail",  SURF_SHADOW_HI },
+    { L"Low Shadow Detail",   SURF_SHADOW_LO },
+    { L"AlphaBlend",          SURF_ALPHABLEND },
+    // column 2
+    { L"No Smooth",           SURF_NO_SMOOTH },
+    { L"Invisible Occluder",  SURF_INVISIBLE_OCCLUDER },
+    { L"Small Wavy",          SURF_SMALL_WAVY },
+    { L"Dirty Shadows",       SURF_DIRTY_SHADOWS },
+    { L"Bright Corners",      SURF_BRIGHT_CORNERS },
+    { L"Special Lit",         SURF_SPECIAL_LIT },
+    { L"No Bounds Reject",    SURF_NO_BOUNDS_REJECT },
+    { L"Unlit",               SURF_UNLIT },
+    { L"Portal",              SURF_PORTAL },
+    { L"Mirror",              SURF_MIRROR },
+    { L"Environment",         SURF_ENVIRONMENT },
+    { L"Glow",                SURF_GLOW },
+    // column 3
+    { L"No Fog",              SURF_NO_FOG },
+    { L"No BSP Cuts",         SURF_NO_BSP_CUTS },
+    { L"Zone Hack",           SURF_ZONE_HACK },
+};
+static const int kSurfaceFlagCount = (int)(sizeof(kSurfaceFlagRows) / sizeof(kSurfaceFlagRows[0]));
+
+// Control ids. ID_SPF_* is its own block (700+) so it can never collide with
+// any other panel's range.
+static const int ID_SPF_TAB        = 700;
+static const int ID_SPF_APPLY      = 701;
+static const int ID_SPF_CLOSE      = 702;
+static const int ID_SPF_RESET      = 703;
+static const int ID_SPF_SLOTSEL    = 705;
+static const int ID_SPF_FLAG_BASE  = 710;   // + i
+static const int ID_SPF_F_BASE     = 760;   // + i  (float fields)
+static const int ID_SPF_TEXPATH    = 800;   // the one free-text field
+
+// The face whose properties the controls currently show. With a multi-face
+// selection this is the first selected face; Apply still writes to all of them.
+static oz::surface::SurfaceFace s_spfShownFace = oz::surface::FACE_PX;
+static int  s_spfTab = 0;
+static HWND s_hSpfTab = nullptr;
+static HWND g_spfPages[3] = {nullptr, nullptr, nullptr};
+static oz::surface::SurfaceProps s_spfEdit{};   // working copy shown in the UI
+
+// Numeric fields, in creation order. Kept in a table so read-back cannot drift
+// from the controls.
+enum SpfField {
+    SPF_UV_SCALE_U = 0, SPF_UV_SCALE_V, SPF_UV_OFF_U, SPF_UV_OFF_V,
+    SPF_PAN_U, SPF_PAN_V, SPF_ALPHA, SPF_CUTOFF,
+    SPF_GLOW_R, SPF_GLOW_G, SPF_GLOW_B, SPF_GLOW_SCALE,
+    SPF_FIELD_COUNT
+};
+static const wchar_t* const kSpfFieldLabel[SPF_FIELD_COUNT] = {
+    L"U Scale:",  L"V Scale:",  L"U Offset:", L"V Offset:",
+    L"U Pan (t/s):", L"V Pan (t/s):", L"Alpha:", L"Alpha Cutoff:",
+    L"Glow R:", L"Glow G:", L"Glow B:", L"Glow Scale:",
+};
+static const int kSpfRowH = 24;
+
+static float SpfGetField(SpfField f) {
+    switch (f) {
+        case SPF_UV_SCALE_U:  return s_spfEdit.uvScaleU;
+        case SPF_UV_SCALE_V:  return s_spfEdit.uvScaleV;
+        case SPF_UV_OFF_U:   return s_spfEdit.uvOffsetU;
+        case SPF_UV_OFF_V:   return s_spfEdit.uvOffsetV;
+        case SPF_PAN_U:      return s_spfEdit.panU;
+        case SPF_PAN_V:      return s_spfEdit.panV;
+        case SPF_ALPHA:      return s_spfEdit.alpha;
+        case SPF_CUTOFF:     return s_spfEdit.alphaCutoff;
+        case SPF_GLOW_R:     return s_spfEdit.glowR;
+        case SPF_GLOW_G:     return s_spfEdit.glowG;
+        case SPF_GLOW_B:     return s_spfEdit.glowB;
+        case SPF_GLOW_SCALE: return s_spfEdit.glowScale;
+        default: return 0.0f;
+    }
+}
+
+static void SpfSetField(SpfField f, float v) {
+    switch (f) {
+        case SPF_UV_SCALE_U:  s_spfEdit.uvScaleU = v; break;
+        case SPF_UV_SCALE_V:  s_spfEdit.uvScaleV = v; break;
+        case SPF_UV_OFF_U:   s_spfEdit.uvOffsetU = v; break;
+        case SPF_UV_OFF_V:   s_spfEdit.uvOffsetV = v; break;
+        case SPF_PAN_U:      s_spfEdit.panU = v; break;
+        case SPF_PAN_V:      s_spfEdit.panV = v; break;
+        case SPF_ALPHA:      s_spfEdit.alpha = v; break;
+        case SPF_CUTOFF:     s_spfEdit.alphaCutoff = v; break;
+        case SPF_GLOW_R:     s_spfEdit.glowR = v; break;
+        case SPF_GLOW_G:     s_spfEdit.glowG = v; break;
+        case SPF_GLOW_B:     s_spfEdit.glowB = v; break;
+        case SPF_GLOW_SCALE: s_spfEdit.glowScale = v; break;
+        default: break;
+    }
+}
+
+static void SpfFloatRow(HWND parent, int x, int& y, int id, float value) {
+    wchar_t buf[48];
+    swprintf(buf, 48, L"%g", value);
+    CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", buf,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        x + 104, y, 92, 22, parent, (HMENU)(INT_PTR)id, g_hInst, nullptr);
+}
+
+// Load the renderable + face into the working copy, clamping values that the
+// renderer would reject anyway.
+static void SpfLoadFromTarget() {
+    OzoneRenderable* r = OzoneLoader::Instance().Get(g_editorPanels.surfaceRenderable);
+    if (!r) { s_spfEdit = oz::surface::SurfaceProps{}; return; }
+    s_spfEdit = r->surface.Resolve(s_spfShownFace);
+    if (s_spfEdit.alpha < 0.0f) s_spfEdit.alpha = 0.0f;
+    if (s_spfEdit.alpha > 1.0f) s_spfEdit.alpha = 1.0f;
+    if (s_spfEdit.alphaCutoff < 0.0f) s_spfEdit.alphaCutoff = 0.0f;
+    if (s_spfEdit.uvScaleU == 0.0f) s_spfEdit.uvScaleU = 1.0f;
+    if (s_spfEdit.uvScaleV == 0.0f) s_spfEdit.uvScaleV = 1.0f;
+}
+
+// Flags tab: one checkbox per flag, three columns, matching the UT99 dialog.
+static void SpfBuildFlagsPage(HWND hwnd) {
+    const int x0 = 12, y0 = 8, colW = 168, rows = 12;
+    for (int i = 0; i < kSurfaceFlagCount; i++) {
+        const int col = i / rows, row = i % rows;
+        CreateCtrl(hwnd, L"BUTTON", kSurfaceFlagRows[i].label,
+                   x0 + col * colW, y0 + row * kSpfRowH, colW - 10, 20,
+                   ID_SPF_FLAG_BASE + i, BS_AUTOCHECKBOX);
+        SendMessage(GetDlgItem(hwnd, ID_SPF_FLAG_BASE + i), BM_SETCHECK,
+                    s_spfEdit.Has(kSurfaceFlagRows[i].bit) ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
+}
+
+// Alignment tab: tileset slot, free-placement texture, UV transform and U/V pan.
+static void SpfBuildAlignPage(HWND hwnd) {
+    int x = 12, y = 8;
+    CreateLabel(hwnd, L"Texture slot:", x, y, 100, 20, 0);
+    HWND hCombo = CreateCtrl(hwnd, L"COMBOBOX", L"", x + 104, y, 120, 240,
+                            ID_SPF_SLOTSEL, CBS_DROPDOWNLIST);
+    // 0 = "keep the brush's own texture", then one entry per tileset texture.
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(brush default)");
+    const int n = OzoneLoader::Instance().TilesetCount();
+    for (int i = 1; i <= n; i++) {
+        wchar_t buf[32];
+        swprintf(buf, 32, L"%d", i);
+        SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)buf);
+    }
+    int sel = s_spfEdit.texSlot;
+    if (sel < 0 || sel > n) sel = 0;
+    SendMessage(hCombo, CB_SETCURSEL, sel, 0);
+    y += kSpfRowH + 4;
+
+    CreateLabel(hwnd, L"Face texture (optional):", x, y, 200, 20, 0);
+    y += kSpfRowH - 2;
+    {
+        std::wstring wp(s_spfEdit.texPath.begin(), s_spfEdit.texPath.end());
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", wp.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+            x, y, 440, 22, hwnd, (HMENU)(INT_PTR)ID_SPF_TEXPATH, g_hInst, nullptr);
+    }
+    y += kSpfRowH + 6;
+
+    for (int i = SPF_UV_SCALE_U; i <= SPF_PAN_V; i++) {
+        CreateLabel(hwnd, kSpfFieldLabel[i], x, y, 100, 20, 0);
+        SpfFloatRow(hwnd, x, y, ID_SPF_F_BASE + i, SpfGetField((SpfField)i));
+        y += kSpfRowH;
+    }
+}
+
+// Stats tab: alpha, alpha cutoff and the glow colour/scale.
+static void SpfBuildStatsPage(HWND hwnd) {
+    int x = 12, y = 8;
+    for (int i = SPF_ALPHA; i < SPF_FIELD_COUNT; i++) {
+        CreateLabel(hwnd, kSpfFieldLabel[i], x, y, 100, 20, 0);
+        SpfFloatRow(hwnd, x, y, ID_SPF_F_BASE + i, SpfGetField((SpfField)i));
+        y += kSpfRowH;
+    }
+    y += 8;
+    CreateLabel(hwnd,
+        L"Flags live on the Flags tab. Apply writes to EVERY selected face.\n"
+        L"Masked needs Alpha Cutoff > 0.  Glow needs a non-zero colour.\n"
+        L"U-Pan / V-Pan scroll the texture; speed is in texture units per second.",
+        x, y, 480, 60, 0);
+}
+
+static void SpfShowPage(int page) {
+    for (int i = 0; i < 3; i++)
+        if (g_spfPages[i]) ShowWindow(g_spfPages[i], (i == page) ? SW_SHOW : SW_HIDE);
+    s_spfTab = page;
+}
+
+// Read every control back into the working copy.
+static void SpfReadControls(HWND hwnd) {
+    for (int i = 0; i < kSurfaceFlagCount; i++) {
+        HWND c = GetDlgItem(hwnd, ID_SPF_FLAG_BASE + i);
+        if (!c) continue;
+        s_spfEdit.Set(kSurfaceFlagRows[i].bit,
+                      SendMessage(c, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    }
+    for (int i = 0; i < SPF_FIELD_COUNT; i++) {
+        HWND c = GetDlgItem(hwnd, ID_SPF_F_BASE + i);
+        if (!c) continue;
+        wchar_t buf[64];
+        GetWindowTextW(c, buf, 64);
+        // Validation lives here, not in ES_NUMBER: Glow R may legitimately be
+        // negative, and a blank field must keep its value rather than become 0.
+        wchar_t* end = nullptr;
+        const double v = wcstod(buf, &end);
+        if (end == buf) continue;
+        SpfSetField((SpfField)i, (float)v);
+    }
+    if (HWND c = GetDlgItem(hwnd, ID_SPF_SLOTSEL)) {
+        const int s = (int)SendMessage(c, CB_GETCURSEL, 0, 0);
+        s_spfEdit.texSlot = (s > 0) ? s : 0;
+    }
+    if (HWND c = GetDlgItem(hwnd, ID_SPF_TEXPATH)) {
+        wchar_t buf[512];
+        GetWindowTextW(c, buf, 512);
+        char out[512] = {0};
+        WideCharToMultiByte(CP_UTF8, 0, buf, -1, out, 512, nullptr, nullptr);
+        s_spfEdit.texPath = out;
+    }
+}
+
+static void SpfBuildAll(HWND hwnd) {
+    for (int i = 0; i < 3; i++) {
+        if (g_spfPages[i]) { DestroyWindow(g_spfPages[i]); g_spfPages[i] = nullptr; }
+    }
+    RECT rc; GetClientRect(hwnd, &rc);
+    const int px = 4, py = 32;
+    const int pw = rc.right - px * 2, ph = rc.bottom - py - 46;
+    for (int i = 0; i < 3; i++) {
+        g_spfPages[i] = CreateWindowEx(0, L"STATIC", L"", WS_CHILD, px, py, pw, ph,
+                                       hwnd, nullptr, g_hInst, nullptr);
+        if (i == 0)      SpfBuildFlagsPage(g_spfPages[i]);
+        else if (i == 1) SpfBuildAlignPage(g_spfPages[i]);
+        else             SpfBuildStatsPage(g_spfPages[i]);
+    }
+    SpfShowPage(s_spfTab);
+}
+
+static LRESULT CALLBACK SurfacePropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+    case WM_COMMAND: {
+        const int id = LOWORD(w);
+        if (id == ID_SPF_APPLY) {
+            SpfReadControls(hwnd);
+            g_editorPanels.surfaceEdit = s_spfEdit;
+            g_editorPanels.actionApplySurface = true;
+            return 0;
+        }
+        if (id == ID_SPF_RESET) {
+            g_editorPanels.actionResetSurface = true;
+            return 0;
+        }
+        if (id == ID_SPF_CLOSE) {
+            ShowSurfaceProps(false, -1, 0);
+            return 0;
+        }
+        return 0;
+    }
+    case WM_NOTIFY: {
+        LPNMHDR nh = (LPNMHDR)l;
+        if (nh->idFrom == ID_SPF_TAB && nh->code == TCN_SELCHANGE) {
+            // Keep edits made on the page being left, otherwise switching tabs
+            // silently discards them.
+            SpfReadControls(hwnd);
+            s_spfTab = TabCtrl_GetCurSel(s_hSpfTab);
+            SpfShowPage(s_spfTab);
+        }
+        return 0;
+    }
+    case WM_CLOSE:   ShowSurfaceProps(false, -1, 0); return 0;
+    case WM_DESTROY: g_editorPanels.hSurfaceProps = nullptr; return 0;
+    default: break;
+    }
+    return DefWindowProc(hwnd, msg, w, l);
+}
+
+void ShowSurfaceProps(bool show, int renderable, uint32_t faceMask) {
+    g_editorPanels.showSurfaceProps = show;
+    if (!show) {
+        if (g_editorPanels.hSurfaceProps)
+            ShowWindow((HWND)g_editorPanels.hSurfaceProps, SW_HIDE);
+        return;
+    }
+    if (faceMask == 0) {
+        MessageBoxA(nullptr, "No surface face is selected.\n\n"
+                     "Right-click directly on a brush face in the viewport.",
+                     "Surface Properties", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    g_editorPanels.surfaceRenderable = renderable;
+    g_editorPanels.surfaceFaceMask = faceMask;
+
+    // Show the first selected face's properties; Apply still covers all of them.
+    s_spfShownFace = oz::surface::FACE_PX;
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        if (faceMask & (1u << f)) { s_spfShownFace = (oz::surface::SurfaceFace)f; break; }
+    }
+    SpfLoadFromTarget();
+    if (!g_editorPanels.hSurfaceProps) return;
+    HWND hwnd = (HWND)g_editorPanels.hSurfaceProps;
+
+    // Title mirrors the UT99 dialog: "N Surface(s) : px,ny,...".
+    int n = 0;
+    std::string faceList;
+    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
+        if (!(faceMask & (1u << f))) continue;
+        if (n++) faceList += ",";
+        faceList += oz::surface::FaceName((oz::surface::SurfaceFace)f);
+    }
+    char title[192];
+    snprintf(title, sizeof(title), "%d Surface%s : %s", n, (n == 1) ? "" : "s", faceList.c_str());
+    wchar_t wtitle[192];
+    MultiByteToWideChar(CP_UTF8, 0, title, -1, wtitle, 192);
+    SetWindowTextW(hwnd, wtitle);
+
+    // Tear down the previous tab/pages but keep the Apply/Reset/Close buttons,
+    // which are the window's persistent furniture.
+    HWND child = GetWindow(hwnd, GW_CHILD);
+    while (child) {
+        HWND next = GetWindow(child, GW_HWNDNEXT);
+        const int cid = GetDlgCtrlID(child);
+        if (cid != ID_SPF_APPLY && cid != ID_SPF_RESET && cid != ID_SPF_CLOSE)
+            DestroyWindow(child);
+        child = next;
+    }
+    for (int i = 0; i < 3; i++) g_spfPages[i] = nullptr;
+    s_hSpfTab = nullptr;
+
+    RECT rc; GetClientRect(hwnd, &rc);
+    s_hSpfTab = CreateCtrl(hwnd, WC_TABCONTROLW, L"", 4, 4, rc.right - 8, 26,
+                           ID_SPF_TAB, TCS_TABS);
+    {
+        static const wchar_t* tabs[3] = {L"Flags", L"Alignment", L"Stats"};
+        for (int i = 0; i < 3; i++) {
+            TCITEMW tc = {};
+            tc.mask = TCIF_TEXT;
+            tc.pszText = (LPWSTR)tabs[i];
+            TabCtrl_InsertItem(s_hSpfTab, i, &tc);
+        }
+    }
+    TabCtrl_SetCurSel(s_hSpfTab, s_spfTab);
+
+    const int bw = 84, by = rc.bottom - 34;
+    CreateButton(hwnd, L"Apply", rc.right - bw * 3 - 20, by, bw, 26, ID_SPF_APPLY);
+    CreateButton(hwnd, L"Reset", rc.right - bw * 2 - 12, by, bw, 26, ID_SPF_RESET);
+    CreateButton(hwnd, L"Close", rc.right - bw - 8, by, bw, 26, ID_SPF_CLOSE);
+
+    SpfBuildAll(hwnd);
+    ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+}
+
+// Re-read from the renderable and rebuild, so the controls show what was
+// actually stored (including any clamping) after an Apply.
+void SurfacePropsRefresh(void* hwnd) {
+    if (!hwnd) return;
+    HWND h = (HWND)hwnd;
+    if (!IsWindow(h)) return;
+    SpfLoadFromTarget();
+    SpfBuildAll(h);
+}
+
 void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     g_hInst = (HINSTANCE)hInst;
     g_hRaylibWnd = (HWND)hRaylibWnd;
@@ -6169,6 +6636,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     RegisterPanelClass(CLASS_PROPSPANEL, PropsPanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_ANIMPANEL, AnimPanelProc, (HINSTANCE)hInst);
     RegisterPanelClass(CLASS_LEVELLIST, LevelListProc, (HINSTANCE)hInst);
+    RegisterPanelClass(CLASS_SURFACEPROPS, SurfacePropsProc, (HINSTANCE)hInst);
 
     // Stats sidebar uses dark background (override default COLOR_BTNFACE)
     {
@@ -6208,6 +6676,7 @@ void CreateAllEditorWindows(void* hInst, void* hRaylibWnd) {
     create(CLASS_PROPSPANEL,  L"Entity Properties",    g_editorPanels.propsPanelPos,        g_editorPanels.hPropsPanel);
     create(CLASS_ANIMPANEL,   L"Animation",            g_editorPanels.animPanelPos,         g_editorPanels.hAnimPanel);
     create(CLASS_LEVELLIST,   L"Level List / Campaign",g_editorPanels.levelListPos,         g_editorPanels.hLevelList);
+    create(CLASS_SURFACEPROPS,L"Surface Properties",    g_editorPanels.surfacePropsPos,     g_editorPanels.hSurfaceProps);
 
     // Docked native stats sidebar (child of raylib window)
     {

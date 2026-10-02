@@ -1,6 +1,13 @@
 #include "GameState.hpp"
 #include "../World/OzoneParser.hpp"
+#include "../World/GameType.hpp"
+#include "../World/LevelSettings.hpp"
 #include "../Log.hpp"
+
+// Defined in OzoneParser.cpp (linked into both client and server) and
+// declared in OzoneParser.hpp. Forward-declared here so init_worlds can
+// strip quotes from levelinfo paths the same way the loader does.
+std::string StripQuotes(std::string s);
 #include <cmath>
 #include <cstring>
 #include <cstdio>
@@ -121,23 +128,30 @@ void GameState::init_worlds(const std::string& gamedata_dir,
         ws.world_min_z = -2000.0f;
         ws.world_max_z = 2000.0f;
 
-        // Parse the world file's levelinfo so game rules (maxPlayers,
-        // friendlyFire) come from the world itself.
+        // Parse the world file's levelinfo so game rules come from the world
+        // itself. ResolveGameTypeInfo layers: built-in table -> .ozls override
+        // -> levelinfo numbers (maxPlayers/friendlyFire/scoreLimit/timeLimit).
         {
             std::string ozonePath = gamedata_dir + "/Worlds/" + world_list[i] + "/World.ozone";
             auto prims = OzoneParser::parse_file(ozonePath);
             for (auto& pr : prims) {
                 if (pr.type != OzonePrimitiveType::ENTITY_LEVELINFO) continue;
-                auto arg = [&](size_t idx) -> float {
-                    return idx < pr.args.size() ? pr.args[idx] : 0.0f;
-                };
-                // levelinfo gameType maxPlayers respawnTime timeLimitEnabled timeLimitMinutes scoreLimit friendlyFire skyboxPath
-                if (pr.args.size() >= 2 && arg(1) > 0.0f)
-                    m_max_players = (uint32_t)arg(1);
-                if (pr.args.size() >= 7)
-                    m_friendly_fire = arg(6) != 0.0f;
-                OZ_INFO("World %s rules: maxPlayers=%u friendlyFire=%d",
-                        world_list[i].c_str(), m_max_players, (int)m_friendly_fire);
+                LevelSettings ls;
+                ParseLevelInfo(ls, pr.args,
+                               StripQuotes(pr.entityType),
+                               StripQuotes(pr.entitySubType),
+                               StripQuotes(pr.gametypeKey));
+                m_gameTypeInfo = oz::gametype::ResolveGameTypeInfo(
+                    oz::gametype::GameTypeFromId(ls.gameType), ls, "");
+                m_max_players = (ls.maxPlayers > 0) ? (uint32_t)ls.maxPlayers : net::MAX_PLAYERS;
+                m_friendly_fire = m_gameTypeInfo.friendlyFire || ls.friendlyFire;
+                m_match.type = m_gameTypeInfo.id;
+                OZ_INFO("World %s rules: mode=%s maxPlayers=%u friendlyFire=%d scoreLimit=%d%s",
+                        world_list[i].c_str(),
+                        oz::gametype::GameTypeKey(m_gameTypeInfo.id),
+                        m_max_players, (int)m_friendly_fire,
+                        m_gameTypeInfo.scoreLimitEnabled ? m_gameTypeInfo.scoreLimit : 0,
+                        m_gameTypeInfo.scoreLimitEnabled ? "" : " (off)");
                 break; // first levelinfo wins
             }
         }
@@ -400,7 +414,6 @@ uint32_t GameState::add_player(uint32_t id, const char* name, int team, int requ
     if (ServerPlayer* existing = get_player(id)) {
         strncpy(existing->name, name, sizeof(existing->name) - 1);
         existing->name[sizeof(existing->name) - 1] = '\0';
-        existing->team = team;
         existing->requested_team = requested_team;
         return existing->id;
     }
@@ -418,6 +431,22 @@ uint32_t GameState::add_player(uint32_t id, const char* name, int team, int requ
     player.last_seen = time(nullptr);
     player.world_index = 0;
     memset(player.inventory, 0, sizeof(player.inventory));
+
+    // Server-owned team assignment. `requested_team` is a HINT ONLY (clamped
+    // on receipt by net::ClampRequestedTeam); AssignTeam decides the actual
+    // team from the mode's teamCount and current balance. The client's
+    // `team` parameter is ignored for new players — it was the untrusted
+    // profile value, and the server is the only authority on team.
+    {
+        std::vector<int> teamSizes(m_gameTypeInfo.teamCount, 0);
+        for (auto& p : m_players) {
+            if (p.connected && p.team >= 0 && p.team < (int)teamSizes.size())
+                teamSizes[p.team]++;
+        }
+        int safeRequested = net::ClampRequestedTeam((int32_t)requested_team);
+        player.team = oz::gametype::AssignTeam(m_gameTypeInfo, teamSizes, safeRequested);
+        player.requested_team = requested_team;  // record-only, never scored on
+    }
 
     // Restore persisted state (by name) — only on first creation, not on
     // auth replays (the existing-player early-out above handles those).
@@ -911,7 +940,8 @@ void GameState::add_xp(uint32_t player_id, int amount) {
 // ---------------------------------------------------------------------------
 // Damage system
 // ---------------------------------------------------------------------------
-void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id) {
+void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id,
+                           oz::gametype::DamageSource source) {
     if (npc.state == NpcState::DEAD) return; // dead NPCs can't be re-killed
     npc.health -= amount;
     if (npc.health <= 0) {
@@ -923,17 +953,50 @@ void GameState::damage_npc(ServerNPC& npc, int amount, uint32_t killer_id) {
         if (killer_id != UINT32_MAX) {
             add_xp(killer_id, XP_PER_KILL);
             OZ_INFO("Killer %u awarded %d XP for NPC kill", killer_id, XP_PER_KILL);
+            register_kill(killer_id, UINT32_MAX, source);
         }
     }
 }
 
-void GameState::damage_player(ServerPlayer& player, int amount) {
+void GameState::damage_player(ServerPlayer& player, int amount,
+                              uint32_t attacker_id,
+                              oz::gametype::DamageSource source) {
     // Armor mitigation is shared with the client via oz::MitigateDamage so both
     // ends resolve damage identically. This used to be a flat 20% cut that
     // ignored the defense stat entirely.
     float mitigated = oz::MitigateDamage((float)amount, (float)player.armor);
     player.health -= (int)mitigated;
     if (player.health < 0) player.health = 0;
+    if (player.health <= 0 && attacker_id != UINT32_MAX && attacker_id != player.id)
+        register_kill(attacker_id, player.id, source);
+}
+
+void GameState::register_kill(uint32_t killer_id, uint32_t victim_id,
+                              oz::gametype::DamageSource source) {
+    if (m_gameTypeInfo.id == oz::gametype::GameType::SINGLEPLAYER ||
+        m_gameTypeInfo.id == oz::gametype::GameType::COOP ||
+        m_gameTypeInfo.id == oz::gametype::GameType::CAMPAIGN ||
+        m_gameTypeInfo.id == oz::gametype::GameType::COOPERATIVE) {
+        return; // non-scoring modes
+    }
+    if (killer_id == UINT32_MAX) return; // no killer to credit
+    if (killer_id == victim_id) {
+        // Suicide: apply penalty to the killer's own team
+        ServerPlayer* p = get_player(killer_id);
+        if (p) {
+            p->score += m_gameTypeInfo.suicidePenalty;
+            oz::gametype::MatchState::WinReason r;
+            oz::gametype::ApplyScoreEvent(m_gameTypeInfo, m_match, p->team,
+                                          m_gameTypeInfo.suicidePenalty, &r);
+        }
+        return;
+    }
+    ServerPlayer* killer = get_player(killer_id);
+    if (!killer) return;
+    killer->score += m_gameTypeInfo.killScore;
+    oz::gametype::MatchState::WinReason r;
+    oz::gametype::ApplyScoreEvent(m_gameTypeInfo, m_match, killer->team,
+                                  m_gameTypeInfo.killScore, &r);
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +1072,8 @@ void GameState::tick_projectiles(WorldState& ws, float dt) {
             float dist = sqrtf(dx*dx + dy*dy + dz*dz);
             if (dist < HIT_RADIUS) {
                 p.active = false;
-                damage_player(player, (int)p.damage);
+                damage_player(player, (int)p.damage, p.owner_id,
+                              oz::gametype::DamageSource::PLAYER);
                 break;
             }
         }
@@ -1030,6 +1094,18 @@ void GameState::tick(float dt) {
         tick_npcs(world, dt);
         tick_pickups(world, dt);
         tick_projectiles(world, dt);
+    }
+
+    // Advance the match clock and evaluate win conditions. CheckWinConditions
+    // is a pure read (no score mutation), so calling it every tick is cheap.
+    if (!match_over()) {
+        m_match.elapsedSeconds += dt;
+        oz::gametype::WinCheck wc = oz::gametype::CheckWinConditions(m_gameTypeInfo, m_match);
+        if (wc.reason != oz::gametype::MatchState::WinReason::NONE) {
+            m_match.winner = wc.reason;
+            m_match.winningTeam = wc.winningTeam;
+            OZ_INFO("Match ended: reason=%d team=%d", (int)wc.reason, wc.winningTeam);
+        }
     }
 
     // Player health/magic/penergy regeneration every tick

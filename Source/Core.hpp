@@ -80,6 +80,7 @@ void SaveGame();
 void DrawRemotePlayers3D();
 
 #include "Renderer/CombatFX.hpp"
+#include "Renderer/SurfaceMaterial.hpp"
 
 // ---------------------------------------------------------------------------
 // OzoneCollisionQuery — adapter that feeds OzoneLoader's chunked collision
@@ -266,6 +267,12 @@ auto LoadWorld()
         // fires and the level renders with the default black ambient.
         LightningEntityRegistry::Instance().LoadWorldOverrides(assetPrefix);
 
+        // The registry is about to be re-pointed at a different world's defs, so
+        // any icon EngineBillboard memoised from the PREVIOUS world's .ozls is
+        // stale (and may already have been unloaded). Drop it here rather than
+        // letting DrawPickup hand DrawBillboard a dangling Texture2D id.
+        EngineBillboard::InvalidateIconCache();
+
         // World skybox: filesystem first, then packages (resolves "Skybox.png"
         // inside the world's .ozone container in packaged builds)
         {
@@ -408,6 +415,16 @@ void UpdateLightSources()
     LitLightning_UpdateFrame(PawnSystem::Instance().GetLights(), OmegaTechData.Lights,
                              OmegaTechData.MainCamera, OmegaTechData.GameLights[0],
                              GetFrameTime());
+
+    // The surface program carries its OWN copy of the lights[]/viewPos/ambient
+    // uniforms, so it has to be refreshed here too. Skipping it would light
+    // surface-flagged brushes with whatever the previous world's lights were,
+    // which is invisible in an empty map and baffling in a real one.
+    if (oz::SurfaceMaterial::Instance().Ready()) {
+        oz::SurfaceMaterial::Instance().UpdateFrame(PawnSystem::Instance().GetLights(),
+                                                OmegaTechData.MainCamera,
+                                                GetFrameTime());
+    }
 }
 
 void DrawLights()
@@ -499,6 +516,12 @@ void OmegaTechInit()
 
     // Initialize engine billboard system
     EngineBillboard::Init();
+
+    // Per-face surface shader (UT99-style flags: unlit, masked, translucent,
+    // glow, U/V pan). Loaded separately from LitFog so nothing that already
+    // depends on Lighting.vs/LitFog.fs output is affected. Failure is non-fatal
+    // and logged by SurfaceMaterial: brushes then fall back to DrawModel.
+    oz::SurfaceMaterial::Instance().Init("GameData/Shaders/");
 
     // Initialize combat FX (procedural decal/particle textures)
     CombatFX::Instance().Init();
@@ -647,6 +670,7 @@ void OmegaTechInit()
     int AmbientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
     float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
     SetShaderValue(OmegaTechData.Lights, AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+    OzoneLoader::Instance().SetWorldAmbient(ambient[0], ambient[1], ambient[2], ambient[3]);
 
     // Initialize fog uniforms
     int fogStartLoc = GetShaderLocation(OmegaTechData.Lights, "fogStart");
@@ -1384,6 +1408,11 @@ if (inSkyZone)
 
     OzoneLoader::Instance().DrawWorldGeometry(OmegaTechData.MainCamera);
 
+    // Additive re-draw of every SURF_GLOW face, after the opaque world so the
+    // halo lands on top of the composited image. No-op unless a surface actually
+    // carries the flag, so this costs two vector scans on a normal frame.
+    OzoneLoader::Instance().DrawGlowGeometry(OmegaTechData.MainCamera);
+
     // OZONE brush collision — chunk-accelerated query, delegated to the
     // physics module via the adapter below.
     {
@@ -1600,6 +1629,7 @@ if (inSkyZone)
             static int ambLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
             float amb[4] = {1.0f, 1.0f, 1.0f, 1.0f};   // matches LitLightning default
             SetShaderValue(OmegaTechData.Lights, ambLoc, amb, SHADER_UNIFORM_VEC4);
+            OzoneLoader::Instance().SetWorldAmbient(amb[0], amb[1], amb[2], amb[3]);
             OZ_INFO("LightningScript: restore_ambient - reverted to level default");
         }
         if (lem.HasPendingAmbient())
@@ -1607,6 +1637,7 @@ if (inSkyZone)
             float amb[4] = {lem.PendingAmbientR(), lem.PendingAmbientG(), lem.PendingAmbientB(), 1.0f};
             static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
             SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
+            OzoneLoader::Instance().SetWorldAmbient(amb[0], amb[1], amb[2], amb[3]);
             lem.ClearPendingAmbient();
         }
 
@@ -1651,6 +1682,7 @@ if (inSkyZone)
                                     eo.ambB / 255.0f * eo.ambIntensity, 1.0f};
                     static int ambientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
                     SetShaderValue(OmegaTechData.Lights, ambientLoc, amb, SHADER_UNIFORM_VEC4);
+                    OzoneLoader::Instance().SetWorldAmbient(amb[0], amb[1], amb[2], amb[3]);
                 }
                 g_activeEnvZone = envZoneName;
             }

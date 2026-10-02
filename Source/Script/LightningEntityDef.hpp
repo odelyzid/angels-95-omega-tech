@@ -28,6 +28,8 @@ enum class EntityType : uint8_t {
     // takes any value the line itself did not author. intensity/radius/color
     // stay line-owned so a def can never silently retune a saved level.
     LIGHT,
+    // Metadata-only ruleset def (GameTypeInfo override). Not placeable.
+    GAMETYPE,
     UNKNOWN
 };
 
@@ -48,6 +50,7 @@ inline const char* EntityTypeName(EntityType t) {
         case EntityType::SKILL:           return "skill";
         case EntityType::GAMEUI:          return "GameUI";
         case EntityType::LIGHT:          return "light";
+        case EntityType::GAMETYPE:       return "gametype";
         default:                          return "unknown";
     }
 }
@@ -68,6 +71,7 @@ inline EntityType EntityTypeFromName(const std::string& n) {
     if (n == "skill")         return EntityType::SKILL;
     if (n == "GameUI")        return EntityType::GAMEUI;
     if (n == "light")          return EntityType::LIGHT;
+    if (n == "gametype")       return EntityType::GAMETYPE;
     return EntityType::UNKNOWN;
 }
 

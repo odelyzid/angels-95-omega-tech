@@ -38,10 +38,34 @@ static void test_levelinfo() {
     printf("  TEST levelinfo entity... ");
     auto e = OzoneParser::parse_string(
         "levelinfo DEATHMATCH 12 7 1 15 50 1 Textures/Sky.dds\n");
+    // DEATHMATCH is not a numeric token; std::stof throws and the parser
+    // substitutes 0.0f, so args[0] == 0 (SINGLEPLAYER). The test asserts the
+    // parse succeeds with >= 7 args, not that the name resolved.
     bool ok = e.size() == 1 && e[0].type == OzonePrimitiveType::ENTITY_LEVELINFO
-        && e[0].args.size() >= 7;
+        && e[0].args.size() >= 7
+        && e[0].args[0] == 0.0f
+        && e[0].entityType == "Textures/Sky.dds";
     if (ok) { pass_count++; printf("PASS\n"); }
-    else printf("FAIL: size=%zu args=%zu\n", e.size(), e.size() ? e[0].args.size() : 0);
+    else printf("FAIL: size=%zu args=%zu arg0=%f entity=%s\n",
+                e.size(), e.size() ? e[0].args.size() : 0,
+                e.size() ? e[0].args[0] : -1.0f,
+                e.size() ? e[0].entityType.c_str() : "");
+}
+
+static void test_levelinfo_gametype_kwarg() {
+    test_count++;
+    printf("  TEST levelinfo gametype= kwarg... ");
+    auto e = OzoneParser::parse_string(
+        "levelinfo 0 8 5 0 10 50 0 sky.dds gametype=deathmatch\n");
+    bool ok = e.size() == 1 && e[0].type == OzonePrimitiveType::ENTITY_LEVELINFO
+        && e[0].args.size() >= 7
+        && e[0].args[0] == 0.0f
+        && e[0].entityType == "sky.dds"
+        && e[0].gametypeKey == "deathmatch";
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: size=%zu args=%zu gametypeKey='%s'\n",
+                e.size(), e.size() ? e[0].args.size() : 0,
+                e.size() ? e[0].gametypeKey.c_str() : "");
 }
 
 static void test_particles() {
@@ -243,11 +267,183 @@ static void test_zone_default_physics() {
                 e.size() ? p.physics.gravity : -1.0f);
 }
 
+// A quoted texPath used to be truncated at the first space: the plain
+// `texPath=` test matched the quoted form before the quote-aware branch could
+// run, so the value silently became `"my` and pointed at a missing file.
+static void test_texpath_quoted_with_space() {
+    test_count++;
+    printf("  TEST brush texPath quoted with space... ");
+    auto e = OzoneParser::parse_string(
+        "box 0 0 0 8 8 8 0 texPath=\"oztex/my stone wall.png\"\n");
+    bool ok = e.size() == 1 && e[0].texPath == "oztex/my stone wall.png";
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: texPath='%s'\n", e.size() ? e[0].texPath.c_str() : "");
+}
+
+static void test_texpath_unquoted_still_works() {
+    test_count++;
+    printf("  TEST brush texPath unquoted... ");
+    auto e = OzoneParser::parse_string(
+        "box 0 0 0 8 8 8 0 texPath=oztex/plain.png\n");
+    bool ok = e.size() == 1 && e[0].texPath == "oztex/plain.png";
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: texPath='%s'\n", e.size() ? e[0].texPath.c_str() : "");
+}
+
+// The quoted value must not swallow the kwargs that follow it on the same line.
+static void test_texpath_quoted_then_flags() {
+    test_count++;
+    printf("  TEST brush texPath quoted followed by flags=... ");
+    auto e = OzoneParser::parse_string(
+        "box 0 0 0 8 8 8 0 texPath=\"a b.png\" flags=8 texScaleU=2\n");
+    bool ok = e.size() == 1
+        && e[0].texPath == "a b.png"
+        && e[0].surfaceFlags == 8
+        && e[0].texScaleU == 2.0f;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: texPath='%s' flags=%d u=%f\n",
+                e.size() ? e[0].texPath.c_str() : "",
+                e.size() ? e[0].surfaceFlags : -1,
+                e.size() ? e[0].texScaleU : -1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Surface properties
+// ---------------------------------------------------------------------------
+static void test_surface_brush_flags() {
+    test_count++;
+    printf("  TEST brush flags= maps onto the surface default... ");
+    auto e = OzoneParser::parse_string("box 0 0 0 8 8 8 0 flags=8\n");
+    using namespace oz::surface;
+    bool ok = e.size() == 1
+        && e[0].surface.def.Has(SURF_FAKEBACKDROP)
+        // The legacy scalar must be DERIVED from the surface default, or the two
+        // can disagree and DrawWorldGeometry would skip a brush the surface
+        // block says is a backdrop (or vice versa).
+        && e[0].surfaceFlags == 8;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: defFlags=0x%X surfaceFlags=%d\n",
+                e.size() ? e[0].surface.def.flags : 0,
+                e.size() ? e[0].surfaceFlags : -1);
+}
+
+static void test_surface_per_face_kwargs() {
+    test_count++;
+    printf("  TEST per-face surface kwargs... ");
+    auto e = OzoneParser::parse_string(
+        "box 0 0 0 8 8 8 0 flags=2048 facepy_flags=12 facepz_texSlot=3 "
+        "facepx_pan=0.05,-0.1 facepx_tex=oztex/custom.png\n");
+    using namespace oz::surface;
+    bool ok = e.size() == 1
+        && e[0].surface.IsFaceOverridden(FACE_PY)
+        && e[0].surface.Resolve(FACE_PY).flags == 12
+        && e[0].surface.IsFaceOverridden(FACE_PZ)
+        // texSlot= is the 1-based tileset index the Alignment tab's combo
+        // writes; tex= is a free-placement PATH. They are different fields, so
+        // conflating them would make a tileset index load as a filename.
+        && e[0].surface.Resolve(FACE_PZ).texSlot == 3
+        && e[0].surface.Resolve(FACE_PZ).texPath.empty()
+        && e[0].surface.IsFaceOverridden(FACE_PX)
+        && e[0].surface.Resolve(FACE_PX).panU == 0.05f
+        && e[0].surface.Resolve(FACE_PX).panV == -0.1f
+        && e[0].surface.Resolve(FACE_PX).texPath == "oztex/custom.png"
+        // A face the author never mentioned must NOT become an override.
+        && !e[0].surface.IsFaceOverridden(FACE_NX)
+        && !e[0].surface.IsFaceOverridden(FACE_NY)
+        && !e[0].surface.IsFaceOverridden(FACE_NZ);
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: py=%d pz=%d px=%d nxOver=%d panU=%.4f panV=%.4f tex=%d\n",
+                e.size() ? (int)e[0].surface.IsFaceOverridden(FACE_PY) : -1,
+                e.size() ? (int)e[0].surface.IsFaceOverridden(FACE_PZ) : -1,
+                e.size() ? (int)e[0].surface.IsFaceOverridden(FACE_PX) : -1,
+                e.size() ? (int)e[0].surface.IsFaceOverridden(FACE_NX) : -1,
+                e.size() ? e[0].surface.Resolve(FACE_PX).panU : -99.0f,
+                e.size() ? e[0].surface.Resolve(FACE_PX).panV : -99.0f,
+                e.size() ? e[0].surface.Resolve(FACE_PZ).texSlot : -1);
+}
+
+// A face kwarg inherits everything it does not restate, so an author can flip
+// one flag on a face without restating the whole surface.
+static void test_surface_face_inherits_default() {
+    test_count++;
+    printf("  TEST face override inherits the brush default... ");
+    auto e = OzoneParser::parse_string("box 0 0 0 8 8 8 0 flags=8 facepy_flags=9\n");
+    using namespace oz::surface;
+    bool ok = e.size() == 1
+        && e[0].surface.Resolve(FACE_PY).flags == 9
+        && e[0].surface.Resolve(FACE_NX).flags == 8
+        && e[0].surface.IsFaceOverridden(FACE_PY)
+        && !e[0].surface.IsFaceOverridden(FACE_NX);
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: py=0x%X nx=0x%X\n",
+                e.size() ? e[0].surface.Resolve(FACE_PY).flags : 0,
+                e.size() ? e[0].surface.Resolve(FACE_NX).flags : 0);
+}
+
+static void test_surface_uv_kwargs_still_derive() {
+    test_count++;
+    printf("  TEST legacy texScale*/texOffset* derive into the surface... ");
+    auto e = OzoneParser::parse_string(
+        "box 0 0 0 8 8 8 0 texScaleU=2 texScaleV=3 texOffsetU=0.25 texOffsetV=0.5\n");
+    bool ok = e.size() == 1
+        && e[0].surface.def.uvScaleU == 2.0f && e[0].surface.def.uvScaleV == 3.0f
+        && e[0].surface.def.uvOffsetU == 0.25f && e[0].surface.def.uvOffsetV == 0.5f
+        && e[0].texScaleU == 2.0f && e[0].texScaleV == 3.0f
+        && e[0].texOffsetU == 0.25f && e[0].texOffsetV == 0.5f;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: defU=%f legacyU=%f\n",
+                e.size() ? e[0].surface.def.uvScaleU : -1.0f,
+                e.size() ? e[0].texScaleU : -1.0f);
+}
+
+static void test_surface_glow_triple() {
+    test_count++;
+    printf("  TEST surfGlow=(r,g,b) triple... ");
+    auto e = OzoneParser::parse_string("box 0 0 0 8 8 8 0 surfGlow=(1,0.5,0.25)\n");
+    const auto& g = e.size() ? e[0].surface.def : oz::surface::SurfaceProps{};
+    bool ok = e.size() == 1 && g.glowR == 1.0f && g.glowG == 0.5f && g.glowB == 0.25f;
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: glow=(%f,%f,%f)\n", g.glowR, g.glowG, g.glowB);
+}
+
+static void test_surface_unknown_face_ignored() {
+    test_count++;
+    printf("  TEST unknown face name is ignored, not a crash... ");
+    auto e = OzoneParser::parse_string("box 0 0 0 8 8 8 0 faceqq_flags=1\n");
+    bool ok = e.size() == 1 && !e[0].surface.NeedsPerFaceDraw();
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: needsPerFace=%d\n", e.size() ? (int)e[0].surface.NeedsPerFaceDraw() : -1);
+}
+
+static void test_skybox_primitive() {
+    test_count++;
+    printf("  TEST skybox primitive... ");
+    auto e = OzoneParser::parse_string("skybox Models/Sky.png 0 0 32 512\n");
+    using namespace oz::surface;
+    bool ok = e.size() == 1
+        && e[0].type == OzonePrimitiveType::SKYBOX
+        && e[0].entityType == "Models/Sky.png"
+        && e[0].args.size() == 4
+        && e[0].args[3] == 512.0f
+        // A skybox must be unlit, two-sided, fog-free and CSG-exempt by
+        // construction, or the sky vanishes when the shell is subtracted.
+        && e[0].surface.def.Has(SURF_UNLIT)
+        && e[0].surface.def.Has(SURF_TWO_SIDED)
+        && e[0].surface.def.Has(SURF_NO_FOG)
+        && e[0].surface.def.Has(SURF_NO_BSP_CUTS);
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: type=%d nargs=%zu flags=0x%X\n",
+                e.size() ? (int)e[0].type : -1,
+                e.size() ? e[0].args.size() : 0,
+                e.size() ? e[0].surface.def.flags : 0);
+}
+
 int main() {
     printf("OzoneParser tests:\n");
     test_portal();
     test_portal_minimal();
     test_levelinfo();
+    test_levelinfo_gametype_kwarg();
     test_particles();
     test_particles_named();
     test_mesh_static();
@@ -260,6 +456,16 @@ int main() {
     test_mixed_document();
     test_zone_physics_kwargs();
     test_zone_default_physics();
+    test_texpath_quoted_with_space();
+    test_texpath_unquoted_still_works();
+    test_texpath_quoted_then_flags();
+    test_surface_brush_flags();
+    test_surface_per_face_kwargs();
+    test_surface_face_inherits_default();
+    test_surface_uv_kwargs_still_derive();
+    test_surface_glow_triple();
+    test_surface_unknown_face_ignored();
+    test_skybox_primitive();
 
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;

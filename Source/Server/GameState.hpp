@@ -4,6 +4,8 @@
 #include "../Network/Network.hpp"
 #include "../Pawn/CombatMath.hpp"
 #include "../Pawn/PickupItems.hpp"
+#include "../World/GameType.hpp"
+#include "../World/LevelSettings.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -46,6 +48,7 @@ struct ServerPlayer {
     int xp_to_next = 100;
     int inventory[5] = {0, 0, 0, 0, 0};  // indices 0-4 match Objects 1-5
     int ammo = 0;                        // shared ammo pool (refilled by AMMO pickups)
+    int score = 0;                       // match score (server-owned, from register_kill)
     // Defense score fed to oz::MitigateDamage. Mirrors the client's
     // LightningEntityManager::GetPlayerDefense() sum of equipped `defense`.
     float armor = 0.0f;
@@ -328,8 +331,28 @@ public:
     int xp_needed_for_level(int level) const;
 
     // Damage / killing
-    void damage_npc(ServerNPC& npc, int amount, uint32_t killer_id = UINT32_MAX);
-    void damage_player(ServerPlayer& player, int amount);
+    // DamageSource defaults to WORLD so existing call sites are unchanged;
+    // future LavaZone/AcidZone/fire call sites pass their own source so a
+    // kill can be attributed (or not) by the mode's rules.
+    void damage_npc(ServerNPC& npc, int amount, uint32_t killer_id = UINT32_MAX,
+                    oz::gametype::DamageSource source = oz::gametype::DamageSource::WORLD);
+    void damage_player(ServerPlayer& player, int amount,
+                       uint32_t attacker_id = UINT32_MAX,
+                       oz::gametype::DamageSource source = oz::gametype::DamageSource::WORLD);
+
+    // Award a kill to the scoring system. killer_id == victim_id is a
+    // suicide (applies suicidePenalty). killer_id == UINT32_MAX with
+    // source == WORLD is an environmental kill: no team credit by default.
+    void register_kill(uint32_t killer_id, uint32_t victim_id,
+                       oz::gametype::DamageSource source = oz::gametype::DamageSource::PLAYER);
+
+    // Match state (owned by GameState; advanced once per tick)
+    oz::gametype::MatchState m_match;
+    bool match_over() const { return m_match.winner != oz::gametype::MatchState::WinReason::NONE; }
+    int winning_team() const { return m_match.winningTeam; }
+    const oz::gametype::GameTypeInfo& gametype_info() const { return m_gameTypeInfo; }
+    oz::gametype::GameType gametype_id() const { return m_gameTypeInfo.id; }
+    int score_limit() const { return m_gameTypeInfo.scoreLimit; }
 
     // Partition helpers
     int get_partition_index(const WorldState& ws, float x, float z) const;
@@ -369,6 +392,7 @@ private:
     int m_player_count = 0;
     uint32_t m_max_players = net::MAX_PLAYERS; // from world levelinfo (maxPlayers)
     bool m_friendly_fire = false;              // from world levelinfo (friendlyFire)
+    oz::gametype::GameTypeInfo m_gameTypeInfo; // resolved per-world from levelinfo + .ozls override
     std::string m_gamedata_dir;                // captured by init_worlds for save/load
     uint32_t m_next_player_id = 1;
     uint32_t m_tick_count = 0;

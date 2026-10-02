@@ -139,6 +139,17 @@ public:
     int get_level() const { return m_level; }
     int get_xp_to_next() const { return m_xp_to_next; }
 
+    // Score state (from SCORE_STATE packets)
+    const std::unordered_map<uint32_t, net::ScoreStateData>& scores() const { return m_scores; }
+    bool match_over() const { return m_matchOver; }
+    double match_over_at() const { return m_matchOverAt; }
+    int winning_team() const {
+        for (const auto& [pid, ss] : m_scores) {
+            if (ss.matchOver) return ss.winningTeam;
+        }
+        return -1;
+    }
+
     // Callbacks for game integration
     void set_on_scene_received(std::function<void(const std::string&)> cb) {
         m_on_scene_received = std::move(cb);
@@ -170,6 +181,11 @@ private:
     int m_xp = 0;
     int m_level = 1;
     int m_xp_to_next = 100;
+
+    // Score state from SCORE_STATE packets (server-owned). Keyed by player_id.
+    std::unordered_map<uint32_t, net::ScoreStateData> m_scores;
+    bool m_matchOver = false;
+    double m_matchOverAt = 0.0;
 
     std::function<void(const std::string&)> m_on_scene_received;
     std::function<void(const std::string&)> m_on_chat_received;
