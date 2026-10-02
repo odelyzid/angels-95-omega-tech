@@ -307,6 +307,44 @@ static void test_texpath_quoted_then_flags() {
                 e.size() ? e[0].texScaleU : -1.0f);
 }
 
+// `flags=16` is the bit that was actually lost: AngelEd's exporter emitted `flags=`
+// only when surface.def.flags DISAGREED with the legacy mirror, but that mirror is
+// derived from the owner, so the two were always equal and every `flags=` was
+// dropped on re-export. GameData/Worlds/TestMap lost all 230 AutoConvex proxies
+// that way. Pinned here so the owner and the mirror can never drift apart again.
+static void test_collision_proxy_flag_roundtrip() {
+    using namespace oz::surface;
+    test_count++;
+    printf("  TEST brush flags=16 sets BOTH the owner and the derived mirror... ");
+    auto e = OzoneParser::parse_string("add box -4 -12 4.75 8.04 8.04 8.04 0 flags=16\n");
+    bool ok = e.size() == 1
+        && e[0].surface.def.Has(SURF_COLLISION_PROXY)
+        && e[0].surfaceFlags == (int)SURF_COLLISION_PROXY
+        && e[0].csgOp == 1;   // `add` -> CsgOp::ADD. Note AppendAutoConvexCollision
+                              // passes CsgOp::SOLID explicitly (also additive to the
+                              // processor) and the exporter prints its name, so a
+                              // generated proxy round-trips as `add box ... flags=16`.
+    if (ok) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: defFlags=0x%X surfaceFlags=%d csgOp=%d\n",
+                e.size() ? e[0].surface.def.flags : 0,
+                e.size() ? e[0].surfaceFlags : -1,
+                e.size() ? e[0].csgOp : -1);
+
+    // A plain brush must stay at zero on both, so the exporter writes no flags=
+    // kwarg for it and does not grow noise in the world file.
+    test_count++;
+    printf("  TEST a plain brush has no flags on either field... ");
+    auto p = OzoneParser::parse_string("add box 0 0 0 8 8 8 0\n");
+    bool ok2 = p.size() == 1
+        && p[0].surface.def.flags == 0
+        && p[0].surfaceFlags == 0
+        && !NeedsFlagsKwarg(p[0].surface.def.flags);
+    if (ok2) { pass_count++; printf("PASS\n"); }
+    else printf("FAIL: defFlags=0x%X surfaceFlags=%d\n",
+                p.size() ? p[0].surface.def.flags : 0,
+                p.size() ? p[0].surfaceFlags : -1);
+}
+
 // ---------------------------------------------------------------------------
 // Surface properties
 // ---------------------------------------------------------------------------
@@ -460,6 +498,7 @@ int main() {
     test_texpath_unquoted_still_works();
     test_texpath_quoted_then_flags();
     test_surface_brush_flags();
+    test_collision_proxy_flag_roundtrip();
     test_surface_per_face_kwargs();
     test_surface_face_inherits_default();
     test_surface_uv_kwargs_still_derive();

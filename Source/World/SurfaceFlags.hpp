@@ -214,6 +214,40 @@ struct BrushSurface {
 // mask is empty). Used by the Surface Properties dialog's Apply.
 void ApplyToSelection(BrushSurface& s, const SurfaceProps& p);
 
+// The subset of flags the *legacy* render path branches on. OzoneRenderable::
+// surfaceFlags and OzonePrimitive::surfaceFlags are DERIVED VIEWS holding exactly
+// this mask of surface.def.flags, so an arbitrary decorative flag can never make
+// a brush invisible or carve it out of CSG by accident.
+//
+// This constant is the single definition of that mask. It used to be copy-pasted
+// at four sites (DeriveLegacySurfaceFields, SetRenderableFace,
+// ResetRenderableSurface, and AddBrushRenderable), which is how the two fields
+// came to disagree in the first place — see DeriveLegacyFlags.
+inline constexpr uint32_t kLegacyPipelineFlags =
+    (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY | SURF_INVISIBLE);
+
+// Re-derive `legacyFlags` from the surface block, which is the single owner.
+// Every writer of surface flags must call this afterwards.
+inline int DeriveLegacyFlags(const SurfaceProps& def) {
+    return (int)(def.flags & kLegacyPipelineFlags);
+}
+
+// Whether a brush line needs an explicit `flags=` kwarg.
+//
+// This used to be written inline in the exporter as
+//     if (def.flags != (uint32_t)legacyFlags) output << " flags=" << def.flags;
+// i.e. "emit the owner's value only when it disagrees with the owner's own
+// derived mirror". After a load those are equal BY CONSTRUCTION, so the condition
+// was never true and `flags=` was never written — every `flags=8` backdrop and
+// every `flags=16` collision proxy was silently dropped on re-export. A freshly
+// appended AutoConvex proxy went the other way (mirror set, owner left at 0) and
+// exported a literal `flags=0`.
+//
+// The honest condition is simply "the owner is non-zero". Kept here, next to the
+// mask, so the exporter's decision is a named, testable predicate rather than an
+// inline comparison someone can invert again.
+inline constexpr bool NeedsFlagsKwarg(uint32_t defFlags) { return defFlags != 0; }
+
 } // namespace surface
 } // namespace oz
 

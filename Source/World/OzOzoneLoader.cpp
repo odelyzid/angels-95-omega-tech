@@ -1575,7 +1575,14 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     r.model = mdl;
     r.loaded = true;
     r.csgOp = csgOp;
-    r.surfaceFlags = surfaceFlags;
+    // Write the OWNER, then derive the legacy mirror from it. Assigning
+    // r.surfaceFlags directly (as this used to) left surface.def.flags at 0, so
+    // the two fields disagreed — the one invariant every other writer in this
+    // file maintains. For a collision proxy that meant the exporter compared 0
+    // against 16 and wrote a literal `flags=0`, i.e. a proxy that collided but was
+    // then drawn in game on the next reload.
+    r.surface.def.flags = (uint32_t)surfaceFlags;
+    r.surfaceFlags = oz::surface::DeriveLegacyFlags(r.surface.def);
     m_renderables.push_back(r);
     return (int)m_renderables.size() - 1;
 }
@@ -1777,10 +1784,7 @@ void OzoneLoader::SetRenderableFace(int idx, oz::surface::SurfaceFace face,
     else                                       r->surface.SetFace(face, p);
     // The surface flags that the existing pipeline branches on are derived from
     // the resolved state so DrawWorldGeometry / DrawZoneGeometry stay correct.
-    const uint32_t f0 = r->surface.def.flags;
-    r->surfaceFlags = (int)(f0 & (oz::surface::SURF_FAKEBACKDROP |
-                                  oz::surface::SURF_COLLISION_PROXY |
-                                  oz::surface::SURF_INVISIBLE));
+    r->surfaceFlags = oz::surface::DeriveLegacyFlags(r->surface.def);
     RebuildSurfaceMeshes(idx);
 }
 
@@ -1788,9 +1792,7 @@ void OzoneLoader::ResetRenderableSurface(int idx) {
     OzoneRenderable* r = Get(idx);
     if (!r) return;
     r->surface.ResetToDefault();
-    r->surfaceFlags = (int)(r->surface.def.flags & (oz::surface::SURF_FAKEBACKDROP |
-                                                    oz::surface::SURF_COLLISION_PROXY |
-                                                    oz::surface::SURF_INVISIBLE));
+    r->surfaceFlags = oz::surface::DeriveLegacyFlags(r->surface.def);
     RebuildSurfaceMeshes(idx);
 }
 

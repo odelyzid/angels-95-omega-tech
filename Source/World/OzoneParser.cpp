@@ -212,9 +212,9 @@ static void DeriveLegacySurfaceFields(OzonePrimitive& prim) {
     using namespace oz::surface;
     // Only the flags the pre-existing pipeline understands are mirrored, so an
     // arbitrary decorative flag can never make a brush invisible or carve it out
-    // of CSG by accident.
-    prim.surfaceFlags = (int)(prim.surface.def.flags &
-                              (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY | SURF_INVISIBLE));
+    // of CSG by accident. oz::surface::kLegacyPipelineFlags is the single
+    // definition of that mask.
+    prim.surfaceFlags = DeriveLegacyFlags(prim.surface.def);
     prim.texScaleU  = prim.surface.def.uvScaleU;
     prim.texScaleV  = prim.surface.def.uvScaleV;
     prim.texOffsetU = prim.surface.def.uvOffsetU;

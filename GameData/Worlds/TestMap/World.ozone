@@ -1,7 +1,7 @@
 # OZONE world exported from AngelEd
 # Format: ozone v1.0
 
-sub box -3.75 0 4.75 128 4 128 0 texScaleU=16 texScaleV=16
+sub box -5.625 0 8.5 128 4 128 0 texScaleU=16 texScaleV=16
 add box -68 -60 4.75 8.04 8.04 8.04 0 flags=16
 add box -68 -52 4.75 8.04 8.04 8.04 0 flags=16
 add box -68 -44 4.75 8.04 8.04 8.04 0 flags=16
@@ -92,10 +92,10 @@ add box -4 -60 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 -52 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 -44 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 -36 4.75 8.04 8.04 8.04 0 flags=16
-add box -4 -28 4.75 8.04 8.04 8.04 0 flags=16
-add box -4 -20 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 -12 4.75 8.04 8.04 8.04 0 flags=16
-add box -4 -4 4.75 8.04 8.04 8.04 0 flags=16
+add box -4 -12 4.75 8.04 8.04 8.04 0 flags=16
+add box -4 -12 4.75 8.04 8.04 8.04 0 flags=16
+add box -4 4 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 4 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 12 4.75 8.04 8.04 8.04 0 flags=16
 add box -4 20 4.75 8.04 8.04 8.04 0 flags=16
@@ -107,8 +107,8 @@ add box -4 60 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -60 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -52 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -44 4.75 8.04 8.04 8.04 0 flags=16
-add box 4 -36 4.75 8.04 8.04 8.04 0 flags=16
-add box 4 -28 4.75 8.04 8.04 8.04 0 flags=16
+add box 4 -20 4.75 8.04 8.04 8.04 0 texPath=GameData/Worlds/EngineTest/oztex/tileset/01_floor_concrete_32.png
+add box 4 -20 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -20 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -12 4.75 8.04 8.04 8.04 0 flags=16
 add box 4 -4 4.75 8.04 8.04 8.04 0 flags=16
@@ -142,9 +142,9 @@ add box 20 -44 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 -36 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 -28 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 -20 4.75 8.04 8.04 8.04 0 flags=16
-add box 20 -12 4.75 8.04 8.04 8.04 0 flags=16
-add box 20 -4 4.75 8.04 8.04 8.04 0 flags=16
-add box 20 4 4.75 8.04 8.04 8.04 0 flags=16
+add box 20 12 4.75 8.04 8.04 8.04 0 flags=16
+add box 20 12 4.75 8.04 8.04 8.04 0 flags=16
+add box 20 12 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 12 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 20 4.75 8.04 8.04 8.04 0 flags=16
 add box 20 28 4.75 8.04 8.04 8.04 0 flags=16
@@ -232,12 +232,14 @@ add box 60 36 4.75 8.04 8.04 8.04 0 flags=16
 add box 60 44 4.75 8.04 8.04 8.04 0 flags=16
 add box 60 52 4.75 8.04 8.04 8.04 0 flags=16
 add box 60 60 4.75 8.04 8.04 8.04 0 flags=16
+sub box 30.7208 29.3361 56.3972 4 4 4 0 texPath=GameData/Worlds/EngineTest/oztex/tileset/01_floor_concrete_32.png
 
 # Entities
 playerstart -2.04512 15.905 17.3599 0
 pickup rifle_01 12.0437 -18.2151 9.8169 30
 npc Floater 13.0442 28.0775 19.6112
-light point -1.26918 15.9852 37.9803 255 255 255 1 20 name=Light.Point
+light point 28.7 27.4795 51.163 255 255 255 1 20 name=Light.Point
+light directional -1.26918 15.9852 37.9803 255 255 255 0.865773 effect=1 flare=1 name=Light.Point
 zone sky -1020.21 -1042.22 -1007.18 1027.79 1005.78 1040.82 1 name=zone_sky_0 gravity=18 jump=9 terminal=60 water_gravity=8 water_drag=0.95 swim_up=5 ladder_speed=6 fly_mult=1.5
 levelinfo 0 8 5 0 10 50 0 GameData/Global/sky/cloud01.dds
 

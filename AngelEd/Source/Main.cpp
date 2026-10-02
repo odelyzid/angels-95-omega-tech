@@ -1370,7 +1370,15 @@ static void ExportToOzone(std::ostream& output) {
             const oz::surface::BrushSurface& bs = r->surface;
             const oz::surface::SurfaceProps& d = bs.def;
             // Brush-wide surface fields the legacy kwargs above do not cover.
-            if (d.flags != (uint32_t)r->surfaceFlags)
+            //
+            // `flags=` is read from the OWNER (surface.def.flags) and never
+            // compared against OzoneRenderable::surfaceFlags. That legacy field is
+            // a derived mirror of this very value, so the old guard
+            // (`d.flags != r->surfaceFlags`) was false for every brush that came
+            // through the loader — the flags were never written, and re-exporting
+            // a level silently deleted every painted backdrop and every AutoConvex
+            // collision proxy in it. See oz::surface::NeedsFlagsKwarg.
+            if (oz::surface::NeedsFlagsKwarg(d.flags))
                 output << " flags=" << d.flags;
             if (d.texSlot > 0) output << " surfTexSlot=" << d.texSlot;
             if (!d.texPath.empty() && r->texPath.empty())

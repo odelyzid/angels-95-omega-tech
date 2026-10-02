@@ -202,9 +202,59 @@ static void test_apply_to_selection() {
           "ApplyToSelection writes every selected face and no others");
 }
 
+// ---------------------------------------------------------------------------
+// Legacy-flag derivation + the exporter's `flags=` kwarg decision
+// ---------------------------------------------------------------------------
+// Both halves of a real data-loss bug, pinned together because they are the same
+// invariant: surface.def.flags OWNS the flags, the legacy mirror is derived from
+// it, and the exporter must read the owner.
+//
+// The exporter used to write `flags=` only when `def.flags != legacyFlags`. Since
+// legacyFlags is derived FROM def.flags, that is false for every brush that came
+// through the loader — so no brush line ever carried `flags=` again, and
+// re-exporting a level deleted every painted backdrop and every AutoConvex
+// collision proxy in it. GameData/Worlds/TestMap lost all 230 of its proxies that
+// way.
+static void test_legacy_flag_derivation() {
+    check(kLegacyPipelineFlags == (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY |
+                                   SURF_INVISIBLE),
+          "kLegacyPipelineFlags is exactly the three pipeline-visible flags");
+
+    SurfaceProps def;
+    def.flags = SURF_COLLISION_PROXY;
+    check(DeriveLegacyFlags(def) == (int)SURF_COLLISION_PROXY,
+          "a collision proxy derives legacyFlags = 16");
+
+    // The mirror is a SUBSET: a decorative flag must not be able to make a brush
+    // invisible or carve it out of CSG by accident.
+    def.flags = SURF_COLLISION_PROXY | SURF_GLOW | SURF_ENVIRONMENT;
+    check(DeriveLegacyFlags(def) == (int)SURF_COLLISION_PROXY,
+          "decorative flags are NOT mirrored into legacyFlags");
+
+    // And the exporter's predicate reads the owner only.
+    check(NeedsFlagsKwarg(SURF_COLLISION_PROXY),
+          "NeedsFlagsKwarg(16) - a proxy needs its flags= kwarg");
+    check(NeedsFlagsKwarg(SURF_FAKEBACKDROP),
+          "NeedsFlagsKwarg(8) - a backdrop needs its flags= kwarg");
+    check(NeedsFlagsKwarg(SURF_FAKEBACKDROP | SURF_COLLISION_PROXY),
+          "NeedsFlagsKwarg(24) - a combined mask is emitted");
+    check(!NeedsFlagsKwarg(0),
+          "NeedsFlagsKwarg(0) - a plain brush writes no flags= kwarg");
+
+    // The exact shape that regressed: owner set, mirror derived from it. The old
+    // guard compared these two and so emitted nothing.
+    def.flags = SURF_COLLISION_PROXY;
+    const int legacy = DeriveLegacyFlags(def);
+    check(def.flags == (uint32_t)legacy,
+          "after derivation, owner == mirror (this equality is what killed the old guard)");
+    check(NeedsFlagsKwarg(def.flags),
+          "...and NeedsFlagsKwarg still emits, so the round trip survives");
+}
+
 int main() {
     printf("Surface tests:\n");
     test_legacy_bits_stable();
+    test_legacy_flag_derivation();
     test_face_from_normal();
     test_face_names();
     test_props_is_non_default();
