@@ -335,6 +335,17 @@ test_gametype: tests/GameType.test.cpp Source/World/GameType.cpp Source/Script/L
 test_editorbus: tests/EditorEventBus.test.cpp AngelEd/Source/Core/EditorEventBus.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
+# The two-root asset tree shared by the Model Browser and the Texture Manager. The
+# first automated coverage the asset browser has had: BuildAssetScope was implemented
+# inside UI/Panels/TexturePanel.cpp while ModelPanel.cpp also called it, so it was
+# shared code living in one of its consumers. AGENTS.md asserted the two panels
+# "cannot drift" but nothing checked the tree was CORRECT.
+# Raylib-free and Win32-free by construction - AssetScope.hpp includes only
+# <string> and <vector> - which is the only reason this suite is possible.
+# No CI wiring needed: `make test` already runs in the Linux job.
+test_assetscope: tests/AssetScope.test.cpp AngelEd/Source/Resources/AssetScope.cpp AngelEd/Source/Resources/AssetScope.hpp
+	$(SERVER_CXX) $(TEST_FLAGS) -I. $^ -o $@
+
 # AutoConvex is raylib-free, so this suite builds headless with SERVER_CXX.
 test_autoconvex: tests/AutoConvex.test.cpp Source/Physics/AutoConvex.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
@@ -373,7 +384,7 @@ test_ozanim: tests/OzAnim.test.cpp Source/Package/Anim/OzAnimFormat.cpp
 test_ozls_writer: tests/OzlsWriter.test.cpp Source/Script/OzlsWriter.cpp Source/Script/LightningScriptParser.cpp
 	$(SERVER_CXX) $(TEST_FLAGS) -ISource $^ -o $@
 
-test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype test_editorbus worldcheck
+test: test_parser test_context test_registry test_entity_manager test_pawn_system test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype test_editorbus test_assetscope worldcheck
 	@echo "=== LightningScriptParser Tests ==="
 	-./test_parser
 	@echo ""
@@ -421,6 +432,9 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	@echo ""
 	@echo "=== EditorEventBus Tests ==="
 	-./test_editorbus
+
+	echo "=== AssetScope Tests ==="
+	./test_assetscope
 	@echo ""
 	@echo "=== Worldcheck (.ozone auditor) ==="
 	# Run worldcheck on every shipped .ozone world (errors are printed, warnings do not fail).
@@ -429,4 +443,4 @@ test: test_parser test_context test_registry test_entity_manager test_pawn_syste
 	done
 
 clean:
-	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype test_editorbus worldcheck
+	rm -rf $(BUILD_DIR) *.exe AngelServ Angels95 AngelMaster OzPack *.o AngelEd/*.o AngelEd/Source/*.o test_context test_parser test_registry test_ozone_parser test_join_uri test_master test_network test_game_state test_ozanim test_ozls_writer test_autoconvex test_surface test_gametype test_editorbus test_assetscope worldcheck

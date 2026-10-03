@@ -189,6 +189,29 @@ $(BUILD_DIR)/OzParticleSimulationManager.o: ../Source/Particle/OzParticleSimulat
 $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Renderer/rlights/rlights.h | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c ../Source/Renderer/rlights/rlights.cpp -o $@
 
+# --- Resources/ layer ---------------------------------------------------------
+# Real translation units, not unity fragments, and this is the one place the extra
+# build wiring is accepted rather than avoided. AssetScope and PackageIO are each
+# shared by two UI panels but used to be implemented INSIDE one of them (TexturePanel),
+# reachable from the other only because the UI layer is a single translation unit.
+# A shared contract with no header of its own is not a contract. See
+# Wiki/Editor-Architecture-Refactor.md.
+#
+# CONSEQUENCE: adding a Resources/ file means adding a rule here AND a `g++ -c` line
+# plus a link entry in .github/workflows/ci.yml, which compiles the editor by hand.
+# That is the "added in one place, CI breaks silently" trap from AGENTS.md, and it is
+# paid here deliberately - the same way the root Makefile and ci.yml list engine
+# objects. Diff the two lists when changing either; they must agree apart from
+# OTCustom_stub.o, which exists only because CI links a stub where the Makefile links
+# -l:Custom.so.
+RESOURCES_OBJS := $(BUILD_DIR)/AssetScope.o $(BUILD_DIR)/PackageIO.o
+
+$(BUILD_DIR)/AssetScope.o: Source/Resources/AssetScope.cpp Source/Resources/AssetScope.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Resources/AssetScope.cpp -o $@
+
+$(BUILD_DIR)/PackageIO.o: Source/Resources/PackageIO.cpp Source/Resources/PackageIO.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Resources/PackageIO.cpp -o $@
+
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/AutoConvex.o \
              $(BUILD_DIR)/OzoneParser.o $(BUILD_DIR)/ZoneManager.o $(BUILD_DIR)/SoundManager.o $(BUILD_DIR)/GameType.o \
@@ -202,7 +225,7 @@ CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DI
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)
 	windres AngelEd.rc -O coff -o $@
 
-EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorEventBus.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorEventBus.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS) $(RESOURCES_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 	$(COMP) $(LDEXTRA) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 

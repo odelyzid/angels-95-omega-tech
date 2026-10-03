@@ -25,118 +25,12 @@ static const int ID_TEX_SCOPE      = 112;   // scope tree
 static const int ID_TEX_SEARCH     = 113;   // search edit box
 
 // =====================================================================
-// Asset scoping â€” shared by the Model Browser and the Texture Manager.
-// See the AssetScopeItem/AssetScopeNode docs in Win32Dialogs.hpp.
+// Asset scoping moved to Resources/AssetScope.{hpp,cpp} in R6.
+//
+// BuildAssetScope used to live here, yet ModelPanel.cpp calls it too - it only worked
+// because the whole UI layer is one translation unit. It is now its own real object
+// and is unit-tested headlessly in tests/AssetScope.test.cpp.
 // =====================================================================
-static std::string LowerAscii(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return (char)::tolower(c); });
-    return s;
-}
-
-// Find or create the child of `parent` labelled `name`.
-static AssetScopeNode& ChildFor(AssetScopeNode& parent, const std::string& name) {
-    for (auto& c : parent.children)
-        if (c.label == name && c.entryIndex < 0) return c;
-    parent.children.push_back(AssetScopeNode{});
-    parent.children.back().label = name;
-    return parent.children.back();
-}
-
-// Split "dir/sub/file.ext" into its directory segments, dropping the leading
-// anchor (drive letter, "GameData/", or a package key's own first segment).
-static std::vector<std::string> DirSegments(const std::string& path) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : path) {
-        if (c == '/' || c == '\\') {
-            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
-        } else {
-            cur.push_back(c);
-        }
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
-
-AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
-                               const std::string& search) {
-    AssetScopeNode root;
-    root.label = "Assets";
-
-    AssetScopeNode gameData;  gameData.label  = "(GameData)";
-    AssetScopeNode packages;  packages.label  = "(Packages)";
-
-    const std::string needle = LowerAscii(search);
-    const bool filtering = !needle.empty();
-
-    for (size_t i = 0; i < items.size(); ++i) {
-        const AssetScopeItem& it = items[i];
-        if (filtering &&
-            LowerAscii(it.name).find(needle) == std::string::npos &&
-            LowerAscii(it.path).find(needle) == std::string::npos)
-            continue;
-
-        AssetScopeNode* scope = it.fromPackage ? &packages : &gameData;
-
-        // Group by folder. Package keys are stored with '/' separators by
-        // PackageAssetLoader; loose files may use '\' on Windows.
-        std::vector<std::string> segs = DirSegments(it.path);
-        if (!segs.empty()) segs.pop_back();          // drop the file name itself
-
-        // A loose path scanned from disk is absolute
-        // ("C:/repo/GameData/Global/x.glb"), so hide everything up to and
-        // including the GameData anchor: the visible hierarchy is just the part
-        // under GameData/. Package keys have no such anchor and are used whole.
-        size_t start = 0;
-        if (!it.fromPackage) {
-            for (size_t k = 0; k < segs.size(); ++k) {
-                if (LowerAscii(segs[k]) == "gamedata") { start = k + 1; break; }
-            }
-        }
-
-        AssetScopeNode* cur = scope;
-        for (size_t k = start; k < segs.size(); ++k)
-            cur = &ChildFor(*cur, segs[k]);
-
-        cur->children.push_back(AssetScopeNode{});
-        cur->children.back().label = it.name;
-        cur->children.back().entryIndex = (int)i;
-    }
-
-    // Prune folders that ended up with no leaves (common while filtering).
-    struct Pruner {
-        static bool Keep(AssetScopeNode& n) {
-            if (n.entryIndex >= 0) return true;
-            std::vector<AssetScopeNode> kept;
-            for (auto& c : n.children) if (Keep(c)) kept.push_back(std::move(c));
-            n.children = std::move(kept);
-            return !n.children.empty();
-        }
-    };
-    Pruner::Keep(gameData);
-    Pruner::Keep(packages);
-
-    // Sort: folders first, then leaves, each alphabetically (case-insensitive).
-    struct Sorter {
-        static bool Less(const AssetScopeNode& a, const AssetScopeNode& b) {
-            bool af = a.entryIndex < 0, bf = b.entryIndex < 0;
-            if (af != bf) return af;
-            return LowerAscii(a.label) < LowerAscii(b.label);
-        }
-        static void Go(AssetScopeNode& n) {
-            std::sort(n.children.begin(), n.children.end(), Less);
-            for (auto& c : n.children) Go(c);
-        }
-    };
-    Sorter::Go(gameData);
-    Sorter::Go(packages);
-
-    if (!gameData.children.empty()) root.children.push_back(std::move(gameData));
-    if (!packages.children.empty()) root.children.push_back(std::move(packages));
-    return root;
-}
-
 #ifdef _WIN32
 void CollectScopeLeavesUnder(HWND tree, void* node, std::vector<int>& out) {
     if (!tree) return;
@@ -280,53 +174,10 @@ static bool ReadWholeFile(const fs::path& p, std::vector<uint8_t>& out) {
     if (n > 0) f.read((char*)out.data(), n);
     return (bool)f || n == 0;
 }
-
-// Pack `add` (entry name -> bytes) into `pkgPath`, preserving whatever the
-// package already held. Returns false and fills `err` on failure.
-static bool PackIntoPackage(const fs::path& pkgPath, uint32_t magic,
-                            const std::vector<std::pair<std::string, std::vector<uint8_t>>>& add,
-                            std::string& err) {
-    std::error_code ec;
-    fs::create_directories(pkgPath.parent_path(), ec);
-
-    OzPackageWriter writer(magic);
-
-    // Carry forward the existing entries.
-    if (fs::exists(pkgPath)) {
-        OzPackageReader reader;
-        if (!reader.Open(pkgPath.string().c_str())) {
-            err = "existing package could not be read (corrupt?): " + pkgPath.string();
-            return false;
-        }
-        std::vector<std::string> names;
-        reader.List(names);
-        for (const auto& nm : names) {
-            std::vector<uint8_t> data;
-            if (reader.Read(nm.c_str(), data) > 0 && !data.empty())
-                writer.AddFile(nm.c_str(), data.data(), data.size());
-        }
-    }
-
-    for (const auto& kv : add) {
-        if (kv.second.empty()) continue;
-        writer.AddFile(kv.first.c_str(), kv.second.data(), kv.second.size());
-    }
-
-    if (!writer.WriteToFile(pkgPath.string().c_str())) {
-        err = "failed to write " + pkgPath.string();
-        return false;
-    }
-    return true;
-}
-
-// Hot-load a freshly written package so its entries resolve this session.
-static bool HotLoadPackage(const fs::path& pkgPath, std::string& err) {
-    if (!PackageAssetLoader::Instance().LoadPackageFile(pkgPath.string().c_str())) {
-        err = "package written but failed to load: " + pkgPath.string();
-        return false;
-    }
-    return true;
-}
+// Pack / hot-load moved to Resources/PackageIO.{hpp,cpp} in R6. Both import paths
+// (texture here, model in ModelPanel.cpp) share it; it used to be `static` in this
+// file and reachable from ModelPanel only because the UI layer is one translation
+// unit.
 
 // ---------------------------------------------------------------------
 // Import Textures â€” pack image file(s) straight into System/Data.

@@ -7,6 +7,8 @@
 #include "../../../Source/Script/LightningEntityRegistry.hpp"
 #include "../../../Source/World/OzOzoneLoader.hpp"
 #include "UiPanels.hpp"
+#include "../Resources/AssetScope.hpp"
+#include "../Resources/PackageIO.hpp"
 #include "../SelType.hpp"
 #include "../Core/EditorEventBus.hpp"
 #include <windows.h>

@@ -282,9 +282,17 @@ g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Core/EditorEventBus.cpp -o EditorEventBu
           # write stat edits back to the source file. Must match AngelEd/Makefile.
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Script/OzlsWriter.cpp -o OzlsWriter.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
+          # Resources/ layer: real translation units. AssetScope and PackageIO are each
+          # shared by two UI panels but were implemented INSIDE TexturePanel.cpp,
+          # reachable from ModelPanel.cpp only because the UI layer is one unity TU.
+          # Adding a Resources/ file means adding a line here AND a rule in
+          # AngelEd/Makefile - the two lists must stay equal. See
+          # Wiki/Editor-Architecture-Refactor.md.
+          g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Resources/AssetScope.cpp -o AssetScope.o
+          g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Resources/PackageIO.cpp -o PackageIO.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o UiShell.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o UiShell.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o AssetScope.o PackageIO.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

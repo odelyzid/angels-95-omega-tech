@@ -1,0 +1,121 @@
+// ============================================================================
+// Resources/AssetScope.cpp
+//
+// See AssetScope.hpp for why this exists and why it is its own translation unit.
+// Verified as a pure move: every line came from UI/Panels/TexturePanel.cpp. The two
+// helpers keep `static` (they are private to this file now, which is MORE correct
+// than before - LowerAscii was a file-static in a 1000-line panel that happened to
+// hold them).
+// ============================================================================
+#include "AssetScope.hpp"
+
+#include <algorithm>
+#include <cctype>
+static std::string LowerAscii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)::tolower(c); });
+    return s;
+}
+
+// Find or create the child of `parent` labelled `name`.
+static AssetScopeNode& ChildFor(AssetScopeNode& parent, const std::string& name) {
+    for (auto& c : parent.children)
+        if (c.label == name && c.entryIndex < 0) return c;
+    parent.children.push_back(AssetScopeNode{});
+    parent.children.back().label = name;
+    return parent.children.back();
+}
+
+// Split "dir/sub/file.ext" into its directory segments, dropping the leading
+// anchor (drive letter, "GameData/", or a package key's own first segment).
+static std::vector<std::string> DirSegments(const std::string& path) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : path) {
+        if (c == '/' || c == '\\') {
+            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
+                               const std::string& search) {
+    AssetScopeNode root;
+    root.label = "Assets";
+
+    AssetScopeNode gameData;  gameData.label  = "(GameData)";
+    AssetScopeNode packages;  packages.label  = "(Packages)";
+
+    const std::string needle = LowerAscii(search);
+    const bool filtering = !needle.empty();
+
+    for (size_t i = 0; i < items.size(); ++i) {
+        const AssetScopeItem& it = items[i];
+        if (filtering &&
+            LowerAscii(it.name).find(needle) == std::string::npos &&
+            LowerAscii(it.path).find(needle) == std::string::npos)
+            continue;
+
+        AssetScopeNode* scope = it.fromPackage ? &packages : &gameData;
+
+        // Group by folder. Package keys are stored with '/' separators by
+        // PackageAssetLoader; loose files may use '\' on Windows.
+        std::vector<std::string> segs = DirSegments(it.path);
+        if (!segs.empty()) segs.pop_back();          // drop the file name itself
+
+        // A loose path scanned from disk is absolute
+        // ("C:/repo/GameData/Global/x.glb"), so hide everything up to and
+        // including the GameData anchor: the visible hierarchy is just the part
+        // under GameData/. Package keys have no such anchor and are used whole.
+        size_t start = 0;
+        if (!it.fromPackage) {
+            for (size_t k = 0; k < segs.size(); ++k) {
+                if (LowerAscii(segs[k]) == "gamedata") { start = k + 1; break; }
+            }
+        }
+
+        AssetScopeNode* cur = scope;
+        for (size_t k = start; k < segs.size(); ++k)
+            cur = &ChildFor(*cur, segs[k]);
+
+        cur->children.push_back(AssetScopeNode{});
+        cur->children.back().label = it.name;
+        cur->children.back().entryIndex = (int)i;
+    }
+
+    // Prune folders that ended up with no leaves (common while filtering).
+    struct Pruner {
+        static bool Keep(AssetScopeNode& n) {
+            if (n.entryIndex >= 0) return true;
+            std::vector<AssetScopeNode> kept;
+            for (auto& c : n.children) if (Keep(c)) kept.push_back(std::move(c));
+            n.children = std::move(kept);
+            return !n.children.empty();
+        }
+    };
+    Pruner::Keep(gameData);
+    Pruner::Keep(packages);
+
+    // Sort: folders first, then leaves, each alphabetically (case-insensitive).
+    struct Sorter {
+        static bool Less(const AssetScopeNode& a, const AssetScopeNode& b) {
+            bool af = a.entryIndex < 0, bf = b.entryIndex < 0;
+            if (af != bf) return af;
+            return LowerAscii(a.label) < LowerAscii(b.label);
+        }
+        static void Go(AssetScopeNode& n) {
+            std::sort(n.children.begin(), n.children.end(), Less);
+            for (auto& c : n.children) Go(c);
+        }
+    };
+    Sorter::Go(gameData);
+    Sorter::Go(packages);
+
+    if (!gameData.children.empty()) root.children.push_back(std::move(gameData));
+    if (!packages.children.empty()) root.children.push_back(std::move(packages));
+    return root;
+}
