@@ -1,0 +1,225 @@
+# AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
+
+**Status: R1 DONE, R2 next.** This file is the source of truth. Update the
+progress log as items land; do not work from memory of a plan held in context.
+
+This is the *deferred* follow-up to `Wiki/Editor-PropertyPanel-Refactor.md`. That
+work fixed the editor's behaviour and deliberately did **not** restructure it,
+because restructuring a 10,900-line pair of god-files while also hunting behaviour
+bugs is how you ship two bugs at once. The defects are fixed; this document is
+about maintainability.
+
+## Why now, and why not before
+
+The property-panel refactor was worth doing on its own merits and was kept
+separate for one reason: **it could be verified**. Every change there was either
+observable in a panel or pinned by a test. A layer split changes no behaviour at
+all — its only output is "the next change is easier and safer" — so bundling it
+with bug fixes would have made both unverifiable.
+
+## The actual problem: 58 hand-rolled message channels
+
+`EditorPanelState` carries **58 `action*` fields**. Each one is a hand-rolled
+message: a panel's `WM_COMMAND` writes a field, `Main.cpp` polls all of them once
+per frame, consumes, and resets. There is no envelope, no payload type, and no
+record of who asked for what.
+
+Three concrete failure modes, all of which are latent today:
+
+1. **A stale index redirects the operation.** `actionWorldGraphDelete` is an
+   index. If the selection moves between the click and the poll — which it can,
+   because raylib mouse picking and the Win32 message pump both run inside the
+   frame — the delete lands on a *different* entity. This exact hazard had to be
+   defended by hand for portal delete in b88:
+   > "Deleting the *selected* portal now clears the selection — `RemovePortal`
+   > shifts every later portal down, so a retained target would have silently
+   > edited a different portal."
+   That is a bug class, not a missing null check, and an index in a loose field
+   cannot express the fix.
+2. **An unconsumed field fires later.** Nothing tracks whether a handler ran. A
+   field set while the handler is disabled silently executes on a subsequent
+   frame against whatever is selected then.
+3. **There is no way to test any of it.** The channels only exist inside a Win32
+   message handler and a raylib frame loop, so none of it is reachable from the
+   headless suites. Every one of the 58 is verified only by clicking.
+
+## Design
+
+### Layers
+
+```
+AngelEd/Source/
+├── Core/            frame loop, editor state, the bus, the dispatcher
+│   ├── EditorState.hpp        selection, placement mode, gizmo, viewport flags
+│   ├── EditorEventBus.hpp/.cpp  ← R1, raylib-free and Win32-free
+│   └── EditorDispatcher.cpp   routes bus events to subsystems
+├── Subsystems/      domain logic, no Win32, no raw raylib drawing
+│   ├── Selection.{hpp,cpp}    pick / snap / gizmo targeting
+│   ├── History.{hpp,cpp}      undo-redo snapshots
+│   ├── Placement.{hpp,cpp}    spawn pawn / mesh / pickup / zone / pathnode / ...
+│   ├── SurfaceOps.{hpp,cpp}   SetRenderableFace / ResetSurface / AutoConvex append
+│   ├── LevelState.{hpp,cpp}   LevelMetadata + gametype + particles + skybox
+│   └── AnimEditing.{hpp,cpp}  clip CRUD, keyframes, tool-scoped vertex undo
+├── Resources/       asset discovery and packaging (shared by UI + Subsystems)
+│   ├── AssetScope.{hpp,cpp}   the two-root (GameData)/(Packages) tree
+│   ├── AssetScan.{hpp,cpp}    file/package enumeration per asset kind
+│   └── PackageIO.{hpp,cpp}    PackIntoPackage / HotLoadPackage
+└── UI/              Win32 panels. Widget code and nothing else.
+    ├── UiCommon.hpp/.cpp      CreateLabel/Button/Ctrl, CHOOSECOLORW, file pickers
+    ├── UiShell.cpp            class registration + create/destroy (unity TU)
+    └── <Panel>.cpp            one per window, unity-included by UiShell.cpp
+```
+
+Dependency rule: **`UI` may call `Subsystems` and `Resources`; `Subsystems` may
+call `Resources`; nothing calls back up.** `Core` calls down and owns the loop.
+A panel that needs a domain operation posts an event; it does not reach into
+`PawnSystem` itself.
+
+### EditorEventBus
+
+Raylib-free and Win32-free **on purpose** — that is what makes the central
+invariant testable headlessly, the same discipline as `ZoneTypes.hpp`,
+`GameType.hpp` and `SurfaceFlags.hpp`.
+
+```cpp
+namespace ed {
+enum class Ev { SpawnPawn, SpawnMesh, SpawnPickup, ..., DeleteEntity, ... };
+
+struct Event {
+    Ev kind = Ev::None;
+    std::variant<std::monostate, int, float, bool, std::string,
+                 SpawnDesc, Transform, SelRef> payload;
+};
+}
+```
+
+Three properties that the current design cannot offer:
+
+- **The payload is typed.** `std::variant` means the post site is checked by the
+  compiler against the event kind, so a `SpawnZone` cannot be posted carrying a
+  filename. The 58 loose fields have no such constraint — `actionSpawnZone` is an
+  `int` and `actionSpawnPawn` is a `std::string`, and nothing stops them being
+  confused.
+- **A selection-sensitive event carries its target, by value.** `SelRef` is
+  `{ SelType type; int index; }` captured **at post time**. The stale-index bug
+  above becomes impossible by construction rather than by remembering a guard.
+- **Post/drain is observable.** `posted()`, `dropped()` and a bounded queue make
+  "the handler did not run" a testable condition instead of a mystery.
+
+Draining stays deferred to one point per frame (inline dispatch from inside
+`WM_COMMAND` would mutate the world while a panel is mid-layout). The safety comes
+from the payload being complete, not from the timing.
+
+### Build wiring — use a unity TU, deliberately
+
+Splitting one 6,100-line `.cpp` into 14 would mean **14** new compile rules in
+`AngelEd/Makefile` **and** 14 lines plus 14 link entries in
+`.github/workflows/ci.yml`, which builds the editor by hand. That is the
+"added in one place, CI breaks silently" trap from `AGENTS.md`, magnified 14x,
+and the Makefile and CI list can drift silently.
+
+So `UI/UiShell.cpp` is a single translation unit that `#include`s the per-panel
+`.cpp` fragments — the same pattern already used for `raygui.c` in both build
+files. **One** new object, **one** Makefile rule, **one** CI line. The trade is
+that a fragment can rely on an include it does not state; that is a real cost and
+it is accepted here because the alternative is a CI that breaks invisibly.
+
+`Core/` and `Subsystems/` get real `.cpp` files, because those are the layers
+whose *interfaces* matter and they are far fewer per layer.
+
+## Phases
+
+| Phase | Item | Status |
+|---|---|---|
+| R0 | this document | **done** |
+| R1 | `EditorEventBus` + headless suite + `make test` in CI | **done** |
+| R2 | convert the 58 action fields, batch by batch | pending |
+| R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) | pending |
+| R4 | split `Main.cpp` into `Core/` + `Subsystems/` | pending |
+| R5 | `AGENTS.md` + full verification | pending |
+
+R2 is split into batches so each is independently reviewable and each deletes its
+fields as it goes:
+
+| Batch | Events | Fields |
+|---|---|---|
+| B1 | placement / spawn | 10 |
+| B2 | world graph + level list | 8 |
+| B3 | properties / surface / light | 8 |
+| B4 | animation | 12 |
+| B5 | assets (texture, model, sound, heightmap) | 20 |
+
+## Invariants — do not regress
+
+- **A panel posts an event; it never mutates the world directly.** If a `UI/`
+  file calls `PawnSystem::Add*`, the layer rule is already broken.
+- **One payload per event kind**, checked by `std::visit` at the handler. No
+  `if (e.kind == Ev::X) reinterpret_cast<...>`.
+- **A selection-sensitive event captures its target at post time.** Never read
+  `g_sel` inside a handler for an event that names an index.
+- **Every converted field is deleted in the same commit that stops writing it.**
+  A field that is written but never read is worse than one that does not exist —
+  that is how `ID_PP_PORTALBROWSE` and `ID_BTN_GT_PREVIEW` survived.
+- **CI must build the editor from the same object list the Makefile uses.** R3
+  is not finished until `ci.yml` and `AngelEd/Makefile` agree; the check is a
+  diff of the two lists, not a build.
+
+## Ruled out — do not re-investigate
+
+- **Converting the whole thing at once.** 58 fields, 14 panels and 4,774 lines of
+  `Main.cpp` in one change cannot be reviewed and cannot be bisected.
+- **A generic `EventBus` with string topics.** The engine has no reflection and
+  no build-time key checking, so a string bus would trade a compile error for a
+  runtime typo — strictly worse than the `action*` fields.
+- **Immediate (inline) dispatch from `WM_COMMAND`.** A panel is mid-layout when it
+  posts; mutating the world underneath it is how you get a crash that only
+  reproduces when you click fast.
+- **Moving `LevelMetadata` out of `UI/`.** It is level *state* and belongs to
+  `Subsystems/LevelState`; it only appears to live in `UI/` because the deleted
+  Zone window used to mirror it into a global.
+
+## Progress log
+
+- **R0** — plan written after the b88 tag. Survey at that point: `Win32Dialogs.cpp`
+  6,109 lines / 14 window procs, `Main.cpp` 4,774 lines, 58 `action*` fields, 59
+  tracked files under `AngelEd/`.
+
+### R1 notes
+
+- **`EventBus` is a value type with a public constructor, plus `instance()`.** It
+  started as a private-ctor singleton and the test could not compile. A bus you
+  cannot instantiate is a bus you cannot test, and testability is the entire
+  reason this type is raylib-free — so the constructor is public and `instance()`
+  is only the production convenience.
+- **`Ev::Count` is a sentinel, not an event**, and the suite asserts
+  `Ev::Count == named + 1`. That is the anti-drift mechanism: add an `Ev` without
+  adding it to `kEvents` in the test and the suite fails. My first attempt
+  hardcoded "39 values" and was wrong (39 events + None = 40), which is exactly
+  the kind of stale constant the sentinel removes.
+- **A wrong-shape payload read logs and returns an inert value** rather than
+  aborting. Crashing an editor frame is worse than a logged mismatch, and the
+  alternative — `reinterpret_cast` on the variant — is the bug this design exists
+  to prevent.
+- **CI now runs `make test`.** It previously ran only `worldcheck`, which is why
+  `test_ozls_writer` and `test_surface` sat unrun. Two details that matter:
+  - `make test` invokes each suite as `-./suite`, so it continues past failures and
+    its exit code is useless. The new step tees the log and greps
+    `^[[:space:]]*FAIL` — one pattern covers every suite's format.
+  - A **compile** failure is still fatal, because only the `./suite` invocation is
+    `-`-prefixed; the compile rules are not. So the grep covers execution and make
+    covers build, with no gap.
+- **CI runs the suites in the Linux job only.** The Windows job builds the editor,
+  which is where AngelEd compilation is actually verified; the bus itself is
+  platform-independent.
+
+## Verification
+
+- `make MODE=debug OTENGINE AngelServ AngelMaster ozpack` and
+  `make -C AngelEd MODE=debug` clean at every phase.
+- `make test` green — **including `test_editorbus`, which does not exist until R1.**
+- `ci.yml`'s AngelEd object list must equal `AngelEd/Makefile`'s `EDITOR_OBJS`,
+  verified by hand after R3.
+- Manual: every menu entry, toolbar button, panel context menu and drag in the
+  editor, because a layer split changes no behaviour and so has **no** headless
+  signal at all. That is the main risk in this document and it is why R3/R4 are
+  separate commits with a manual pass between them.

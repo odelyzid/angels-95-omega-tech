@@ -56,6 +56,26 @@ jobs:
       - name: Build client (Angels95)
         run: make OTENGINE
 
+      - name: Build and run the test suites
+        run: |
+          # CI previously ran worldcheck but never `make test`, so a new suite was
+          # not exercised until someone ran it locally - which is how
+          # test_ozls_writer and test_surface sat unrun for a long time.
+          #
+          # `make test` deliberately CONTINUES PAST FAILURES (each suite is
+          # invoked as `-./suite`) so one broken suite still reports the rest.
+          # That makes its exit code useless for execution failures, hence the
+          # grep below. A COMPILE failure is still fatal: only the `./suite`
+          # invocation is `-`-prefixed, the compile rules are not.
+          #
+          # Every suite prints its failures as optional-whitespace + "FAIL", so
+          # one pattern covers them all.
+          make test 2>&1 | tee /tmp/testlog
+          if grep -qE '^[[:space:]]*FAIL' /tmp/testlog; then
+            echo "::error::a test suite reported a failure (see the log above)"
+            exit 1
+          fi
+
       - name: Run worldcheck on every world
         run: |
           failed=0

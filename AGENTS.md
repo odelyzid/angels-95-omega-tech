@@ -51,13 +51,14 @@ make -j$(nproc) MODE=debug OTENGINE   # -O0 -g, no clean
 ```bash
 make test   # builds + runs ALL suites (continues past failures)
 ```
-Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_ozone_parser`, `test_join_uri`, `test_master`, `test_network`, `test_game_state`, `test_ozanim`, `test_ozls_writer`, `test_autoconvex`.
+Suites: `test_parser`, `test_context`, `test_registry`, `test_entity_manager`, `test_pawn_system`, `test_ozone_parser`, `test_join_uri`, `test_master`, `test_network`, `test_game_state`, `test_ozanim`, `test_ozls_writer`, `test_autoconvex`, `test_surface`, `test_gametype`, `test_editorbus`.
 
 - No test framework - standalone `tests/*.test.cpp` compiled directly. **Test executables land in repo root** (`./test_parser`, not `./tests/`).
 - Most suites use `SERVER_CXX` + `-DOMEGA_TEST_ENV` (no raylib). **Exceptions:** `test_entity_manager` and `test_pawn_system` link raylib (Vector3/BoundingBox types).
-- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_ozone_parser` / `make test_join_uri` / `make test_master` / `make test_network` / `make test_game_state` / `make test_ozls_writer` / `make test_autoconvex` etc.
+- Single test targets: `make test_parser` / `make test_context` / `make test_registry` / `make test_ozone_parser` / `make test_join_uri` / `make test_master` / `make test_network` / `make test_game_state` / `make test_ozls_writer` / `make test_autoconvex` / `make test_surface` / `make test_gametype` / `make test_editorbus` etc. Note a single target **builds but does not run** — invoke `./<suite>` yourself.
+- **Adding an AngelEd `.cpp` also needs `AngelEd/Makefile` + `ci.yml`.** `AngelEd/Source/Core/EditorEventBus.cpp` is the one exception so far: it is listed in `ci.yml` only, because nothing in the editor links it yet (R2 does). `Wiki/Editor-Architecture-Refactor.md` plans to end that by making `UI/` a single unity TU.
 - **A new source file must be added in THREE places** or CI breaks silently: the root `Makefile` (compile rule + `OBJS` + link), `AngelEd/Makefile` if the editor needs it, and `.github/workflows/ci.yml`'s **inline `g++` list** — CI builds AngelEd by hand rather than via `AngelEd/Makefile`, so the two can drift. `OBJS` is now the OTENGINE link's single source of truth; it previously had a duplicate hand-maintained list in the `OTENGINE` prerequisite line and the two drifted, breaking both CI jobs (see `fcbf049`).
-- CI runs `make worldcheck` but **not** `make test`, so a new test suite is not exercised by CI unless a step is added.
+- **CI runs `make test`** (added in the b88-era editor refactor; it previously ran only `make worldcheck`, which is how `test_ozls_writer` and `test_surface` sat unexercised). Two things to know about that step: `make test` invokes each suite as `-./suite`, so it **continues past failures and its exit code is useless** — the step tees the log and greps `^[[:space:]]*FAIL`. A **compile** failure is still fatal, because only the `./suite` invocation is `-`-prefixed.
 
 ## Runtime config (verified)
 - **Client:** reads/writes `System/Angels95.ini` for real (loaded via
