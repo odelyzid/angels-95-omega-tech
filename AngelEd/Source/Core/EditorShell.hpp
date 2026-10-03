@@ -1,3 +1,5 @@
+#ifndef ANGEL_ED_CORE_EDITORSHELL_HPP
+#define ANGEL_ED_CORE_EDITORSHELL_HPP
 // =============================================================================
 // Core/EditorShell.hpp
 //
@@ -48,3 +50,5 @@ namespace fs = std::filesystem;
 // The state that used to live here is now in Core/EditorState.hpp. It is included
 // from Main.cpp rather than from here, so this file stays a pure include list - the
 // same relationship UI/UiCommon.hpp has with its own preamble.
+
+#endif // ANGEL_ED_CORE_EDITORSHELL_HPP

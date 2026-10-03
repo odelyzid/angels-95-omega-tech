@@ -209,10 +209,27 @@ RESOURCES_OBJS := $(BUILD_DIR)/AssetScope.o $(BUILD_DIR)/PackageIO.o $(BUILD_DIR
 # Subsystems/ promoted to REAL translation units in Phase F. These used to be unity
 # fragments included by Main.cpp, which meant they inherited its include order and
 # could not be compiled on their own. Add a file here AND in ci.yml.
-SUBSYSTEMS_OBJS := $(BUILD_DIR)/SurfaceOps.o
+SUBSYSTEMS_OBJS := $(BUILD_DIR)/SurfaceOps.o $(BUILD_DIR)/Placement.o $(BUILD_DIR)/PropsApply.o \
+                  $(BUILD_DIR)/LevelState.o $(BUILD_DIR)/History.o
+
+# Each promoted subsystem needs exactly three things: a header, a rule here, and a
+# `g++ -c` line plus a link entry in .github/workflows/ci.yml. The lists must stay
+# equal - diff them when changing either.
 
 $(BUILD_DIR)/SurfaceOps.o: Source/Subsystems/SurfaceOps.cpp Source/Subsystems/SurfaceOps.hpp Source/Core/EditorState.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Subsystems/SurfaceOps.cpp -o $@
+
+$(BUILD_DIR)/Placement.o: Source/Subsystems/Placement.cpp Source/Subsystems/Placement.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Subsystems/Placement.cpp -o $@
+
+$(BUILD_DIR)/PropsApply.o: Source/Subsystems/PropsApply.cpp Source/Subsystems/PropsApply.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Subsystems/PropsApply.cpp -o $@
+
+$(BUILD_DIR)/LevelState.o: Source/Subsystems/LevelState.cpp Source/Subsystems/LevelState.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Subsystems/LevelState.cpp -o $@
+
+$(BUILD_DIR)/History.o: Source/Subsystems/History.cpp Source/Subsystems/History.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Subsystems/History.cpp -o $@
 
 $(BUILD_DIR)/AssetScope.o: Source/Resources/AssetScope.cpp Source/Resources/AssetScope.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Resources/AssetScope.cpp -o $@

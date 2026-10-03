@@ -1,3 +1,5 @@
+#ifndef ANGEL_ED_SUBSYSTEMS_LEVELSTATE_HPP
+#define ANGEL_ED_SUBSYSTEMS_LEVELSTATE_HPP
 // ============================================================================
 // Subsystems/LevelState.hpp
 //
@@ -68,3 +70,14 @@ void SetLevelMetadata(const LevelMetadata& meta);
 inline LevelMetadata GetLevelMetadata() { return {}; }
 inline void SetLevelMetadata(const LevelMetadata&) {}
 #endif
+// Write the SelType::MAP property rows back into the metadata.
+//
+// Lives here rather than in PropsApply because it is level state, not a per-entity
+// edit - and because it has its own undo policy: it pushes a snapshot only when
+// something actually changed. Every other Apply path calls HistoryPush()
+// unconditionally, which is fine because their apply always mutates something, but a
+// level'"'"'s 17 metadata fields are edited in one screen, so re-opening and pressing
+// Apply untouched would stack a no-op snapshot per click and make Ctrl+Z appear to do
+// nothing but burn steps.
+void ApplyMapProperties();
+#endif // ANGEL_ED_SUBSYSTEMS_LEVELSTATE_HPP

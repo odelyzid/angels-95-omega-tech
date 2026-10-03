@@ -1,4 +1,8 @@
-// =============================================================================
+#include "../Core/EditorShell.hpp"
+#include "../Core/EditorState.hpp"
+#include "History.hpp"
+#include "OzoneExport.hpp"
+
 // Subsystems/History.cpp
 //
 // Document undo/redo via ExportToOzone snapshots, plus ApplyMapProperties.
@@ -7,6 +11,14 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
+
+// The document undo stacks. These were declared in AnimEditing.cpp until Phase F and
+// used here - it worked only because the unity include order happened to put
+// AnimEditing before History. The animation tool has its own separate undo stack
+// (AnimSnapshotPush / AnimUndo / AnimRedo); these are the DOCUMENT stack.
+static std::vector<std::string> g_histUndo;
+static std::vector<std::string> g_histRedo;
+static const size_t kHistMax = 64;
 std::string HistoryCapture() {
     std::ostringstream oss;
     ExportToOzone(oss);

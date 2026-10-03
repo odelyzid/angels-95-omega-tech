@@ -1,4 +1,10 @@
-// ============================================================================
+#include "../Core/EditorShell.hpp"
+#include "../Core/EditorState.hpp"
+#include "Placement.hpp"
+
+#include "../../../Source/Pawn/OzPawnSystem.hpp"
+#include "../../../Source/World/OzOzoneLoader.hpp"
+#include "../../../Source/World/ZoneManager.hpp"
 // Subsystems/Placement.cpp
 //
 // FRAGMENT - not a standalone translation unit. Included by ../Main.cpp, which
@@ -33,7 +39,6 @@
 // vector, not shared with g_editorFrameEvents, for the reason the surface and anim
 // passes have theirs: so this file's handlers can be lifted into a real translation
 // unit later without that move having to reorder the selection dispatch.
-static std::vector<ed::Event> g_editorPlacementEvents;
 
 // How many times ApplyPlacementSpawns ran without a recognised payload. A Spawn*
 // kind with no case here would otherwise be a silent no-op, which is exactly how
@@ -46,7 +51,7 @@ static int g_editorUnplacedEvents = 0;
 // exactly as before - a saved world carries its own node names.
 static int s_pathNodeCounter = 0;
 
-static void ApplyPlacementSpawns(const std::vector<ed::Event>& events) {
+void ApplyPlacementSpawns(const std::vector<ed::Event>& events) {
     for (const ed::Event& ev : events) {
         // ev.spawn() is the shape-checked accessor: on a payload mismatch it LOGS and
         // returns an inert SpawnDesc rather than reinterpret_cast-ing the variant,

@@ -7,7 +7,13 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
-static void ExportToOzone(std::ostream& output) {
+// NOT static: Subsystems/History.cpp is a real translation unit and calls this from
+// HistoryCapture(). A `static` function in a unity fragment has internal linkage and
+// cannot satisfy an external reference, so this one function carries the linkage.
+// The rest of this file stays a fragment - it calls UI file dialogs and uses Core
+// statics, so promoting it means cutting those seams first. See
+// Wiki/Editor-Architecture-Refactor.md.
+void ExportToOzone(std::ostream& output) {
     // Header
     output << "# OZONE world exported from AngelEd\n";
     output << "# Format: ozone v1.0\n\n";

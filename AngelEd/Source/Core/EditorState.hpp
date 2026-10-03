@@ -1,3 +1,5 @@
+#ifndef ANGEL_ED_CORE_EDITORSTATE_HPP
+#define ANGEL_ED_CORE_EDITORSTATE_HPP
 // =============================================================================
 // Core/EditorState.hpp
 //
@@ -72,6 +74,10 @@ void HistoryUndo();
 void HistoryRedo();
 void HistoryClear();
 
+// Drop everything currently loaded: renderables, pawns, zones, level metadata.
+// Defined in Core/EditorShell.cpp and called from WorldIO, History and Main.
+void ClearScene();
+
 // WDLModels definition (extern declared in Editor.hpp). inline so that including this
 // header from several translation units still yields ONE object - a plain definition
 // in a header is a multiple-definition link error the moment Subsystems/ becomes real
@@ -145,3 +151,10 @@ inline bool g_gizmoDrag = false;
 inline bool g_gizmoHistPushed = false;
 inline bool g_suppressViewportDrag = false;
 inline bool g_terrainHistPushed = false;
+// Placement commands and Properties applies get their own drains for the same reason
+// the surface and anim ones do. Moved here from Placement.cpp / PropsApply.cpp in
+// Phase F: Main.cpp reads them, and a real translation unit cannot expose a `static`.
+inline std::vector<ed::Event> g_editorPlacementEvents;
+inline std::vector<ed::Event> g_editorPropsEvents;
+
+#endif // ANGEL_ED_CORE_EDITORSTATE_HPP

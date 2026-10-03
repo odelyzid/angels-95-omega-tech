@@ -299,6 +299,3 @@ static void ApplyAnimIntents(const std::vector<ed::Event>& events) {
 // A snapshot captures geometry, entities, level metadata and the heightmap
 // (everything ExportToOzone writes). Camera and selection are left untouched.
 // ---------------------------------------------------------------------------
-static std::vector<std::string> g_histUndo;
-static std::vector<std::string> g_histRedo;
-static const size_t kHistMax = 64;

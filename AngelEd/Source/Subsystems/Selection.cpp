@@ -428,7 +428,7 @@ static void ToggleSurfacePick(const SurfaceFacePick& sp) {
 
 static void ClearSurfacePicks() { g_selectedSurfaces.clear(); }
 
-static int ClampPropInt(int v, int lo, int hi) {
+int ClampPropInt(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
@@ -437,7 +437,7 @@ static int ClampPropInt(int v, int lo, int hi) {
 // with every other entity type, so they are neither 0-based nor contiguous per
 // type. Indexing the vector by id (as an earlier revision of the properties
 // apply handler did) therefore addressed the wrong node - or none.
-static PlayerStartNode* FindPlayerStartById(int id) {
+PlayerStartNode* FindPlayerStartById(int id) {
     for (auto& s : PawnSystem::Instance().GetPlayerStarts())
         if ((int)s.id == id) return &s;
     return nullptr;

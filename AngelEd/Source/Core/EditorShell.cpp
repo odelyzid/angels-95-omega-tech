@@ -67,7 +67,10 @@ static void StopSoundPreview() {
     g_previewSoundLoaded = false;
 }
 
-static void ClearScene() {
+// NOT static: Subsystems/History.cpp is a real translation unit and calls this from
+// HistoryRestore(). Same reason as ExportToOzone / g_editorLog - a `static` in a unity
+// fragment has internal linkage and cannot satisfy an external reference.
+void ClearScene() {
     StopSoundPreview();
     OzoneLoader::Instance().Unload();
     auto& pawns = PawnSystem::Instance();

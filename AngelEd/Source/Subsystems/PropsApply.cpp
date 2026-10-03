@@ -1,4 +1,12 @@
-// ============================================================================
+#include "../Core/EditorShell.hpp"
+#include "../Core/EditorState.hpp"
+#include "PropsApply.hpp"
+#include "LevelState.hpp"   // ApplyMapProperties
+#include "Selection.hpp"   // FindPlayerStartById, ClampPropInt
+
+#include "../../../Source/Pawn/OzPawnSystem.hpp"
+#include "../../../Source/World/OzOzoneLoader.hpp"
+#include "../../../Source/World/ZoneManager.hpp"
 // Subsystems/PropsApply.cpp
 //
 // Writes the Entity Properties panel's edited values back into the world.
@@ -8,7 +16,6 @@
 // FRAGMENT - not a standalone translation unit. Included by Main.cpp.
 // ============================================================================
 
-static std::vector<ed::Event> g_editorPropsEvents;
 
 // THE EVENT CARRIES THE TARGET ONLY. The ~87 prop* value fields are still read from
 // g_editorPanels at drain time, and that is a decision rather than a half-finished
@@ -32,7 +39,7 @@ static std::vector<ed::Event> g_editorPropsEvents;
 // it named - "when the panel stops owning the target directly" - is satisfied in the
 // sense that matters: the HANDLER no longer reads the target from panel state. The
 // panel keeps propsTarget* because it needs those fields to render its rows.
-static void ApplyPanelProperties(const std::vector<ed::Event>& events) {
+void ApplyPanelProperties(const std::vector<ed::Event>& events) {
     for (const ed::Event& ev : events) {
         const ed::SelRef& t = ev.sel();
         if (!t.valid()) {

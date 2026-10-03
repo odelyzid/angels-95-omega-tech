@@ -1,4 +1,7 @@
-// ============================================================================
+#include "../Core/EditorShell.hpp"
+#include "../Core/EditorState.hpp"
+#include "LevelState.hpp"
+
 // Subsystems/LevelState.cpp
 //
 // The owner of LevelMetadata, plus the apply path that writes the Map row back into
@@ -34,7 +37,7 @@ void SetLevelMetadata(const LevelMetadata& meta) {
 // fields are edited in one screen, so re-opening and pressing Apply without
 // touching anything would otherwise stack a no-op snapshot per click and make
 // Ctrl+Z appear to do nothing but burn steps.
-static void ApplyMapProperties() {
+void ApplyMapProperties() {
     const auto& P = g_editorPanels;
     LevelMetadata before = GetLevelMetadata();
 
@@ -93,8 +96,5 @@ static void ApplyMapProperties() {
               meta.timeLimitEnabled ? "on" : "off", meta.scoreLimit,
               meta.friendlyFire ? "on" : "off", meta.skyboxTexturePath.c_str(),
               (int)meta.particleType);
-
-    // RefreshWorldGraph had no callers at all, so nothing repainted the WorldGraph
     // name after an edit.
-    RefreshWorldGraph();
 }

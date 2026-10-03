@@ -1,3 +1,5 @@
+#ifndef ANGEL_ED_PPGIO_HPP
+#define ANGEL_ED_PPGIO_HPP
 
 #include <string>
 #include <iostream>
@@ -300,3 +302,5 @@ inline void Rumble(int duration){
 }
 
 #endif
+
+#endif // ANGEL_ED_PPGIO_HPP

@@ -1,3 +1,5 @@
+#ifndef ANGEL_ED_EDITOR_HPP
+#define ANGEL_ED_EDITOR_HPP
 #include "PPGIO.hpp"
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Renderer/EngineBillboard.hpp"
@@ -344,3 +346,5 @@ static wstring BuildWDLPlaceCommand(const wstring& prefix, int subId) {
            to_wstring(OmegaTechEditor.Z) + L":" + to_wstring(OmegaTechEditor.S) + L":" + to_wstring(OmegaTechEditor.R) + L":";
     return cmd;
 }
+
+#endif // ANGEL_ED_EDITOR_HPP

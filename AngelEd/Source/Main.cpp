@@ -36,6 +36,12 @@
 
 #include "Core/EditorShell.hpp"
 #include "Core/EditorState.hpp"
+#include "Subsystems/Placement.hpp"
+#include "Subsystems/LevelState.hpp"
+#include "Subsystems/History.hpp"
+#include "Subsystems/OzoneExport.hpp"
+#include "Subsystems/Selection.hpp"
+#include "Subsystems/PropsApply.hpp"
 #include "Subsystems/SurfaceOps.hpp"
 // The UI API surface, needed for the panel Show*/Refresh* entry points the frame loop calls.
 // Explicit rather than transitive: Core/EditorShell.hpp is a preamble shared with Subsystems/,
@@ -64,8 +70,8 @@
 // Subsystems/AnimEditing.cpp         vertex-keyframe editing + anim event handlers
 // Subsystems/History.cpp             OZONE-snapshot undo/redo
 // Subsystems/LevelState.cpp          LevelMetadata owner + the Map-row apply
-// Subsystems/PropsApply.cpp          ApplyProperties (was the actionApplyProperties field)
-// Subsystems/Placement.cpp           entity placement (was: direct PawnSystem calls
+// Subsystems/PropsApply.hpp          ApplyProperties (was the actionApplyProperties field)
+// Subsystems/Placement.hpp           entity placement (was: direct PawnSystem calls
 //                                    from UI/Panels/PawnPanel.cpp). After History.cpp
 //                                    because it calls HistoryPush.
 // Core/EditorDispatcher.cpp           LAST of all. It is the consumer: it calls
@@ -84,10 +90,6 @@
 #include "Subsystems/WorldGraphBridge.cpp"
 #include "Core/EditorMenus.cpp"
 #include "Subsystems/AnimEditing.cpp"
-#include "Subsystems/History.cpp"
-#include "Subsystems/LevelState.cpp"
-#include "Subsystems/PropsApply.cpp"
-#include "Subsystems/Placement.cpp"
 #include "Core/EditorDispatcher.cpp"
 
 // -----------------------------------------------------------------------------
@@ -1696,7 +1698,13 @@ if (g_editorPanels.showCollisionBounds) {
         // SelType::MAP is dispatched inside PropsApply rather than here, because it
         // writes level metadata and has its own undo policy.
         ed::EventBus::instance().drain(g_editorPropsEvents);
-        ApplyPanelProperties(g_editorPropsEvents);
+        if (!g_editorPropsEvents.empty()) {
+            ApplyPanelProperties(g_editorPropsEvents);
+            // The Map row renames the world in the WorldGraph, so repaint it. This
+            // was RefreshWorldGraph() inside ApplyMapProperties, i.e. Subsystems
+            // calling upward into UI. Core calling UI is the legal direction.
+            RefreshWorldGraph();
+        }
 
         // --- Editable .ozls stat rows ---------------------------------------
         //
