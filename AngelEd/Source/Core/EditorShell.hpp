@@ -20,7 +20,6 @@
 #include "rlgl.h"
 #include "raymath.h"
 #include <cmath>
-#include "../UI/UiPanels.hpp"
 #include "../EditorIcons.hpp"
 #include "../../../Source/IniConfig.hpp"
 #include "../../../Source/World/OzOzoneLoader.hpp"

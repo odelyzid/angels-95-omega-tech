@@ -6,14 +6,17 @@
 // (Subsystems/SurfaceOps) - which the plan wrongly claimed already existed folded into
 // EntityOps.cpp. It did not: EntityOps.cpp holds only AutoConvex and the CSG commit.
 //
-// This pass was always separate from the frame dispatch, and keeping it separate is
-// what let this move happen without touching the selection dispatch.
-//
-// FRAGMENT - not a standalone translation unit. Included by Main.cpp.
+// REAL translation unit as of Phase F.
 // ============================================================================
+#include "../Core/EditorShell.hpp"
+#include "../Core/EditorState.hpp"
+#include "SurfaceOps.hpp"
 
-static void ApplySurfaceEdits(const std::vector<ed::Event>& events) {
-    for (const ed::Event& sev : g_editorSurfaceEvents) {
+#include "../../../Source/World/OzOzoneLoader.hpp"
+#include "../../../Source/World/SurfaceFlags.hpp"
+
+void ApplySurfaceEdits(const std::vector<ed::Event>& events) {
+    for (const ed::Event& sev : events) {
         const ed::SurfaceEdit& se = sev.surface();
         if (sev.kind == ed::Ev::ApplySurface) {
             OzoneRenderable* r = OzoneLoader::Instance().Get(se.renderable);
@@ -42,7 +45,8 @@ static void ApplySurfaceEdits(const std::vector<ed::Event>& events) {
                 }
                 EditorLog("Surface: applied to %d face(s) of renderable %d (flags=0x%X)",
                           __builtin_popcount(se.faceMask), se.renderable, se.flags);
-                SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
+                // The Surface Properties dialog is refreshed by the CALLER now, not
+                // from here - see SurfaceOps.hpp.
             }
         } else if (sev.kind == ed::Ev::ResetSurface) {
             const int rIdx = se.renderable;
@@ -58,7 +62,6 @@ static void ApplySurfaceEdits(const std::vector<ed::Event>& events) {
                 OzoneLoader::Instance().RebuildSurfaceMeshes(rIdx);
                 EditorLog("Surface: reset %d face(s) of renderable %d",
                           __builtin_popcount(se.faceMask), rIdx);
-                SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
             }
         }
     }

@@ -206,6 +206,14 @@ $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Rendere
 # -l:Custom.so.
 RESOURCES_OBJS := $(BUILD_DIR)/AssetScope.o $(BUILD_DIR)/PackageIO.o $(BUILD_DIR)/AssetScan.o
 
+# Subsystems/ promoted to REAL translation units in Phase F. These used to be unity
+# fragments included by Main.cpp, which meant they inherited its include order and
+# could not be compiled on their own. Add a file here AND in ci.yml.
+SUBSYSTEMS_OBJS := $(BUILD_DIR)/SurfaceOps.o
+
+$(BUILD_DIR)/SurfaceOps.o: Source/Subsystems/SurfaceOps.cpp Source/Subsystems/SurfaceOps.hpp Source/Core/EditorState.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Subsystems/SurfaceOps.cpp -o $@
+
 $(BUILD_DIR)/AssetScope.o: Source/Resources/AssetScope.cpp Source/Resources/AssetScope.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Resources/AssetScope.cpp -o $@
 
@@ -231,7 +239,7 @@ CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DI
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)
 	windres AngelEd.rc -O coff -o $@
 
-EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorEventBus.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS) $(RESOURCES_OBJS)
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorEventBus.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS) $(RESOURCES_OBJS) $(SUBSYSTEMS_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 	$(COMP) $(LDEXTRA) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 

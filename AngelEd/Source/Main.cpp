@@ -36,6 +36,11 @@
 
 #include "Core/EditorShell.hpp"
 #include "Core/EditorState.hpp"
+#include "Subsystems/SurfaceOps.hpp"
+// The UI API surface, needed for the panel Show*/Refresh* entry points the frame loop calls.
+// Explicit rather than transitive: Core/EditorShell.hpp is a preamble shared with Subsystems/,
+// and the Subsystems do not need (or want) any of this.
+#include "UI/UiPanels.hpp"
 
 // DO NOT REORDER THESE. Fragments carry no forward declarations of their own, so
 // several statics and functions are declared in the fragment ABOVE their user.
@@ -49,7 +54,7 @@
 //
 // Subsystems/Selection.cpp           picking, gizmo snap, adopting a selection
 // Subsystems/EntityOps.cpp           delete, duplicate, AutoConvex, CSG commit
-// Subsystems/SurfaceOps.cpp          ApplySurface / ResetSurface handlers
+// Subsystems/SurfaceOps.hpp          ApplySurfaceEdits (now a REAL translation unit)
 // Core/EditorLog.cpp                 AngelEd.log appender
 // Core/EditorShell.cpp               view presets, panel toggles, scene reset
 // Subsystems/WorldIO.cpp             LoadWorldDocument + name helpers
@@ -72,7 +77,6 @@
 //                                    drained and applied by its own subsystem.
 #include "Subsystems/Selection.cpp"
 #include "Subsystems/EntityOps.cpp"
-#include "Subsystems/SurfaceOps.cpp"
 #include "Core/EditorLog.cpp"
 #include "Core/EditorShell.cpp"
 #include "Subsystems/WorldIO.cpp"
@@ -1676,7 +1680,12 @@ if (g_editorPanels.showCollisionBounds) {
         // their own group, and that separation is what let Subsystems/SurfaceOps.cpp
         // happen without reordering the selection dispatch.
         ed::EventBus::instance().drain(g_editorSurfaceEvents);
-        ApplySurfaceEdits(g_editorSurfaceEvents);
+        if (!g_editorSurfaceEvents.empty()) {
+            ApplySurfaceEdits(g_editorSurfaceEvents);
+            // Core calling into the UI layer is the legal direction. It used to be
+            // SurfaceOps calling SurfacePropsRefresh itself, twice.
+            SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
+        }
 
         // --- Properties apply -------------------------------------------------
         //

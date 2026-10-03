@@ -10,7 +10,7 @@
 #include "../../Source/Renderer/raygui/dark.h"
 using namespace std;
 
-wstring LoadFile(const char *Path)
+inline wstring LoadFile(const char *Path)
 {
     wifstream input(Path);
     if (!input.is_open()) return L"";
@@ -27,7 +27,7 @@ wstring LoadFile(const char *Path)
     return data;
 }
 
-float ToFloat(wstring Data)
+inline float ToFloat(wstring Data)
 {
     string s(Data.begin(), Data.end());
     float Out = stof(s);
@@ -35,7 +35,7 @@ float ToFloat(wstring Data)
 }
 
 
-int GetWDLSize(wstring WData , wstring Extra)
+inline int GetWDLSize(wstring WData , wstring Extra)
 {
     int Out = 0;
     wstring Data = WData + Extra;
@@ -54,7 +54,7 @@ int GetWDLSize(wstring WData , wstring Extra)
 // Weird Optimizations
 static wstring ReadValueOut = L"";
 
-auto WReadValue(wstring Data, int Start, int End)
+inline auto WReadValue(wstring Data, int Start, int End)
 { // Reads Value from (Start to End)
     ReadValueOut = L"";
     if (Start < 0 || End < Start || Start >= (int)Data.size()) return ReadValueOut;
@@ -70,7 +70,7 @@ static int SVPlaceCounter = 0;
 static int SVStart = 0;
 static int SVEnd = 0;
 
-auto WSplitValue(wstring Data, int Place)
+inline auto WSplitValue(wstring Data, int Place)
 {
     SVPlaceCounter = 0;
     SVStart = 0;
@@ -115,7 +115,7 @@ auto WSplitValue(wstring Data, int Place)
     return WReadValue(Data, SVStart, SVEnd);
 }
 
-auto PullConfigValue(const char *Path, int ValueIndex)
+inline auto PullConfigValue(const char *Path, int ValueIndex)
 {
 
     wstring Data = LoadFile(Path);
@@ -214,7 +214,7 @@ auto PullConfigValue(const char *Path, int ValueIndex)
     return Value;
 }
 
-bool GetCollision(int x, int y , int w, int h, int x2 , int y2 , int w2 , int h2){
+inline bool GetCollision(int x, int y , int w, int h, int x2 , int y2 , int w2 , int h2){
     if( y+h <= y2 )
     {
         return false;
@@ -295,7 +295,7 @@ static Input OmegaInputController;
 
 #ifdef __linux__
 
-void Rumble(int duration){
+inline void Rumble(int duration){
     
 }
 

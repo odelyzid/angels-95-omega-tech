@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 
 #define MaxCachedModels 200
 
-RenderTexture2D Target;
+inline RenderTexture2D Target;
 
 enum class LightingMode : uint8_t { LIT, UNLIT, WIREFRAME, DYNAMIC };
 
@@ -153,7 +153,7 @@ static int CachedCollisionCounter = 0;
 static CollisionData CachedCollision[MaxCachedModels];
 
 // --- Heightmap sampling (terrain following) ---
-float SampleHeightmapGroundY(float px, float pz) {
+inline float SampleHeightmapGroundY(float px, float pz) {
     if (!WDLModels.HeightMapReady || WDLModels.HeightMapImage.data == 0)
         return -99999.0f;
     Vector3 o = WDLModels.HeightMapPosition;
@@ -195,7 +195,7 @@ static const char* NodeTypeLabel(EditorNodeType t) {
     }
 }
 
-void Init(){
+inline void Init(){
     if (WDLModels.HeightMapImage.data) {
         UnloadImage(WDLModels.HeightMapImage);
         WDLModels.HeightMapImage = (Image){0};
@@ -304,7 +304,7 @@ void Init(){
 
 static int ScriptTimer = 0;
 static float X, Y, Z, S, Rotation, W, H, L;
-bool NextCollision = false;
+inline bool NextCollision = false;
 
 class InEditor{
     public:
@@ -318,14 +318,14 @@ class InEditor{
 
 static InEditor OmegaTechEditor;
 
-char ScriptEditorBuffer[1200];
+inline char ScriptEditorBuffer[1200];
 
-void ConvertConstCharToCharArray(const char* constString, char* charArray, int arraySize) {
+inline void ConvertConstCharToCharArray(const char* constString, char* charArray, int arraySize) {
     std::strncpy(charArray, constString, arraySize - 1);
     charArray[arraySize - 1] = '\0';
 }
 
-void LoadEditor(const char* File){
+inline void LoadEditor(const char* File){
     ifstream file(File);
     string fileContents;
     string line;
@@ -334,7 +334,7 @@ void LoadEditor(const char* File){
     ConvertConstCharToCharArray(fileContents.c_str(), ScriptEditorBuffer, 1200);
 }
 
-int EMID = 1;
+inline int EMID = 1;
 
 // --- Helper: draw a WDL instruction line for current placed item ---
 static wstring BuildWDLPlaceCommand(const wstring& prefix, int subId) {

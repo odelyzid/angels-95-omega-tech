@@ -294,9 +294,14 @@ g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Core/EditorEventBus.cpp -o EditorEventBu
           # filesystem and PackageAssetLoader. Its policy lives in AssetScope.cpp so
           # that part stays covered.
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Resources/AssetScan.cpp -o AssetScan.o
+          # Subsystems/ promoted to REAL translation units in Phase F (SurfaceOps first).
+          # These used to be unity fragments included by Main.cpp, so they inherited its
+          # include order and could not be compiled standalone. A new subsystem needs a
+          # line here AND a rule in AngelEd/Makefile - the two lists must stay equal.
+          g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Subsystems/SurfaceOps.cpp -o SurfaceOps.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o UiShell.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o AssetScope.o PackageIO.o AssetScan.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o UiShell.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o AssetScope.o PackageIO.o AssetScan.o SurfaceOps.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release
