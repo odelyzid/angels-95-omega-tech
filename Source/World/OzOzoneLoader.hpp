@@ -178,7 +178,6 @@ public:
 
     // Collision volumes for OZONE brush primitives
     const std::vector<OzoneCollisionVolume>& GetCollisionVolumes() const { return m_collisionVolumes; }
-    std::vector<OzoneCollisionVolume>& GetCollisionVolumesMutable() { return m_collisionVolumes; }
     void RebuildCollisionVolumes();
 
     // Editor: add a brush renderable so it becomes visible in the viewport
@@ -206,9 +205,6 @@ public:
 
     // Editor: remove a brush renderable by index (used for delete)
     void RemoveRenderable(int idx);
-
-    // Editor: find the renderable index whose world AABB best matches a collision volume
-    int FindRenderableByCollisionVol(int cvIdx);
 
     // Editor: regenerate a brush renderable with new position/size/rotation
     void UpdateBrushRenderable(int idx, const Vector3& pos, const Vector3& size, float rot);

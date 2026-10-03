@@ -1817,38 +1817,6 @@ void OzoneLoader::RemoveRenderable(int idx) {
 }
 
 // ---------------------------------------------------------------------------
-// FindRenderableByCollisionVol -- given a collision volume index, find the
-// best-matching renderable by comparing world-space AABB centers.
-// Returns -1 if no match found (counts differ, merged volumes, etc.)
-// ---------------------------------------------------------------------------
-int OzoneLoader::FindRenderableByCollisionVol(int cvIdx) {
-    if (cvIdx < 0 || cvIdx >= (int)m_collisionVolumes.size()) return -1;
-    BoundingBox target = m_collisionVolumes[cvIdx].aabb;
-    float targetCx = (target.min.x + target.max.x) * 0.5f;
-    float targetCy = (target.min.y + target.max.y) * 0.5f;
-    float targetCz = (target.min.z + target.max.z) * 0.5f;
-
-    int bestIdx = -1;
-    float bestDist = 1e9f;
-    for (size_t i = 0; i < m_renderables.size(); i++) {
-        auto& r = m_renderables[i];
-        if (!r.loaded || r.model.meshCount == 0) continue;
-        BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
-        float cx = r.position.x + (mb.min.x + mb.max.x) * 0.5f * r.scale;
-        float cy = r.position.y + (mb.min.y + mb.max.y) * 0.5f * r.scale;
-        float cz = r.position.z + (mb.min.z + mb.max.z) * 0.5f * r.scale;
-        float dx = cx - targetCx, dy = cy - targetCy, dz = cz - targetCz;
-        float dist = dx*dx + dy*dy + dz*dz;
-        if (dist < bestDist) { bestDist = dist; bestIdx = (int)i; }
-    }
-    // Only return match if close enough (within half the target's longest axis)
-    float maxDim = fmaxf(target.max.x - target.min.x,
-                         fmaxf(target.max.y - target.min.y, target.max.z - target.min.z));
-    if (bestDist > maxDim * maxDim * 0.25f) return -1;
-    return bestIdx;
-}
-
-// ---------------------------------------------------------------------------
 // UpdateBrushRenderable -- regenerate a brush renderable's mesh from new
 // position, size, and rotation. Preserves texture slot, custom texture,
 // and UV transform. Called from the editor Properties panel when the user

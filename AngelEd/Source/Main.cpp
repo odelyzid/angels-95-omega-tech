@@ -1171,13 +1171,12 @@ if (g_editorPanels.showCollisionBounds) {
                         if ((int)pk.id == idx) { pk.position = newPos; break; }
                     }
                 } else if (g_sel.type == SelType::BRUSH) {
-                    // Try to update the renderable position so the visual moves
-                    int rIdx = -1;
-                    if (idx >= 0 && idx < OzoneLoader::Instance().Count()) {
-                        rIdx = idx; // renderable index
-                    } else {
-                        rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(idx);
-                    }
+                    // idx is a renderable index (see EditorRaycastAt), so there is no
+                    // collision-volume fallback to try. The old code guessed with
+                    // `idx < Count()` and otherwise went looking for a matching
+                    // collision volume, which is how dragging a brush could move a
+                    // different one.
+                    const int rIdx = (OzoneLoader::Instance().Get(idx) != nullptr) ? idx : -1;
                     if (rIdx >= 0) {
                         OzoneRenderable* r = OzoneLoader::Instance().Get(rIdx);
                         if (r) {
@@ -1890,32 +1889,14 @@ if (g_editorPanels.showCollisionBounds) {
             if (!g_editorPanels.activeTexturePath.empty() && g_sel.type != SelType::NONE) {
                 HistoryPush();
                 if (g_sel.type == SelType::BRUSH) {
-                    // g_sel.index may be a renderable index or a collision-volume
-                    // index depending on which raycast produced it. Resolve to the
-                    // renderable (the export reads renderables, not collision vols).
-                    int rIdx = -1;
-                    if (g_sel.index >= 0 && g_sel.index < OzoneLoader::Instance().Count()) {
-                        // Direct renderable hit â€” verify it matches the selection point
-                        OzoneRenderable* r = OzoneLoader::Instance().Get(g_sel.index);
-                        if (r && r->loaded) {
-                            BoundingBox b = GetMeshBoundingBox(r->model.meshes[0]);
-                            Vector3 mn = {r->position.x + b.min.x * r->scale,
-                                          r->position.y + b.min.y * r->scale,
-                                          r->position.z + b.min.z * r->scale};
-                            Vector3 mxn = {r->position.x + b.max.x * r->scale,
-                                           r->position.y + b.max.y * r->scale,
-                                           r->position.z + b.max.z * r->scale};
-                            const float eps = 0.75f;
-                            if (g_sel.pos.x >= mn.x - eps && g_sel.pos.x <= mxn.x + eps &&
-                                g_sel.pos.y >= mn.y - eps && g_sel.pos.y <= mxn.y + eps &&
-                                g_sel.pos.z >= mn.z - eps && g_sel.pos.z <= mxn.z + eps)
-                                rIdx = g_sel.index;
-                        }
-                    }
-                    if (rIdx < 0)
-                        rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(g_sel.index);
-                    if (rIdx < 0)
-                        rIdx = g_sel.index; // best effort
+                    // g_sel.index is a renderable index for BRUSH (see
+                    // EditorRaycastAt), so the whole "it might be a collision-volume
+                    // index, let me hunt for a matching renderable" chain below was
+                    // working around an ambiguity that no longer exists. The old chain
+                    // could end up applying the texture to a DIFFERENT brush than the
+                    // one selected, because a collision index below the renderable
+                    // count passed the first branch.
+                    const int rIdx = g_sel.index;
                     bool applied = OzoneLoader::Instance().ApplyRenderableTexture(
                         rIdx, g_editorPanels.activeTexturePath.c_str());
                     EditorLog("Applied texture to brush renderable idx=%d (sel=%d): %s",

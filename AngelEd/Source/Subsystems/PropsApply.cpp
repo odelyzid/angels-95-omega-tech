@@ -86,13 +86,13 @@ static void ApplyPanelProperties(const std::vector<ed::Event>& events) {
             if (sy < 0.01f) sy = 1.0f;
             if (sz < 0.01f) sz = 1.0f;
             Vector3 newSize = {sx, sy, sz};
-            // Resolve renderable index: try direct, then find by AABB
-            int rIdx = -1;
-            if (tgtIdx >= 0 && tgtIdx < OzoneLoader::Instance().Count()) {
-                rIdx = tgtIdx;
-            } else {
-                rIdx = OzoneLoader::Instance().FindRenderableByCollisionVol(tgtIdx);
-            }
+            // tgtIdx is unambiguously a renderable index for SelType::BRUSH (see
+            // EditorRaycastAt). The old code fell back to
+            // FindRenderableByCollisionVol when the index exceeded the renderable
+            // count, which silently retargeted the edit at whatever brush best
+            // matched a stale collision volume - the Properties panel then reported a
+            // different brush's size, and applying wrote that size somewhere else.
+            const int rIdx = (OzoneLoader::Instance().Get(tgtIdx) != nullptr) ? tgtIdx : -1;
             if (rIdx >= 0) {
                 OzoneLoader::Instance().UpdateBrushRenderable(
                     rIdx, (Vector3){px, py, pz}, newSize, prot);
