@@ -143,7 +143,7 @@ fields as it goes:
 
 | Batch | Events | Fields |
 |---|---|---|
-| B1 | placement / spawn | 10 |
+| B1 | placement / spawn — **done, and it was deletion not conversion** | 10 |
 | B2 | world graph + level list | 8 |
 | B3 | properties / surface / light | 8 |
 | B4 | animation | 12 |
@@ -211,6 +211,50 @@ fields as it goes:
 - **CI runs the suites in the Linux job only.** The Windows job builds the editor,
   which is where AngelEd compilation is actually verified; the bus itself is
   platform-independent.
+
+### R2 B1 — all ten fields were unreachable, so the batch is a deletion
+
+Auditing the writers of every `action*` field before converting any of them found
+that **the entire placement batch was dead**. For all nine `actionSpawn*` fields
+the only assignments anywhere in `AngelEd/Source/` were the handlers' own resets to
+their defaults:
+
+```
+$ grep -n 'actionSpawn\w*\s*=[^=]' AngelEd/Source/*.cpp AngelEd/Source/*.hpp
+Main.cpp:4661:    g_editorPanels.actionSpawnParticleEmitter = false;
+Main.cpp:4672:    g_editorPanels.actionSpawnPathNode = false;
+...
+```
+
+So ~110 lines of handlers in `Main.cpp` could never run. Placement in fact happens
+**synchronously** in `SpawnSelectedPawnTreeItem` (`Win32Dialogs.cpp:1778`), which
+covers all nine types — pawn, pickup, player start, emitter, zone, mesh, particle
+emitter, path node, wind zone — using `spawnPos`. The dead handlers would also
+have placed at `MainCamera.target` instead of the ghost position, so they were not
+merely redundant but *wrong*.
+
+**This is why the batch is an audit first and a conversion second.** The plan
+assumed 58 live channels; it is closer to 49. `Ev::Spawn*` still earns its place —
+`SpawnSelectedPawnTreeItem` reaching into `PawnSystem` directly is exactly the
+UI→Subsystems dependency R3/R4 removes — but its first real users arrive there,
+not here.
+
+### B1 also caught a regression I introduced in b88
+
+`actionApplyLight` was the **only** writer of the legacy light apply handler in
+`Main.cpp`, and `LightPropsProc` was that writer. Deleting the Light Properties
+window in b88 therefore orphaned ~27 lines. It was not caught at the time because
+"a handler nothing can reach" produces no build error and no test failure.
+
+It was also already a strict **subset** of the panel's `tgtType == SelType::LIGHT`
+branch (`Main.cpp:3940`), which additionally handles position, name and target and
+clamps `type`/`effect` defensively. Removed, along with its 12 `light*` backing
+fields — which nothing else referenced.
+
+> **Lesson worth keeping:** removing a producer must include a check that its
+> consumer went with it. `grep` for the *handler*, not just the field.
+
+Action fields: **58 → 49** (9 `actionSpawn*` + `actionApplyLight` removed).
 
 ## Verification
 

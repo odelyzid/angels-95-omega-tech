@@ -4608,114 +4608,6 @@ if (g_editorPanels.showCollisionBounds) {
             OmegaTechEditor.R = 1;
             g_editorPanels.actionNodeType = -1;
         }
-        if (!g_editorPanels.actionSpawnPickup.empty()) {
-            // Pawn Manager weapon/item leaf â†’ spawn the pickup immediately at the
-            // camera aim point (the Pickups panel still offers ghosted placement).
-            HistoryPush();
-            PickupNode node;
-            node.position = OTEditor.MainCamera.target;
-            node.typeName = g_editorPanels.actionSpawnPickup;
-            PawnSystem::Instance().AddPickup(node);
-            EditorLog("Spawned pickup '%s' at camera target",
-                      g_editorPanels.actionSpawnPickup.c_str());
-            g_editorPanels.actionSpawnPickup.clear();
-        }
-        if (!g_editorPanels.actionSpawnMesh.empty()) {
-            // GameEngine.Mesh placement â€” uses the model selected in the Model
-            // Browser, spawned at the camera target as an OZONE Mesh.* entity.
-            int idx = g_editorPanels.selectedModel;
-            if (idx >= 0 && idx < (int)g_editorPanels.modelEntries.size()) {
-                HistoryPush();
-                MeshObjectNode node;
-                node.meshPath = g_editorPanels.modelEntries[idx].path;
-                node.skeletal = (g_editorPanels.actionSpawnMesh == "skeletal");
-                node.position = OTEditor.MainCamera.target;
-                node.yaw = 0.0f;
-                node.scale = 1.0f;
-                PawnSystem::Instance().AddMeshObject(node);
-                EditorLog("Placed %s '%s'",
-                          node.skeletal ? "Mesh.Skeletal" : "Mesh.Static",
-                          node.meshPath.c_str());
-            } else {
-                EditorLog("Mesh placement: select a model in the Model Browser first");
-            }
-            g_editorPanels.actionSpawnMesh.clear();
-        }
-        if (g_editorPanels.actionSpawnParticleEmitter) {
-            HistoryPush();
-            ParticleEmitterNode node;
-            node.type = "fire";
-            node.position = OTEditor.MainCamera.target;
-            node.direction = {0, 1, 0};
-            node.rate = 30.0f;
-            node.lifetime = 0.9f;
-            node.speed = 2.0f;
-            node.spread = 0.5f;
-            node.sizeStart = 0.5f;
-            node.sizeEnd = 0.0f;
-            node.colorStart = {255, 170, 60, 255};
-            node.colorEnd = {80, 20, 10, 0};
-            node.radius = 0.2f;
-            PawnSystem::Instance().AddParticleEmitter(node);
-            EditorLog("Placed ParticleEmitter at camera target");
-            g_editorPanels.actionSpawnParticleEmitter = false;
-        }
-        if (g_editorPanels.actionSpawnPathNode) {
-            static int s_pathCounter = 0;
-            HistoryPush();
-            PathNode node;
-            node.name = "path_" + std::to_string(s_pathCounter++);
-            node.position = OTEditor.MainCamera.target;
-            node.radius = 1.0f;
-            PawnSystem::Instance().AddPathNode(node);
-            EditorLog("Placed PathNode '%s' at camera target", node.name.c_str());
-            g_editorPanels.actionSpawnPathNode = false;
-        }
-        if (g_editorPanels.actionSpawnWindZone) {
-            WindZoneNode zone;
-            Vector3 c = OTEditor.MainCamera.target;
-            zone.bounds.min = {c.x - 5.0f, c.y - 5.0f, c.z - 5.0f};
-            zone.bounds.max = {c.x + 5.0f, c.y + 5.0f, c.z + 5.0f};
-            zone.direction = {1.0f, 0.0f, 0.0f};
-            zone.strength = 1.0f;
-            zone.frequency = 1.0f;
-            HistoryPush();
-            PawnSystem::Instance().AddWindZone(zone);
-            EditorLog("Placed WindZone at camera target");
-            g_editorPanels.actionSpawnWindZone = false;
-        }
-        if (g_editorPanels.actionSpawnPlayerStart) {
-            HistoryPush();
-            PlayerStartNode node;
-            node.position = OTEditor.MainCamera.target;
-            node.yaw = 0.0f;
-            PawnSystem::Instance().AddPlayerStart(node);
-            EditorLog("Placed PlayerStartNode at camera target");
-            g_editorPanels.actionSpawnPlayerStart = false;
-        }
-        if (!g_editorPanels.actionSpawnEmitter.empty()) {
-            HistoryPush();
-            EmitterNode node;
-            node.type = (g_editorPanels.actionSpawnEmitter == "music")
-                ? EmitterType::MUSIC : EmitterType::SOUND;
-            node.position = OTEditor.MainCamera.target;
-            PawnSystem::Instance().AddEmitter(node);
-            EditorLog("Placed %s EmitterNode at camera target",
-                      g_editorPanels.actionSpawnEmitter.c_str());
-            g_editorPanels.actionSpawnEmitter.clear();
-        }
-        if (g_editorPanels.actionSpawnZone >= 0) {
-            HistoryPush();
-            ZoneVolumeNode node;
-            Vector3 c = OTEditor.MainCamera.target;
-            node.bounds.min = {c.x - 4.0f, c.y - 2.0f, c.z - 4.0f};
-            node.bounds.max = {c.x + 4.0f, c.y + 2.0f, c.z + 4.0f};
-            node.zoneType = (ZoneType)g_editorPanels.actionSpawnZone;
-            ZoneManager::Instance().AddZone(node);
-            EditorLog("Placed ZoneVolumeNode (type=%d) at camera target",
-                      g_editorPanels.actionSpawnZone);
-            g_editorPanels.actionSpawnZone = -1;
-        }
         if (g_editorPanels.actionPlaceModel >= 0) {
             g_placeMode = PlaceMode::MODEL;
             g_sel = { SelType::NONE, -1, "", {0,0,0} };
@@ -4801,48 +4693,13 @@ if (g_editorPanels.showCollisionBounds) {
             }
             g_editorPanels.actionGenerateHeightmap = false;
         }
-        // Legacy Light Properties apply handler. Superseded by the properties
-        // panel (SelType::LIGHT), but kept so the old window still functions.
-        // lightPropTarget is a LightNode ID (that is what the selection and the
-        // WorldGraph hand out), so it must be resolved with GetLight() - the
-        // previous vector-index lookup addressed the wrong node whenever the
-        // ids and positions diverged, e.g. after any deletion.
-        if (g_editorPanels.actionApplyLight) {
-            if (LightNode* ln = PawnSystem::Instance().GetLight(g_editorPanels.lightPropTarget)) {
-                HistoryPush();
-                ln->color.r = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorR, 0, 255);
-                ln->color.g = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorG, 0, 255);
-                ln->color.b = (unsigned char)ClampPropInt((int)g_editorPanels.lightColorB, 0, 255);
-                ln->intensity = fmaxf(0.0f, g_editorPanels.lightIntensity);
-                ln->radius = fmaxf(0.1f, g_editorPanels.lightRadius);
-                ln->type = (LitLightType)g_editorPanels.lightType;
-                ln->effect = (LitLightEffect)g_editorPanels.lightEffect;
-                // Spot cone angles: edit fields are in degrees, LightNode stores cos(half-angle)
-                ln->innerCone = cosf(fminf(fmaxf(g_editorPanels.lightInnerAngle, 0.5f), 89.0f) * DEG2RAD);
-                ln->outerCone = cosf(fminf(fmaxf(g_editorPanels.lightOuterAngle, 1.0f), 89.0f) * DEG2RAD);
-                ln->flare  = g_editorPanels.lightFlare;
-                ln->corona = g_editorPanels.lightCorona;
-                if (ln->type == LitLightType::DIRECTIONAL)
-                    ln->target = {0.0f, 0.0f, 0.0f};
-                PawnSystem::Instance().AssignLightZones();
-                EditorLog("Applied legacy light properties to id=%d: color=(%.0f,%.0f,%.0f) "
-                          "intensity=%.1f radius=%.0f type=%d effect=%d",
-                    ln->id,
-                    g_editorPanels.lightColorR, g_editorPanels.lightColorG, g_editorPanels.lightColorB,
-                    g_editorPanels.lightIntensity, g_editorPanels.lightRadius,
-                    g_editorPanels.lightType, g_editorPanels.lightEffect);
-            }
-            g_editorPanels.actionApplyLight = false;
-        }
+        // The legacy Light Properties apply handler is GONE. It became unreachable
+        // in b88 when LightPropsProc - its only writer - was deleted with the window,
+        // and it was already a strict subset of the properties panel's
+        // tgtType == SelType::LIGHT branch, which additionally handles position, name
+        // and target and clamps type/effect defensively. Its 12 light* backing
+        // fields were referenced by nothing else and went with it.
 
-        if (!g_editorPanels.actionSpawnPawn.empty()) {
-            Vector3 pos = OTEditor.MainCamera.target; // in front of the camera
-            HistoryPush();
-            PawnSystem::Instance().Spawn(pos, g_editorPanels.actionSpawnPawn.c_str());
-            EditorLog("Spawned pawn '%s' at camera target",
-                      g_editorPanels.actionSpawnPawn.c_str());
-            g_editorPanels.actionSpawnPawn.clear();
-        }
 
         // Portal deletion. Portal *editing* is the Entity Properties panel's PORTAL
         // section (applied by the generic tgtType == SelType::PORTAL branch); only

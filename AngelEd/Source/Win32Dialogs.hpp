@@ -79,14 +79,20 @@ struct EditorPanelState {
     int actionNodeType = -1;
     int actionPlaceModel = -1;
     bool actionRefreshBrowser = false;
-    std::string actionSpawnPawn;
-    std::string actionSpawnMesh;    // "static" | "skeletal" — GameEngine.Mesh placement
-    bool actionSpawnParticleEmitter = false; // place a default ParticleEmitter at camera
-    bool actionSpawnPathNode = false;        // place a GameEngine.PathNode at camera
-    bool actionSpawnWindZone = false;        // place a WindZone at camera
-    bool actionSpawnPlayerStart = false;     // place a PlayerStartNode at camera
-    std::string actionSpawnEmitter;          // "sound" | "music" — place an EmitterNode
-    int actionSpawnZone = -1;                // ZoneType index — place a ZoneVolumeNode
+    // The nine `actionSpawn*` fields (pawn / mesh / pickup / emitter / zone /
+    // particle emitter / path node / wind zone / player start) are GONE. They had
+    // no writer anywhere in the editor: every one of their handlers in Main.cpp
+    // was unreachable, because the only assignments to the fields were the
+    // handlers' own resets to their default. Placement actually happens
+    // synchronously in SpawnSelectedPawnTreeItem (Pawn Manager tree leaf), which
+    // covers all nine types using spawnPos below — so the handlers were ~110 lines
+    // of vestigial duplicates that would also have placed at MainCamera.target
+    // instead of the ghost position.
+    //
+    // ed::EventBus::Spawn* exists for the day the layering rule in
+    // Wiki/Editor-Architecture-Refactor.md is enforced: SpawnSelectedPawnTreeItem
+    // reaching into PawnSystem directly is precisely the UI->Subsystems dependency
+    // that R3/R4 remove. Do not reintroduce an action field for these.
     // Camera aim point, refreshed every frame by Main.cpp, so Win32 panels can
     // spawn entities synchronously without waiting on the main-loop action flags.
     float spawnPos[3] = {0.0f, 0.0f, 0.0f};
@@ -105,17 +111,11 @@ struct EditorPanelState {
     float actionHmScale = 1.0f;
     bool actionGenerateHeightmap = false;
 
-    // Light properties. Owned entirely by the Entity Properties panel (see
-    // propLight*); these are the panel's backing store, read on Apply.
-    int lightPropTarget = -1;   // index into GameLights
-    float lightColorR = 255, lightColorG = 255, lightColorB = 255;
-    float lightIntensity = 1.0f, lightRadius = 50.0f;
-    int lightType = 1;         // 0=directional, 1=point, 2=spot
-    int lightEffect = 0;       // 0=none, 1=watery, 2=torch, 3=fire, 4=lamp
-    bool lightFlare = false, lightCorona = false;
-    float lightInnerAngle = 15.0f;   // spot inner cone half-angle (degrees)
-    float lightOuterAngle = 45.0f;   // spot outer cone half-angle (degrees)
-    bool actionApplyLight = false;
+    // Light properties live in propLight* (the Entity Properties panel's own state).
+    // The 12 `light*` fields and actionApplyLight that used to sit here are GONE:
+    // their only reader was the legacy light apply handler, which became
+    // unreachable in b88 when LightPropsProc - its only writer - was deleted with
+    // the window. Nothing writes or reads them now.
     // --- Surface Properties (UT99-style, per-face) -------------------------
     // The dialog edits one BrushSurface at a time. `surfaceFaces` is the set of
     // faces the current selection covers (a bitmask, so "(3 Selected)" is just a
@@ -131,7 +131,6 @@ struct EditorPanelState {
     oz::surface::SurfaceProps surfaceEdit;
     int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
     int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
-    std::string actionSpawnPickup;   // Pawn Manager "Spawn Selected" — weapon/item pickup def name
 
     // Terrain editing
     int terrainBrushMode = 0;       // 0=raise, 1=lower, 2=flatten
@@ -332,9 +331,9 @@ struct DefStatRow {
     float propWindFrequency = 1.0f;
     float propWindSizeX = 10.0f, propWindSizeY = 10.0f, propWindSizeZ = 10.0f;
 
-    // GameEngine.Light editing (Properties panel, SelType::LIGHT). This is the
-    // supported home for light settings; the standalone Light Properties window
-    // is a legacy shell that writes the same values via lightColor*/actionApplyLight.
+    // GameEngine.Light editing (Properties panel, SelType::LIGHT). This is now the
+    // ONLY home for light settings: the standalone Light Properties window and its
+    // lightColor*/actionApplyLight backing store are both gone.
     std::string propLightName;
     int   propLightR = 255, propLightG = 255, propLightB = 255;
     float propLightIntensity = 1.0f;
