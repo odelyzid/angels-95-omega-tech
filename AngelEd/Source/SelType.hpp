@@ -111,3 +111,31 @@ inline ed::SelKind ToBusKind(SelType t) {
     // silent mis-dispatch in the dispatcher.
     return ed::SelKind::None;
 }
+
+// ed::SelKind -> SelType. The reverse of the above, needed where an event's captured
+// target has to become a SelType again to index a container: Subsystems/PropsApply
+// resolves ev.sel() back to a SelType to dispatch the properties apply.
+//
+// Also an exhaustive switch rather than a static_cast, for the same reason. The two
+// enums have identical values today, so a cast would work - and would keep compiling
+// after someone adds a 15th SelType, silently applying properties to the wrong
+// container.
+inline SelType ToSelType(ed::SelKind k) {
+    switch (k) {
+        case ed::SelKind::None:       return SelType::NONE;
+        case ed::SelKind::Brush:      return SelType::BRUSH;
+        case ed::SelKind::Model:      return SelType::MODEL;
+        case ed::SelKind::Npc:        return SelType::NPC;
+        case ed::SelKind::Pickup:     return SelType::PICKUP;
+        case ed::SelKind::Light:      return SelType::LIGHT;
+        case ed::SelKind::Zone:       return SelType::ZONE;
+        case ed::SelKind::Spawn:      return SelType::SPAWN;
+        case ed::SelKind::Portal:     return SelType::PORTAL;
+        case ed::SelKind::Mesh:       return SelType::MESH;
+        case ed::SelKind::Particle:   return SelType::PARTICLE;
+        case ed::SelKind::PathNode:   return SelType::PATHNODE;
+        case ed::SelKind::WindZone:   return SelType::WINDZONE;
+        case ed::SelKind::Map:        return SelType::MAP;
+    }
+    return SelType::NONE;
+}

@@ -10,6 +10,23 @@
 // =====================================================================
 // Properties Panel - context-sensitive, dynamic controls
 // =====================================================================
+// Post the properties apply for whatever this panel is currently showing.
+//
+// The SelRef is captured HERE, at the moment Apply was pressed, so the handler cannot
+// end up writing to a different entity than the one whose rows are on screen - the
+// stale-index bug class this whole bus exists to remove. The edited VALUES are not in
+// the payload; see Subsystems/PropsApply.cpp for why reading those live is deliberate.
+//
+// propsTargetType is sel::DEF_ONLY (-1) for a def-only panel, which ToBusKind maps to
+// SelKind::None - so Apply on such a row posts an invalid SelRef and the handler skips
+// it rather than acting on the previous selection.
+static void PostApplyProperties() {
+    ed::SelRef ref;
+    ref.kind  = ToBusKind((SelType)g_editorPanels.propsTargetType);
+    ref.index = g_editorPanels.propsTargetIndex;
+    ed::EventBus::instance().post(ed::Ev::ApplyProperties, ref);
+}
+
 static const int ID_PP_POSX  = 401;
 static const int ID_PP_POSY  = 402;
 static const int ID_PP_POSZ  = 403;
@@ -1196,7 +1213,7 @@ case WM_USER + 50: {
                 std::wstring w(path.begin(), path.end());
                 SetWindowTextW(GetDlgItem(hwnd, ID_PP_MESHANIMFILE), w.c_str());
                 g_editorPanels.propMeshAnimFile = path;
-                g_editorPanels.actionApplyProperties = true;
+                PostApplyProperties();
             }
             break;
         }
@@ -1220,7 +1237,7 @@ case WM_USER + 50: {
             SetWindowTextW(GetDlgItem(hwnd, field), w.c_str());
             if (mesh) g_editorPanels.propMeshTex = path;
             else      g_editorPanels.propEmitterTex = path;
-            g_editorPanels.actionApplyProperties = true;
+            PostApplyProperties();
             break;
         }
         // --- SelType::MAP controls ---------------------------------------------
@@ -1530,7 +1547,7 @@ case WM_USER + 50: {
             if (HWND hb = GetDlgItem(hwnd, ID_PP_LIGHT_CORONA))
                 g_editorPanels.propLightCorona =
                     SendMessage(hb, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            g_editorPanels.actionApplyProperties = true;
+            PostApplyProperties();
         }
         break;
     }
@@ -1540,6 +1557,7 @@ case WM_USER + 50: {
     }
     return 0;
 }
+
 
 // Fill the structured def rows from the registry by def name (+ a PawnDefs/*.cfg
 // fallback for pawns without an .ozls def).

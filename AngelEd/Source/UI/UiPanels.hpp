@@ -180,8 +180,14 @@ struct EditorPanelState {
     // Rot row is seeded from a 0.0f default and used to overwrite the authored
     // value (notably `playerstart`'s yaw) on every Apply.
     bool propsTargetHasRotation = false;
-    // Apply results (set by panel, consumed by Main.cpp)
-    bool actionApplyProperties = false;
+    // Properties values (set by panel, read by Subsystems/PropsApply.cpp at drain
+    // time - see that file for why the values stay live-read while the TARGET travels
+    // in the event).
+    //
+    // actionApplyProperties is GONE -> ed::Ev::ApplyProperties, carrying a SelRef built
+    // by PostApplyProperties() in PropsPanel.cpp. The handler used to read
+    // propsTargetType/propsTargetIndex from live panel state, so whichever row the
+    // panel happened to be showing at drain time decided what got written.
     float propPosX = 0, propPosY = 0, propPosZ = 0;
     float propSizeX = 1, propSizeY = 1, propSizeZ = 1;  // for brush/zone
     float propRotation = 0;
