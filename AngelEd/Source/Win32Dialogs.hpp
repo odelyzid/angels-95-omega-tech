@@ -123,20 +123,31 @@ struct EditorPanelState {
     bool showSurfaceProps = false;
     int  surfaceRenderable = -1;      // OzoneRenderable index
     uint32_t surfaceFaceMask = 0;     // bitmask of SurfaceFace
-    bool actionApplySurface = false;
-    bool actionResetSurface = false;
-    // Working copy handed from the dialog to the main loop on Apply. Carrying
-    // the values rather than a "read the controls" flag means an Apply that is
-    // processed a frame later still writes exactly what the user saw.
+    // actionApplySurface / actionResetSurface are GONE -> ed::Ev::ApplySurface /
+    // ed::Ev::ResetSurface, both carrying one ed::SurfaceEdit with the renderable,
+    // the face mask AND the working props.
+    //
+    // The mask travels with the event because ApplyToSelection is a deliberate
+    // no-op on an empty mask so it can never mean "all six faces", and the old
+    // code read the mask from live panel state at drain time - so a selection
+    // change between the click and the drain applied the props to different faces
+    // than the dialog was showing.
+    //
+    // surfaceEdit below is now only the dialog's own working copy; the main loop
+    // reads the values from the event, not from here.
     oz::surface::SurfaceProps surfaceEdit;
-    int actionCsgPlace = -1;    // CSG sidebar: 0=box,1=cyl,2=sph,3=pyr,4=pln
+    // actionCsgPlace is GONE -> ed::Ev::CsgPlace (payload ed::CsgIntent). Two kinds
+    // rather than one because "arm a primitive" resets the ghost to a default box
+    // at the camera, while "commit the ghost with this op" reads the ghost as it
+    // currently is; collapsing them would either lose the reset or commit a brush
+    // the user never positioned.
     int currentToolMode = 0;    // persistent tool mode: 0=cam,1=move,2=scale,3=rotate
 
     // Terrain editing
     int terrainBrushMode = 0;       // 0=raise, 1=lower, 2=flatten
     int terrainBrushSize = 4;       // radius in grid cells
     float terrainBrushStrength = 0.05f; // height change per click [0..1]
-    int actionCsgCommitNow = -1; // CSG operation to place immediately (-1 = inactive)
+    // actionCsgCommitNow is GONE -> ed::Ev::CsgCommit (see actionCsgPlace above).
     // actionWorldGraphProperties / actionWorldGraphDelete / actionWorldGraphDup and
     // the five actionSelectFromGraph* fields are GONE — they became ed::Event
     // SelectEntity / ApplyProperties / DeleteEntity / DuplicateEntity (R2 batch B2).
@@ -167,7 +178,6 @@ struct EditorPanelState {
     // Portal deletion action. Portal *editing* is the Entity Properties panel's
     // PORTAL section; only the delete needs an out-of-band channel because it
     // mutates the vector the panel is indexing into.
-    int  actionDeletePortal = -1;           // portal index to delete
 
     // Properties panel (context-sensitive)
     bool showPropsPanel = false;
@@ -310,7 +320,6 @@ struct DefStatRow {
     std::string propAnimClip;       // skeletal clip name
     std::string propMeshAnimFile;   // external .ozanim clip path
     float propMeshAnimSpeed = 1.0f; // playback speed
-    bool actionReloadMesh = false;  // force asset reload
 
     // GameEngine.ParticleEmitter editing
     std::string propEmitterType;    // fire/sparks/smoke/...
@@ -363,7 +372,6 @@ struct DefStatRow {
     bool actionAnimNewClip = false;
     bool actionAnimDeleteClip = false;
     bool actionAnimSave = false;
-    bool actionConvertToAnimated = false;
     bool actionAnimRefresh = false;
     bool actionAnimScrub = false;       // timeline dragged
     bool actionAnimAddKey = false;      // Phase C

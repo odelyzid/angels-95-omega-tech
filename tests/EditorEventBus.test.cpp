@@ -196,6 +196,7 @@ static void test_event_coverage() {
         {Ev::SpawnPlayerStart, "SpawnPlayerStart"},
         {Ev::CsgPlace, "CsgPlace"}, {Ev::CsgCommit, "CsgCommit"},
         {Ev::DeleteEntity, "DeleteEntity"}, {Ev::DuplicateEntity, "DuplicateEntity"},
+        {Ev::DeletePortal, "DeletePortal"},
         {Ev::SelectEntity, "SelectEntity"}, {Ev::ApplyProperties, "ApplyProperties"},
         {Ev::OpenWorld, "OpenWorld"}, {Ev::LinkWorld, "LinkWorld"},
         {Ev::ApplySurface, "ApplySurface"}, {Ev::ResetSurface, "ResetSurface"},
@@ -242,10 +243,64 @@ static void test_selkind_covers_seltype() {
     check(static_cast<int>(SelKind::Portal) == 8, "SelKind::Portal is 8, as in SelType");
 }
 
+// SurfaceEdit must carry the face mask, not just "apply". ApplyToSelection is a
+// deliberate no-op on an empty mask so it can never mean "all six faces" - and the
+// old code read the mask from live panel state at drain time, so a selection
+// change between the click and the drain applied props to different faces than
+// the dialog was showing.
+static void test_surface_edit_carries_its_mask() {
+    SurfaceEdit s;
+    s.renderable = 4;
+    s.faceMask    = (1u << 3) | (1u << 5);   // two faces, not one and not six
+    s.flags       = 0x10;                    // SURF_COLLISION_PROXY
+    Event e = Event::make(Ev::ApplySurface, s);
+
+    check(e.surface().renderable == 4, "SurfaceEdit carries the renderable index");
+    check(e.surface().faceMask == ((1u << 3) | (1u << 5)),
+          "SurfaceEdit carries the EXACT face mask");
+    check(e.surface().hasFaces(), "a two-face mask reports hasFaces()");
+    check(e.surface().flags == 0x10, "SurfaceEdit carries the flags");
+
+    // The empty-mask case must stay distinguishable, because "reset nothing" and
+    // "reset all six faces" must never be the same code path.
+    SurfaceEdit none;
+    none.renderable = 4;
+    none.faceMask    = 0;
+    check(!Event::make(Ev::ResetSurface, none).surface().hasFaces(),
+          "an empty mask reports !hasFaces(), so it is a no-op not 'all faces'");
+
+    // Reset travels as the same payload type, so one handler shape serves both.
+    check(Event::make(Ev::ResetSurface, s).surface().faceMask == s.faceMask,
+          "ResetSurface uses the same SurfaceEdit payload as ApplySurface");
+}
+
+// CsgPlace and CsgCommit are separate kinds because "arm a primitive" resets the
+// ghost while "commit the ghost" reads it. A merged event would either lose the
+// reset or commit a brush nobody positioned.
+static void test_csg_intent_distinguishes_place_from_commit() {
+    CsgIntent place;
+    place.primitive = 2;      // sphere
+    CsgIntent commit;
+    commit.operation = 1;     // ADD
+
+    Event pe = Event::make(Ev::CsgPlace, place);
+    Event ce = Event::make(Ev::CsgCommit, commit);
+    check(pe.csg().isPrimitive() && !pe.csg().isCommit(),
+          "a CsgPlace intent is a primitive, not a commit");
+    check(ce.csg().isCommit() && !ce.csg().isPrimitive(),
+          "a CsgCommit intent is a commit, not a primitive");
+
+    CsgIntent empty;
+    check(!empty.isPrimitive() && !empty.isCommit(),
+          "a default CsgIntent is neither, so a malformed post is ignored");
+}
+
 int main() {
     printf("EditorEventBus tests:\n");
     test_typed_payloads();
     test_selection_is_one_atomic_message();
+    test_surface_edit_carries_its_mask();
+    test_csg_intent_distinguishes_place_from_commit();
     test_wrong_shape_is_inert();
     test_target_is_captured_not_looked_up();
     test_fifo_drain();

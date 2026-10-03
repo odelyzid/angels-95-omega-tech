@@ -4828,15 +4828,19 @@ case WM_USER + 50: {
             break;
         }
         if (id == ID_PP_MESHRELOAD) {
-            g_editorPanels.actionReloadMesh = true;
+            // Carries the target so a reload cannot be applied to whatever is
+            // selected by the time the frame drains the bus.
+            ed::EventBus::instance().post(ed::Ev::ReloadMesh,
+                ed::SelRef{ToBusKind((SelType)g_editorPanels.propsTargetType),
+                           g_editorPanels.propsTargetIndex});
             break;
         }
         if (id == ID_PP_PORTALDELETE) {
-            // propsTargetIndex is already the GetPortals() index, which is what
-            // Main.cpp's actionDeletePortal handler expects. It calls
-            // HistoryPush() itself, so this must not push undo here.
+            // propsTargetIndex is already the GetPortals() index. Main.cpp's handler
+            // calls HistoryPush() itself, so this must not push undo here.
             if (g_editorPanels.propsTargetIndex >= 0)
-                g_editorPanels.actionDeletePortal = g_editorPanels.propsTargetIndex;
+                ed::EventBus::instance().post(ed::Ev::DeletePortal,
+                    ed::SelRef{ed::SelKind::Portal, g_editorPanels.propsTargetIndex});
             break;
         }
         // Texture pickers for mesh / particle-emitter properties â€” pick from the
@@ -4853,7 +4857,11 @@ case WM_USER + 50: {
             break;
         }
         if (id == ID_PP_CONVERT_ANIMATED) {
-            g_editorPanels.actionConvertToAnimated = true;
+            // Capture the panel's own target, not whatever is selected by the time
+            // the frame drains - the button lives on this panel for this entity.
+            ed::EventBus::instance().post(ed::Ev::ConvertToAnimated,
+                ed::SelRef{ToBusKind((SelType)g_editorPanels.propsTargetType),
+                           g_editorPanels.propsTargetIndex});
             break;
         }
         if (id == ID_PP_MESHTEX_BROWSE || id == ID_PP_EMITTERTEX_BROWSE ||
@@ -5744,20 +5752,24 @@ static LRESULT CALLBACK StatsSidebarProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         int id = LOWORD(w);
         switch (id) {
             // --- Primitives ---
-            case ID_TB_CSG_BOX:  g_editorPanels.actionCsgPlace = 0; break;
-            case ID_TB_CSG_CYL:  g_editorPanels.actionCsgPlace = 1; break;
-            case ID_TB_CSG_SPH:  g_editorPanels.actionCsgPlace = 2; break;
-            case ID_TB_CSG_PYR:  g_editorPanels.actionCsgPlace = 3; break;
-            case ID_TB_CSG_PLN:  g_editorPanels.actionCsgPlace = 4; break;
+            // Both halves post a CsgIntent. They are separate kinds because
+            // CsgPlace resets the ghost to a default box at the camera while
+            // CsgCommit reads whatever the ghost currently is - collapsing them
+            // would either lose the reset or commit a brush nobody positioned.
+            case ID_TB_CSG_BOX:  ed::EventBus::instance().post(ed::Ev::CsgPlace, ed::CsgIntent{0, -1, false}); break;
+            case ID_TB_CSG_CYL:  ed::EventBus::instance().post(ed::Ev::CsgPlace, ed::CsgIntent{1, -1, false}); break;
+            case ID_TB_CSG_SPH:  ed::EventBus::instance().post(ed::Ev::CsgPlace, ed::CsgIntent{2, -1, false}); break;
+            case ID_TB_CSG_PYR:  ed::EventBus::instance().post(ed::Ev::CsgPlace, ed::CsgIntent{3, -1, false}); break;
+            case ID_TB_CSG_PLN:  ed::EventBus::instance().post(ed::Ev::CsgPlace, ed::CsgIntent{4, -1, false}); break;
             // --- CSG Operations (commit immediately) ---
             case ID_TB_OP_SOLID: Editor_SetCsgOperation(0); Editor_SetPlaceMode(0);
-                g_editorPanels.actionCsgCommitNow = 0; break;
+                ed::EventBus::instance().post(ed::Ev::CsgCommit, ed::CsgIntent{-1, 0, true}); break;
             case ID_TB_OP_ADD:   Editor_SetCsgOperation(1); Editor_SetPlaceMode(0);
-                g_editorPanels.actionCsgCommitNow = 1; break;
+                ed::EventBus::instance().post(ed::Ev::CsgCommit, ed::CsgIntent{-1, 1, true}); break;
             case ID_TB_OP_SUB:   Editor_SetCsgOperation(2); Editor_SetPlaceMode(0);
-                g_editorPanels.actionCsgCommitNow = 2; break;
+                ed::EventBus::instance().post(ed::Ev::CsgCommit, ed::CsgIntent{-1, 2, false}); break;
             case ID_TB_OP_INTER: Editor_SetCsgOperation(3); Editor_SetPlaceMode(0);
-                g_editorPanels.actionCsgCommitNow = 3; break;
+                ed::EventBus::instance().post(ed::Ev::CsgCommit, ed::CsgIntent{-1, 3, false}); break;
             // --- Tool Modes ---
             case ID_TB_MODE_CAM:   g_editorPanels.currentToolMode = 0; break;
             case ID_TB_MODE_MOVE:  g_editorPanels.currentToolMode = 1; break;
@@ -6277,11 +6289,38 @@ static LRESULT CALLBACK SurfacePropsProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         if (id == ID_SPF_APPLY) {
             SpfReadControls(hwnd);
             g_editorPanels.surfaceEdit = s_spfEdit;
-            g_editorPanels.actionApplySurface = true;
+            // Post the working copy, the renderable AND the face mask together.
+            // The mask is load-bearing: ApplyToSelection is a deliberate no-op on
+            // an empty mask so it can never mean "all six faces", and carrying the
+            // mask in the event means the handler cannot read a DIFFERENT selection
+            // than the one the user was shown.
+            ed::SurfaceEdit ev;
+            ev.renderable = g_editorPanels.surfaceRenderable;
+            ev.faceMask    = g_editorPanels.surfaceFaceMask;
+            ev.flags       = s_spfEdit.flags;
+            ev.glowR       = s_spfEdit.glowR;
+            ev.glowG       = s_spfEdit.glowG;
+            ev.glowB       = s_spfEdit.glowB;
+            ev.glowScale   = s_spfEdit.glowScale;
+            ev.alpha       = s_spfEdit.alpha;
+            ev.alphaCutoff = s_spfEdit.alphaCutoff;
+            ev.uvScaleU    = s_spfEdit.uvScaleU;
+            ev.uvScaleV    = s_spfEdit.uvScaleV;
+            ev.uvOffsetU   = s_spfEdit.uvOffsetU;
+            ev.uvOffsetV   = s_spfEdit.uvOffsetV;
+            ev.panU        = s_spfEdit.panU;
+            ev.panV        = s_spfEdit.panV;
+            ev.texSlot     = s_spfEdit.texSlot;
+            ed::EventBus::instance().post(ed::Ev::ApplySurface, ev);
             return 0;
         }
         if (id == ID_SPF_RESET) {
-            g_editorPanels.actionResetSurface = true;
+            // Reset carries the same target/mask as Apply. It posts the mask so a
+            // reset cannot land on faces the user had not selected.
+            ed::SurfaceEdit ev;
+            ev.renderable = g_editorPanels.surfaceRenderable;
+            ev.faceMask    = g_editorPanels.surfaceFaceMask;
+            ed::EventBus::instance().post(ed::Ev::ResetSurface, ev);
             return 0;
         }
         if (id == ID_SPF_CLOSE) {

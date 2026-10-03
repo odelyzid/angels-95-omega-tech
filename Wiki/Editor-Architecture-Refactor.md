@@ -145,7 +145,7 @@ fields as it goes:
 |---|---|---|
 | B1 | placement / spawn — **done, and it was deletion not conversion** | 10 |
 | B2 | world graph — **done** (level list deferred to B5, it is a world *name*, not a selection) | 8 |
-| B3 | properties / surface / light | 8 |
+| B3 | surface / CSG / portal / reload / convert — **done** | 8 |
 | B4 | animation | 12 |
 | B5 | assets (texture, model, sound, heightmap) | 20 |
 
@@ -310,6 +310,65 @@ carry a world *name*, not a selection, and belong with the other asset/world
 operations in B5.
 
 Action fields: **49 → 40**. `test_editorbus` 46/46.
+
+### R2 B3 — surface, CSG, portal, reload, convert (8 fields)
+
+Converted to `ApplySurface`, `ResetSurface` (both a new `ed::SurfaceEdit`),
+`CsgPlace`/`CsgCommit` (a new `ed::CsgIntent`), `DeletePortal`, `ReloadMesh`,
+`ConvertToAnimated`.
+
+Two more live defects fixed on the way:
+
+- **`Reload` could reset an unrelated object's cache.** The handler read
+  `g_sel.index` and only checked `g_sel.type == SelType::MESH` *after* indexing, so
+  a Reload pressed while something else was selected called `GetMeshObject()` with
+  a foreign index. It now carries a `SelRef` and guards on the kind as well.
+- **`Convert to Animated` converted whatever was selected at drain time** rather
+  than the mesh whose button was pressed. Same shape of bug as the WorldGraph one.
+
+#### Decisions worth recording
+
+- **`actionApplyProperties` deliberately STAYS a field.** There is no target to
+  capture: the properties panel owns `propsTargetType` / `propsTargetIndex` itself
+  and is both the only writer and the only reader, so an event would add a queue
+  hop without adding a payload that could go stale. It converts in **R4**, when the
+  panel stops owning the target directly — which is the last reader of live panel
+  state. Recorded here so its absence is a decision, not an oversight.
+- **`SurfaceEdit` carries the mask, and `ResetSurface` posts a mask too.** The
+  viewport's `IDM_SURFACE_RESET` route previously set a bare bool, so it reset only
+  the last-clicked face and ignored the Shift multi-selection the dialog title
+  advertises ("(N Selected)"). It now rebuilds the mask from
+  `g_selectedSurfaces`, which is what both routes should have used.
+- **Surface events are drained in their own pass** (`g_editorSurfaceEvents`), not
+  the shared `g_editorFrameEvents`. Those handlers are the ones moving to
+  `Subsystems/SurfaceOps` in R4, and a separate pass means that move does not have
+  to reorder the selection dispatch.
+- **`CsgPlace` and `CsgCommit` stay separate kinds.** "Arm a primitive" resets the
+  ghost to a default box at the camera; "commit the ghost" reads the ghost as it is.
+  One merged event would either lose the reset or commit a brush nobody positioned.
+
+#### The `Ev::Count` sentinel earned its keep
+
+Adding `DeletePortal` made `test_editorbus` fail immediately:
+
+```
+FAIL  Ev::Count == named events + None (every Ev has a row above)
+```
+
+That is the anti-drift mechanism from R1 doing exactly its job on the first real
+use — a new event kind with no test row is a **failing suite**, not an untested
+path. It is the direct successor to `ID_PP_PORTALBROWSE` and `ID_BTN_GT_PREVIEW`,
+which sat declared, created and never handled for a long time.
+
+Action fields: **40 → 32**. `test_editorbus` 55/55.
+
+#### Process note: a brace-balance check is worth having
+
+Deleting the CSG handlers by line range left one `}` behind (the block's close was
+at 4769, the cut ran to 4768), which closed the render loop early. The symptom was
+a cascade of ~15 unrelated "expected constructor" errors 1,700 lines later. A
+five-line brace-count loop after every range deletion found it immediately, and is
+now part of the routine for the remaining batches.
 
 ## Verification
 

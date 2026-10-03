@@ -18,6 +18,8 @@ void mismatch(const char* fn, Ev kind) {
 const SpawnDesc kEmptySpawn{};
 const SelRef    kEmptySel{};
 const Selection kEmptySeln{};
+const SurfaceEdit kEmptySurf{};
+const CsgIntent   kEmptyCsg{};
 const Transform kEmptyXform{};
 const std::string kEmptyStr{};
 const LevelStateEdit kEmptyLevel{};
@@ -40,6 +42,18 @@ const Selection& Event::selection() const {
     if (const auto* v = std::get_if<Selection>(&data)) return *v;
     mismatch("selection", kind);
     return kEmptySeln;
+}
+
+const SurfaceEdit& Event::surface() const {
+    if (const auto* v = std::get_if<SurfaceEdit>(&data)) return *v;
+    mismatch("surface", kind);
+    return kEmptySurf;
+}
+
+const CsgIntent& Event::csg() const {
+    if (const auto* v = std::get_if<CsgIntent>(&data)) return *v;
+    mismatch("csg", kind);
+    return kEmptyCsg;
 }
 
 const Transform& Event::xform() const {

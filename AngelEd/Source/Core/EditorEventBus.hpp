@@ -65,6 +65,42 @@ struct LevelStateEdit {
     int gameType = 0;
 };
 
+// CSG sidebar intent.
+//
+// Split into "start placing this primitive" and "commit the current ghost with
+// this operation" because they are genuinely different: CsgPlace resets the ghost
+// to a default box at the camera, while CsgCommit reads whatever the ghost
+// currently is. Collapsing them into one event would either lose the reset or
+// commit a brush the user never positioned.
+struct CsgIntent {
+    int primitive = -1;   // 0=box 1=cyl 2=sph 3=pyr 4=pln
+    int operation = -1;   // CsgOp value; -1 means "use the ghost's current op"
+    bool solid = false;   // commit immediately as SOLID (Add/Solid buttons)
+
+    bool isPrimitive() const { return primitive >= 0; }
+    bool isCommit() const { return operation >= 0; }
+};
+
+// A per-face surface-properties edit.
+//
+// Deliberately captures the renderable, the face mask AND the working props. The
+// mask matters most: `ApplyToSelection` is a documented no-op on an empty mask
+// precisely so it can never mean "apply to all six faces", and a payload that
+// carried only "apply" would let the mask be read from whatever the panel shows
+// *now* instead of what the user was looking at when they clicked.
+struct SurfaceEdit {
+    int  renderable = -1;
+    uint32_t faceMask = 0;
+    uint32_t flags = 0;
+    float glowR = 0, glowG = 0, glowB = 0, glowScale = 1.0f;
+    float alpha = 1.0f, alphaCutoff = 0.0f;
+    float uvScaleU = 1.0f, uvScaleV = 1.0f, uvOffsetU = 0.0f, uvOffsetV = 0.0f;
+    float panU = 0.0f, panV = 0.0f;
+    int  texSlot = 0;
+
+    bool hasFaces() const { return faceMask != 0; }
+};
+
 // A complete selection, captured by value.
 //
 // This replaces FIVE separate action fields — actionSelectFromGraph plus its
@@ -90,16 +126,25 @@ enum class Ev : uint8_t {
     SpawnPawn, SpawnMesh, SpawnPickup, SpawnEmitter, SpawnZone,
     SpawnParticleEmitter, SpawnPathNode, SpawnWindZone, SpawnPlayerStart,
 
-    // CSG. Payload: SpawnDesc (kind = primitive, solid) then Transform.
+    // CSG. Payload: CsgIntent — isPrimitive() for CsgPlace, isCommit() for CsgCommit.
     CsgPlace, CsgCommit,
 
-    // World graph / level list. Payload: SelRef.
+    // Selection. Payload: Selection (see below) or SelRef.
     DeleteEntity, DuplicateEntity, SelectEntity, ApplyProperties,
+
+    // Portal deletion, deliberately NOT folded into DeleteEntity: it mutates
+    // ZoneManager::GetPortals(), a different container from the entity lists
+    // DeleteSelectedEntity understands, and its index space is a GetPortals index
+    // rather than an entity id. Keeping them apart stops the dispatcher treating
+    // one as the other.
+    DeletePortal,              // Payload: SelRef
 
     // Payload: std::string (world folder name).
     OpenWorld, LinkWorld,
 
-    // Surface. Payload: SelRef, then int faceMask + uint32_t flags via SpawnDesc.kind
+    // Surface. Payload: SurfaceEdit — carries the renderable, the face mask AND
+    // the working props, so an Apply cannot land on a different face selection than
+    // the one the dialog was showing.
     ApplySurface, ResetSurface,
 
     // Assets.
@@ -139,6 +184,8 @@ using Payload = std::variant<std::monostate,
                              std::string,
                              SelRef,
                              Selection,
+                             SurfaceEdit,
+                             CsgIntent,
                              SpawnDesc,
                              Transform,
                              LevelStateEdit>;
@@ -156,6 +203,8 @@ struct Event {
     const SpawnDesc& spawn() const;
     const SelRef&    sel()   const;
     const Selection& selection() const;
+    const SurfaceEdit& surface() const;
+    const CsgIntent&   csg() const;
     const Transform& xform() const;
     const std::string& str() const;
     const LevelStateEdit& level() const;
