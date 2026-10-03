@@ -144,7 +144,7 @@ fields as it goes:
 | Batch | Events | Fields |
 |---|---|---|
 | B1 | placement / spawn — **done, and it was deletion not conversion** | 10 |
-| B2 | world graph + level list | 8 |
+| B2 | world graph — **done** (level list deferred to B5, it is a world *name*, not a selection) | 8 |
 | B3 | properties / surface / light | 8 |
 | B4 | animation | 12 |
 | B5 | assets (texture, model, sound, heightmap) | 20 |
@@ -255,6 +255,61 @@ fields — which nothing else referenced.
 > consumer went with it. `grep` for the *handler*, not just the field.
 
 Action fields: **58 → 49** (9 `actionSpawn*` + `actionApplyLight` removed).
+
+### R2 B2 — the first real bus use, and it fixed a live bug
+
+Nine fields became four events (`SelectEntity`, `ApplyProperties`, `DeleteEntity`,
+`DuplicateEntity`), and the conversion surfaced a defect that was live in the
+editor right now:
+
+```cpp
+g_editorPanels.actionWorldGraphDelete = e.selIndex;          // writer
+...
+if (g_editorPanels.actionWorldGraphDelete >= 0) {
+    if (g_sel.type != SelType::NONE) DeleteSelectedEntity();  // reads g_sel, NOT the index
+```
+
+The index was written and never read. Delete and Duplicate acted on whatever
+`g_sel` was, which was correct **only** because the select field happened to be
+written in the same `WM_NOTIFY` — an ordering coincidence, not a guarantee. The
+same batch found:
+
+- **Two index spaces in three near-identically named fields.**
+  `actionWorldGraphProperties` held a ListView **row** index while
+  `actionWorldGraphDelete`/`Dup` held an **entity** index.
+- **`actionWorldGraphProperties` was never read at all.** Its handler just called
+  `OpenPropertiesForSelection()`, i.e. acted on `g_sel` too.
+- **One message spread over five fields.** `actionSelectFromGraph` plus its
+  `Type`/`Name`/`Pos[3]` satellites were written together and read together with
+  nothing coupling them, so a handler could read a new index against the previous
+  frame's type and position without noticing. Now one `ed::Selection`.
+
+`AdoptSelection()` takes the target from the event rather than from `g_sel`, which
+makes the ordering irrelevant instead of merely currently-fine.
+
+#### Decisions worth recording
+
+- **`ToBusKind(SelType)` is a switch, not a `static_cast`.** The two enums have
+  identical values so a cast would work — and would keep compiling after someone
+  adds a 15th `SelType`, silently mis-dispatching every event for it. A switch with
+  no `else` turns that omission into a compile error. It lives in `SelType.hpp`,
+  not in the bus, because that is the only place both enums are visible.
+- **The drain happens BEFORE dispatch**, and into a file-static vector. A handler
+  that opens a panel can post further events; draining while iterating the live
+  queue would dispatch those in the same frame.
+- **`e.selType < 0` is mapped to `SelKind::None`.** `sel::DEF_ONLY` (-1) is a
+  Script-Manager sentinel, not a `SelType`, and it means "no live target".
+  `AdoptSelection` then rejects it, so Properties/Delete on such a row does nothing
+  rather than acting on the previous selection.
+- **Unhandled events are counted** (`g_editorUnhandledEvents`), not ignored, so a
+  batch that posts an event nobody handles shows up as a counter rather than a
+  click that silently does nothing. Should be 0 once R2 completes.
+
+`actionLevelListOpen` / `actionLevelListLink` were **not** converted here: they
+carry a world *name*, not a selection, and belong with the other asset/world
+operations in B5.
+
+Action fields: **49 → 40**. `test_editorbus` 46/46.
 
 ## Verification
 

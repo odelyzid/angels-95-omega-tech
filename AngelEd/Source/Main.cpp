@@ -96,6 +96,16 @@ GameModels WDLModels;
 // SelType itself lives in SelType.hpp because it crosses the Main.cpp <->
 // Win32Dialogs.cpp boundary as a raw int on both sides.
 #include "SelType.hpp"
+#include "Core/EditorEventBus.hpp"
+
+// Events posted by the Win32 panels during the frame's message pump, drained at
+// the single dispatch point below. A file-static buffer rather than a local so
+// the drain cannot allocate during dispatch.
+static std::vector<ed::Event> g_editorFrameEvents;
+// Bumped by any event kind the dispatcher does not handle yet. Should be 0 once
+// R2 is complete; a non-zero value means a batch posted an event nobody consumes,
+// which is a silently dead click rather than a compile error.
+static int g_editorUnhandledEvents = 0;
 
 struct EditorSelection {
     SelType type = SelType::NONE;
@@ -804,6 +814,35 @@ static void OpenPropertiesForSelection() {
     g_editorPanels.propsTargetHasRotation = g_sel.hasRotation;
     ShowPropertiesPanel(true);
     EditorLog("Properties for %s idx=%d", g_sel.name.c_str(), g_sel.index);
+}
+
+// Adopt a bus event's captured selection as the live one.
+//
+// Returns false when the event named nothing selectable, so a caller can skip the
+// destructive action rather than applying it to whatever happens to be selected —
+// the exact failure the loose `action*` fields made possible, where
+// actionWorldGraphDelete stored an entity index that the handler then ignored.
+//
+// SelKind mirrors SelType one-for-one (see ToBusKind in SelType.hpp), so the cast
+// is safe; the switch there is what guarantees they cannot drift.
+static bool AdoptSelection(const ed::Selection& pick) {
+    if (!pick.valid()) return false;
+    g_sel.type = (SelType)pick.ref.kind;
+    g_sel.index = pick.ref.index;
+    g_sel.name = pick.name;
+    g_sel.pos = {pick.x, pick.y, pick.z};
+    EditorLog("Selected from WorldGraph: %s (type=%d idx=%d)",
+              g_sel.name.c_str(), (int)g_sel.type, g_sel.index);
+    // SelType::MAP is the level, not a placed object: it has no transform, so
+    // arming the gizmo would put a draggable handle at {0,0,0} that the Move tool
+    // then writes into g_sel.pos every frame. Only an instance selection gets one.
+    if (g_sel.type != SelType::MAP) {
+        OmegaTechEditor.DrawModel = true;
+        SnapGizmoToSelection(g_sel);
+    } else {
+        OmegaTechEditor.DrawModel = false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -3715,45 +3754,50 @@ if (g_editorPanels.showCollisionBounds) {
                        (Rectangle){(float)sbW, (float)tbH, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - tbH)}, (Vector2){0,0}, 0, WHITE);
         DrawFPS(GetScreenWidth() - 60, 36);
 
-        // WorldGraph selection handler â€” set g_sel from explorer double-click
-        if (g_editorPanels.actionSelectFromGraph >= 0) {
-            int idx = g_editorPanels.actionSelectFromGraph;
-            SelType selType = (SelType)g_editorPanels.actionSelectFromGraphType;
-            // The name and pos were set by the WorldGraph panel
-            g_sel.type = selType;
-            g_sel.index = idx;
-            g_sel.name = g_editorPanels.actionSelectFromGraphName;
-            g_sel.pos = {g_editorPanels.actionSelectFromGraphPos[0],
-                         g_editorPanels.actionSelectFromGraphPos[1],
-                         g_editorPanels.actionSelectFromGraphPos[2]};
-            g_editorPanels.actionSelectFromGraph = -1;
-            EditorLog("Selected from WorldGraph: %s (type=%d idx=%d)",
-                      g_sel.name.c_str(), (int)selType, idx);
-            // SelType::MAP is the level, not a placed object: it has no transform,
-            // so arming the gizmo would put a draggable handle at {0,0,0} that
-            // the Move tool then writes into g_sel.pos every frame. Only an
-            // instance selection gets a gizmo.
-            if (selType != SelType::MAP) {
-                OmegaTechEditor.DrawModel = true;
-                SnapGizmoToSelection(g_sel);
-            } else {
-                OmegaTechEditor.DrawModel = false;
+        // --- Event bus drain + dispatch (R2 batch B2) --------------------------
+        //
+        // Move the queue out here, BEFORE dispatching: a handler that opens a panel
+        // can post further events, and draining while iterating the live queue would
+        // let those be dispatched in the same frame.
+        ed::EventBus::instance().drain(g_editorFrameEvents);
+        //
+        // The single point where posted events are handled. Draining once per frame,
+        // after the Win32 message pump, is deliberate: a panel is mid-layout while it
+        // posts, so dispatching inline would mutate the world under a live dialog.
+        //
+        // What makes deferral safe is that every event carries its own target,
+        // captured at post time. The WorldGraph Delete/Duplicate used to store the
+        // clicked entity index and then IGNORE it, acting on whatever g_sel happened
+        // to be - correct only because the select field was written in the same
+        // notification. Reading the target off the event instead of off g_sel makes
+        // that ordering irrelevant.
+        for (const ed::Event& ev : g_editorFrameEvents) {
+            switch (ev.kind) {
+                case ed::Ev::SelectEntity:
+                    AdoptSelection(ev.selection());
+                    break;
+                case ed::Ev::ApplyProperties:
+                    // Adopt the event's own target rather than trusting g_sel, so
+                    // "Properties" always opens the row that was right-clicked even
+                    // if something else changed the selection in between.
+                    AdoptSelection(ev.selection());
+                    OpenPropertiesForSelection();
+                    break;
+                case ed::Ev::DeleteEntity:
+                    if (!AdoptSelection(ev.selection())) break;
+                    DeleteSelectedEntity();
+                    break;
+                case ed::Ev::DuplicateEntity:
+                    if (!AdoptSelection(ev.selection())) break;
+                    DuplicateSelectedEntity();
+                    break;
+                default:
+                    // B3..B5 add the remaining kinds. An unhandled event is counted
+                    // rather than ignored, so a batch that forgets a kind shows up as
+                    // a counter instead of a click that silently does nothing.
+                    g_editorUnhandledEvents++;
+                    break;
             }
-        }
-        // WorldGraph context menu: open properties
-        if (g_editorPanels.actionWorldGraphProperties >= 0) {
-            OpenPropertiesForSelection();
-            g_editorPanels.actionWorldGraphProperties = -1;
-        }
-        // WorldGraph context menu: delete
-        if (g_editorPanels.actionWorldGraphDelete >= 0) {
-            if (g_sel.type != SelType::NONE) DeleteSelectedEntity();
-            g_editorPanels.actionWorldGraphDelete = -1;
-        }
-        // WorldGraph context menu: duplicate
-        if (g_editorPanels.actionWorldGraphDup >= 0) {
-            if (g_sel.type != SelType::NONE) DuplicateSelectedEntity();
-            g_editorPanels.actionWorldGraphDup = -1;
         }
 
         // --- Surface Properties apply / reset ------------------------------

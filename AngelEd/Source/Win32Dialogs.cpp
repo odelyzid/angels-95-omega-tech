@@ -3398,52 +3398,57 @@ static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         // (the column), not iItem, so there is no portable row index to test.
         // BuildWorldGraphEntries therefore distinguishes it by label and by
         // leaving its position columns blank.
-        if (nm->idFrom == ID_WG_LIST && nm->code == NM_DBLCLK) {
+        if (nm->idFrom == ID_WG_LIST &&
+            (nm->code == NM_DBLCLK || nm->code == NM_RCLICK)) {
             int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (sel >= 0 && sel < (int)g_worldGraphEntries.size()) {
                 auto& e = g_worldGraphEntries[sel];
-                g_editorPanels.actionSelectFromGraph = e.selIndex;
-                g_editorPanels.actionSelectFromGraphType = e.selType;
-                g_editorPanels.actionSelectFromGraphName = e.name;
-                g_editorPanels.actionSelectFromGraphPos[0] = e.posX;
-                g_editorPanels.actionSelectFromGraphPos[1] = e.posY;
-                g_editorPanels.actionSelectFromGraphPos[2] = e.posZ;
-            }
-        }
-        if (nm->idFrom == ID_WG_LIST && nm->code == NM_RCLICK) {
-            // Right-click context menu
-            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-            if (sel >= 0 && sel < (int)g_worldGraphEntries.size()) {
-                auto& e = g_worldGraphEntries[sel];
-                // First select the entity (same as double-click)
-                g_editorPanels.actionSelectFromGraph = e.selIndex;
-                g_editorPanels.actionSelectFromGraphType = e.selType;
-                g_editorPanels.actionSelectFromGraphName = e.name;
-                g_editorPanels.actionSelectFromGraphPos[0] = e.posX;
-                g_editorPanels.actionSelectFromGraphPos[1] = e.posY;
-                g_editorPanels.actionSelectFromGraphPos[2] = e.posZ;
-                // Then show popup menu
-                HMENU hMenu = CreatePopupMenu();
-                AppendMenuA(hMenu, MF_STRING, 1001, "Properties");
-                // Delete/Duplicate are for placed objects only. Both handlers are
-                // `else if` chains with no `else`, so offering them on the Map row
-                // (the level) would silently deselect it and leave a no-op undo
-                // snapshot instead of failing visibly.
-                if (e.selType != sel::MAP) {
-                    AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
-                    AppendMenuA(hMenu, MF_STRING, 1002, "Delete");
-                    AppendMenuA(hMenu, MF_STRING, 1003, "Duplicate");
-                }
-                POINT pt;
-                GetCursorPos(&pt);
-                int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
-                DestroyMenu(hMenu);
-                if (cmd == 1001) {
-                    g_editorPanels.actionWorldGraphProperties = sel;
-                } else if (cmd == 1002) {
-                    g_editorPanels.actionWorldGraphDelete = e.selIndex;
-                } else if (cmd == 1003) {
-                    g_editorPanels.actionWorldGraphDup = e.selIndex;
+                // ONE event carries the whole selection. This used to be five
+                // fields (actionSelectFromGraph plus Type/Name/Pos[3]) written
+                // together and read together with nothing coupling them, so a
+                // handler could read a new index against the previous frame's
+                // type and position without noticing.
+                ed::Selection pick;
+                // WorldGraphEntry::selType is an int mirror of SelType (see SelType.hpp), and
+                // sel::DEF_ONLY (-1) means "a def with no world instance", which has
+                // no live target. Both of those collapse to None, which
+                // AdoptSelection() rejects — so a Properties/Delete on such a row
+                // does nothing instead of acting on the previous selection.
+                pick.ref = ed::SelRef{e.selType < 0 ? ed::SelKind::None
+                                                    : ToBusKind((SelType)e.selType),
+                                      e.selIndex};
+                pick.name = e.name;
+                pick.x = e.posX; pick.y = e.posY; pick.z = e.posZ;
+                ed::EventBus::instance().post(ed::Ev::SelectEntity, pick);
+
+                if (nm->code == NM_RCLICK) {
+                    HMENU hMenu = CreatePopupMenu();
+                    AppendMenuA(hMenu, MF_STRING, 1001, "Properties");
+                    // Delete/Duplicate are for placed objects only. Both handlers are
+                    // `else if` chains with no `else`, so offering them on the Map row
+                    // (the level) would silently deselect it and leave a no-op undo
+                    // snapshot instead of failing visibly.
+                    if (e.selType != sel::MAP) {
+                        AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
+                        AppendMenuA(hMenu, MF_STRING, 1002, "Delete");
+                        AppendMenuA(hMenu, MF_STRING, 1003, "Duplicate");
+                    }
+                    POINT pt;
+                    GetCursorPos(&pt);
+                    int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
+                    DestroyMenu(hMenu);
+                    // Each of these posts the SAME captured selection, so the
+                    // target is fixed at click time. Previously Delete/Duplicate
+                    // stored e.selIndex and then the handler ignored it, acting on
+                    // whatever g_sel happened to be — correct only because the
+                    // select field was set in the same notification.
+                    if (cmd == 1001) {
+                        ed::EventBus::instance().post(ed::Ev::ApplyProperties, pick);
+                    } else if (cmd == 1002) {
+                        ed::EventBus::instance().post(ed::Ev::DeleteEntity, pick);
+                    } else if (cmd == 1003) {
+                        ed::EventBus::instance().post(ed::Ev::DuplicateEntity, pick);
+                    }
                 }
             }
         }

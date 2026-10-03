@@ -70,6 +70,38 @@ static void test_wrong_shape_is_inert() {
 // the delete landed on a different entity. Portal delete already had to be
 // defended by hand for this in b88. Capturing the target with the event makes it
 // impossible by construction.
+// One Selection replaces the five fields the WorldGraph used to split a single
+// message across: actionSelectFromGraph plus its Type/Name/Pos[3] satellites.
+// They were written together and read together with nothing coupling them, and
+// THREE of them carried TWO different index spaces (a ListView row index vs an
+// entity index) in near-identically named fields - one of which
+// (actionWorldGraphProperties) was written and then never read at all.
+static void test_selection_is_one_atomic_message() {
+    Selection s;
+    s.ref = SelRef{SelKind::Mesh, 12};
+    s.name = "GameEngine.Mesh/crate.glb";
+    s.x = 1.0f; s.y = 2.0f; s.z = 3.0f;
+    Event e = Event::make(Ev::SelectEntity, s);
+
+    check(e.selection().ref.index == 12, "Selection carries the entity index");
+    check(e.selection().ref.kind == SelKind::Mesh, "Selection carries the kind");
+    check(e.selection().name == "GameEngine.Mesh/crate.glb", "Selection carries the name");
+    check(e.selection().x == 1.0f && e.selection().z == 3.0f, "Selection carries the position");
+    check(e.selection().valid(), "a fully populated Selection is valid");
+
+    // target() must unwrap both selection-shaped payloads, because the dispatcher
+    // uses it to staleness-check an event without knowing which it holds.
+    check(e.target().index == 12, "target() unwraps a Selection payload");
+    SelRef bare{SelKind::Zone, 4};
+    check(Event::make(Ev::DeleteEntity, bare).target().index == 4,
+          "target() unwraps a SelRef payload too");
+
+    Selection empty;
+    check(!empty.valid(), "a default Selection is not valid");
+    check(!Event::make(Ev::SelectEntity, empty).target().valid(),
+          "target() of an empty Selection is invalid, so the dispatcher can skip it");
+}
+
 static void test_target_is_captured_not_looked_up() {
     SelRef atClickTime{SelKind::Zone, 7};
     Event e = Event::make(Ev::DeleteEntity, atClickTime);
@@ -213,6 +245,7 @@ static void test_selkind_covers_seltype() {
 int main() {
     printf("EditorEventBus tests:\n");
     test_typed_payloads();
+    test_selection_is_one_atomic_message();
     test_wrong_shape_is_inert();
     test_target_is_captured_not_looked_up();
     test_fifo_drain();

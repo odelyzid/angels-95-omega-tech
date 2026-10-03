@@ -60,6 +60,12 @@ $(BUILD_DIR):
 $(BUILD_DIR)/Main.o: Source/Main.cpp Source/*.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Main.cpp -o $@
 
+# The editor event bus (AngelEd/Source/Core/). Only linked here because R2; it has
+# no other consumer in the editor yet. Kept as its own object rather than folded
+# into Main.o so the Makefile and ci.yml lists match one-for-one.
+$(BUILD_DIR)/EditorEventBus.o: Source/Core/EditorEventBus.cpp Source/Core/EditorEventBus.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Core/EditorEventBus.cpp -o $@
+
 # 2. Compile Win32 Dialog support (Windows only)
 $(BUILD_DIR)/Win32Dialogs.o: Source/Win32Dialogs.cpp Source/Win32Dialogs.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Win32Dialogs.cpp -o $@
@@ -191,7 +197,7 @@ CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DI
 $(BUILD_DIR)/AngelEd.res: AngelEd.rc ../GameData/Global/Icon/angelEd.ico | $(BUILD_DIR)
 	windres AngelEd.rc -O coff -o $@
 
-EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
+EDITOR_OBJS := $(BUILD_DIR)/raygui.o $(BUILD_DIR)/Main.o $(BUILD_DIR)/EditorEventBus.o $(BUILD_DIR)/EditorIcons.o $(BUILD_DIR)/AngelEd.res $(addprefix $(BUILD_DIR)/,$(WIN32_OBJS)) $(LIGHTNING_OBJS) $(CORE_OBJS)
 AngelEd: $(EDITOR_OBJS) $(BUILD_DIR)/Custom.so
 	$(COMP) $(LDEXTRA) $(EDITOR_OBJS) -o AngelEd $(CFLAGS) -L$(BUILD_DIR) -l:Custom.so $(LDFLAGS) -Wl,-rpath=$(BUILD_DIR)
 

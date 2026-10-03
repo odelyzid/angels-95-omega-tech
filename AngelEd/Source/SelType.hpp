@@ -47,9 +47,10 @@ enum class SelType {
 };
 
 // Named constants for the `int` mirrors (`WorldGraphEntry::selType`,
-// `EditorPanelState::propsTargetType`, `actionSelectFromGraphType`). Spelling the
-// value at both ends is the whole point: a bare `13` in a comparison is exactly
-// the drift this header removes.
+// `EditorPanelState::propsTargetType`). Spelling the value at both ends is the
+// whole point: a bare `13` in a comparison is exactly the drift this header
+// removes. `actionSelectFromGraphType` used to be a third mirror and is now an
+// ed::Selection, so it is bridged by ToBusKind() below instead.
 namespace sel {
 constexpr int NONE     = static_cast<int>(SelType::NONE);
 constexpr int BRUSH    = static_cast<int>(SelType::BRUSH);
@@ -70,3 +71,43 @@ constexpr int MAP      = static_cast<int>(SelType::MAP);
 // per-instance rows at all.
 constexpr int DEF_ONLY = -1;
 } // namespace sel
+
+// ---------------------------------------------------------------------------
+// SelType -> ed::SelKind
+//
+// The event bus carries its OWN SelKind enum because EditorEventBus.hpp must stay
+// raylib-free and independent of the editor's headers. The two enums have
+// identical values, so the mapping could be a `static_cast` — which is exactly
+// why it is a switch instead. `static_cast<ed::SelKind>(someInt)` would keep
+// compiling after someone adds a 15th SelType, and every event for that new type
+// would silently arrive with the wrong kind: no diagnostic, wrong entity acted
+// on. A switch has no `else` that compiles, so the omission is a compile error.
+//
+// `NONE` maps to `None`, and `sel::DEF_ONLY` (-1) is NOT a SelType value, so it
+// falls through to `None` as well. Both mean "no live target", which is what the
+// dispatcher needs in order to skip the staleness check.
+// ---------------------------------------------------------------------------
+#include "Core/EditorEventBus.hpp"
+
+inline ed::SelKind ToBusKind(SelType t) {
+    switch (t) {
+        case SelType::NONE:     return ed::SelKind::None;
+        case SelType::BRUSH:    return ed::SelKind::Brush;
+        case SelType::MODEL:    return ed::SelKind::Model;
+        case SelType::NPC:      return ed::SelKind::Npc;
+        case SelType::PICKUP:   return ed::SelKind::Pickup;
+        case SelType::LIGHT:    return ed::SelKind::Light;
+        case SelType::ZONE:     return ed::SelKind::Zone;
+        case SelType::SPAWN:    return ed::SelKind::Spawn;
+        case SelType::PORTAL:   return ed::SelKind::Portal;
+        case SelType::MESH:     return ed::SelKind::Mesh;
+        case SelType::PARTICLE: return ed::SelKind::Particle;
+        case SelType::PATHNODE: return ed::SelKind::PathNode;
+        case SelType::WINDZONE: return ed::SelKind::WindZone;
+        case SelType::MAP:      return ed::SelKind::Map;
+    }
+    // Unreachable while the switch is exhaustive, which is the point. -Wswitch
+    // turns a future unhandled SelType into a warning here before it becomes a
+    // silent mis-dispatch in the dispatcher.
+    return ed::SelKind::None;
+}

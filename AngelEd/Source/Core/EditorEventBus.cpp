@@ -17,6 +17,7 @@ void mismatch(const char* fn, Ev kind) {
 
 const SpawnDesc kEmptySpawn{};
 const SelRef    kEmptySel{};
+const Selection kEmptySeln{};
 const Transform kEmptyXform{};
 const std::string kEmptyStr{};
 const LevelStateEdit kEmptyLevel{};
@@ -33,6 +34,12 @@ const SelRef& Event::sel() const {
     if (const auto* v = std::get_if<SelRef>(&data)) return *v;
     mismatch("sel", kind);
     return kEmptySel;
+}
+
+const Selection& Event::selection() const {
+    if (const auto* v = std::get_if<Selection>(&data)) return *v;
+    mismatch("selection", kind);
+    return kEmptySeln;
 }
 
 const Transform& Event::xform() const {
@@ -55,6 +62,7 @@ const LevelStateEdit& Event::level() const {
 
 SelRef Event::target() const {
     if (const auto* v = std::get_if<SelRef>(&data)) return *v;
+    if (const auto* v = std::get_if<Selection>(&data)) return v->ref;
     return SelRef{};
 }
 

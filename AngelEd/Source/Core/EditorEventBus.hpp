@@ -65,6 +65,24 @@ struct LevelStateEdit {
     int gameType = 0;
 };
 
+// A complete selection, captured by value.
+//
+// This replaces FIVE separate action fields — actionSelectFromGraph plus its
+// Type/Name/Pos[3] satellites — which were written together and read together,
+// but were not coupled by anything: a handler could read the new index with the
+// previous frame's type and position and never notice.
+//
+// It also fixes the index-space confusion the WorldGraph had: its Properties
+// entry stored a LIST ROW index while Delete/Duplicate stored an ENTITY index, in
+// fields with near-identical names. One type, one index space.
+struct Selection {
+    SelRef    ref;
+    std::string name;
+    float x = 0, y = 0, z = 0;
+
+    bool valid() const { return ref.valid(); }
+};
+
 enum class Ev : uint8_t {
     None = 0,
 
@@ -120,6 +138,7 @@ using Payload = std::variant<std::monostate,
                              bool,
                              std::string,
                              SelRef,
+                             Selection,
                              SpawnDesc,
                              Transform,
                              LevelStateEdit>;
@@ -136,6 +155,7 @@ struct Event {
     // class of bug the loose fields could not even represent.
     const SpawnDesc& spawn() const;
     const SelRef&    sel()   const;
+    const Selection& selection() const;
     const Transform& xform() const;
     const std::string& str() const;
     const LevelStateEdit& level() const;
@@ -143,6 +163,7 @@ struct Event {
     // The target this event names, or None when it is not selection-scoped.
     // Used by the dispatcher to reject a stale event against the live selection
     // rather than silently acting on whatever happens to be selected.
+    // Handles BOTH SelRef and Selection payloads.
     SelRef target() const;
 };
 

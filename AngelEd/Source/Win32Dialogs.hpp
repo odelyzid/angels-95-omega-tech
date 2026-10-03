@@ -137,9 +137,17 @@ struct EditorPanelState {
     int terrainBrushSize = 4;       // radius in grid cells
     float terrainBrushStrength = 0.05f; // height change per click [0..1]
     int actionCsgCommitNow = -1; // CSG operation to place immediately (-1 = inactive)
-    int actionWorldGraphProperties = -1; // WorldGraph item index to open properties
-    int actionWorldGraphDelete = -1; // WorldGraph entity index to delete
-    int actionWorldGraphDup = -1;    // WorldGraph entity index to duplicate
+    // actionWorldGraphProperties / actionWorldGraphDelete / actionWorldGraphDup and
+    // the five actionSelectFromGraph* fields are GONE — they became ed::Event
+    // SelectEntity / ApplyProperties / DeleteEntity / DuplicateEntity (R2 batch B2).
+    //
+    // That batch also fixed a live bug: Delete and Duplicate stored the clicked
+    // entity index and then IGNORED it, calling DeleteSelectedEntity() against
+    // whatever g_sel happened to be. That was correct only because the select field
+    // was written in the same WM_NOTIFY. The two also used different index spaces
+    // (actionWorldGraphProperties held a ListView ROW, the others an ENTITY), and
+    // Properties was never read at all — the handler just called
+    // OpenPropertiesForSelection(), i.e. acted on g_sel too.
 
     // Active texture tracking (for context menu apply + auto-apply)
     std::string activeTexturePath;   // currently selected texture in browser
@@ -148,10 +156,7 @@ struct EditorPanelState {
 
     // WorldGraph Explorer
     bool showWorldGraph = false;
-    int actionSelectFromGraph = -1;         // item index selected
-    int actionSelectFromGraphType = -1;     // SelType encoded
-    std::string actionSelectFromGraphName;
-    float actionSelectFromGraphPos[3] = {0,0,0};
+    // (the actionSelectFromGraph* fields moved to ed::Event SelectEntity — see above)
 
     // LevelList / Campaign panel
     bool showLevelList = false;
