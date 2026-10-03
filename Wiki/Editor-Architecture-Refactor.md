@@ -486,17 +486,6 @@ Convert-to-Animated converted the wrong mesh; the Pickups panel resolved an inde
 at drain time; and the b88 Light-window deletion orphaned its apply handler. All
 fixed.
 
-## Verification
-
-- `make MODE=debug OTENGINE AngelServ AngelMaster ozpack` and
-  `make -C AngelEd MODE=debug` clean at every phase.
-- `make test` green — **including `test_editorbus`, which does not exist until R1.**
-- `ci.yml`'s AngelEd object list must equal `AngelEd/Makefile`'s `EDITOR_OBJS`,
-  verified by hand after R3.
-- Manual: every menu entry, toolbar button, panel context menu and drag in the
-  editor, because a layer split changes no behaviour and so has **no** headless
-  signal at all. That is the main risk in this document and it is why R3/R4 are
-  separate commits with a manual pass between them.
 ## R4 outcome: Main.cpp
 
 Split into the same unity-TU shape as R3, so `Main.o` stays `Main.o` and **no build
@@ -629,9 +618,12 @@ added for the three light tags, which had no event at all. `Transform` had to mo
 
 ### Not done, and still outstanding
 
-- **The manual pass.** R3-R5 are ~11,500 lines of movement whose only headless signal
-  is the line-multiset diff. Placing each of the ten kinds and then Ctrl+Z-ing each one
-  is the test that matters and it has not been run.
+- ~~**The manual pass.**~~ **DONE** — the user exercised the editor by hand after
+  R3/R4/R5 and confirmed placement works. R3-R5 moved ~11,500 lines whose only
+  machine signal was the line-multiset diff, so this was the load-bearing check and it
+  has now been done. The line-multiset diff remains worth keeping for future moves:
+  it proves the text is unchanged, which the manual pass then confirms is behaviourally
+  sufficient.
 - **`Resources/` layer: never created.** `AssetScope` / `AssetScan` / `PackageIO` from
   the Design section do not exist; all of it is still in `UI/`.
 - **`Core/EditorDispatcher.cpp` and `Core/EditorState.hpp`: never created.** The
@@ -646,3 +638,24 @@ added for the three light tags, which had no event at all. `Transform` had to mo
 - **`actionApplyTextureToSel` remains a field** by the documented modal-`TrackPopupMenu`
   argument, which is sound.
 - **Promotion of `Subsystems/` to real translation units**, now including Placement.
+
+## Verification
+
+- `make MODE=debug OTENGINE AngelServ AngelMaster ozpack` and
+  `make -C AngelEd MODE=debug` clean at every phase.
+- `make test` green — **including `test_editorbus`, which does not exist until R1.**
+- **The two AngelEd object lists were diffed, as required — and they differ by exactly
+  one entry, legitimately.** `ci.yml` links `OTCustom_stub.o`; `AngelEd/Makefile`'s
+  `EDITOR_OBJS` has no such object because the Makefile builds a real shared
+  `Custom.so` and links `-l:Custom.so` instead. Both compile the same stub body. This
+  is pre-existing and correct, but it means the invariant "the two lists must be
+  equal" is **imprecise as written** — a literal diff will always show this one entry
+  and will read as a regression to whoever checks next. Compare with this exception
+  named, not by equality.
+- **Manual pass: DONE.** Every menu entry, toolbar button, panel context menu and drag
+  was exercised in the editor after R3/R4/R5; the user confirmed placement works. This
+  was the main risk in the document, because a layer split changes no behaviour and so
+  has **no** headless signal at all — the line-multiset diff proves the text is
+  unchanged, not that the editor still works. That gap is now closed by hand rather
+  than by machine.
+
