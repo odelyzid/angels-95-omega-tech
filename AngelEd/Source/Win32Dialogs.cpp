@@ -5899,6 +5899,34 @@ static void PopulateAnimPanel(HWND hwnd, HWND hList, HWND hTime, HWND hFps, HWND
     }
 }
 
+// Build an AnimIntent from the panel's CURRENT state and post it.
+//
+// `hwnd` is unused today but keeps the signature honest: reading fps/loop straight
+// off the controls rather than off the mirrored g_editorPanels fields removes the
+// possibility of posting an intent built from values the panel has already moved
+// past. Pass nullptr where there is no control to read (keyboard shortcuts).
+static void PostAnimIntent(ed::Ev kind, HWND hwnd) {
+    ed::AnimIntent ai;
+    ai.meshId   = g_editorPanels.animTargetMesh;
+    ai.clipName = g_editorPanels.animClipName;
+    ai.time     = g_editorPanels.animTime;
+    ai.fps      = g_editorPanels.animFps;
+    ai.loop     = g_editorPanels.animLoop;
+    if (hwnd) {
+        HWND hFps = GetDlgItem(hwnd, ID_AN_FPS);
+        if (hFps) {
+            char b[32] = {0};
+            GetWindowTextA(hFps, b, 32);
+            const float v = (float)atof(b);
+            if (v > 0.0f) ai.fps = v;
+        }
+        HWND hLoop = GetDlgItem(hwnd, ID_AN_LOOP);
+        if (hLoop)
+            ai.loop = SendMessage(hLoop, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    }
+    ed::EventBus::instance().post(kind, ai);
+}
+
 static LRESULT CALLBACK AnimPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     static HWND hList, hTime, hFps, hStatus, hLoop, hEditBtn;
     switch (msg) {
@@ -5946,7 +5974,15 @@ static LRESULT CALLBACK AnimPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if ((HWND)l == hTime) {
             int pos = (int)SendMessage(hTime, SBM_GETPOS, 0, 0);
             g_editorPanels.animTimeSlider = pos;
-            g_editorPanels.actionAnimScrub = true;
+            // Scrub is a continuous signal, but posting it is still better than a
+            // sticky flag: the value travels with the event, so a drag that ends
+            // and a second drag that starts cannot collapse into one write of the
+            // LAST position seen rather than each position passed through.
+            ed::AnimIntent ai;
+            ai.meshId   = g_editorPanels.animTargetMesh;
+            ai.clipName = g_editorPanels.animClipName;
+            ai.time     = pos / 1000.0f;
+            ed::EventBus::instance().post(ed::Ev::AnimScrub, ai);
         }
         break;
     }
@@ -5964,16 +6000,21 @@ static LRESULT CALLBACK AnimPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             }
             break;
         }
-        if (id == ID_AN_NEW)    { g_editorPanels.actionAnimNewClip = true; break; }
-        if (id == ID_AN_DELETE) { g_editorPanels.actionAnimDeleteClip = true; break; }
+        if (id == ID_AN_NEW)    { PostAnimIntent(ed::Ev::AnimNewClip, hwnd); break; }
+        if (id == ID_AN_DELETE) { PostAnimIntent(ed::Ev::AnimDeleteClip, hwnd); break; }
+        // Save stays a FIELD on purpose. The anim handlers set actionAnimSave
+        // themselves (NewClip, DeleteClip, ApplyClipMeta all do) and the consumer
+        // runs later in the SAME frame, so the file write is part of the command
+        // chain rather than an independent user action. Queueing it would push the
+        // write a frame later for no benefit.
         if (id == ID_AN_SAVE)   { g_editorPanels.actionAnimSave = true; break; }
-        if (id == ID_AN_ADDKEY) { g_editorPanels.actionAnimAddKey = true; break; }
-        if (id == ID_AN_DELKEY) { g_editorPanels.actionAnimDeleteKey = true; break; }
-        if (id == ID_AN_EDITVERTS) { g_editorPanels.actionAnimToggleEdit = true; break; }
-        if (id == ID_AN_UNDO)   { g_editorPanels.actionAnimUndo = true; break; }
-        if (id == ID_AN_REDO)   { g_editorPanels.actionAnimRedo = true; break; }
-        if (id == ID_AN_SELALL) { g_editorPanels.actionAnimSelectAll = true; break; }
-        if (id == ID_AN_CLRSEL) { g_editorPanels.actionAnimClearSel = true; break; }
+        if (id == ID_AN_ADDKEY) { PostAnimIntent(ed::Ev::AnimAddKey, hwnd); break; }
+        if (id == ID_AN_DELKEY) { PostAnimIntent(ed::Ev::AnimDeleteKey, hwnd); break; }
+        if (id == ID_AN_EDITVERTS) { PostAnimIntent(ed::Ev::AnimToggleEdit, hwnd); break; }
+        if (id == ID_AN_UNDO)   { PostAnimIntent(ed::Ev::AnimUndo, hwnd); break; }
+        if (id == ID_AN_REDO)   { PostAnimIntent(ed::Ev::AnimRedo, hwnd); break; }
+        if (id == ID_AN_SELALL) { PostAnimIntent(ed::Ev::AnimSelectAll, hwnd); break; }
+        if (id == ID_AN_CLRSEL) { PostAnimIntent(ed::Ev::AnimClearSelection, hwnd); break; }
         if (id == ID_AN_PLAY)   { g_editorPanels.animPlaying = true;  g_editorPanels.actionAnimRefresh = true; break; }
         if (id == ID_AN_PAUSE)  { g_editorPanels.animPlaying = false; break; }
         if (id == ID_AN_STOP)   { g_editorPanels.animPlaying = false; g_editorPanels.animTime = 0.0f; g_editorPanels.actionAnimRefresh = true; break; }
@@ -5982,13 +6023,13 @@ static LRESULT CALLBACK AnimPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             GetWindowTextA(hFps, b, 32);
             float v = (float)atof(b);
             if (v > 0.0f) g_editorPanels.animFps = v;
-            g_editorPanels.actionAnimApplyClipMeta = true;
+            PostAnimIntent(ed::Ev::AnimApplyClipMeta, hwnd);
             break;
         }
         if (id == ID_AN_LOOP && HIWORD(w) == BN_CLICKED) {
             g_editorPanels.animLoop =
                 SendMessage(GetDlgItem(hwnd, ID_AN_LOOP), BM_GETCHECK, 0, 0) == BST_CHECKED;
-            g_editorPanels.actionAnimApplyClipMeta = true;
+            PostAnimIntent(ed::Ev::AnimApplyClipMeta, hwnd);
             break;
         }
         break;

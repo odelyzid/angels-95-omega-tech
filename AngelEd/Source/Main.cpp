@@ -107,6 +107,11 @@ static std::vector<ed::Event> g_editorFrameEvents;
 // g_editorFrameEvents so this batch's handlers can be moved into
 // Subsystems/SurfaceOps during R4 without reordering the selection dispatch.
 static std::vector<ed::Event> g_editorSurfaceEvents;
+// Animation commands, drained and dispatched by ApplyAnimIntents. Separate pass
+// for the same reason as the surface one: that function is moving to
+// Subsystems/AnimEditing in R4 and should not have to be interleaved with the
+// selection dispatch.
+static std::vector<ed::Event> g_editorAnimEvents;
 // Bumped by any event kind the dispatcher does not handle yet. Should be 0 once
 // R2 is complete; a non-zero value means a batch posted an event nobody consumes,
 // which is a silently dead click rather than a compile error.
@@ -2063,6 +2068,190 @@ static void AnimRedo() {
     AnimRestore(s);
 }
 
+// ---------------------------------------------------------------------------
+// ApplyAnimIntents — R2 batch B4
+//
+// Every animation command the panel posts, dispatched from one place. Each intent
+// carries the clip name, playhead and fps/loop captured when the button was
+// pressed; previously the handlers read `animClipName` and `animTime` from live
+// panel state at drain time, so a clip-list selection that moved between the click
+// and the frame deleted or keyed a DIFFERENT clip. That is the same staleness
+// class as the WorldGraph index bug, and easier to hit here because a list
+// selection changes on every click.
+//
+// `AnimTarget()`, `AnimSnapshotPush()` and the undo stack still resolve the
+// CURRENT target internally, so the mesh id carried in an intent cannot yet be
+// threaded through them. Rather than leave that silent, a mismatch is detected and
+// reported: the command is skipped and logged instead of landing on whatever mesh
+// happens to be selected. Subsystems/AnimEditing in R4 threads the id properly.
+// ---------------------------------------------------------------------------
+static void ApplyAnimIntents(const std::vector<ed::Event>& events) {
+    for (const ed::Event& ev : events) {
+        const ed::AnimIntent& ai = ev.anim();
+
+        // Scrub is special: it addresses the target directly and is a continuous
+        // signal, so it neither needs nor wants the target-mismatch guard below.
+        if (ev.kind == ed::Ev::AnimScrub) {
+            MeshObjectNode* tn = PawnSystem::Instance().GetMeshObject(ai.meshId);
+            if (!tn || tn->animFile.empty()) continue;
+            const float dur = AnimDuration();
+            // ai.time is the slider position 0..1, captured at post time.
+            g_editorPanels.animTime = (dur > 0.0f) ? ai.time * dur : 0.0f;
+            tn->animTime = g_editorPanels.animTime;
+            g_editorPanels.animPlaying = false;
+            continue;
+        }
+
+        if (ai.meshId >= 0 && ai.meshId != g_editorPanels.animTargetMesh) {
+            EditorLog("Anim: command skipped, target moved (event=%d was for %d, now %d)",
+                      (int)ev.kind, ai.meshId, g_editorPanels.animTargetMesh);
+            continue;
+        }
+        oz::AnimatedMesh* am = AnimTarget();
+
+        switch (ev.kind) {
+            case ed::Ev::AnimNewClip: {
+                if (!am) break;
+                static int s_clipN = 1;
+                AnimSnapshotPush();
+                ozanim::Clip c;
+                c.name = "Clip" + std::to_string(s_clipN++);
+                c.fps  = ai.fps > 0.0f ? ai.fps : 30.0f;
+                c.loop = ai.loop;
+                am->MutableAnimation().clips.push_back(c);
+                g_editorPanels.animClipName = c.name;
+                g_editorPanels.animTime = 0.0f;
+                g_editorPanels.actionAnimSave = true;
+                break;
+            }
+            case ed::Ev::AnimDeleteClip: {
+                if (!am) break;
+                auto& clips = am->MutableAnimation().clips;
+                // The clip NAME from the event, not the live panel field.
+                int idx = am->FindClip(ai.clipName);
+                if (idx >= 0 && idx < (int)clips.size()) {
+                    AnimSnapshotPush();
+                    clips.erase(clips.begin() + idx);
+                    g_editorPanels.animClipName = clips.empty() ? "" : clips.front().name;
+                    g_editorPanels.animTime = 0.0f;
+                    g_editorPanels.actionAnimSave = true;
+                }
+                break;
+            }
+            case ed::Ev::AnimApplyClipMeta: {
+                if (!am) break;
+                if (ozanim::Clip* c = am->MutableAnimation().FindClip(ai.clipName)) {
+                    if (ai.fps > 0.0f) c->fps = ai.fps;
+                    c->loop = ai.loop;
+                    g_editorPanels.actionAnimSave = true;
+                }
+                break;
+            }
+            case ed::Ev::AnimAddKey: {
+                if (!am) break;
+                MeshObjectNode* kn = PawnSystem::Instance().GetMeshObject(ai.meshId);
+                ozanim::Clip* c = am->MutableAnimation().FindClip(ai.clipName);
+                if (!c) break;
+                AnimSnapshotPush();
+                const float t = ai.time;
+                ozanim::Keyframe* kf = nullptr;
+                for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
+                if (!kf) {
+                    ozanim::Keyframe k; k.time = t;
+                    c->keys.push_back(k);
+                    std::sort(c->keys.begin(), c->keys.end(),
+                              [](const ozanim::Keyframe& a, const ozanim::Keyframe& b) { return a.time < b.time; });
+                    for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
+                }
+                if (kf) {
+                    const int vc = am->TotalVertexCount();
+                    // Source offsets: the live edit pose when editing, else the sample.
+                    std::vector<float> sampled;
+                    std::vector<float>* offs = nullptr;
+                    if (kn && kn->editPose) offs = kn->editPose.get();
+                    else { c->SampleOffsets(t, vc, sampled); offs = &sampled; }
+
+                    std::vector<int> verts;
+                    if (g_editorPanels.animEditVerts && !g_editorPanels.animSelVerts.empty())
+                        verts = g_editorPanels.animSelVerts;
+                    else for (int i = 0; i < vc; i++) verts.push_back(i);
+
+                    for (int vi : verts) {
+                        if (vi < 0 || vi >= vc) continue;
+                        const float dx = (*offs)[vi * 3 + 0];
+                        const float dy = (*offs)[vi * 3 + 1];
+                        const float dz = (*offs)[vi * 3 + 2];
+                        kf->offsets.erase(std::remove_if(kf->offsets.begin(), kf->offsets.end(),
+                            [vi](const ozanim::VertexOffset& o) { return o.index == vi; }),
+                            kf->offsets.end());
+                        if (fabsf(dx) > 1e-5f || fabsf(dy) > 1e-5f || fabsf(dz) > 1e-5f)
+                            kf->offsets.push_back({vi, dx, dy, dz});
+                    }
+                    std::sort(kf->offsets.begin(), kf->offsets.end(),
+                              [](const ozanim::VertexOffset& a, const ozanim::VertexOffset& b) { return a.index < b.index; });
+                }
+                g_editorPanels.actionAnimSave = true;
+                break;
+            }
+            case ed::Ev::AnimDeleteKey: {
+                if (!am) break;
+                ozanim::Clip* c = am->MutableAnimation().FindClip(ai.clipName);
+                if (!c) break;
+                AnimSnapshotPush();
+                int best = -1; float bd = 1e9f;
+                for (int i = 0; i < (int)c->keys.size(); i++) {
+                    const float d = fabsf(c->keys[i].time - ai.time);
+                    if (d < bd) { bd = d; best = i; }
+                }
+                if (best >= 0 && bd < 0.05f) c->keys.erase(c->keys.begin() + best);
+                g_editorPanels.actionAnimSave = true;
+                break;
+            }
+            case ed::Ev::AnimToggleEdit: {
+                MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(ai.meshId);
+                if (!n || !am) break;
+                if (!g_editorPanels.animEditVerts) {
+                    std::vector<float> offs((size_t)am->TotalVertexCount() * 3, 0.0f);
+                    if (const ozanim::Clip* c = am->GetAnimation().FindClip(ai.clipName))
+                        c->SampleOffsets(ai.time, am->TotalVertexCount(), offs);
+                    n->editPose = std::make_shared<std::vector<float>>(std::move(offs));
+                    n->animPaused = true;
+                    g_editorPanels.animEditVerts = true;
+                    g_editorPanels.animSelVerts.clear();
+                    g_animUndo.clear();
+                    g_animRedo.clear();
+                    g_editorPanels.animPrevValid = false;
+                } else {
+                    n->editPose.reset();
+                    g_editorPanels.animEditVerts = false;
+                    g_editorPanels.animSelVerts.clear();
+                }
+                g_editorPanels.actionAnimRefresh = true;
+                break;
+            }
+            case ed::Ev::AnimSelectAll: {
+                if (!g_editorPanels.animEditVerts || !am) break;
+                g_editorPanels.animSelVerts.clear();
+                for (int i = 0; i < am->TotalVertexCount(); i++)
+                    g_editorPanels.animSelVerts.push_back(i);
+                break;
+            }
+            case ed::Ev::AnimClearSelection:
+                g_editorPanels.animSelVerts.clear();
+                break;
+            case ed::Ev::AnimUndo:
+                AnimUndo();
+                g_editorPanels.actionAnimRefresh = true;
+                break;
+            case ed::Ev::AnimRedo:
+                AnimRedo();
+                g_editorPanels.actionAnimRefresh = true;
+                break;
+            default:
+                break;
+        }
+    }
+}
 // ---------------------------------------------------------------------------
 // Editor History â€” full-document undo/redo via OZONE text snapshots.
 // A snapshot captures geometry, entities, level metadata and the heightmap
@@ -4408,111 +4597,18 @@ if (g_editorPanels.showCollisionBounds) {
                 EditorLog("Convert: select a GameEngine.Mesh with no anim file");
             }
         }
-        // New / delete clip
-        if (g_editorPanels.actionAnimNewClip) {
-            g_editorPanels.actionAnimNewClip = false;
-            if (oz::AnimatedMesh* am = AnimTarget()) {
-                static int s_clipN = 1;
-                AnimSnapshotPush();
-                ozanim::Clip c;
-                c.name = "Clip" + std::to_string(s_clipN++);
-                c.fps = g_editorPanels.animFps;
-                c.loop = g_editorPanels.animLoop;
-                am->MutableAnimation().clips.push_back(c);
-                g_editorPanels.animClipName = c.name;
-                g_editorPanels.animTime = 0.0f;
-                g_editorPanels.actionAnimSave = true;
-            }
-        }
-        if (g_editorPanels.actionAnimDeleteClip) {
-            g_editorPanels.actionAnimDeleteClip = false;
-            if (oz::AnimatedMesh* am = AnimTarget()) {
-                auto& clips = am->MutableAnimation().clips;
-                int idx = am->FindClip(g_editorPanels.animClipName);
-                if (idx >= 0 && idx < (int)clips.size()) {
-                    AnimSnapshotPush();
-                    clips.erase(clips.begin() + idx);
-                    g_editorPanels.animClipName = clips.empty() ? "" : clips.front().name;
-                    g_editorPanels.animTime = 0.0f;
-                    g_editorPanels.actionAnimSave = true;
-                }
-            }
-        }
-        // Add / delete a key at the current time (Phase C adds vertex offsets).
-        if (g_editorPanels.actionAnimAddKey) {
-            g_editorPanels.actionAnimAddKey = false;
-            MeshObjectNode* kn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
-            if (oz::AnimatedMesh* am = AnimTarget()) {
-                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
-                    AnimSnapshotPush();
-                    float t = g_editorPanels.animTime;
-                    ozanim::Keyframe* kf = nullptr;
-                    for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
-                    if (!kf) {
-                        ozanim::Keyframe k; k.time = t;
-                        c->keys.push_back(k);
-                        std::sort(c->keys.begin(), c->keys.end(),
-                                  [](const ozanim::Keyframe& a, const ozanim::Keyframe& b) { return a.time < b.time; });
-                        for (auto& k : c->keys) if (fabsf(k.time - t) < 1e-3f) kf = &k;
-                    }
-                    if (kf) {
-                        int vc = am->TotalVertexCount();
-                        // Source offsets: live edit pose if editing, else the clip sample.
-                        std::vector<float> sampled;
-                        std::vector<float>* offs = nullptr;
-                        if (kn && kn->editPose) offs = kn->editPose.get();
-                        else { c->SampleOffsets(t, vc, sampled); offs = &sampled; }
+        // Animation commands arrive as ed::Ev::Anim* with the clip name, playhead
+        // and fps/loop captured at post time; ApplyAnimIntent owns them. The two
+        // remaining fields, actionAnimSave and actionAnimRefresh, are
+        // INTRA-FRAME chaining signals rather than user intents: the handlers
+        // themselves set Save, and Refresh is a dirty flag. Queueing those would
+        // push the file write a frame later for no benefit.
+        ed::EventBus::instance().drain(g_editorAnimEvents);
+        ApplyAnimIntents(g_editorAnimEvents);
 
-                        std::vector<int> verts;
-                        if (g_editorPanels.animEditVerts && !g_editorPanels.animSelVerts.empty())
-                            verts = g_editorPanels.animSelVerts;
-                        else for (int i = 0; i < vc; i++) verts.push_back(i);
-
-                        for (int vi : verts) {
-                            if (vi < 0 || vi >= vc) continue;
-                            float dx = (*offs)[vi * 3 + 0];
-                            float dy = (*offs)[vi * 3 + 1];
-                            float dz = (*offs)[vi * 3 + 2];
-                            kf->offsets.erase(std::remove_if(kf->offsets.begin(), kf->offsets.end(),
-                                [vi](const ozanim::VertexOffset& o) { return o.index == vi; }),
-                                kf->offsets.end());
-                            if (fabsf(dx) > 1e-5f || fabsf(dy) > 1e-5f || fabsf(dz) > 1e-5f)
-                                kf->offsets.push_back({vi, dx, dy, dz});
-                        }
-                        std::sort(kf->offsets.begin(), kf->offsets.end(),
-                                  [](const ozanim::VertexOffset& a, const ozanim::VertexOffset& b) { return a.index < b.index; });
-                    }
-                    g_editorPanels.actionAnimSave = true;
-                }
-            }
-        }
-        if (g_editorPanels.actionAnimDeleteKey) {
-            g_editorPanels.actionAnimDeleteKey = false;
-            if (oz::AnimatedMesh* am = AnimTarget()) {
-                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
-                    AnimSnapshotPush();
-                    int best = -1; float bd = 1e9f;
-                    for (int i = 0; i < (int)c->keys.size(); i++) {
-                        float d = fabsf(c->keys[i].time - g_editorPanels.animTime);
-                        if (d < bd) { bd = d; best = i; }
-                    }
-                    if (best >= 0 && bd < 0.05f) c->keys.erase(c->keys.begin() + best);
-                    g_editorPanels.actionAnimSave = true;
-                }
-            }
-        }
-        // FPS / loop edited in the panel â†’ update the current clip.
-        if (g_editorPanels.actionAnimApplyClipMeta) {
-            g_editorPanels.actionAnimApplyClipMeta = false;
-            if (oz::AnimatedMesh* am = AnimTarget()) {
-                if (ozanim::Clip* c = am->MutableAnimation().FindClip(g_editorPanels.animClipName)) {
-                    if (g_editorPanels.animFps > 0.0f) c->fps = g_editorPanels.animFps;
-                    c->loop = g_editorPanels.animLoop;
-                    g_editorPanels.actionAnimSave = true;
-                }
-            }
-        }
-        // Save the clip file back to disk.
+        // Save the clip file back to disk. Deliberately AFTER ApplyAnimIntents:
+        // a NewClip/DeleteKey posted this frame sets actionAnimSave from inside the
+        // handler, and the write must still happen in the same frame.
         if (g_editorPanels.actionAnimSave) {
             g_editorPanels.actionAnimSave = false;
             MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
@@ -4530,72 +4626,21 @@ if (g_editorPanels.showCollisionBounds) {
         {
             MeshObjectNode* tn = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
             if (tn && !tn->animFile.empty()) {
-                if (g_editorPanels.actionAnimScrub) {
-                    g_editorPanels.actionAnimScrub = false;
-                    float dur = AnimDuration();
-                    g_editorPanels.animTime = (dur > 0.0f)
-                        ? (g_editorPanels.animTimeSlider / 1000.0f) * dur : 0.0f;
-                    tn->animTime = g_editorPanels.animTime;
-                    g_editorPanels.animPlaying = false;
-                }
                 tn->animPaused = !g_editorPanels.animPlaying;
                 if (g_editorPanels.animPlaying) g_editorPanels.animTime = tn->animTime;
             }
         }
-        // Enter/exit vertex-edit mode.
-        if (g_editorPanels.actionAnimToggleEdit) {
-            g_editorPanels.actionAnimToggleEdit = false;
-            MeshObjectNode* n = PawnSystem::Instance().GetMeshObject(g_editorPanels.animTargetMesh);
-            oz::AnimatedMesh* am = AnimTarget();
-            if (n && am) {
-                if (!g_editorPanels.animEditVerts) {
-                    std::vector<float> offs((size_t)am->TotalVertexCount() * 3, 0.0f);
-                    if (const ozanim::Clip* c = am->GetAnimation().FindClip(g_editorPanels.animClipName))
-                        c->SampleOffsets(g_editorPanels.animTime, am->TotalVertexCount(), offs);
-                    n->editPose = std::make_shared<std::vector<float>>(std::move(offs));
-                    n->animPaused = true;
-                    g_editorPanels.animEditVerts = true;
-                    g_editorPanels.animSelVerts.clear();
-                    g_animUndo.clear();
-                    g_animRedo.clear();
-                    g_editorPanels.animPrevValid = false;
-                } else {
-                    n->editPose.reset();
-                    g_editorPanels.animEditVerts = false;
-                    g_editorPanels.animSelVerts.clear();
-                }
-            }
-            g_editorPanels.actionAnimRefresh = true;
-        }
-        if (g_editorPanels.actionAnimSelectAll) {
-            g_editorPanels.actionAnimSelectAll = false;
-            if (g_editorPanels.animEditVerts) {
-                if (oz::AnimatedMesh* am = AnimTarget()) {
-                    g_editorPanels.animSelVerts.clear();
-                    for (int i = 0; i < am->TotalVertexCount(); i++)
-                        g_editorPanels.animSelVerts.push_back(i);
-                }
-            }
-        }
-        if (g_editorPanels.actionAnimClearSel) {
-            g_editorPanels.actionAnimClearSel = false;
-            g_editorPanels.animSelVerts.clear();
-        }
-        if (g_editorPanels.actionAnimUndo) {
-            g_editorPanels.actionAnimUndo = false;
-            AnimUndo();
-            g_editorPanels.actionAnimRefresh = true;
-        }
-        if (g_editorPanels.actionAnimRedo) {
-            g_editorPanels.actionAnimRedo = false;
-            AnimRedo();
-            g_editorPanels.actionAnimRefresh = true;
-        }
-        // Ctrl+Z / Ctrl+Y while the anim tool is active.
+        // Ctrl+Z / Ctrl+Y while the anim tool is active. Posts the SAME events the
+        // toolbar posts, so a keyboard undo is not a second code path with its own
+        // staleness behaviour.
         if (g_editorPanels.animEditVerts &&
             (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))) {
-            if (IsKeyPressed(KEY_Z)) g_editorPanels.actionAnimUndo = true;
-            if (IsKeyPressed(KEY_Y)) g_editorPanels.actionAnimRedo = true;
+            ed::AnimIntent ai;
+            ai.meshId   = g_editorPanels.animTargetMesh;
+            ai.clipName = g_editorPanels.animClipName;
+            ai.time     = g_editorPanels.animTime;
+            if (IsKeyPressed(KEY_Z)) ed::EventBus::instance().post(ed::Ev::AnimUndo, ai);
+            if (IsKeyPressed(KEY_Y)) ed::EventBus::instance().post(ed::Ev::AnimRedo, ai);
         }
         if (g_editorPanels.actionAnimRefresh) {
             g_editorPanels.actionAnimRefresh = false;

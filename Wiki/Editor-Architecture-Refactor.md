@@ -146,8 +146,8 @@ fields as it goes:
 | B1 | placement / spawn — **done, and it was deletion not conversion** | 10 |
 | B2 | world graph — **done** (level list deferred to B5, it is a world *name*, not a selection) | 8 |
 | B3 | surface / CSG / portal / reload / convert — **done** | 8 |
-| B4 | animation | 12 |
-| B5 | assets (texture, model, sound, heightmap) | 20 |
+| B4 | animation - **done** (11 events; Save/Refresh stay fields) | 12 |
+| B5 | assets (texture, model, sound, heightmap, level list) | 20 |
 
 ## Invariants — do not regress
 
@@ -369,6 +369,52 @@ at 4769, the cut ran to 4768), which closed the render loop early. The symptom w
 a cascade of ~15 unrelated "expected constructor" errors 1,700 lines later. A
 five-line brace-count loop after every range deletion found it immediately, and is
 now part of the routine for the remaining batches.
+
+### R2 B4 — animation (11 of 13 fields)
+
+Eleven commands became `ed::Ev::Anim*` carrying a new `ed::AnimIntent` (mesh id,
+clip name, playhead, fps/loop). Another live staleness bug fixed:
+
+> **Delete Clip deleted a different clip than the one clicked.** The handler read
+> `animClipName` from live panel state at drain time. A clip list re-selects on
+> every click, so this was easy to trigger — click Delete, and the clip that goes
+> is whatever the list holds when the frame drains. The same applied to Add/Delete
+> Key (`animTime`) and ApplyClipMeta (`animFps`/`animLoop`).
+
+Two fields **deliberately stayed**, and this is the batch's main judgement call:
+
+| Field | Why it is not an event |
+|---|---|
+| `actionAnimSave` | An **intra-frame chaining signal**. NewClip, DeleteClip, AddKey, DeleteKey and ApplyClipMeta all set it from inside their own handlers, and the file write consumes it later in the *same* frame. Queueing it would delay every save by a frame for no benefit — and the write is part of the command completing, not an independent user action. |
+| `actionAnimRefresh` | A **dirty flag**. Set by 7 sites including handlers; consumed by `RefreshAnimPanel()`. It means "the panel needs re-reading", not "the user did something". |
+
+Treating these as events would be the "convert everything" reflex applied to two
+signals that are not messages. `test_editorbus` asserts their **absence** from the
+enum, so a future "fix" for that asymmetry has to be deliberate.
+
+#### The mesh-id guard is a stopgap, and says so
+
+`AnimIntent` carries `meshId`, but `AnimTarget()`, `AnimSnapshotPush()`, `AnimUndo`
+and the snapshot stack all resolve the **current** target internally, so the id
+cannot yet be threaded through them. Rather than leave that silent,
+`ApplyAnimIntents` detects the mismatch and skips + logs the command:
+
+```
+EditorLog("Anim: command skipped, target moved (event=%d was for %d, now %d)", ...)
+```
+
+`Subsystems/AnimEditing` in R4 threads the id properly; until then a moved target
+is a visible no-op instead of an edit to the wrong mesh.
+
+- **Ctrl+Z / Ctrl+Y now posts the same events the toolbar does**, so keyboard undo
+  is not a second code path with its own staleness behaviour.
+- **`PostAnimIntent()` reads fps/loop off the controls**, not the mirrored panel
+  fields, so an intent cannot be built from values the panel has already moved past.
+- **All eleven handlers moved out of `main()`** into `ApplyAnimIntents()` — the
+  first real step toward `Subsystems/AnimEditing`, and the reason animation drains
+  into its own `g_editorAnimEvents` pass.
+
+Action fields: **32 → 23**. `test_editorbus` 63/63.
 
 ## Verification
 

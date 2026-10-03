@@ -369,25 +369,25 @@ struct DefStatRow {
     bool animPlaying = false;
     int animTimeSlider = 0;         // 0..1000 (drives animTime)
     std::string animStatus;         // read-only status line
-    bool actionAnimNewClip = false;
-    bool actionAnimDeleteClip = false;
+    // Eleven animation commands are GONE -> ed::Ev::Anim* carrying an
+    // ed::AnimIntent (mesh id + clip name + playhead + fps/loop, captured at post
+    // time). "Delete Clip" used to read animClipName from live panel state at
+    // drain time, so a clip-list selection that moved between the click and the
+    // frame deleted a different clip.
+    //
+    // actionAnimSave and actionAnimRefresh deliberately REMAIN fields. They are
+    // intra-frame chaining signals, not user intents: the anim handlers set
+    // actionAnimSave themselves and the file write consumes it later in the SAME
+    // frame, while Refresh is a dirty flag consumed by RefreshAnimPanel().
+    // Queueing either would delay the write a frame for no benefit.
     bool actionAnimSave = false;
     bool actionAnimRefresh = false;
-    bool actionAnimScrub = false;       // timeline dragged
-    bool actionAnimAddKey = false;      // Phase C
-    bool actionAnimDeleteKey = false;   // Phase C
-    bool actionAnimApplyClipMeta = false; // fps/loop edited in the panel
     // Vertex definition tool (Phase C)
     bool animEditVerts = false;         // vertex-edit mode active
     std::vector<int> animSelVerts;      // selected global vertex indices
     // Undo/redo snapshot stacks live in Main.cpp (they hold ozanim::Animation).
     float animPrevX = 0, animPrevY = 0, animPrevZ = 0, animPrevR = 0;
     bool animPrevValid = false;
-    bool actionAnimToggleEdit = false;
-    bool actionAnimUndo = false;
-    bool actionAnimRedo = false;
-    bool actionAnimSelectAll = false;
-    bool actionAnimClearSel = false;
 
 #ifdef _WIN32
     // Window handles (Windows only)

@@ -205,14 +205,19 @@ static void test_event_coverage() {
         {Ev::PlaySound, "PlaySound"}, {Ev::StopSoundPreview, "StopSoundPreview"},
         {Ev::GenerateHeightmap, "GenerateHeightmap"},
         {Ev::ApplyLevelState, "ApplyLevelState"},
-        {Ev::AnimNewClip, "AnimNewClip"}, {Ev::AnimDeleteClip, "AnimDeleteClip"},
-        {Ev::AnimSave, "AnimSave"}, {Ev::AnimRefresh, "AnimRefresh"},
+{Ev::AnimNewClip, "AnimNewClip"}, {Ev::AnimDeleteClip, "AnimDeleteClip"},
         {Ev::AnimScrub, "AnimScrub"}, {Ev::AnimAddKey, "AnimAddKey"},
         {Ev::AnimDeleteKey, "AnimDeleteKey"}, {Ev::AnimApplyClipMeta, "AnimApplyClipMeta"},
-        {Ev::AnimToggleEdit, "AnimToggleEdit"}, {Ev::AnimUndo, "AnimUndo"},
-        {Ev::AnimRedo, "AnimRedo"}, {Ev::AnimSelectAll, "AnimSelectAll"},
+        {Ev::AnimToggleEdit, "AnimToggleEdit"},
+        {Ev::AnimUndo, "AnimUndo"}, {Ev::AnimRedo, "AnimRedo"},
+        {Ev::AnimSelectAll, "AnimSelectAll"},
         {Ev::AnimClearSelection, "AnimClearSelection"},
     };
+    // AnimSave and AnimRefresh are deliberately NOT events - they are intra-frame
+    // chaining signals, so asserting their absence keeps someone from "fixing" the
+    // asymmetry by queueing the file write and delaying it a frame.
+    check(static_cast<int>(Ev::AnimUndo) != static_cast<int>(Ev::AnimScrub),
+          "AnimSave/AnimRefresh stayed fields, not events (see plan B4)");
 
     // Distinct enumerators, and no accidental aliasing.
     bool unique = true;
@@ -295,12 +300,43 @@ static void test_csg_intent_distinguishes_place_from_commit() {
           "a default CsgIntent is neither, so a malformed post is ignored");
 }
 
+// An animation intent must carry the clip name and playhead, because the anim
+// panel's live fields were read at drain time - so a clip-list selection that moved
+// between click and frame deleted or keyed a different clip.
+static void test_anim_intent_carries_its_clip() {
+    AnimIntent a;
+    a.meshId   = 17;
+    a.clipName = "Idle";
+    a.time     = 1.25f;
+    a.fps      = 24.0f;
+    a.loop     = false;
+    Event e = Event::make(Ev::AnimDeleteClip, a);
+
+    check(e.anim().clipName == "Idle", "AnimIntent carries the clip name");
+    check(e.anim().time == 1.25f, "AnimIntent carries the playhead");
+    check(e.anim().meshId == 17, "AnimIntent carries the mesh id");
+    check(e.anim().fps == 24.0f && !e.anim().loop,
+          "AnimIntent carries fps and loop, read off the controls at post time");
+    check(e.anim().hasClip(), "a named clip reports hasClip()");
+
+    // Two intents posted from different list selections stay distinct, which is
+    // the whole point of capturing the name rather than reading it later.
+    Event first  = Event::make(Ev::AnimDeleteKey, AnimIntent{1, "Walk", 0.5f});
+    Event second = Event::make(Ev::AnimDeleteKey, AnimIntent{1, "Run",  0.5f});
+    check(first.anim().clipName != second.anim().clipName,
+          "two posts keep their own clips instead of aliasing one panel field");
+
+    AnimIntent none;
+    check(!none.hasClip(), "a default AnimIntent has no clip, so clip-scoped ops skip");
+}
+
 int main() {
     printf("EditorEventBus tests:\n");
     test_typed_payloads();
     test_selection_is_one_atomic_message();
     test_surface_edit_carries_its_mask();
     test_csg_intent_distinguishes_place_from_commit();
+    test_anim_intent_carries_its_clip();
     test_wrong_shape_is_inert();
     test_target_is_captured_not_looked_up();
     test_fifo_drain();

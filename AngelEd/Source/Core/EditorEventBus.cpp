@@ -19,6 +19,7 @@ const SpawnDesc kEmptySpawn{};
 const SelRef    kEmptySel{};
 const Selection kEmptySeln{};
 const SurfaceEdit kEmptySurf{};
+const AnimIntent  kEmptyAnim{};
 const CsgIntent   kEmptyCsg{};
 const Transform kEmptyXform{};
 const std::string kEmptyStr{};
@@ -48,6 +49,12 @@ const SurfaceEdit& Event::surface() const {
     if (const auto* v = std::get_if<SurfaceEdit>(&data)) return *v;
     mismatch("surface", kind);
     return kEmptySurf;
+}
+
+const AnimIntent& Event::anim() const {
+    if (const auto* v = std::get_if<AnimIntent>(&data)) return *v;
+    mismatch("anim", kind);
+    return kEmptyAnim;
 }
 
 const CsgIntent& Event::csg() const {

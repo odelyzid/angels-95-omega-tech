@@ -65,6 +65,24 @@ struct LevelStateEdit {
     int gameType = 0;
 };
 
+// An animation-editing intent.
+//
+// The clip name and the mesh id travel with the event because the anim panel's
+// live fields were previously read at drain time. "Delete Clip" reads
+// `animClipName` — so a click whose list selection moves before the frame drains
+// deletes a different clip. That is the same staleness class as the WorldGraph
+// index bug, in a place where it is far easier to trigger (a list selection moves
+// on every click).
+struct AnimIntent {
+    int  meshId = -1;        // MeshObjectNode id of the anim target at post time
+    std::string clipName;    // clip the command applies to, "" when not clip-scoped
+    float time = 0.0f;       // playhead position in seconds
+    float fps = 30.0f;       // for NewClip / ApplyClipMeta
+    bool loop = true;
+
+    bool hasClip() const { return !clipName.empty(); }
+};
+
 // CSG sidebar intent.
 //
 // Split into "start placing this primitive" and "commit the current ghost with
@@ -160,8 +178,9 @@ enum class Ev : uint8_t {
     // Level state. Payload: LevelStateEdit.
     ApplyLevelState,
 
-    // Animation editing. Payload: std::string (clip name); index in Transform.y
-    AnimNewClip, AnimDeleteClip, AnimSave, AnimRefresh, AnimScrub,
+    // Animation editing. Payload: AnimIntent (mesh id + clip name + time, captured at
+    // post time). AnimSave and AnimRefresh are NOT events - see below.
+    AnimNewClip, AnimDeleteClip, AnimScrub,
     AnimAddKey, AnimDeleteKey, AnimApplyClipMeta, AnimToggleEdit,
     AnimUndo, AnimRedo, AnimSelectAll, AnimClearSelection,
 
@@ -185,6 +204,7 @@ using Payload = std::variant<std::monostate,
                              SelRef,
                              Selection,
                              SurfaceEdit,
+                             AnimIntent,
                              CsgIntent,
                              SpawnDesc,
                              Transform,
@@ -204,6 +224,7 @@ struct Event {
     const SelRef&    sel()   const;
     const Selection& selection() const;
     const SurfaceEdit& surface() const;
+    const AnimIntent& anim() const;
     const CsgIntent&   csg() const;
     const Transform& xform() const;
     const std::string& str() const;
