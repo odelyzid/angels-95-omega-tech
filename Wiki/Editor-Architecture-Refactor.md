@@ -802,3 +802,144 @@ in the Makefile comment so the next person does not read it as a regression.
 Every one was caught by verifying after the fact rather than assuming. That is the only
 reason any of them cost minutes instead of a bad commit — and the reason a reviewer can
 read these entries as evidence the process works, not as an excuse.
+
+## Working directory: every asset path is relative and unanchored
+
+`EnsureProjectRoot()` (`Core/EditorShell.cpp`) is the **first** statement in `main()`,
+before `g_config.Load`, before `PackageAssetLoader::Init`, before the world load. Three
+rules, in order:
+
+1. cwd already contains both `GameData/` and `System/`;
+2. cwd's final component is `system` (case-insensitive) and its parent is a root - this is
+   what the run scripts set up, and is the *only* case the old code handled;
+3. walk up to four levels from the executable (`GetModuleFileNameA`).
+
+It never fails hard - the editor can still open an explicitly-named world from a
+GameData-less layout - but it logs the directory it settled on, and on failure logs the
+cwd it tried.
+
+**Why the generalisation was needed.** A real session reported two errors that had no
+visible connection:
+
+```
+WARN: GameData/Global/PawnDefs not found, using hardcoded defaults
+Skybox: could not load 'GameData/Global/sky/sky_noon.dds'
+```
+
+Both are downstream of the cwd. Almost every asset path in the editor is a relative
+literal - `GameData`, `System/AngelEd.ini`, `System/Data` - so a wrong launch directory
+does not fail loudly, it fails *selectively and confusingly*. The old heuristic handled
+only the directory the run scripts happen to use, so a shortcut with a different "Start
+in", a copy of the tree elsewhere, or a debugger all landed in the broken state.
+
+`PackageAssetLoader::Init`'s missing-`System/Data` branch was a bare `return`. That is
+the line that made this undiagnosable: every packaged asset vanished with nothing in the
+log. It is now an `OZ_WARN` naming both the path and the cwd.
+
+Verified by launching the built editor from `System/` and from an unrelated temp
+directory: both recover, log `Project root: ... (from System/)` / `(from exe)`, load all
+four pawn defs, and leave no stray log in the wrong cwd.
+
+**Do not reintroduce a path that exists in only one layout.** The no-argument default
+world was `"../GameData/World.ozone"`, which resolves in no layout at all: worlds live
+at `GameData/Worlds/<Name>/World.ozone`, and the path also contradicted the
+`System/AngelEd.ini` load eight lines below it. `FirstAvailableWorld()` takes the
+sorted-first world that actually has one, so the choice is deterministic rather than
+dependent on directory-iteration order.
+
+## WorldGraph Explorer: derived list, dirty flag
+
+The Explorer list is **derived** from `PawnSystem` / `ZoneManager` / `OzoneLoader`, and it
+was built exactly once - in `WM_CREATE`, from `CreateAllEditorWindows`, which runs
+**before** the world is loaded and before PawnDefs register. Opening it on a fresh
+session showed one `Map (level)` row and stayed that way until `Refresh` was pressed.
+
+Worse, each row's `lParam` is a `selIndex` **into the very vector the row was built from**.
+A delete or duplicate shifts every later row, so a second right-click acts on the wrong
+entity until the next manual refresh. The single auto-refresh that existed sat inside the
+props-apply block: it fired for *every* Apply regardless of what changed, and missed every
+other mutation.
+
+The rule now:
+
+- `MarkWorldGraphDirty()` (in `Core/EditorPanelState.hpp`) is set at the choke points -
+  each event drain **gated on non-empty**, the Enter-key placement path that bypasses the
+  bus, `AppendAutoConvexForSelection`, `HistoryRestore`, and world load.
+- It is consumed **once per frame after the last drain** in `Main.cpp`, so a mutation is
+  never reflected a frame late.
+- `ShowWorldGraph(true)` refreshes unconditionally; a hidden panel costs nothing because
+  the consume is gated on `showWorldGraph`.
+
+**Setting a flag is not a mutation.** That is what keeps the layer rule intact: `UI/` still
+posts and never mutates, `Subsystems/`/`Core/` only set the flag, and the single
+`RefreshWorldGraph()` call lives in `Core`'s frame loop - Core reaching down into UI, the
+legal direction. Do not "fix" this by calling `RefreshWorldGraph()` from a `Subsystems/`
+handler.
+
+Two calibrations worth keeping:
+
+- **Gating the drains on `!empty()` is load-bearing.** Marking unconditionally rebuilt the
+  list on every frame - measured at 19 rebuilds/second on an idle open panel.
+- **The gizmo release is gated on `g_gizmoHistPushed`**, the flag meaning a transform was
+  actually pushed to history. Ungated, every plain *click* refreshed the list, because a
+  pick is also a release.
+
+Verified by driving `IDM_WORLD_GRAPH` and querying the ListView directly: 131 rows
+populated on open with no manual refresh, and zero rebuilds while idle.
+
+## Control IDs must be unique per window
+
+`ID_PAWN_SHOW_HIDDEN` and `ID_PAWN_TREE` were both `105`. It happened to work only because
+the treeview emits `WM_NOTIFY` and the checkbox `WM_COMMAND` - but neither could be
+addressed with `GetDlgItem`, and the checkbox's handle was discarded at creation, so its
+state could not be seeded or reset.
+
+The checkbox also had a hard-coded rect and was never passed to `LayoutPawnMgr`, so on
+`WM_SIZE` it stayed at `y=228` while the tree and the three buttons re-flowed to
+`y = 41 + treeH` - a visible 9px desync at the default size. It now has a distinct ID, a
+kept handle seeded from `g_editorPanels.showHidden`, and a place in the layout; the default
+`pawnMgrPos` is 480 wide so it no longer ends 6px from the window edge.
+
+**When adding a control to a panel that has a layout function, add it to that function.**
+A hard-coded rect in `WM_CREATE` is a bug the first time the window is resized.
+
+## Texture Manager: delegate the scan, build thumbnails lazily
+
+`ScanTextureBrowserFiles()` now delegates to `Resources/AssetScan`'s `ScanAssets` rather
+than carrying a third copy of the GameData + package walk. It also stops re-deriving the
+dedup policy from `!IsPathFile()`: `ResourceEntry` carries `fromPackage`, stated by the
+scanner that knows which list the entry came from, exactly as `AssetScopeItem` already did.
+
+Two resource bugs fixed alongside:
+
+- **Thumbnails were built eagerly, one per texture in GameData, on every rescan** -
+  thousands of GDI bitmaps and a visible memory spike at panel-open time, for cells that
+  were off-screen or never scrolled to. `BuildTextureThumbnail()` is now called from the
+  paint loop on first use. Off-screen cells are already `continue`d, so scrolling pays only
+  for what it shows.
+- **`ScanTextureBrowserFiles` cleared a vector owning an `HBITMAP` per entry without
+  deleting them**, leaking one bitmap per texture per rescan - and a rescan runs on every
+  window activation. The free loop now runs *before* the `clear()`.
+
+The eager loop's `tex.path.substr(tex.path.rfind('.'))` was also unguarded: `substr(npos)`
+throws when a path has no extension, reachable for a hand-built package key.
+
+## Phase F status: parked at 5 of 11
+
+Promoted to real translation units (`AngelEd/Makefile` rule + `ci.yml` entry each):
+
+`SurfaceOps`, `Placement`, `PropsApply`, `LevelState`, `History`
+
+Still unity fragments in `Main.cpp`, with the seam that blocks each:
+
+| Fragment | Blocker |
+|---|---|
+| `Selection` | reads/writes `g_editorPanels` throughout; entangled with the Core dispatcher |
+| `EntityOps` | `CommitBrushRenderable` + AutoConvex reach into `OzoneLoader` and UI statics |
+| `WorldIO` | uses `ClearScene`/`Clear*` statics declared across Core fragments |
+| `OzoneExport` | calls UI file dialogs (`ChooseOpenWorldFile`, `ChooseSaveWorldFile`) and Core statics (`g_documentPath`, `SetWorldDirectory`, `g_pendingNew`) - deliberately **not** promoted, since moving it either way is a violation |
+| `WorldGraphBridge` | the `EditorWndProc` menu dispatcher, which owns Core statics |
+| `AnimEditing` | cross-state access to the animation target and undo stacks |
+
+Object lists verified in step: Makefile 44 / `ci.yml` 43, agreeing on all 43 editor
+objects, the sole difference being `OTCustom_stub.o`.
