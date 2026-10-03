@@ -241,7 +241,10 @@ jobs:
           g++ -fpermissive $EDITOR_FLAGS $EDITOR_INC -c Source/raygui/raygui.c -DRAYGUI_IMPLEMENTATION -o raygui.o
           gcc -O3 -std=c99 -I ../Source/miniz -c ../Source/miniz/miniz.c -o miniz.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Main.cpp -o Main.o
-          g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Win32Dialogs.cpp -o Win32Dialogs.o
+          # The UI layer: one unity TU (Source/UI/UiShell.cpp includes every
+# Source/UI/Panels/*.cpp). Must match AngelEd/Makefile's WIN32_OBJS = UiShell.o.
+# Adding a panel means adding a fragment, NOT a line here - see UiShell.cpp.
+g++ $EDITOR_FLAGS $EDITOR_INC -c Source/UI/UiShell.cpp -o UiShell.o
 # The editor event bus. Must match AngelEd/Makefile's EDITOR_OBJS.
 g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Core/EditorEventBus.cpp -o EditorEventBus.o
           g++ $EDITOR_FLAGS $EDITOR_INC -c ../Source/Pawn/OzPawnSystem.cpp -o OzPawnSystem.o
@@ -281,7 +284,7 @@ g++ $EDITOR_FLAGS $EDITOR_INC -c Source/Core/EditorEventBus.cpp -o EditorEventBu
           g++ $EDITOR_FLAGS $EDITOR_INC -c Source/EditorIcons.cpp -o EditorIcons.o
           echo 'int main_custom() { return 0; }' | g++ $EDITOR_FLAGS $EDITOR_INC -x c++ -c - -o OTCustom_stub.o
           
-          g++ Main.o Win32Dialogs.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
+          g++ Main.o UiShell.o EditorEventBus.o OzPawnSystem.o OzAssetMapper.o OzOzoneLoader.o OzoneFrustum.o OzoneHeightmap.o OzoneParser.o ZoneManager.o GameType.o SurfaceFlags.o SurfaceMaterial.o SoundManager.o Log.o OzBsp.o AutoConvex.o WorldChunk.o LightningScriptContext.o LightningScriptParser.o LightningEntityRegistry.o LightningEntityManager.o OzlsWriter.o EditorIcons.o LitLightning.o Mesh.o SkeletalMesh.o MeshCache.o AnimatedMesh.o OzAnimFormat.o OzParticleSimulationManager.o rlights.o miniz.o raygui.o OTCustom_stub.o -o AngelEd.exe $EDITOR_FLAGS $EDITOR_INC $EDITOR_LIBS
           cd ..
 
       - name: Assemble System/ release

@@ -43,7 +43,12 @@ else
   # Windows (MSYS2/MINGW64)
   CFLAGS   = $(OPTFLAGS) --std=c++20 -Wno-narrowing -DWIN32_LEAN_AND_MEAN -I../Source
   LDFLAGS  = -lraylib -lopengl32 -lgdi32 -lcomctl32 -lwinmm -lcomdlg32 -lm
-  WIN32_OBJS := Win32Dialogs.o
+  # The UI layer is ONE object. Source/UI/UiShell.cpp is a unity TU that includes
+# every Source/UI/Panels/*.cpp fragment, so adding a panel means adding a fragment
+# - NOT a Makefile rule and NOT a ci.yml line. That is the whole point: CI builds
+# the editor by hand, so per-file entries here would have to be duplicated there
+# and the two lists would drift silently. See Source/UI/UiShell.cpp.
+WIN32_OBJS := UiShell.o
 endif
 
 COMP := $(CCACHE_PREFIX) g++
@@ -67,8 +72,8 @@ $(BUILD_DIR)/EditorEventBus.o: Source/Core/EditorEventBus.cpp Source/Core/Editor
 	$(COMP) $(CFLAGS) -c Source/Core/EditorEventBus.cpp -o $@
 
 # 2. Compile Win32 Dialog support (Windows only)
-$(BUILD_DIR)/Win32Dialogs.o: Source/Win32Dialogs.cpp Source/Win32Dialogs.hpp | $(BUILD_DIR)
-	$(COMP) $(CFLAGS) -c Source/Win32Dialogs.cpp -o $@
+$(BUILD_DIR)/UiShell.o: Source/UI/UiShell.cpp Source/UI/UiCommon.hpp Source/UI/UiPanels.hpp $(wildcard Source/UI/Panels/*.cpp) | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/UI/UiShell.cpp -o $@
 
 # 3. Compile Custom Engine Behavior
 $(BUILD_DIR)/Custom.so:

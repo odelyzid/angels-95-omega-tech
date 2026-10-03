@@ -2,8 +2,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "../../Source/World/GameType.hpp"
-#include "../../Source/World/SurfaceFlags.hpp"
+#include "../../../Source/World/GameType.hpp"
+#include "../../../Source/World/SurfaceFlags.hpp"
 
 // =====================================================================
 // Win32Dialogs â€” Real OS-level window panels for AngelEd

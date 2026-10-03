@@ -1,6 +1,6 @@
 # AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
 
-**Status: R0–R2 DONE, R3 next.** This file is the source of truth. Update the
+**Status: R0–R3 DONE, R4 next.** This file is the source of truth. Update the
 progress log as items land; do not work from memory of a plan held in context.
 
 **R2 result in one line:** 58 `action*` fields → **4**, and all 4 are documented
@@ -138,7 +138,7 @@ whose *interfaces* matter and they are far fewer per layer.
 | R0 | this document | **done** |
 | R1 | `EditorEventBus` + headless suite + `make test` in CI | **done** |
 | R2 | convert the action fields, batch by batch - **done** | 58 |
-| R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) | pending |
+| R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) - **done** | pending |
 | R4 | split `Main.cpp` into `Core/` + `Subsystems/` | pending |
 | R5 | `AGENTS.md` + full verification | pending |
 
