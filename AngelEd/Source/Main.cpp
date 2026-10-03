@@ -35,17 +35,21 @@
 // =============================================================================
 
 #include "Core/EditorShell.hpp"
+#include "Core/EditorState.hpp"
 
-// DO NOT REORDER THESE. The order below is the original declaration order of the
-// 5,039-line file this was cut from, and it is load-bearing: fragments carry no
-// forward declarations of their own, so several statics are declared in the
-// fragment ABOVE their user. `g_editorLog` is declared at the top of EntityOps.cpp
-// and used in EditorLog.cpp; `g_originalWndProc` and `EditorWndProc` are declared in
-// WorldGraphBridge.cpp and used in EditorMenus.cpp. Grouping these by layer
-// ("core before subsystems") reads better and does not compile.
+// DO NOT REORDER THESE. Fragments carry no forward declarations of their own, so
+// several statics and functions are declared in the fragment ABOVE their user.
+// Examples that have bitten this file at least once each:
+//   g_editorLog            declared at the top of EntityOps.cpp, used in EditorLog.cpp
+//   g_originalWndProc,
+//   EditorWndProc           declared in WorldGraphBridge.cpp, used in EditorMenus.cpp
+//   everything the dispatcher calls
+// Grouping these by layer ("core before subsystems") reads better and does not
+// compile.
 //
 // Subsystems/Selection.cpp           picking, gizmo snap, adopting a selection
 // Subsystems/EntityOps.cpp           delete, duplicate, AutoConvex, CSG commit
+// Subsystems/SurfaceOps.cpp          ApplySurface / ResetSurface handlers
 // Core/EditorLog.cpp                 AngelEd.log appender
 // Core/EditorShell.cpp               view presets, panel toggles, scene reset
 // Subsystems/WorldIO.cpp             LoadWorldDocument + name helpers
@@ -55,10 +59,18 @@
 // Subsystems/AnimEditing.cpp         vertex-keyframe editing + anim event handlers
 // Subsystems/History.cpp             OZONE-snapshot undo/redo + ApplyMapProperties
 // Subsystems/Placement.cpp           entity placement (was: direct PawnSystem calls
-//                                    from UI/Panels/PawnPanel.cpp). LAST because it
-//                                    calls HistoryPush, which History.cpp defines.
+//                                    from UI/Panels/PawnPanel.cpp). After History.cpp
+//                                    because it calls HistoryPush.
+// Core/EditorDispatcher.cpp           LAST of all. It is the consumer: it calls
+//                                    AdoptSelection, DeleteSelectedEntity,
+//                                    DuplicateSelectedEntity, CommitBrushRenderable,
+//                                    StopSoundPreview and more, so every subsystem
+//                                    must be defined above it. The anim / placement /
+//                                    surface passes are NOT cases here - each is
+//                                    drained and applied by its own subsystem.
 #include "Subsystems/Selection.cpp"
 #include "Subsystems/EntityOps.cpp"
+#include "Subsystems/SurfaceOps.cpp"
 #include "Core/EditorLog.cpp"
 #include "Core/EditorShell.cpp"
 #include "Subsystems/WorldIO.cpp"
@@ -68,6 +80,7 @@
 #include "Subsystems/AnimEditing.cpp"
 #include "Subsystems/History.cpp"
 #include "Subsystems/Placement.cpp"
+#include "Core/EditorDispatcher.cpp"
 
 // -----------------------------------------------------------------------------
 // main()
@@ -1642,327 +1655,25 @@ if (g_editorPanels.showCollisionBounds) {
                        (Rectangle){(float)sbW, (float)tbH, (float)(GetScreenWidth() - sbW), (float)(GetScreenHeight() - tbH)}, (Vector2){0,0}, 0, WHITE);
         DrawFPS(GetScreenWidth() - 60, 36);
 
-        // --- Event bus drain + dispatch (R2 batch B2) --------------------------
+        // --- Event bus drain + dispatch ---------------------------------------
         //
         // Move the queue out here, BEFORE dispatching: a handler that opens a panel
         // can post further events, and draining while iterating the live queue would
         // let those be dispatched in the same frame.
+        //
+        // Dispatch is deferred to one point per frame, after the Win32 message pump,
+        // because a panel is mid-layout while it posts. What makes that safe is every
+        // event carrying its own target captured at post time - not the timing.
         ed::EventBus::instance().drain(g_editorFrameEvents);
-        //
-        // The single point where posted events are handled. Draining once per frame,
-        // after the Win32 message pump, is deliberate: a panel is mid-layout while it
-        // posts, so dispatching inline would mutate the world under a live dialog.
-        //
-        // What makes deferral safe is that every event carries its own target,
-        // captured at post time. The WorldGraph Delete/Duplicate used to store the
-        // clicked entity index and then IGNORE it, acting on whatever g_sel happened
-        // to be - correct only because the select field was written in the same
-        // notification. Reading the target off the event instead of off g_sel makes
-        // that ordering irrelevant.
-        for (const ed::Event& ev : g_editorFrameEvents) {
-          switch (ev.kind) {
-                case ed::Ev::SelectEntity:
-                    AdoptSelection(ev.selection());
-                    break;
-                case ed::Ev::ApplyProperties:
-                    // Adopt the event's own target rather than trusting g_sel, so
-                    // "Properties" always opens the row that was right-clicked even
-                    // if something else changed the selection in between.
-                    AdoptSelection(ev.selection());
-                    OpenPropertiesForSelection();
-                    break;
-                case ed::Ev::DeleteEntity:
-                    if (!AdoptSelection(ev.selection())) break;
-                    DeleteSelectedEntity();
-                    break;
-                case ed::Ev::DuplicateEntity:
-                    if (!AdoptSelection(ev.selection())) break;
-                    DuplicateSelectedEntity();
-                    break;
-                case ed::Ev::DeletePortal: {
-                    // Portal deletion mutates ZoneManager::GetPortals(), so it does
-                    // NOT go through DeleteSelectedEntity (which knows the entity
-                    // containers). Its own event kind keeps the two index spaces
-                    // from ever being confused.
-                    int pidx = ev.sel().index;
-                    if (pidx < 0) break;
-                    HistoryPush();
-                    ZoneManager::Instance().RemovePortal(pidx);
-                    EditorLog("Portal %d deleted", pidx);
-                    RefreshPortalList();
-                    RefreshLevelList();
-                    // Drop any selection that pointed at the portal that just went.
-                    // RemovePortal shifts every later portal down by one, so a
-                    // retained propsTargetIndex means the next Apply silently
-                    // edits a DIFFERENT portal.
-                    if (g_sel.type == SelType::PORTAL && g_sel.index == pidx)
-                        g_sel = { SelType::NONE, -1, "", {0,0,0} };
-                    if (g_editorPanels.propsTargetType == sel::PORTAL &&
-                        g_editorPanels.propsTargetIndex == pidx) {
-                        ShowPropertiesPanel(false);
-                    }
-                    break;
-                }
-                case ed::Ev::CsgPlace: {
-                    // Start placing a new primitive: reset the ghost to a default
-                    // box at the camera. Distinct from CsgCommit, which reads
-                    // whatever the ghost currently is.
-                    const ed::CsgIntent& ci = ev.csg();
-                    if (!ci.isPrimitive()) break;
-                    g_placeMode = PlaceMode::MODEL;
-                    g_sel = { SelType::NONE, -1, "", {0,0,0} };
-                    g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
-                    OmegaTechEditor.DrawModel = true;
-                    EMID = 200 + ci.primitive;
-                    OmegaTechEditor.X = OTEditor.MainCamera.target.x;
-                    OmegaTechEditor.Y = OTEditor.MainCamera.target.y;
-                    OmegaTechEditor.Z = OTEditor.MainCamera.target.z;
-                    OmegaTechEditor.W = 4.0f;
-                    OmegaTechEditor.H = 4.0f;
-                    OmegaTechEditor.L = 4.0f;
-                    OmegaTechEditor.S = 1.0f;
-                    OmegaTechEditor.R = 0.0f;
-                    break;
-                }
-                case ed::Ev::CsgCommit: {
-                    // Commit the current ghost immediately (Solid/Add/Sub/Inter).
-                    const ed::CsgIntent& ci = ev.csg();
-                    if (!ci.isCommit()) break;
-                    if (g_placeMode == PlaceMode::MODEL) {
-                        HistoryPush();
-                        // Default to a box at the camera if no primitive is armed.
-                        if (EMID < 200) {
-                            EMID = 200;
-                            OmegaTechEditor.X = OTEditor.MainCamera.target.x;
-                            OmegaTechEditor.Y = OTEditor.MainCamera.target.y;
-                            OmegaTechEditor.Z = OTEditor.MainCamera.target.z;
-                            OmegaTechEditor.W = 4.0f;
-                            OmegaTechEditor.H = 4.0f;
-                            OmegaTechEditor.L = 4.0f;
-                        }
-                        // Same CSG placement logic as the ENTER key (collision is
-                        // rebuilt by RebuildCollisionVolumes inside
-                        // CommitBrushRenderable).
-                        int primType = EMID - 200;
-                        Vector3 center = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
-                        Vector3 size = {OmegaTechEditor.W, OmegaTechEditor.H, OmegaTechEditor.L};
-                        int ridx = CommitBrushRenderable(primType, center, size,
-                                                         OmegaTechEditor.R, OmegaTechEditor.S,
-                                                         ci.operation);
-                        if (ridx >= 0) {
-                            EditorLog("CSG commit: op=%d prim=%d at (%.1f,%.1f,%.1f) size=(%.1f,%.1f,%.1f)",
-                                      ci.operation, primType, center.x, center.y, center.z,
-                                      size.x, size.y, size.z);
-                        }
-                    }
-                    // Placing via the toolbox is done - drop the ghost so the
-                    // viewport returns to normal selection (Enter does the same).
-                    if (g_sel.type == SelType::NONE) OmegaTechEditor.DrawModel = false;
-                    break;
-                }
-                case ed::Ev::ConvertToAnimated:
-                    // Deferred to the conversion site further down this frame,
-                    // which owns EnsureMeshNodeLoaded + the Anim panel handover.
-                    // Posting the index is the point: the old field was read back
-                    // out of g_sel, so pressing Convert while the selection moved
-                    // converted the wrong mesh.
-                    evConvertMeshIndex = ev.sel().index;
-                    break;
-                case ed::Ev::PlaySound: {
-                    // The PATH travelled with the event; volume/loop stay live
-                    // fields because they are re-applied every frame while the
-                    // preview plays (see the poll above).
-                    const std::string& path = ev.str();
-                    if (path.empty()) break;
-                    StopSoundPreview();
-                    g_previewSound = LoadSound(path.c_str());
-                    g_previewSoundLoaded = g_previewSound.frameCount > 0;
-                    if (g_previewSoundLoaded) {
-                        SetSoundVolume(g_previewSound,
-                                       g_editorPanels.previewSoundVolume / 100.0f);
-                        PlaySound(g_previewSound);
-                    }
-                    break;
-                }
-                case ed::Ev::StopSoundPreview:
-                    StopSoundPreview();
-                    break;
-                case ed::Ev::ApplyTextureToModel: {
-                    const ed::TextureApply& ta = ev.textureApply();
-                    if (ta.target <= 0 || ta.path.empty()) break;
-                    HistoryPush();
-                    ApplyTextureToModel(ta.target, ta.path.c_str());
-                    break;
-                }
-                case ed::Ev::RefreshModelBrowser:
-                    ScanModelBrowserFiles();
-                    g_lastPreviewSel = -1;   // force a fresh preview after the rebuild
-                    g_previewNeedsUpdate = false;
-                    break;
-                case ed::Ev::GenerateHeightmap: {
-                    const ed::HeightmapDesc& hd = ev.heightmap();
-                    if (hd.imagePath.empty()) break;
-                    HistoryPush();
-                    std::vector<float> args = {
-                        hd.x, hd.y, hd.z, hd.scale,
-                        hd.sizeX, hd.sizeY, hd.sizeZ
-                    };
-                    OzoneLoader::Instance().BuildHeightmap(hd.imagePath,
-                                                           hd.texturePath, args);
-                    EditorLog("Heightmap generated from %s", hd.imagePath.c_str());
-                    break;
-                }
-                case ed::Ev::BeginPlacement: {
-                    const ed::PlacementRequest& pr = ev.placement();
-                    // Every placement mode clears the selection first: a ghost and
-                    // a selection must not coexist, or the drag gate cannot tell
-                    // which the user means to move.
-                    g_sel = { SelType::NONE, -1, "", {0,0,0} };
-                    g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
-                    switch (pr.kind) {
-                        case ed::PlacementRequest::Kind::Pickup:
-                            g_placeMode = PlaceMode::PICKUP;
-                            // The def NAME came from the panel, already resolved from
-                            // the legacy index or the registry. Resolving it here from
-                            // an index meant a panel rebuild between the click and the
-                            // frame placed a different pickup.
-                            OmegaTechEditor.ActivePickupName = pr.key;
-                            break;
-                        case ed::PlacementRequest::Kind::Node:
-                            g_placeMode = PlaceMode::NODE;
-                            OmegaTechEditor.ActiveNodeType =
-                                (EditorNodeType)atoi(pr.key.c_str());
-                            break;
-                        case ed::PlacementRequest::Kind::Model:
-                            g_placeMode = PlaceMode::MODEL;
-                            EMID = 0;   // 0 = user-selected obj
-                            break;
-                    }
-                    OmegaTechEditor.DrawModel = true;
-                    OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-                    OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-                    OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-                    OmegaTechEditor.R = 1;
-                    break;
-                }
-                case ed::Ev::OpenWorld: {
-                    const std::string& worldName = ev.str();
-                    if (worldName.empty()) break;
-                    fs::path ozone = fs::path("GameData/Worlds") / worldName / "World.ozone";
-                    if (!fs::exists(ozone))
-                        ozone = fs::path("../GameData/Worlds") / worldName / "World.ozone";
-                    if (fs::exists(ozone)) {
-                        g_pendingOpenPath = ozone;
-                        EditorLog("LevelList: opening world '%s'", worldName.c_str());
-                    } else {
-                        EditorLog("LevelList: world '%s' not found", worldName.c_str());
-                    }
-                    break;
-                }
-                case ed::Ev::LinkWorld: {
-                    // Create a portal in front of the camera linking to the target.
-                    const std::string& target = ev.str();
-                    if (target.empty()) break;
-                    Vector3 pos = OTEditor.MainCamera.target;
-                    HistoryPush();
-                    ZonePortal portal;
-                    portal.bounds = {{pos.x - 2, pos.y - 2, pos.z - 2},
-                                     {pos.x + 2, pos.y + 2, pos.z + 2}};
-                    portal.targetWorld = target;
-                    portal.targetSpawn = {0, 20, 0};
-                    portal.bidirectional = true;
-                    ZoneManager::Instance().AddPortal(portal);
-                    g_editorPanels.portalTargetWorld = target;
-                    RefreshPortalList();
-                    RefreshLevelList();
-                    EditorLog("Created portal link to '%s' at camera target",
-                              target.c_str());
-                    break;
-                }
-                case ed::Ev::ReloadMesh: {
-                    const ed::SelRef& t = ev.sel();
-                    if (!t.valid() || t.kind != ed::SelKind::Mesh) break;
-                    // reset() drops the cached mesh so the next draw reloads it
-                    // from disk. Guarded on the kind as well as the index: the old
-                    // handler read g_sel.index, so a Reload pressed while something
-                    // else was selected reset an unrelated object's cache.
-                    if (MeshObjectNode* m = PawnSystem::Instance().GetMeshObject(t.index)) {
-                        m->mesh.reset();
-                        EditorLog("Reset mesh cache for '%s'", m->meshPath.c_str());
-                    }
-                    break;
-                }
-                default:
-                    // B3..B5 add the remaining kinds. An unhandled event is counted
-                    // rather than ignored, so a batch that forgets a kind shows up as
-                    // a counter instead of a click that silently does nothing.
-                    g_editorUnhandledEvents++;
-                    break;
-            }
-        }
+        DispatchFrameEvents(g_editorFrameEvents);
 
         // --- Surface Properties apply / reset ------------------------------
         //
-        // Drained separately from g_editorFrameEvents above: these handlers belong
-        // to Subsystems/SurfaceOps in R4 and are being moved out of main(), so
-        // keeping them in their own pass means that move does not have to reorder
-        // the selection dispatch.
+        // Drained separately from the frame pass because these handlers always were
+        // their own group, and that separation is what let Subsystems/SurfaceOps.cpp
+        // happen without reordering the selection dispatch.
         ed::EventBus::instance().drain(g_editorSurfaceEvents);
-
-        // Surface apply/reset arrive as one ed::SurfaceEdit carrying the renderable,
-        // the face mask AND the working props, captured when the button was pressed.
-        // Previously the mask and renderable were read from the live panel state at
-        // drain time, so a selection change between click and drain applied the
-        // props to whatever faces were selected THEN.
-        for (const ed::Event& sev : g_editorSurfaceEvents) {
-            const ed::SurfaceEdit& se = sev.surface();
-            if (sev.kind == ed::Ev::ApplySurface) {
-                OzoneRenderable* r = OzoneLoader::Instance().Get(se.renderable);
-                if (!r) {
-                    EditorLog("Surface: apply ignored - renderable %d no longer exists",
-                              se.renderable);
-                } else if (!se.hasFaces()) {
-                    // Guarded on purpose: an empty mask must never be treated as
-                    // "apply to all six faces".
-                    EditorLog("Surface: apply ignored - no face selected");
-                } else {
-                    HistoryPush();
-                    oz::surface::SurfaceProps p = g_editorPanels.surfaceEdit;
-                    p.flags      = se.flags;
-                    p.glowR      = se.glowR;  p.glowG = se.glowG;  p.glowB = se.glowB;
-                    p.glowScale  = se.glowScale;
-                    p.alpha      = se.alpha;  p.alphaCutoff = se.alphaCutoff;
-                    p.uvScaleU   = se.uvScaleU; p.uvScaleV = se.uvScaleV;
-                    p.uvOffsetU  = se.uvOffsetU; p.uvOffsetV = se.uvOffsetV;
-                    p.panU       = se.panU;   p.panV = se.panV;
-                    p.texSlot    = se.texSlot;
-                    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
-                        if (!(se.faceMask & (1u << f))) continue;
-                        OzoneLoader::Instance().SetRenderableFace(
-                            se.renderable, (oz::surface::SurfaceFace)f, p);
-                    }
-                    EditorLog("Surface: applied to %d face(s) of renderable %d (flags=0x%X)",
-                              __builtin_popcount(se.faceMask), se.renderable, se.flags);
-                    SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
-                }
-            } else if (sev.kind == ed::Ev::ResetSurface) {
-                const int rIdx = se.renderable;
-                OzoneRenderable* r = OzoneLoader::Instance().Get(rIdx);
-                if (r && se.hasFaces()) {
-                    HistoryPush();
-                    for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
-                        if (!(se.faceMask & (1u << f))) continue;
-                        r->surface.ClearFace((oz::surface::SurfaceFace)f);
-                    }
-                    // Face meshes only exist while a brush is decorated, so
-                    // dropping the last override has to release them.
-                    OzoneLoader::Instance().RebuildSurfaceMeshes(rIdx);
-                    EditorLog("Surface: reset %d face(s) of renderable %d",
-                              __builtin_popcount(se.faceMask), rIdx);
-                    SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
-                }
-            }
-        }
+        ApplySurfaceEdits(g_editorSurfaceEvents);
 
         // Properties apply handler - write values back from native panel.
         //

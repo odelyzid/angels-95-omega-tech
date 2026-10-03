@@ -7,6 +7,262 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
+// Thirteen per-container raycasts, one per entity kind, all sharing the same shape:
+// pick the nearest hit and fill `out`. They lived in Core/EditorShell.hpp until R6,
+// which is how a 420-line state header came to contain 250 lines of picking logic.
+// EditorRaycastAt below is their only caller, which is why they moved down to it.
+
+static RayCollision RaycastTestBrushes(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
+    for (size_t i = 0; i < vols.size(); i++) {
+        RayCollision hit = GetRayCollisionBox(ray, vols[i].aabb);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::BRUSH, (int)i, "Brush", 
+                    {(vols[i].aabb.min.x + vols[i].aabb.max.x)/2,
+                     (vols[i].aabb.min.y + vols[i].aabb.max.y)/2,
+                     (vols[i].aabb.min.z + vols[i].aabb.max.z)/2} };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestOzPrimitives(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    int count = OzoneLoader::Instance().Count();
+    for (int i = 0; i < count; i++) {
+        OzoneRenderable* r = OzoneLoader::Instance().Get(i);
+        if (!r || !r->loaded || r->model.meshCount == 0) continue;
+        BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+        // Apply mesh-local AABB transformed by position + scale (handles non-centered meshes)
+        Vector3 wMin = {r->position.x + mb.min.x * r->scale,
+                        r->position.y + mb.min.y * r->scale,
+                        r->position.z + mb.min.z * r->scale};
+        Vector3 wMax = {r->position.x + mb.max.x * r->scale,
+                        r->position.y + mb.max.y * r->scale,
+                        r->position.z + mb.max.z * r->scale};
+        BoundingBox box = {wMin, wMax};
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            // Store ACTUAL mesh center as selection position, not r->position
+            Vector3 center = {(wMin.x + wMax.x) * 0.5f, (wMin.y + wMax.y) * 0.5f, (wMin.z + wMax.z) * 0.5f};
+            out = { SelType::BRUSH, i, TextFormat("OzPrimitive %d", i),
+                    center, r->scale, r->rotation * RAD2DEG, true }; // UI works in degrees
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestModels(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    for (int i = 0; i < CachedModelCounter; i++) {
+        int mid = CachedModels[i].ModelId;
+        if (mid <= 0) continue;
+        LoadedModel* lm = WDLModels.GetModelByWDLId(mid);
+        if (!lm || !lm->loaded || lm->model.meshCount == 0) continue;
+        BoundingBox box = GetMeshBoundingBox(lm->model.meshes[0]);
+        float sx = CachedModels[i].S;
+        Vector3 pos = {CachedModels[i].X, CachedModels[i].Y, CachedModels[i].Z};
+        box.min = Vector3Add(Vector3Scale(box.min, sx), pos);
+        box.max = Vector3Add(Vector3Scale(box.max, sx), pos);
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::MODEL, i, TextFormat("Model%d", mid), pos, sx, CachedModels[i].R, true };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPawns(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& pawns = PawnSystem::Instance().GetPawns();
+    for (auto& p : pawns) {
+        if (!p.active) continue;
+        BoundingBox box = { {p.position.x - 1, p.position.y - 1, p.position.z - 1},
+                            {p.position.x + 1, p.position.y + 1, p.position.z + 1} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::NPC, (int)p.id, p.defName, p.position };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPickups(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& pickups = PawnSystem::Instance().GetPickups();
+    for (auto& pk : pickups) {
+        if (!pk.active) continue;
+        BoundingBox box = { {pk.position.x - 0.6f, pk.position.y - 0.3f, pk.position.z - 0.6f},
+                            {pk.position.x + 0.6f, pk.position.y + 0.9f, pk.position.z + 0.6f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PICKUP, (int)pk.id, pk.typeName, pk.position };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestZones(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& zones = ZoneManager::Instance().GetZones();
+    Vector3 camPos = OTEditor.MainCamera.position;
+    for (auto& z : zones) {
+        // Skip zones containing the camera â€” can't select the boundary you're inside
+        if (camPos.x >= z.bounds.min.x && camPos.x <= z.bounds.max.x &&
+            camPos.y >= z.bounds.min.y && camPos.y <= z.bounds.max.y &&
+            camPos.z >= z.bounds.min.z && camPos.z <= z.bounds.max.z)
+            continue;
+        RayCollision hit = GetRayCollisionBox(ray, z.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::ZONE, (int)z.id, "ZoneVolume", {
+                (z.bounds.min.x + z.bounds.max.x) * 0.5f,
+                (z.bounds.min.y + z.bounds.max.y) * 0.5f,
+                (z.bounds.min.z + z.bounds.max.z) * 0.5f
+            }};
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestLights(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& lights = PawnSystem::Instance().GetLights();
+    // A light is drawn as a billboard at position + 0.4 Y, so the pick volume
+    // has to cover that sprite rather than sitting under it - otherwise the
+    // visible marker and the clickable region disagree and aiming feels broken.
+    for (auto& l : lights) {
+        if (!l.active) continue;
+        BoundingBox box = { {l.position.x - 0.6f, l.position.y - 0.1f, l.position.z - 0.6f},
+                            {l.position.x + 0.6f, l.position.y + 1.0f, l.position.z + 0.6f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::LIGHT, (int)l.id,
+                    l.name.empty() ? "Light" : l.name.c_str(), l.position };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestStarts(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& starts = PawnSystem::Instance().GetPlayerStarts();
+    for (auto& s : starts) {
+        BoundingBox box = { {s.position.x - 0.6f, s.position.y - 0.3f, s.position.z - 0.6f},
+                            {s.position.x + 0.6f, s.position.y + 1.0f, s.position.z + 0.6f} };
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::SPAWN, (int)s.id, "PlayerStart", s.position, 1.0f, s.yaw, true };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPortals(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& portals = ZoneManager::Instance().GetPortals();
+    for (size_t p = 0; p < portals.size(); p++) {
+        auto& portal = portals[p];
+        RayCollision hit = GetRayCollisionBox(ray, portal.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PORTAL, (int)p, portal.targetWorld, {
+                (portal.bounds.min.x + portal.bounds.max.x) * 0.5f,
+                (portal.bounds.min.y + portal.bounds.max.y) * 0.5f,
+                (portal.bounds.min.z + portal.bounds.max.z) * 0.5f
+            }};
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestMeshObjects(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& objs = PawnSystem::Instance().GetMeshObjects();
+    for (auto& n : objs) {
+        BoundingBox box;
+        Vector3 center = n.position;
+        if (n.mesh && n.mesh->Valid()) {
+            const BoundingBox& mb = n.mesh->Bounds();
+            box.min = {n.position.x + mb.min.x * n.scale,
+                       n.position.y + mb.min.y * n.scale,
+                       n.position.z + mb.min.z * n.scale};
+            box.max = {n.position.x + mb.max.x * n.scale,
+                       n.position.y + mb.max.y * n.scale,
+                       n.position.z + mb.max.z * n.scale};
+            center = {(box.min.x + box.max.x) * 0.5f,
+                      (box.min.y + box.max.y) * 0.5f,
+                      (box.min.z + box.max.z) * 0.5f};
+        } else {
+            box.min = {n.position.x - 1.0f, n.position.y - 1.0f, n.position.z - 1.0f};
+            box.max = {n.position.x + 1.0f, n.position.y + 1.0f, n.position.z + 1.0f};
+        }
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::MESH, (int)n.id,
+                    n.skeletal ? "Mesh.Skeletal" : "Mesh.Static",
+                    center, n.scale, n.yaw, true };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestParticleEmitters(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetParticleEmitters();
+    for (auto& e : list) {
+        float r = e.radius + 0.5f;
+        BoundingBox box = {{e.position.x - r, e.position.y - r, e.position.z - r},
+                           {e.position.x + r, e.position.y + r, e.position.z + r}};
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PARTICLE, (int)e.id, "ParticleEmitter", e.position, 1.0f, e.yaw, true };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestPathNodes(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetPathNodes();
+    for (auto& n : list) {
+        float r = n.radius + 0.4f;
+        BoundingBox box = {{n.position.x - r, n.position.y - r, n.position.z - r},
+                           {n.position.x + r, n.position.y + r, n.position.z + r}};
+        RayCollision hit = GetRayCollisionBox(ray, box);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            out = { SelType::PATHNODE, (int)n.id, n.name, n.position, 1.0f, 0.0f };
+        }
+    }
+    return best;
+}
+
+static RayCollision RaycastTestWindZones(Ray ray, EditorSelection& out) {
+    RayCollision best = { false, 1e9f, {0,0,0}, {0,0,0} };
+    auto& list = PawnSystem::Instance().GetWindZones();
+    for (auto& z : list) {
+        RayCollision hit = GetRayCollisionBox(ray, z.bounds);
+        if (hit.hit && hit.distance < best.distance) {
+            best = hit;
+            Vector3 center = {(z.bounds.min.x + z.bounds.max.x) * 0.5f,
+                              (z.bounds.min.y + z.bounds.max.y) * 0.5f,
+                              (z.bounds.min.z + z.bounds.max.z) * 0.5f};
+            out = { SelType::WINDZONE, (int)z.id, "WindZone", center, 1.0f, 0.0f };
+        }
+    }
+    return best;
+}
 static bool EditorRaycastAt(Vector2 mousePos, EditorSelection& out) {
     Ray ray = GetMouseRay(mousePos, OTEditor.MainCamera);
 #ifdef DEBUG_EDITOR_TRACE

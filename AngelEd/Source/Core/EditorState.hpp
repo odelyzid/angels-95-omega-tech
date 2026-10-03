@@ -1,0 +1,144 @@
+// =============================================================================
+// Core/EditorState.hpp
+//
+// Shared editor state: menu command IDs, the AutoConvex budget, the event-pass
+// buffers, and the selection / mouse / gizmo state that Core, Subsystems and UI all
+// read.
+//
+// Split out of Core/EditorShell.hpp in R6. EditorShell.hpp used to be a preamble AND
+// a state header AND - the actual reason for the split - the home of thirteen
+// RaycastTest* picking functions whose ONLY caller is Subsystems/Selection.cpp.
+// Picking logic sitting in a state header is what made that file 420 lines and
+// unreadable; those functions moved down to their caller.
+//
+// Everything here is `static`, i.e. internal to the one translation unit of Main.cpp.
+// That is deliberate for now and is what R6 phase F changes: promoting Subsystems/
+// to real translation units means the genuinely shared subset moves to `inline
+// variables here and the rest stays private to its fragment.
+// =============================================================================
+
+#include "../SelType.hpp"
+#include "EditorEventBus.hpp"
+
+
+// Menu command IDs
+enum EditorMenuCmd {
+    IDM_NEW = 1001,
+    IDM_OPEN,
+    IDM_SAVE,
+    IDM_SAVE_AS,
+    IDM_PLAY_TEST,
+    IDM_UNDO,
+    IDM_REDO,
+    IDM_EXIT,
+    IDM_MODEL_BRW = 1100,
+    IDM_SOUND_MGR,
+    IDM_TEXTURE_MGR,
+    IDM_PAWN_MGR,
+    IDM_SCRIPT_MGR,
+    IDM_NODE_PANEL,
+    IDM_PICKUP_PANEL,
+    IDM_HEIGHTMAP,
+    IDM_WORLD_GRAPH,
+    IDM_LEVEL_LIST,
+    IDM_FULLSCREEN,
+    IDM_RESET_CAM,
+    IDM_VIEW_TOP,
+    IDM_VIEW_BOTTOM,
+    IDM_VIEW_RIGHT,
+    IDM_VIEW_LEFT,
+    IDM_VIEW_PERSPECTIVE,
+    IDM_ABOUT,
+    // Context menu actions
+    IDM_PROPERTIES = 2001,
+    IDM_DELETE_ENTITY,
+    IDM_DUPLICATE_ENTITY,
+    IDM_CANCEL,
+    IDM_APPLY_TEXTURE,
+IDM_APPEND_AUTOCONVEX,
+IDM_SURFACE_PROPS,
+IDM_SURFACE_RESET,
+};
+
+// Box budget for one "Append AutoConvex Collision" run. Past this the command
+// refuses outright rather than emitting a partial hull - a missing box in a
+// collision wall is the exact failure the feature exists to prevent.
+static const int kAutoConvexMaxBoxes = 2048;
+
+// Forward declarations
+static void EditorLog(const char* fmt, ...);
+static void HistoryPush();
+static void HistoryUndo();
+static void HistoryRedo();
+static void HistoryClear();
+
+// WDLModels definition (extern declared in Editor.hpp)
+GameModels WDLModels;
+
+// ---------------------------------------------------------------------------
+// Entity selection system (hover + click + right-click context menu)
+// ---------------------------------------------------------------------------
+// SelType itself lives in SelType.hpp because it crosses the Main.cpp <->
+// Win32Dialogs.cpp boundary as a raw int on both sides.
+#include "../SelType.hpp"
+#include "EditorEventBus.hpp"
+
+// Events posted by the Win32 panels during the frame's message pump, drained at
+// the single dispatch point below. A file-static buffer rather than a local so
+// the drain cannot allocate during dispatch.
+static std::vector<ed::Event> g_editorFrameEvents;
+// Surface edits are drained in their own pass, at the point the old
+// actionApplySurface / actionResetSurface handlers lived. Kept separate from
+// g_editorFrameEvents so this batch's handlers can be moved into
+// Subsystems/SurfaceOps during R4 without reordering the selection dispatch.
+static std::vector<ed::Event> g_editorSurfaceEvents;
+// Animation commands, drained and dispatched by ApplyAnimIntents. Separate pass
+// for the same reason as the surface one: that function is moving to
+// Subsystems/AnimEditing in R4 and should not have to be interleaved with the
+// selection dispatch.
+static std::vector<ed::Event> g_editorAnimEvents;
+// Bumped by any event kind the dispatcher does not handle yet. Should be 0 once
+// R2 is complete; a non-zero value means a batch posted an event nobody consumes,
+// which is a silently dead click rather than a compile error.
+static int g_editorUnhandledEvents = 0;
+// Index of a mesh awaiting Ev::ConvertToAnimated. -1 = none. The conversion itself
+// runs at its own site in the frame (it needs EnsureMeshNodeLoaded and the Anim
+// panel handover), so the dispatcher only records the target.
+static int evConvertMeshIndex = -1;
+
+struct EditorSelection {
+    SelType type = SelType::NONE;
+    int index = -1;
+    std::string name;
+    Vector3 pos{0,0,0};
+    float scale = 1.0f;
+    float rotation = 0.0f;
+    // True only when `rotation` above was actually populated by the raycast
+    // that produced this selection. Most entity types have no yaw concept at
+    // all (zones, pickups, lights, portals), so they leave `rotation` at its
+    // 0.0f default. The properties panel still seeds a "Rot" row from that
+    // default, and the apply handler used to write it straight back - which
+    // silently reset the authored `playerstart` yaw to 0 on any Apply. Same
+    // trap as scale. Anything that consumes `rotation` on write must gate on
+    // this flag.
+    bool hasRotation = false;
+};
+static EditorSelection g_sel;       // left-click selected (red)
+static EditorSelection g_hoverSel;  // mouse hover (yellow)
+
+// Right-click state: drag vs click detection
+static bool g_rbDown = false;
+static Vector2 g_rbDownPos{0,0};
+// Left-click state: pick fires on release so a held drag (e.g. moving a
+// placement ghost) is not mistaken for a selection click.
+static bool g_lbDown = false;
+static Vector2 g_lbDownPos{0,0};
+
+// Gizmo drag: moving a SELECTED entity requires an intentional gesture (Move
+// tool active, or the press landing on the selection) â€” a plain viewport click
+// must never translate it. g_suppressViewportDrag swallows stale mouse input
+// for the frame(s) around a native context menu.
+static bool g_gizmoDrag = false;
+static bool g_gizmoHistPushed = false;
+static bool g_suppressViewportDrag = false;
+static bool g_terrainHistPushed = false;
