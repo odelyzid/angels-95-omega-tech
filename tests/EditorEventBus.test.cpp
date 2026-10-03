@@ -32,6 +32,21 @@ static void test_typed_payloads() {
     check(e.spawn().key == "pistol_01", "SpawnDesc.string survives the round trip");
     check(e.spawn().kind == 2, "SpawnDesc.int survives the round trip");
 
+    // The three fields added when placement moved off direct PawnSystem calls.
+    // `at` is the one that matters most: placement used to read the live camera aim
+    // point at drain time, and it now travels with the event.
+    sd.at.x = 10.0f; sd.at.y = -4.0f; sd.at.z = 22.5f;
+    sd.at.w = 4.0f; sd.at.h = 2.0f; sd.at.yaw = 1.5f;
+    sd.skeletal = true;
+    sd.lightType = 2;
+    Event sp = Event::make(Ev::SpawnLight, sd);
+    check(sp.spawn().at.x == 10.0f && sp.spawn().at.y == -4.0f && sp.spawn().at.z == 22.5f,
+          "SpawnDesc.at position survives the round trip");
+    check(sp.spawn().at.w == 4.0f && sp.spawn().at.h == 2.0f && sp.spawn().at.yaw == 1.5f,
+          "SpawnDesc.at half-extents and yaw survive the round trip");
+    check(sp.spawn().skeletal, "SpawnDesc.skeletal survives the round trip");
+    check(sp.spawn().lightType == 2, "SpawnDesc.lightType survives the round trip");
+
     SelRef sel{SelKind::Portal, 3};
     Event d = Event::make(Ev::DeleteEntity, sel);
     check(d.sel().kind == SelKind::Portal && d.sel().index == 3,
@@ -194,6 +209,7 @@ static void test_event_coverage() {
         {Ev::SpawnZone, "SpawnZone"}, {Ev::SpawnParticleEmitter, "SpawnParticleEmitter"},
         {Ev::SpawnPathNode, "SpawnPathNode"}, {Ev::SpawnWindZone, "SpawnWindZone"},
         {Ev::SpawnPlayerStart, "SpawnPlayerStart"},
+  {Ev::SpawnLight, "SpawnLight"},
         {Ev::CsgPlace, "CsgPlace"}, {Ev::CsgCommit, "CsgCommit"},
         {Ev::DeleteEntity, "DeleteEntity"}, {Ev::DuplicateEntity, "DuplicateEntity"},
         {Ev::DeletePortal, "DeletePortal"},

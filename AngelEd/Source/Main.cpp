@@ -54,6 +54,9 @@
 // Core/EditorMenus.cpp               native menu bar construction
 // Subsystems/AnimEditing.cpp         vertex-keyframe editing + anim event handlers
 // Subsystems/History.cpp             OZONE-snapshot undo/redo + ApplyMapProperties
+// Subsystems/Placement.cpp           entity placement (was: direct PawnSystem calls
+//                                    from UI/Panels/PawnPanel.cpp). LAST because it
+//                                    calls HistoryPush, which History.cpp defines.
 #include "Subsystems/Selection.cpp"
 #include "Subsystems/EntityOps.cpp"
 #include "Core/EditorLog.cpp"
@@ -64,6 +67,7 @@
 #include "Core/EditorMenus.cpp"
 #include "Subsystems/AnimEditing.cpp"
 #include "Subsystems/History.cpp"
+#include "Subsystems/Placement.cpp"
 
 // -----------------------------------------------------------------------------
 // main()
@@ -2384,6 +2388,24 @@ if (g_editorPanels.showCollisionBounds) {
         // push the file write a frame later for no benefit.
         ed::EventBus::instance().drain(g_editorAnimEvents);
         ApplyAnimIntents(g_editorAnimEvents);
+
+        // Placement arrives as ed::Ev::Spawn* carrying its own position, resolved
+        // type and (for meshes) the model path - all captured at post time. The Pawn
+        // panel used to call PawnSystem::Add* directly from its WM_COMMAND handler,
+        // which broke the layer rule; see Subsystems/Placement.cpp.
+        //
+        // Drained in its own pass rather than the shared g_editorFrameEvents for the
+        // same reason the surface and anim passes have theirs: so Placement.cpp can
+        // become a real translation unit without that move reordering the selection
+        // dispatch above.
+        //
+        // Deferral is one frame. It is safe because nothing here reads live panel or
+        // selection state, and it is what makes the "the handler did not run"
+        // condition observable at all - g_editorUnplacedEvents counts a Spawn* that
+        // arrived without a usable payload, which is how the nine dead actionSpawn*
+        // fields stayed invisible for so long.
+        ed::EventBus::instance().drain(g_editorPlacementEvents);
+        ApplyPlacementSpawns(g_editorPlacementEvents);
 
         // Save the clip file back to disk. Deliberately AFTER ApplyAnimIntents:
         // a NewClip/DeleteKey posted this frame sets actionAnimSave from inside the

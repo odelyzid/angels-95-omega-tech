@@ -1,6 +1,6 @@
 # AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
 
-**Status: R0–R4 DONE.** This file is the source of truth. Update the
+**Status: R0–R5 DONE.** This file is the source of truth. Update the
 progress log as items land; do not work from memory of a plan held in context.
 
 **R2 result in one line:** 58 `action*` fields → **4**, and all 4 are documented
@@ -139,8 +139,9 @@ whose *interfaces* matter and they are far fewer per layer.
 | R1 | `EditorEventBus` + headless suite + `make test` in CI | **done** |
 | R2 | convert the action fields, batch by batch - **done** | 58 |
 | R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) | **done** |
-| R4 | split `Main.cpp` into `Core/` + `Subsystems/` | pending |
-| R5 | `AGENTS.md` + full verification | pending |
+
+| R4 | split `Main.cpp` into `Core/` + `Subsystems/` | **done** |
+| R5 | `Subsystems/Placement` (close Invariant 1) + `AGENTS.md` | **done** |
 
 R2 is split into batches so each is independently reviewable and each deletes its
 fields as it goes:
@@ -230,12 +231,23 @@ Main.cpp:4672:    g_editorPanels.actionSpawnPathNode = false;
 ...
 ```
 
-So ~110 lines of handlers in `Main.cpp` could never run. Placement in fact happens
-**synchronously** in `SpawnSelectedPawnTreeItem` (`Win32Dialogs.cpp:1778`), which
-covers all nine types — pawn, pickup, player start, emitter, zone, mesh, particle
-emitter, path node, wind zone — using `spawnPos`. The dead handlers would also
-have placed at `MainCamera.target` instead of the ghost position, so they were not
-merely redundant but *wrong*.
+So ~110 lines of handlers in `Main.cpp` could never run. Placement in fact happened
+**synchronously** in `SpawnSelectedPawnTreeItem`, which covered all nine types - pawn,
+pickup, player start, emitter, zone, mesh, particle emitter, path node, wind zone -
+using `spawnPos`.
+
+> **CORRECTION (made in R5).** This section originally added: *"The dead handlers
+> would also have placed at `MainCamera.target` instead of the ghost position, so they
+> were not merely redundant but **wrong**."* **That was false.**
+> `g_editorPanels.spawnPos` is assigned from `OTEditor.MainCamera.target` every frame,
+> so there is no separate ghost position - the camera aim point **is** the placement
+> point. The dead handlers would have been behaviourally **identical**, not wrong.
+>
+> It mattered, because that sentence was the strongest stated reason to keep placement
+> synchronous. With it gone, synchronous placement had no position-fidelity argument
+> left - which is what made routing placement through the bus defensible at all. R5
+> therefore deferred placement by one frame deliberately, having established there was
+> no second position to lose.
 
 **This is why the batch is an audit first and a conversion second.** The plan
 assumed 58 live channels; it is closer to 49. `Ev::Spawn*` still earns its place —
@@ -497,13 +509,15 @@ AngelEd/Source/
   Core/EditorShell.cpp     view presets, panel toggle shims, world dir, scene reset
   Core/EditorLog.cpp       AngelEd.log appender
   Core/EditorMenus.cpp     native menu bar
-  Subsystems/Selection.cpp          raycast, surface-face pick, gizmo snap, adopt
-  Subsystems/EntityOps.cpp          delete, duplicate, AutoConvex, CSG commit
+  Subsystems/Selection.cpp          raycast, surface-face pick, gizmo snap, adopt,
+                                         delete, duplicate
   Subsystems/WorldIO.cpp            LoadWorldDocument + name helpers
   Subsystems/OzoneExport.cpp        ExportToOzone, Save, File menu, texture apply
   Subsystems/WorldGraphBridge.cpp   UI accessor surface + Win32 menu dispatch
   Subsystems/AnimEditing.cpp        vertex-keyframe editing + anim event handlers
+  Subsystems/EntityOps.cpp          AutoConvex proxy append, brush CSG commit
   Subsystems/History.cpp            OZONE-snapshot undo/redo + ApplyMapProperties
+  Subsystems/Placement.cpp          Spawn* handlers: the world mutation
   EditorEventBus.{hpp,cpp}          shared event contract
   Editor.hpp, EditorIcons.{hpp,cpp}, SelType.hpp
   UI/                        see R3
@@ -552,3 +566,83 @@ of them an `#include` whose path changed because the preamble moved from `Source
 > The comparison needs `-Encoding UTF8` on both sides. PowerShell 5.1's `Get-Content`
 > otherwise defaults to the ANSI codepage and mangles every em-dash in the file's
 > comments, which shows up as ~40 phantom "removed" lines and looks like data loss.
+
+## R5 outcome: Subsystems/Placement (Invariant 1 closed)
+
+R3 and R4 were file surgery. R5 was the first change in this document that alters
+behaviour, and it exists to close the invariant the document opens with:
+
+> **A panel posts an event; it never mutates the world directly.** If a `UI/` file
+> calls `PawnSystem::Add*`, the layer rule is already broken.
+
+It was broken. `SpawnSelectedPawnTreeItem` in `UI/Panels/PawnPanel.cpp` called
+`PawnSystem::Add*` eight times and `ZoneManager::AddZone` once, from inside a
+`WM_COMMAND` handler.
+
+### What changed
+
+| | Before | After |
+|---|---|---|
+| Panel does | validate + **mutate** | validate + **post** |
+| Position source | `g_editorPanels.spawnPos` read at click | `SpawnDesc::at`, captured at post |
+| Mesh path | resolved by index at click | resolved by the panel, path travels |
+| Undo | **none** - placement was the one mutation with no `HistoryPush` | `HistoryPush()` first |
+
+`SpawnDesc` gained `Transform at` (position, plus zone/wind-zone half-extents and
+mesh/playerstart yaw), `bool skeletal` and `int lightType`; `Ev::SpawnLight` was
+added for the three light tags, which had no event at all. `Transform` had to move
+**above** `SpawnDesc` to be nested.
+
+### Two things worth recording
+
+- **The `Spawn*` seam already existed and was fully tested - with zero users.** All
+  nine kinds and `SpawnDesc` were exercised only by `tests/EditorEventBus.test.cpp`.
+  The dead `actionSpawn*` fields had been deleted in B1 and the replacement was left
+  to land here, which is exactly what the B1 note said would happen.
+- **`ev.spawn()` is the shape check.** The first draft of `ApplyPlacementSpawns` used
+  `std::holds_alternative<ed::SpawnDesc>(ev.payload())` - which does not compile, the
+  member is `data`. But the better outcome is that it is unnecessary: `spawn()` already
+  logs and returns an inert `SpawnDesc` on a shape mismatch, which is the documented
+  anti-`reinterpret_cast` mechanism. A second, weaker guard doing the same job would be
+  the wrong fix.
+
+### Behaviour changes a reviewer must know about
+
+1. **Placement defers by one frame.** It used to happen inside `WM_COMMAND`; it now
+   happens at the next drain. Safe because the panel validates synchronously (its
+   failure `MessageBox` needs the return value, and a queued event cannot report back)
+   and because nothing in the handler reads live panel or selection state.
+2. **Placement is now undoable.** This is a fix, not a regression: previously a placed
+   entity could not be removed with Ctrl+Z while delete, duplicate and surface edit all
+   could.
+
+### Verified
+
+- `Spawn*` events with no handler increment `g_editorUnplacedEvents` rather than being
+  ignored - the failure mode that kept the nine `actionSpawn*` fields invisible.
+- **Invariant 1 grep now passes:** the only `ps.Spawn` left in `UI/` is inside a comment
+  describing the old code. `UI/` still calls twelve `PawnSystem` accessors, all reads
+  (`GetDefs`, `GetMeshObject`, `GetPickups`, ...), which the invariant permits.
+- `make test` green including `test_editorbus` 77/77 (was 73/73).
+- The `Ev::Count` sentinel failed the suite the moment `SpawnLight` was added, before
+  its row existed. Working as designed.
+
+### Not done, and still outstanding
+
+- **The manual pass.** R3-R5 are ~11,500 lines of movement whose only headless signal
+  is the line-multiset diff. Placing each of the ten kinds and then Ctrl+Z-ing each one
+  is the test that matters and it has not been run.
+- **`Resources/` layer: never created.** `AssetScope` / `AssetScan` / `PackageIO` from
+  the Design section do not exist; all of it is still in `UI/`.
+- **`Core/EditorDispatcher.cpp` and `Core/EditorState.hpp`: never created.** The
+  dispatcher is still a switch inline in `main()`; editor state lives in
+  `Core/EditorShell.hpp`.
+- **`Subsystems/SurfaceOps` and `Subsystems/LevelState` were folded** into
+  `EntityOps.cpp` and `History.cpp` respectively rather than created as named.
+- **`LevelMetadata` is still declared in `UI/UiPanels.hpp`**, which this document's
+  "Ruled out" section says belongs in `Subsystems/LevelState`.
+- **`actionApplyProperties` is still a field**, though B3 and the R2 result table both
+  say it converts in R4. R4 did not convert it.
+- **`actionApplyTextureToSel` remains a field** by the documented modal-`TrackPopupMenu`
+  argument, which is sound.
+- **Promotion of `Subsystems/` to real translation units**, now including Placement.

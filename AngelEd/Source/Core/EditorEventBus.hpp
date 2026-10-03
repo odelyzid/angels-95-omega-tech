@@ -28,21 +28,34 @@ enum class SelKind : uint8_t {
     Mesh, Particle, PathNode, WindZone, Map,
 };
 
-// What to place at the camera. One payload for all ten `actionSpawn*` fields,
-// which is the point: those ten fields are ten spellings of "place something",
-// and nothing stopped the wrong one being read.
-struct SpawnDesc {
-    std::string key;        // def name for pawn/mesh/pickup, "" when unused
-    int         kind = 0;   // ZoneType index for a zone, else unused
-    bool        solid = false;   // CSG op: SOLID when placed directly
-};
-
 // Position / size / rotation. Grouped so a resize cannot be posted with a
 // rotation for some other entity's transform.
+//
+// Declared ABOVE SpawnDesc because SpawnDesc nests it. It was introduced for the
+// CSG brush ghost and sat below SpawnDesc; nesting needs it first.
 struct Transform {
     float x = 0, y = 0, z = 0;
     float w = 8, h = 8, d = 8;
     float yaw = 0;
+};
+
+// What to place. One payload for the whole Spawn* family, which is the point:
+// ten `actionSpawn*` fields were ten spellings of "place something", and nothing
+// stopped the wrong one being read.
+//
+// Each field below is scoped to specific event kinds and unused by the rest.
+// That is a deliberate trade against a struct per kind: the kinds are a closed set
+// of ten, and the alternative is ten near-identical structs whose only difference
+// is two fields. The per-kind scoping is what keeps it honest, so it is stated
+// per field rather than left to be inferred.
+struct SpawnDesc {
+    std::string key;        // def name, or the model path for SpawnMesh
+    int         kind = 0;   // SpawnZone only: ZoneType
+    bool        solid = false;   // CSG op: SOLID when placed directly
+    Transform   at;         // position for every kind; w/h/d are zone + wind-zone
+                             // HALF-extents; yaw is mesh + playerstart
+    bool        skeletal = false;   // SpawnMesh only
+    int         lightType = 0;     // SpawnLight only: LitLightType
 };
 
 // A selection, captured BY VALUE at post time.
@@ -173,6 +186,13 @@ enum class Ev : uint8_t {
     // Placement. Payload: SpawnDesc.
     SpawnPawn, SpawnMesh, SpawnPickup, SpawnEmitter, SpawnZone,
     SpawnParticleEmitter, SpawnPathNode, SpawnWindZone, SpawnPlayerStart,
+    // Lights were the one placement path with no event: the Actor-Hierarchy tree
+    // can emit light_point / light_spot / light_directional, and SpawnLight was
+    // never added, so those three stayed as direct PawnSystem calls from the panel.
+    // The kind is explicit rather than a `lightType` field on SpawnMesh because the
+    // three differ in more than a tag - a directional light is authored by its
+    // SOURCE and aimed at the origin, so it seeds 40 units above the aim point.
+    SpawnLight,
 
     // Enter a placement mode (pickup ghost / node ghost / model ghost).
     // Payload: PlacementRequest - carries the resolved def NAME, not a list index.

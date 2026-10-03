@@ -294,10 +294,59 @@ PawnTreeNode BuildPawnTree() {
     return root;
 }
 
-// Spawn the currently selected Actor-Hierarchy leaf DIRECTLY into PawnSystem.
-// Done synchronously inside the panel's window proc (rather than via main-loop
-// action flags) so it works regardless of frame/flag timing. Returns false when
-// nothing could be spawned (e.g. a category is selected, or no model chosen).
+// Map an Actor-Hierarchy typeTag to the event kind that places it.
+//
+// This is the whole placement vocabulary. An unrecognised tag falls through to
+// SpawnPawn, which reproduces the old trailing `else { ps.Spawn(pos, defName); }`.
+// That default is deliberate: an unknown tag used to spawn a pawn rather than do
+// nothing, and silently refusing would be a behaviour change nobody asked for.
+static ed::Ev PlacementKindForTag(const std::string& typeTag) {
+    if (typeTag == "enemy")                            return ed::Ev::SpawnPawn;
+    if (typeTag == "pickup")                           return ed::Ev::SpawnPickup;
+    if (typeTag == "playerstart")                      return ed::Ev::SpawnPlayerStart;
+    if (typeTag == "emitter")                          return ed::Ev::SpawnEmitter;
+    if (typeTag == "zone")                             return ed::Ev::SpawnZone;
+    if (typeTag == "mesh_static" || typeTag == "mesh_skeletal")
+                                                      return ed::Ev::SpawnMesh;
+    if (typeTag == "light_point" || typeTag == "light_spot" ||
+        typeTag == "light_directional")                return ed::Ev::SpawnLight;
+    if (typeTag == "particle")                         return ed::Ev::SpawnParticleEmitter;
+    if (typeTag == "pathnode")                         return ed::Ev::SpawnPathNode;
+    if (typeTag == "windzone")                         return ed::Ev::SpawnWindZone;
+    return ed::Ev::SpawnPawn;
+}
+
+// Zone def name -> ZoneType. The five placed zone kinds and nothing else.
+static int ZoneTypeForDef(const std::string& defName) {
+    if (defName == "ZONE_LADDER")         return (int)ZoneType::ZONE_LADDER;
+    if (defName == "ZONE_SKY")            return (int)ZoneType::ZONE_SKY;
+    if (defName == "ZONE_REVERB")         return (int)ZoneType::ZONE_REVERB;
+    if (defName == "ZONE_GAMEPLAY_SOUND") return (int)ZoneType::ZONE_GAMEPLAY_SOUND;
+    return (int)ZoneType::ZONE_WATER;
+}
+
+// Light def name -> LitLightType.
+static int LightTypeForDef(const std::string& defName) {
+    if (defName == "Light.Spot")        return (int)LitLightType::SPOT;
+    if (defName == "Light.Directional") return (int)LitLightType::DIRECTIONAL;
+    return (int)LitLightType::POINT;
+}
+
+// Post a placement request for the currently selected Actor-Hierarchy leaf.
+//
+// The panel VALIDATES and POSTS; it no longer mutates the world. Everything that used
+// to be a PawnSystem call from this file is now an ed::Spawn* event carrying its own
+// position, so a tree rebuild or a selection change between the click and the frame
+// cannot place a different entity. See Wiki/Editor-Architecture-Refactor.md, Invariants:
+// "A panel posts an event; it never mutates the world directly."
+//
+// The validation deliberately stays HERE and stays synchronous: the caller drives a
+// failure MessageBox off this function's return value, and a queued event cannot report
+// back. So the panel answers "is this spawnable?" and ApplyPlacementSpawns answers
+// "place it" - which is why the handler cannot fail on a bad key.
+//
+// Returns false when nothing could be posted: a category is selected, a metadata-only
+// def was chosen, or no model is selected for a mesh.
 static bool SpawnSelectedPawnTreeItem(HWND hTree) {
     TVITEMW item;
     item.hItem = (HTREEITEM)SendMessage(hTree, TVM_GETNEXTITEM, TVGN_CARET, 0);
@@ -309,94 +358,40 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
     SplitTreeParam((const char*)item.lParam, typeTag, defName);
     if (defName.empty()) return false;
 
-    auto& ps = PawnSystem::Instance();
-    Vector3 pos = { g_editorPanels.spawnPos[0], g_editorPanels.spawnPos[1], g_editorPanels.spawnPos[2] };
+    // Metadata-only defs (EntityType::GAMETYPE) are not placeable. Clicking one is a
+    // no-op: no OZONE export entry, no placement.
+    if (typeTag == "metadata") return false;
 
-    if (typeTag == "enemy") {
-        ps.Spawn(pos, defName.c_str());
-    } else if (typeTag == "pickup") {
-        PickupNode n; n.position = pos; n.typeName = defName; ps.AddPickup(n);
-    } else if (typeTag == "playerstart") {
-        PlayerStartNode n; n.position = pos; n.yaw = 0.0f; ps.AddPlayerStart(n);
-    } else if (typeTag == "emitter") {
-        EmitterNode n;
-        n.type = (defName == "MusicEmitter") ? EmitterType::MUSIC : EmitterType::SOUND;
-        n.position = pos; ps.AddEmitter(n);
-    } else if (typeTag == "zone") {
-        ZoneVolumeNode n;
-        n.bounds.min = {pos.x - 4.0f, pos.y - 2.0f, pos.z - 4.0f};
-        n.bounds.max = {pos.x + 4.0f, pos.y + 2.0f, pos.z + 4.0f};
-        if      (defName == "ZONE_LADDER")         n.zoneType = ZoneType::ZONE_LADDER;
-        else if (defName == "ZONE_SKY")            n.zoneType = ZoneType::ZONE_SKY;
-        else if (defName == "ZONE_REVERB")         n.zoneType = ZoneType::ZONE_REVERB;
-        else if (defName == "ZONE_GAMEPLAY_SOUND") n.zoneType = ZoneType::ZONE_GAMEPLAY_SOUND;
-        else                                        n.zoneType = ZoneType::ZONE_WATER;
-        ZoneManager::Instance().AddZone(n);
-    } else if (typeTag == "mesh_static" || typeTag == "mesh_skeletal") {
+    ed::Ev kind = PlacementKindForTag(typeTag);
+    ed::SpawnDesc d;
+    d.key = defName;
+
+    // spawnPos is refreshed from the camera aim point once per frame in Main.cpp, so
+    // capturing it here captures where the user was looking when they clicked. There
+    // is no separate "ghost position" - the camera aim point IS the placement point.
+    d.at.x = g_editorPanels.spawnPos[0];
+    d.at.y = g_editorPanels.spawnPos[1];
+    d.at.z = g_editorPanels.spawnPos[2];
+
+    if (kind == ed::Ev::SpawnZone) {
+        d.kind  = ZoneTypeForDef(defName);
+        d.at.w = 4.0f; d.at.h = 2.0f; d.at.d = 4.0f;        // half-extents
+    } else if (kind == ed::Ev::SpawnWindZone) {
+        d.at.w = 5.0f; d.at.h = 5.0f; d.at.d = 5.0f;        // half-extents
+    } else if (kind == ed::Ev::SpawnMesh) {
+        // The mesh PATH and the skeletal flag are resolved here, from the same
+        // selectedModel the Model Browser owns, rather than sent as an index for the
+        // handler to resolve later against a list that may since have been rebuilt.
         int idx = g_editorPanels.selectedModel;
         if (idx < 0 || idx >= (int)g_editorPanels.modelEntries.size()) return false;
-        MeshObjectNode n;
-        n.meshPath = g_editorPanels.modelEntries[idx].path;
-        n.skeletal = (typeTag == "mesh_skeletal");
-        n.position = pos; n.yaw = 0.0f; n.scale = 1.0f;
-        ps.AddMeshObject(n);
-    } else if (typeTag == "light_point" || typeTag == "light_spot" ||
-               typeTag == "light_directional") {
-        LightNode n;
-        n.active = true;
-        n.position = pos;
-        n.color = WHITE;
-        n.intensity = 1.0f;
-        n.radius = 20.0f;
-        if (typeTag == "light_directional") {
-            // A directional light is authored by its SOURCE point and aimed at
-            // the world origin (see OzOzoneLoader), so seed it above the aim
-            // point rather than at the emitter position a point light uses.
-            n.type = LitLightType::DIRECTIONAL;
-            n.position = {pos.x, pos.y + 40.0f, pos.z};
-            n.target = {0.0f, 0.0f, 0.0f};
-            n.intensity = 0.8f;
-        } else if (typeTag == "light_spot") {
-            n.type = LitLightType::SPOT;
-            // Default aim: straight down from the emitter. inner_cone/outer_cone
-            // are left at their engine defaults here and filled from the def
-            // below, so Light.Spot.ozls owns the cone instead of this function.
-            n.target = {pos.x, pos.y - 10.0f, pos.z};
-        } else {
-            n.type = LitLightType::POINT;
-        }
-        n.name = defName;
-        // Same defaults layer the OZONE load path uses, so editing
-        // Light.Spot.ozls affects newly placed lights as well as loaded worlds.
-        // color / intensity / radius / position / target stay local: they are
-        // line-owned on every `light` line, so no def may move them.
-        ApplyLightDefDefaultsToNode(n);
-        ps.AddLight(n);
-    } else if (typeTag == "particle") {
-        ParticleEmitterNode n;
-        n.type = "fire"; n.position = pos; n.direction = {0, 1, 0};
-        n.rate = 30.0f; n.lifetime = 0.9f; n.speed = 2.0f; n.spread = 0.5f;
-        n.sizeStart = 0.5f; n.sizeEnd = 0.0f;
-        n.colorStart = {255, 170, 60, 255}; n.colorEnd = {80, 20, 10, 0}; n.radius = 0.2f;
-        ps.AddParticleEmitter(n);
-    } else if (typeTag == "pathnode") {
-        static int s_pathCounter = 0;
-        PathNode n; n.name = "path_" + std::to_string(s_pathCounter++);
-        n.position = pos; n.radius = 1.0f;
-        ps.AddPathNode(n);
-    } else if (typeTag == "windzone") {
-        WindZoneNode n;
-        n.bounds.min = {pos.x - 5.0f, pos.y - 5.0f, pos.z - 5.0f};
-        n.bounds.max = {pos.x + 5.0f, pos.y + 5.0f, pos.z + 5.0f};
-        n.direction = {1, 0, 0}; n.strength = 1.0f; n.frequency = 1.0f;
-        ps.AddWindZone(n);
-    } else if (typeTag == "metadata") {
-        // Metadata-only defs (EntityType::GAMETYPE) are not placeable.
-        // Clicking one is a no-op: no OZONE export entry, no placement.
-        return false;
-    } else {
-        ps.Spawn(pos, defName.c_str());
+        d.key = g_editorPanels.modelEntries[idx].path;
+        d.skeletal = (typeTag == "mesh_skeletal");
+        d.at.yaw = 0.0f;
+    } else if (kind == ed::Ev::SpawnLight) {
+        d.lightType = LightTypeForDef(defName);
     }
+
+    ed::EventBus::instance().post(kind, d);
     return true;
 }
 
