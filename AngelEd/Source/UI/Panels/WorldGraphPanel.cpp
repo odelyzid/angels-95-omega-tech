@@ -61,19 +61,47 @@ static void BuildWorldGraphEntries() {
         g_worldGraphEntries.push_back(e);
     }
 
-    // Brushes from OzoneLoader collision volumes
+    // Brushes from OzoneLoader RENDERABLES, the same source and the same index space
+    // RaycastTestOzPrimitives picks from.
+    //
+    // This used to iterate GetCollisionVolumes() - the CSG output, whose entries are
+    // merged AABBs - and store that index as SelType::BRUSH. R8 established that
+    // SelType::BRUSH means a RENDERABLE index and removed the collision-volume pick
+    // path, but only on the mouse route; this list kept the old index space. Every
+    // consumer of the row (Properties, Delete, Duplicate) then read a collision-volume
+    // index as a renderable index, which is the same defect R8 fixed for clicks, in a
+    // second location.
+    //
+    // It was also self-inconsistent: the CSG output includes AutoConvex
+    // SURF_COLLISION_PROXY boxes and drops `sub`-carved geometry, so the Explorer listed
+    // rows that a click cannot select, and omitted rows it can.
+    //
+    // The skip filter and the world-space AABB must stay identical to Selection.cpp's
+    // RaycastTestOzPrimitives. Two copies of "what counts as a visible brush" is how
+    // the two drifted apart in the first place.
     {
-        auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
-        for (size_t i = 0; i < vols.size(); i++) {
+        const int count = OzoneLoader::Instance().Count();
+        for (int i = 0; i < count; i++) {
+            const OzoneRenderable* r = OzoneLoader::Instance().Get(i);
+            if (!r || !r->loaded || r->model.meshCount == 0) continue;
+            if (r->surfaceFlags & (oz::surface::SURF_COLLISION_PROXY | oz::surface::SURF_INVISIBLE))
+                continue;
+            const BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
+            const float cx = r->position.x + (mb.min.x + mb.max.x) * 0.5f * r->scale;
+            const float cy = r->position.y + (mb.min.y + mb.max.y) * 0.5f * r->scale;
+            const float cz = r->position.z + (mb.min.z + mb.max.z) * 0.5f * r->scale;
+
             WorldGraphEntry e;
             e.typeLabel = "Brush";
-            e.name = TextFormat("Brush %zu", i);
-            e.posX = (vols[i].aabb.min.x + vols[i].aabb.max.x) * 0.5f;
-            e.posY = (vols[i].aabb.min.y + vols[i].aabb.max.y) * 0.5f;
-            e.posZ = (vols[i].aabb.min.z + vols[i].aabb.max.z) * 0.5f;
-            e.rotation = 0;
-            e.selType = 1; // SelType::BRUSH
-            e.selIndex = (int)i;
+            // Same label the picker produces, so one brush reads identically in the
+            // Explorer, the Properties panel and AngelEd.log.
+            e.name = TextFormat("OzPrimitive %d", i);
+            e.posX = cx;
+            e.posY = cy;
+            e.posZ = cz;
+            e.rotation = r->rotation * RAD2DEG;   // the list column is degrees
+            e.selType = sel::BRUSH;
+            e.selIndex = i;
             g_worldGraphEntries.push_back(e);
         }
     }
