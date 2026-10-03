@@ -204,13 +204,19 @@ $(BUILD_DIR)/rlights.o: ../Source/Renderer/rlights/rlights.cpp ../Source/Rendere
 # objects. Diff the two lists when changing either; they must agree apart from
 # OTCustom_stub.o, which exists only because CI links a stub where the Makefile links
 # -l:Custom.so.
-RESOURCES_OBJS := $(BUILD_DIR)/AssetScope.o $(BUILD_DIR)/PackageIO.o
+RESOURCES_OBJS := $(BUILD_DIR)/AssetScope.o $(BUILD_DIR)/PackageIO.o $(BUILD_DIR)/AssetScan.o
 
 $(BUILD_DIR)/AssetScope.o: Source/Resources/AssetScope.cpp Source/Resources/AssetScope.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Resources/AssetScope.cpp -o $@
 
 $(BUILD_DIR)/PackageIO.o: Source/Resources/PackageIO.cpp Source/Resources/PackageIO.hpp | $(BUILD_DIR)
 	$(COMP) $(CFLAGS) -c Source/Resources/PackageIO.cpp -o $@
+
+# AssetScan is the one Resources object a headless suite cannot link: it reads the
+# filesystem and PackageAssetLoader. Its POLICY (sort + dedupe) lives in AssetScope.cpp
+# precisely so that part stays testable - see tests/AssetScope.test.cpp.
+$(BUILD_DIR)/AssetScan.o: Source/Resources/AssetScan.cpp Source/Resources/AssetScan.hpp Source/Resources/AssetScope.hpp | $(BUILD_DIR)
+	$(COMP) $(CFLAGS) -c Source/Resources/AssetScan.cpp -o $@
 
 CORE_OBJS := $(BUILD_DIR)/OzPawnSystem.o $(BUILD_DIR)/OzOzoneLoader.o $(BUILD_DIR)/OzoneFrustum.o $(BUILD_DIR)/OzoneHeightmap.o $(BUILD_DIR)/OzBsp.o \
              $(BUILD_DIR)/AutoConvex.o \

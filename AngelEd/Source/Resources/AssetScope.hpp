@@ -61,4 +61,17 @@ struct AssetScopeNode {
 AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
                                const std::string& search);
 
+// Order by display name and drop same-named duplicates, KEEPING THE REAL FILE.
+//
+// This is the enumeration-side half of the invariant AGENTS.md states: a package
+// holding a same-named copy does not make the on-disk file disappear. Both asset
+// browsers did this independently, each with the same three lines, and each deciding
+// "is this a package?" by calling IsPathFile() on the path - re-deriving something the
+// scanner already knew, via a filesystem hit test that a package key could in
+// principle satisfy. `fromPackage` is set by the scanner and needs no guesswork.
+//
+// Sorted by name, so the result is stable and two browsers listing the same asset
+// agree on its position.
+void DedupeAssetItemsByName(std::vector<AssetScopeItem>& items);
+
 #endif // ANGEL_ED_RESOURCES_ASSETSCOPE_HPP

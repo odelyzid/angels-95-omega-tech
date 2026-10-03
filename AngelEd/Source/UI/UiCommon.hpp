@@ -7,7 +7,7 @@
 #include "../../../Source/Script/LightningEntityRegistry.hpp"
 #include "../../../Source/World/OzOzoneLoader.hpp"
 #include "UiPanels.hpp"
-#include "../Resources/AssetScope.hpp"
+#include "../Resources/AssetScan.hpp"
 #include "../Resources/PackageIO.hpp"
 #include "../SelType.hpp"
 #include "../Core/EditorEventBus.hpp"
@@ -113,64 +113,23 @@ static int g_previewSeq = 0;
 // =====================================================================
 // Helper: scan GameData/ filesystem + packages for matching extensions
 // =====================================================================
+// Adapter over Resources/AssetScan.cpp. The enumeration (filesystem walk + package
+// walk + sort + dedupe) is shared with the Model Browser; all this does is map the
+// result into ResourceEntry, which carries an HBITMAP thumbnail and is therefore a UI
+// type rather than an asset-tree one.
 static void ScanFilesAndPackages(const std::string& subdir,
-                                  const std::vector<std::string>& exts,
-                                  std::vector<ResourceEntry>& out) {
+                                 const std::vector<std::string>& exts,
+                                 std::vector<ResourceEntry>& out) {
+    const std::vector<AssetScopeItem> found = ScanAssets(subdir, exts);
     out.clear();
-    // Filesystem scan under GameData/
-    fs::path base = fs::current_path() / "GameData";
-    if (!subdir.empty()) base /= subdir;
-    try {
-        if (fs::exists(base)) {
-            for (auto& entry : fs::recursive_directory_iterator(base)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    for (const auto& e : exts) {
-                        if (ext == e) {
-                            out.push_back({ entry.path().stem().string(), entry.path().string() });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    } catch (const std::exception& e) {
-            fprintf(stderr, "WARN: Exception during file scan: %s\n", e.what());
-        } catch (...) {
-            fprintf(stderr, "WARN: Unknown exception during file scan\n");
-        }
-
-    // Package entries
-    std::vector<std::string> pkgFiles;
-    PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
-    for (const auto& pkgPath : pkgFiles) {
-        std::string ext = pkgPath.substr(pkgPath.rfind('.'));
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        for (const auto& e : exts) {
-            if (ext == e) {
-                // Extract filename without extension for display
-                std::string name = pkgPath;
-                size_t slash = name.rfind('/');
-                if (slash != std::string::npos) name = name.substr(slash + 1);
-                size_t dot = name.rfind('.');
-                if (dot != std::string::npos) name = name.substr(0, dot);
-                out.push_back({ name, pkgPath });
-                break;
-            }
-        }
+    out.reserve(found.size());
+    for (const auto& it : found) {
+        ResourceEntry e;
+        e.name = it.name;
+        e.path = it.path;
+        e.thumbnail = nullptr;      // filled lazily by the texture grid
+        out.push_back(std::move(e));
     }
-
-    // Deduplicate by display name, preferring real files over package entries.
-    auto isPkgRes = [](const ResourceEntry& e) { return !IsPathFile(e.path.c_str()); };
-    std::stable_sort(out.begin(), out.end(),
-        [&](const ResourceEntry& a, const ResourceEntry& b) {
-            if (a.name != b.name) return a.name < b.name;
-            return (isPkgRes(a) ? 1 : 0) < (isPkgRes(b) ? 1 : 0);
-        });
-    auto last = std::unique(out.begin(), out.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
-    out.erase(last, out.end());
 }
 
 // =====================================================================

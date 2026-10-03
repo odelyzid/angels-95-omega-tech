@@ -28,62 +28,23 @@ void ShowModelBrowser(bool show) {
         ShowWindow((HWND)g_editorPanels.hModelBrowser, show ? SW_SHOW : SW_HIDE);
 }
 
+// Adapter over Resources/AssetScan.cpp - the enumeration itself (filesystem walk,
+// package walk, sort, dedupe) is shared with the sound browser. What stays here is the
+// part that belongs to this panel: it owns g_editorPanels.modelEntries, and it has to
+// poke the treeview afterwards.
 void ScanModelBrowserFiles() {
     g_editorPanels.modelEntries.clear();
     g_editorPanels.selectedModel = -1;
 
-    // Filesystem scan
-    fs::path base = fs::current_path() / "GameData";
-    try {
-        if (fs::exists(base)) {
-            for (auto& entry : fs::recursive_directory_iterator(base)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".iqm" || ext == ".vox" || ext == ".m3d") {
-                        ModelBrowserEntry mbe;
-                        mbe.name = entry.path().stem().string();
-                        mbe.path = entry.path().string();
-                        g_editorPanels.modelEntries.push_back(mbe);
-                    }
-                }
-            }
-        }
-    } catch (const std::exception& e) {
-        fprintf(stderr, "WARN: Exception during model scan: %s\n", e.what());
-    } catch (...) {
-        fprintf(stderr, "WARN: Unknown exception during model scan\n");
+    const std::vector<AssetScopeItem> found =
+        ScanAssets("", { ".obj", ".gltf", ".glb", ".iqm", ".vox", ".m3d" });
+    g_editorPanels.modelEntries.reserve(found.size());
+    for (const auto& it : found) {
+        ModelBrowserEntry mbe;
+        mbe.name = it.name;
+        mbe.path = it.path;
+        g_editorPanels.modelEntries.push_back(mbe);
     }
-
-    // Package scan for .obj files
-    std::vector<std::string> pkgFiles;
-    PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
-    for (const auto& pkgPath : pkgFiles) {
-        std::string ext = pkgPath.substr(pkgPath.rfind('.'));
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".iqm" || ext == ".vox" || ext == ".m3d") {
-            ModelBrowserEntry mbe;
-            std::string name = pkgPath;
-            size_t slash = name.rfind('/');
-            if (slash != std::string::npos) name = name.substr(slash + 1);
-            size_t dot = name.rfind('.');
-            if (dot != std::string::npos) name = name.substr(0, dot);
-            mbe.name = name;
-            mbe.path = pkgPath;
-            g_editorPanels.modelEntries.push_back(mbe);
-        }
-    }
-    
-    // Deduplicate by name, preferring real files over package copies.
-    auto isPkgModel = [](const ModelBrowserEntry& e) { return !IsPathFile(e.path.c_str()); };
-    std::stable_sort(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
-        [&](const ModelBrowserEntry& a, const ModelBrowserEntry& b) {
-            if (a.name != b.name) return a.name < b.name;
-            return (isPkgModel(a) ? 1 : 0) < (isPkgModel(b) ? 1 : 0);
-        });
-    auto last = std::unique(g_editorPanels.modelEntries.begin(), g_editorPanels.modelEntries.end(),
-        [](const ModelBrowserEntry& a, const ModelBrowserEntry& b) { return a.name == b.name; });
-    g_editorPanels.modelEntries.erase(last, g_editorPanels.modelEntries.end());
 
     if (g_editorPanels.hModelBrowser)
         SendMessage((HWND)g_editorPanels.hModelBrowser, WM_USER + 50, 0, 0);

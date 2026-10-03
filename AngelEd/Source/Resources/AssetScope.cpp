@@ -119,3 +119,21 @@ AssetScopeNode BuildAssetScope(const std::vector<AssetScopeItem>& items,
     if (!packages.children.empty()) root.children.push_back(std::move(packages));
     return root;
 }
+
+void DedupeAssetItemsByName(std::vector<AssetScopeItem>& items) {
+    // stable_sort so two items with the same name AND the same fromPackage keep
+    // enumeration order - the sort below only decides which of a same-named PAIR is a
+    // package copy, not how two real files order against each other.
+    std::stable_sort(items.begin(), items.end(),
+        [](const AssetScopeItem& a, const AssetScopeItem& b) {
+            if (a.name != b.name) return a.name < b.name;
+            // false (0, a real file) sorts before true (1, a package copy), so after
+            // std::unique keeps the FIRST of each run it is the real file that
+            // survives. Reversing this silently makes packaged assets shadow local
+            // ones, which is the bug this rule exists to prevent.
+            return static_cast<int>(a.fromPackage) < static_cast<int>(b.fromPackage);
+        });
+    auto last = std::unique(items.begin(), items.end(),
+        [](const AssetScopeItem& a, const AssetScopeItem& b) { return a.name == b.name; });
+    items.erase(last, items.end());
+}

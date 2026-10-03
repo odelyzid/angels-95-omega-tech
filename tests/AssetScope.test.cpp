@@ -294,6 +294,66 @@ static void test_degenerate_inputs() {
     check(gd && Child(*gd, "GameData") == nullptr, "anchor still stripped with backslashes");
 }
 
+// The enumeration side of the same invariant. DedupeAssetItemsByName is what
+// Resources/AssetScan.cpp calls once it has walked both the filesystem and the package
+// loader, so this is where "a package copy never shadows the real file" is actually
+// decided - the tree builder above only displays the result.
+static void test_dedupe_prefers_real_file() {
+    printf("dedupe by name, preferring the real file\n");
+
+    // The exact case the old code had to guess at: a packaged copy listed FIRST.
+    std::vector<AssetScopeItem> v = {
+        Pkg("hero", "Global/hero.glb"),
+        Loose("hero", "C:/repo/GameData/Global/hero.glb"),
+    };
+    DedupeAssetItemsByName(v);
+    check(v.size() == 1, "a same-named package copy does not duplicate the real file");
+    check(!v[0].fromPackage, "the surviving entry is the real file");
+    check(v[0].path == "C:/repo/GameData/Global/hero.glb", "the real file's path survives");
+
+    // And the reverse order, because the sort has to not care about input order.
+    std::vector<AssetScopeItem> v2 = {
+        Loose("hero", "C:/repo/GameData/Global/hero.glb"),
+        Pkg("hero", "Global/hero.glb"),
+    };
+    DedupeAssetItemsByName(v2);
+    check(v2.size() == 1 && !v2[0].fromPackage, "same result regardless of input order");
+
+    // Distinct names are all kept, sorted by name.
+    std::vector<AssetScopeItem> v3 = {
+        Pkg("zebra", "z.glb"), Loose("Apple", "a.glb"), Pkg("mango", "m.glb"),
+    };
+    DedupeAssetItemsByName(v3);
+    check(v3.size() == 3, "distinct names are all kept");
+    check(v3[0].name == "Apple" && v3[1].name == "mango" && v3[2].name == "zebra",
+          "the result is sorted by name");
+
+    // Two real files with the same stem in different folders: the dedup key is the
+    // display name, so this COLLAPSES them. That is the pre-existing behaviour of both
+    // browsers (they both deduped on name) and is pinned here rather than left
+    // implicit - it is a real limitation of a name-keyed asset browser.
+    std::vector<AssetScopeItem> v4 = {
+        Loose("rock", "C:/repo/GameData/A/rock.glb"),
+        Loose("rock", "C:/repo/GameData/B/rock.glb"),
+    };
+    DedupeAssetItemsByName(v4);
+    check(v4.size() == 1, "same-stem files in different folders collapse (name is the key)");
+
+    // Two package copies with one name: stable_sort must still leave exactly one.
+    std::vector<AssetScopeItem> v5 = {
+        Pkg("rock", "A/rock.glb"), Pkg("rock", "B/rock.glb"),
+    };
+    DedupeAssetItemsByName(v5);
+    check(v5.size() == 1, "two package copies of one name collapse to one");
+    check(v5[0].path == "A/rock.glb",
+          "stable_sort keeps the first package copy when neither is a real file");
+
+    // Empty input is what a browser sees before its first scan.
+    std::vector<AssetScopeItem> none;
+    DedupeAssetItemsByName(none);
+    check(none.empty(), "an empty list dedupes to empty");
+}
+
 int main() {
     printf("AssetScope tests\n\n");
     test_root_shape();
@@ -304,6 +364,7 @@ int main() {
     test_entry_index_addresses_input_vector();
     test_sort_order();
     test_degenerate_inputs();
+    test_dedupe_prefers_real_file();
 
     printf("\nResults: %d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
