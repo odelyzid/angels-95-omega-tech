@@ -623,10 +623,19 @@ added for the three light tags, which had no event at all. `Transform` had to mo
 
 ### Not done, and still outstanding
 
-- **The manual pass was done for R3–R5** (the user exercised the editor and confirmed
-  placement works). **R6 has NOT had one** — it moved ~2,500 lines including two
-  behaviour-relevant changes (`actionApplyProperties` becoming an event, and the
-  properties apply becoming deferred). **This is the one open risk that matters.**
+- **Manual passes: DONE for R3-R8.** The user exercised the editor by hand after each
+  round: R3-R5 (placement), then R6-R8, where R6 deferred the properties apply by a
+  frame, R7 changed how both asset browsers enumerate, and R8 fixed brush selection.
+  **This is the load-bearing check for the whole document.** A layer split changes no
+  behaviour and so has *no* headless signal; the line-multiset diff proves the text is
+  unchanged, not that the editor still works. Both matter, and the second is the one
+  that actually caught anything.
+- **What a manual pass caught that nothing else could:** both of R8's reported bugs
+  (Delete crashing, brushes reappearing on click) were PRE-EXISTING - the delete branch
+  is byte-identical at `b89` - and had been sitting in `AngelEd.log` as a churn of
+  `Brush idx=102, 15, 14, 13, 11, 10, 9, 7` for one point on screen. No suite covers
+  picking and there is no honest way to add one: the defect was two index spaces behind
+  one `SelType`, which is only observable by clicking.
 - ~~**`Resources/` layer: never created.**~~ **DONE in R6** — `AssetScope` and
   `PackageIO` are real translation units with headers of their own, and
   `tests/AssetScope.test.cpp` (45 checks) is the first automated coverage the asset

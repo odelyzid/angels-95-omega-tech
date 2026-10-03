@@ -42,6 +42,15 @@ GameData/Saves/
 
 build.log
 
+# Runtime logs written by the editor and the client. AngelEd.log is how the editor
+# reports what it did (EditorLog in Core/EditorLog.cpp) and is the first thing to look
+# at when picking or deleting misbehaves - it is a diagnostic, not an artifact to keep.
+# It was previously untracked-but-not-ignored, so every editor run left a file that
+# could be swept into an unrelated commit.
+*.log
+!build.log
+AngelEd/*.log
+
 # Build cache
 build/*.DB
 build/*.DB-shm
