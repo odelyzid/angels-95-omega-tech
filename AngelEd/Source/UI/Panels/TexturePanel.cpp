@@ -76,61 +76,90 @@ void ShowTextureManager(bool show) {
         ShowWindow((HWND)g_editorPanels.hTextureMgr, show ? SW_SHOW : SW_HIDE);
 }
 
+// Build one 64x64 thumbnail HBITMAP on demand. Returns nullptr when the image cannot
+// be loaded, in which case the caller simply draws no preview.
+//
+// LAZY ON PURPOSE. This used to run once per texture in GameData on every rescan,
+// building a DIB section for each whether or not it was ever displayed. On a full tree
+// that is thousands of GDI bitmaps and a visible memory spike at panel-open time. Now
+// only the cells that actually paint pay for one.
+static HBITMAP BuildTextureThumbnail(HWND hwnd, const ResourceEntry& tex) {
+    // Guarded: substr(npos) throws std::out_of_range when the path has no extension at
+    // all, which is reachable for a hand-built package key.
+    const size_t dot = tex.path.rfind('.');
+    if (dot == std::string::npos) return nullptr;
+    std::string ext = tex.path.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    Image img = {0};
+    if (ext == ".dds") {
+        // raylib loads DDS via LoadTexture; resolve package entries by caching the bytes
+        // to a real file first.
+        std::string filePath = tex.fromPackage
+            ? PackageAssetLoader::Instance().CacheModelFile(tex.path.c_str())
+            : tex.path;
+        if (!filePath.empty() && IsPathFile(filePath.c_str())) {
+            Texture2D t = LoadTexture(filePath.c_str());
+            if (t.id > 0) {
+                img = LoadImageFromTexture(t);
+                UnloadTexture(t);
+            }
+        }
+    } else {
+        img = LoadImageWithFallback(tex.path.c_str());
+    }
+    if (!img.data) return nullptr;
+
+    ImageResize(&img, TEX_THUMB_SIZE, TEX_THUMB_SIZE);
+    ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    unsigned char* px = (unsigned char*)img.data;
+    for (int i = 0; i < img.width * img.height; i++) {
+        unsigned char tmp = px[i*4];
+        px[i*4] = px[i*4+2];
+        px[i*4+2] = tmp;
+    }
+    HDC hdc = GetDC(hwnd);
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = img.width;
+    bmi.bmiHeader.biHeight = -img.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (bits && img.data) memcpy(bits, img.data, img.width * img.height * 4);
+    ReleaseDC(hwnd, hdc);
+    UnloadImage(img);
+    return bits ? bmp : nullptr;
+}
+
 void ScanTextureBrowserFiles() {
+    // Free the previous thumbnails BEFORE clearing the vector. g_textureFiles owns an
+    // HBITMAP per entry and this used to be a bare clear(), so every rescan leaked one
+    // GDI bitmap per texture - and a rescan runs on every window activation.
+    for (auto& tex : g_textureFiles) {
+        if (tex.thumbnail) { DeleteObject(tex.thumbnail); tex.thumbnail = nullptr; }
+    }
     g_textureFiles.clear();
     // .dds included so the Global/sky skybox library is selectable
     const std::vector<std::string> exts = { ".png", ".tga", ".bmp", ".jpg", ".jpeg", ".dds" };
 
-    // Scan filesystem under GameData/
-    fs::path base = fs::current_path() / "GameData";
-    try {
-        if (fs::exists(base)) {
-            for (auto& entry : fs::recursive_directory_iterator(base)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    for (const auto& e : exts) {
-                        if (ext == e) {
-                            g_textureFiles.push_back({ entry.path().stem().string(), entry.path().string(), nullptr });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    } catch (...) {}
-
-    // Scan packages
-    std::vector<std::string> pkgFiles;
-    PackageAssetLoader::Instance().ListAllFiles(pkgFiles);
-    for (const auto& pkgPath : pkgFiles) {
-        std::string ext = pkgPath.substr(pkgPath.rfind('.'));
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        for (const auto& e : exts) {
-            if (ext == e) {
-                std::string name = pkgPath;
-                size_t slash = name.rfind('/');
-                if (slash != std::string::npos) name = name.substr(slash + 1);
-                size_t dot = name.rfind('.');
-                if (dot != std::string::npos) name = name.substr(0, dot);
-                g_textureFiles.push_back({ name, pkgPath, nullptr });
-                break;
-            }
-        }
+    // Enumeration belongs to Resources/AssetScan - it is the same walk the sound browser
+    // and the Model Browser use, and this file was carrying a third copy of it.
+    // ScanAssets also sorts by name and resolves same-named duplicates in favour of the
+    // real file (a package copy like "Models/Skybox.png" would otherwise shadow the
+    // world's actual file and be unusable as an editable source). Both used to be
+    // re-derived here, the dedup from !IsPathFile().
+    const std::vector<AssetScopeItem> found = ScanAssets("", exts);
+    g_textureFiles.reserve(found.size());
+    for (const auto& it : found) {
+        ResourceEntry e;
+        e.name        = it.name;
+        e.path        = it.path;
+        e.fromPackage = it.fromPackage;
+        g_textureFiles.push_back(std::move(e));
     }
-
-    // Deduplicate by display name, preferring real files over package entries
-    // (a package copy like "Models/Skybox.png" would otherwise shadow the world's
-    // actual file and be unusable as an editable source).
-    auto isPkg = [](const ResourceEntry& e) { return !IsPathFile(e.path.c_str()); };
-    std::stable_sort(g_textureFiles.begin(), g_textureFiles.end(),
-        [&](const ResourceEntry& a, const ResourceEntry& b) {
-            if (a.name != b.name) return a.name < b.name;
-            return (isPkg(a) ? 1 : 0) < (isPkg(b) ? 1 : 0);
-        });
-    auto last = std::unique(g_textureFiles.begin(), g_textureFiles.end(),
-        [](const ResourceEntry& a, const ResourceEntry& b) { return a.name == b.name; });
-    g_textureFiles.erase(last, g_textureFiles.end());
 
     // Entry indices changed underneath any scope selection, so drop it; the
     // tree is rebuilt below and re-selects the scope by path.
@@ -340,7 +369,10 @@ static LRESULT CALLBACK TextureGridProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
                 DeleteObject(hBrush);
             }
 
-            // Thumbnail
+            // Thumbnail, built on first paint. Off-screen cells are `continue`d
+            // above, so scrolling never pays for what it cannot show.
+            if (!g_textureFiles[fi].thumbnail)
+                g_textureFiles[fi].thumbnail = BuildTextureThumbnail(hwnd, g_textureFiles[fi]);
             if (g_textureFiles[fi].thumbnail) {
                 SelectObject(hdcMem, g_textureFiles[fi].thumbnail);
                 StretchBlt(hdc, x + (TEX_CELL_W - TEX_THUMB_SIZE) / 2, y + 2,
@@ -475,7 +507,7 @@ static void FillTextureScopeTree(HWND hwnd, HWND hTree, HWND hGrid) {
     std::vector<AssetScopeItem> items;
     items.reserve(g_textureFiles.size());
     for (const auto& e : g_textureFiles)
-        items.push_back({e.name, e.path, !IsPathFile(e.path.c_str())});
+        items.push_back({e.name, e.path, e.fromPackage});
 
     char search[128] = {};
     GetWindowTextA(GetDlgItem(hwnd, ID_TEX_SEARCH), search, sizeof(search));
@@ -638,57 +670,11 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
         break;
     }
     case WM_USER + 50: {
-        // Free old thumbnails
+        // Free old thumbnails. Loading is NOT done here - TextureGridProc builds each
+        // one the first time its cell is actually painted (BuildTextureThumbnail).
+        // Building them all up front was the 38 MB spike.
         for (auto& tex : g_textureFiles) {
             if (tex.thumbnail) { DeleteObject(tex.thumbnail); tex.thumbnail = nullptr; }
-        }
-        // Reload all thumbnails
-        for (auto& tex : g_textureFiles) {
-            // Determine extension (dds needs the texture loader, not the image one)
-            std::string ext = tex.path.substr(tex.path.rfind('.'));
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-            Image img = {0};
-            if (ext == ".dds") {
-                // raylib loads DDS via LoadTexture; resolve package entries by
-                // caching the bytes to a real file first
-                std::string filePath = IsPathFile(tex.path.c_str())
-                    ? tex.path
-                    : PackageAssetLoader::Instance().CacheModelFile(tex.path.c_str());
-                if (!filePath.empty() && IsPathFile(filePath.c_str())) {
-                    Texture2D t = LoadTexture(filePath.c_str());
-                    if (t.id > 0) {
-                        img = LoadImageFromTexture(t);
-                        UnloadTexture(t);
-                    }
-                }
-            } else {
-                img = LoadImageWithFallback(tex.path.c_str());
-            }
-
-            if (img.data) {
-                ImageResize(&img, TEX_THUMB_SIZE, TEX_THUMB_SIZE);
-                ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-                unsigned char* px = (unsigned char*)img.data;
-                for (int i = 0; i < img.width * img.height; i++) {
-                    unsigned char tmp = px[i*4];
-                    px[i*4] = px[i*4+2];
-                    px[i*4+2] = tmp;
-                }
-                HDC hdc = GetDC(hwnd);
-                BITMAPINFO bmi = {};
-                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                bmi.bmiHeader.biWidth = img.width;
-                bmi.bmiHeader.biHeight = -img.height;
-                bmi.bmiHeader.biPlanes = 1;
-                bmi.bmiHeader.biBitCount = 32;
-                bmi.bmiHeader.biCompression = BI_RGB;
-                void* bits = nullptr;
-                tex.thumbnail = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
-                if (bits && img.data) memcpy(bits, img.data, img.width * img.height * 4);
-                ReleaseDC(hwnd, hdc);
-                UnloadImage(img);
-            }
         }
         // Refresh grid
         FillTextureScopeTree(hwnd, hScope, hGrid);

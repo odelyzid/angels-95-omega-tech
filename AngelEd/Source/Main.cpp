@@ -96,14 +96,11 @@
 // main()
 // -----------------------------------------------------------------------------
 int main(int argc, char **argv){
-    // Auto-detect repo root: if cwd ends with /System, go up one level
-    {
-        auto cwd = fs::current_path();
-        std::string dir = cwd.filename().string();
-        std::transform(dir.begin(), dir.end(), dir.begin(), ::tolower);
-        if (dir == "system")
-            fs::current_path(cwd.parent_path());
-    }
+    // FIRST, before anything reads a relative path. Almost every asset path in the
+    // editor is relative and unanchored, so launching from the wrong directory produces a
+    // wave of silent failures instead of one clear error. See EnsureProjectRoot() in
+    // Core/EditorShell.cpp.
+    EnsureProjectRoot();
 
     EditorLog("=== AngelEd starting ===");
     SetConfigFlags(FLAG_VSYNC_HINT);
@@ -117,8 +114,21 @@ int main(int argc, char **argv){
     // Load editor toolbar icons
     EditorIcons::Instance().Load();
 
-    g_documentPath = argc > 1 && argv[1] ? fs::path(argv[1]) : fs::path("../GameData/World.ozone");
-    SetWorldDirectory(g_documentPath.parent_path());
+    // No argument: open a world, but only if one is actually there. This used to
+    // default to "../GameData/World.ozone", which does not exist in ANY layout -
+    // worlds live at GameData/Worlds/<Name>/World.ozone, and the path also assumed
+    // cwd == System/, contradicting the "System/AngelEd.ini" load eight lines below.
+    if (argc > 1 && argv[1]) {
+        g_documentPath = fs::path(argv[1]);
+    } else {
+        g_documentPath.clear();
+        fs::path first = FirstAvailableWorld();
+        if (!first.empty()) g_documentPath = first;
+        else EditorLog("No world argument and no world found under GameData/Worlds/ - "
+                       "starting with an empty scene.");
+    }
+    SetWorldDirectory(g_documentPath.empty() ? fs::path()
+                                             : g_documentPath.parent_path());
 
     // Load INI config
     g_config.Load("System/AngelEd.ini");

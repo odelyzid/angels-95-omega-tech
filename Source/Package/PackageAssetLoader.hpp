@@ -22,7 +22,18 @@ public:
         m_readers.clear();
         m_modelCache.clear();
         fs::path dataDir = fs::current_path() / "System" / "Data";
-        if (!fs::exists(dataDir)) return;
+        if (!fs::exists(dataDir)) {
+            // This used to be a bare `return`, and it is the single line that made a
+            // wrong working directory undiagnosable: every packaged model, texture and
+            // sound silently vanished with nothing in the log to say why. Name the path
+            // AND the cwd, because the path is relative to it.
+            OZ_WARN("package data directory not found: %s (cwd '%s') - "
+                    "no .oz* packages will load. Run the editor from the project root "
+                    "or from System/.",
+                    dataDir.string().c_str(),
+                    fs::current_path().string().c_str());
+            return;
+        }
 
         for (auto& entry : fs::recursive_directory_iterator(dataDir)) {
             if (entry.is_regular_file()) {

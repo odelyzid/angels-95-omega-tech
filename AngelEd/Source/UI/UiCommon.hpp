@@ -75,7 +75,12 @@ static const int STATS_SIDEBAR_W = 200;
 struct ResourceEntry {
     std::string name;
     std::string path;
-    HBITMAP thumbnail = nullptr; // cached 64x64 preview
+    HBITMAP thumbnail = nullptr; // cached 64x64 preview, built LAZILY on first paint
+    // Set by the scanner, which knows which list an entry came from. Both browsers used
+    // to infer it with !IsPathFile(path) - a filesystem hit test that re-derives
+    // something already known, and that AssetScopeItem::fromPackage exists precisely to
+    // state instead.
+    bool fromPackage = false;
 };
 
 static std::vector<ResourceEntry> g_textureFiles;

@@ -7,6 +7,91 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
+// Make the cwd a usable project root before anything reads a relative path.
+//
+// Almost EVERY asset path in the editor is relative and unanchored - "GameData",
+// "System/AngelEd.ini", "System/Data" - so launching from the wrong directory produces
+// a wave of silent failures rather than one clear error. Two were reported from a real
+// session and neither said so:
+//
+//   WARN: GameData/Global/PawnDefs not found, using hardcoded defaults
+//   Skybox: could not load 'GameData/Global/sky/sky_noon.dds'
+//
+// The previous code handled exactly one case: cwd whose final component is literally
+// "System". That is the case the run scripts set up and nothing else, so a shortcut with
+// a different "Start in", a copy of the tree elsewhere, or a debugger with a different
+// working directory all landed in the broken state.
+//
+// Returns true if the cwd is (or has been made) a project root. Never fails hard - the
+// editor can still open an explicit world from a GameData-less layout - but it logs the
+// directory it tried, because that is the one fact needed to diagnose what follows.
+static bool EnsureProjectRoot() {
+    auto looksLikeRoot = [](const fs::path& p) {
+        return fs::exists(p / "GameData") && fs::exists(p / "System");
+    };
+
+    // 1. Already correct.
+    if (looksLikeRoot(fs::current_path()))
+        return true;
+
+    // 2. cwd is System/ - the documented way the run scripts launch. Keeps the previous
+    //    behaviour, but only when the parent really is a root.
+    {
+        fs::path cwd = fs::current_path();
+        std::string leaf = cwd.filename().string();
+        std::transform(leaf.begin(), leaf.end(), leaf.begin(), ::tolower);
+        if (leaf == "system" && looksLikeRoot(cwd.parent_path())) {
+            fs::current_path(cwd.parent_path());
+            EditorLog("Project root: %s (from System/)", fs::current_path().string().c_str());
+            return true;
+        }
+    }
+
+    // 3. Walk up from the executable. Four levels covers bin/<cfg>/, AngelEd/, and a
+    //    couple of nesting levels people actually use.
+    char buf[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n && n < MAX_PATH) {
+        fs::path dir = fs::path(buf).parent_path();
+        for (int up = 0; up < 4 && !dir.empty(); ++up) {
+            if (looksLikeRoot(dir)) {
+                SetCurrentDirectoryA(dir.string().c_str());
+                EditorLog("Project root: %s (from exe)", fs::current_path().string().c_str());
+                return true;
+            }
+            if (dir == dir.parent_path())
+                break;                       // reached the drive root
+            dir = dir.parent_path();
+        }
+    }
+
+    EditorLog("WARNING: no project root found. Looked in cwd '%s' and up to 4 levels "
+              "above the executable. Every asset path is relative, so expect missing "
+              "GameData content - open a world explicitly or run from the repo root.",
+              fs::current_path().string().c_str());
+    return false;
+}
+
+// The first world under GameData/Worlds/ that actually has a World.ozone, or empty.
+//
+// Replaces a default of "../GameData/World.ozone" that resolved in no layout at all.
+// Sorted so the choice is deterministic across machines rather than depending on
+// directory-iteration order.
+static fs::path FirstAvailableWorld() {
+    const fs::path root = "GameData/Worlds";
+    std::error_code ec;
+    if (!fs::exists(root, ec)) return {};
+    std::vector<fs::path> dirs;
+    for (auto& d : fs::directory_iterator(root, ec)) {
+        if (d.is_directory()) dirs.push_back(d.path());
+        if (ec) break;
+    }
+    std::sort(dirs.begin(), dirs.end());
+    for (const auto& d : dirs) {
+        if (fs::exists(d / "World.ozone")) return d / "World.ozone";
+    }
+    return {};
+}
 static void SetViewPreset(const Vector3& pos, const Vector3& target, const Vector3& up) {
     if (!g_orthoView) {
         g_perspectiveCamState = OTEditor.MainCamera;
