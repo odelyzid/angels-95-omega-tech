@@ -43,6 +43,10 @@ public:
                     OzPackageReader reader;
                     if (reader.Open(entry.path().string().c_str())) {
                         m_readers.push_back(std::move(reader));
+                        // Kept index-aligned with m_readers so ResolveInPackage() can
+                        // name a package. OzPackageReader deliberately stores no path of
+                        // its own, so the loader keeps the association.
+                        m_readerFiles.push_back(entry.path().string());
                         OZ_INFO("PackageLoader: loaded %s (%u entries)",
                                 entry.path().filename().string().c_str(),
                                 m_readers.back().EntryCount());
@@ -69,6 +73,23 @@ public:
                 outSize = (size_t)e->sizeRaw;
                 return (const uint8_t*)(it->GetData(e->filename, outSize));
             }
+        }
+        return nullptr;
+    }
+
+    // Resolve a key inside ONE named package, matched on the package's own filename.
+    //
+    // Needed wherever a basename is ambiguous across packages. Per-world music is the
+    // case that proves it: build-data.ps1 packs each world directory as
+    // world_<Name>.ozone with the track keyed "Music/Main.mp3", so EVERY world package
+    // holds an entry whose basename is "Main.mp3". A global FindBasename() walks every
+    // loaded reader and returns whichever comes first, which is not the world being
+    // loaded - so the package-aware path for a world track has to be scoped by name.
+    const uint8_t* ResolveInPackage(const char* pkgFileName, const char* key, size_t& outSize) {
+        outSize = 0;
+        for (size_t i = 0; i < m_readers.size(); i++) {
+            if (fs::path(m_readerFiles[i]).filename().string() != pkgFileName) continue;
+            return m_readers[i].GetData(key, outSize);
         }
         return nullptr;
     }
@@ -164,6 +185,8 @@ public:
 
 private:
     std::vector<OzPackageReader> m_readers;
+    // Source path of each entry in m_readers, same index. See ResolveInPackage().
+    std::vector<std::string> m_readerFiles;
     std::unordered_map<std::string, std::string> m_modelCache;
 };
 
@@ -231,6 +254,21 @@ inline Music LoadMusicWithFallback(const char* path) {
         return LoadMusicStreamFromMemory(ext.c_str(), data, (int)sz);
     }
     return Music{0};
+}
+
+// Load a music asset from ONE named package, by package filename + in-package key.
+// Use this instead of LoadMusicWithFallback whenever the asset's basename is shared
+// across packages - per-world "Music/Main.mp3" being the case that forced this.
+inline Music LoadMusicFromPackage(const char* pkgFileName, const char* key) {
+    size_t sz = 0;
+    const uint8_t* data = PackageAssetLoader::Instance().ResolveInPackage(pkgFileName, key, sz);
+    if (!data) return Music{0};
+    std::string k = key;
+    const size_t dot = k.rfind('.');
+    if (dot == std::string::npos) return Music{0};
+    std::string ext = k.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return LoadMusicStreamFromMemory(ext.c_str(), data, (int)sz);
 }
 
 inline Model LoadModelWithFallback(const char* path) {

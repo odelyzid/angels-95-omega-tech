@@ -206,6 +206,17 @@ void SoundManager::UpdateStream(Music music) {
         UpdateMusicStream(music);
 }
 
+// The world directory name out of an asset prefix: "GameData/Worlds/<Name>/" ->
+// "<Name>". Empty if the prefix is not a plain world directory.
+static std::string WorldDirNameFromPrefix(const std::string& assetPrefix) {
+    std::string p = assetPrefix;
+    for (auto& c : p) if (c == '\\') c = '/';
+    while (p.size() > 1 && p.back() == '/') p.pop_back();
+    const size_t slash = p.find_last_of('/');
+    if (slash == std::string::npos) return {};
+    return p.substr(slash + 1);
+}
+
 void SoundManager::PlayWorldMusic(const std::string& assetPrefix) {
     StopWorldMusic();
 
@@ -213,22 +224,48 @@ void SoundManager::PlayWorldMusic(const std::string& assetPrefix) {
     // Fallback so worlds without their own track still get atmosphere.
     static const char* kGlobalAmbience = "GameData/Global/Sounds/Ambience/Music_Atmo_1.wav";
 
-    const bool hasWorldTrack = IsPathFile(worldTrack.c_str());
-    const char* path = hasWorldTrack ? worldTrack.c_str() : kGlobalAmbience;
-    if (!hasWorldTrack && !IsPathFile(kGlobalAmbience)) {
-        OZ_WARN("PlayWorldMusic: no music for prefix '%s' and no global ambience", assetPrefix.c_str());
+    Music m{0};
+    std::string playingFrom;
+
+    // 1. The loose file, which is what a source checkout and the release zip both have.
+    if (IsPathFile(worldTrack.c_str())) {
+        m = LoadMusicStream(worldTrack.c_str());
+        playingFrom = worldTrack;
+    }
+
+    // 2. The world package. SCOPED, and that is the whole point: build-data.ps1 packs
+    //    each world directory as world_<Name>.ozone with the track keyed
+    //    "Music/Main.mp3", so every world package holds an entry with that basename.
+    //    The obvious fix - delete the IsPathFile gate and let LoadMusicWithFallback
+    //    resolve it - resolves through FindBasename(), which walks every loaded package
+    //    and returns whichever comes first. With two worlds shipping a track that plays
+    //    Dust_Ravine's music in Dessert_Dreams, silently. Verified by packing both
+    //    worlds: each contains "Music/Main.mp3".
+    if (m.ctxData == nullptr) {
+        const std::string world = WorldDirNameFromPrefix(assetPrefix);
+        if (!world.empty()) {
+            const std::string pkg = "world_" + world + ".ozone";
+            m = LoadMusicFromPackage(pkg.c_str(), "Music/Main.mp3");
+            if (m.ctxData != nullptr) playingFrom = pkg + ":Music/Main.mp3";
+        }
+    }
+
+    // 3. The shared ambience. Its basename is unique, so the plain wrapper is safe here.
+    if (m.ctxData == nullptr) {
+        m = LoadMusicWithFallback(kGlobalAmbience);
+        if (m.ctxData != nullptr) playingFrom = kGlobalAmbience;
+    }
+
+    if (m.ctxData == nullptr) {
+        OZ_WARN("PlayWorldMusic: nothing playable - tried '%s', world_%s.ozone, and '%s'",
+                worldTrack.c_str(), WorldDirNameFromPrefix(assetPrefix).c_str(), kGlobalAmbience);
         return;
     }
 
-    Music m = LoadMusicWithFallback(path);
-    if (m.ctxData == nullptr) {
-        OZ_WARN("PlayWorldMusic: failed to load '%s'", path);
-        return;
-    }
     m_sounds.BackgroundMusic = m;
     m_sounds.MusicFound = true;
     PlayMusicStream(m_sounds.BackgroundMusic);
-    OZ_INFO("PlayWorldMusic: %s", path);
+    OZ_INFO("PlayWorldMusic: %s", playingFrom.c_str());
 }
 
 void SoundManager::StopWorldMusic() {
