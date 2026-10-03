@@ -7,7 +7,13 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
-static void EditorLog(const char* fmt, ...) {
+
+// The append handle. Moved here from EntityOps.cpp in R8-phase F: EditorLog is its
+// only user, and a definition in another translation unit is exactly the kind of
+// accidental coupling the Subsystems promotion exists to remove. Internal linkage is
+// correct here - nothing else needs the handle.
+static FILE* g_editorLog = nullptr;
+void EditorLog(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);

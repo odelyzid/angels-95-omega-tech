@@ -63,17 +63,20 @@ IDM_SURFACE_RESET,
 // Box budget for one "Append AutoConvex Collision" run. Past this the command
 // refuses outright rather than emitting a partial hull - a missing box in a
 // collision wall is the exact failure the feature exists to prevent.
-static const int kAutoConvexMaxBoxes = 2048;
+inline constexpr int kAutoConvexMaxBoxes = 2048;
 
 // Forward declarations
-static void EditorLog(const char* fmt, ...);
-static void HistoryPush();
-static void HistoryUndo();
-static void HistoryRedo();
-static void HistoryClear();
+void EditorLog(const char* fmt, ...);
+void HistoryPush();
+void HistoryUndo();
+void HistoryRedo();
+void HistoryClear();
 
-// WDLModels definition (extern declared in Editor.hpp)
-GameModels WDLModels;
+// WDLModels definition (extern declared in Editor.hpp). inline so that including this
+// header from several translation units still yields ONE object - a plain definition
+// in a header is a multiple-definition link error the moment Subsystems/ becomes real
+// TUs.
+inline GameModels WDLModels;
 
 // ---------------------------------------------------------------------------
 // Entity selection system (hover + click + right-click context menu)
@@ -86,25 +89,25 @@ GameModels WDLModels;
 // Events posted by the Win32 panels during the frame's message pump, drained at
 // the single dispatch point below. A file-static buffer rather than a local so
 // the drain cannot allocate during dispatch.
-static std::vector<ed::Event> g_editorFrameEvents;
+inline std::vector<ed::Event> g_editorFrameEvents;
 // Surface edits are drained in their own pass, at the point the old
 // actionApplySurface / actionResetSurface handlers lived. Kept separate from
 // g_editorFrameEvents so this batch's handlers can be moved into
 // Subsystems/SurfaceOps during R4 without reordering the selection dispatch.
-static std::vector<ed::Event> g_editorSurfaceEvents;
+inline std::vector<ed::Event> g_editorSurfaceEvents;
 // Animation commands, drained and dispatched by ApplyAnimIntents. Separate pass
 // for the same reason as the surface one: that function is moving to
 // Subsystems/AnimEditing in R4 and should not have to be interleaved with the
 // selection dispatch.
-static std::vector<ed::Event> g_editorAnimEvents;
+inline std::vector<ed::Event> g_editorAnimEvents;
 // Bumped by any event kind the dispatcher does not handle yet. Should be 0 once
 // R2 is complete; a non-zero value means a batch posted an event nobody consumes,
 // which is a silently dead click rather than a compile error.
-static int g_editorUnhandledEvents = 0;
+inline int g_editorUnhandledEvents = 0;
 // Index of a mesh awaiting Ev::ConvertToAnimated. -1 = none. The conversion itself
 // runs at its own site in the frame (it needs EnsureMeshNodeLoaded and the Anim
 // panel handover), so the dispatcher only records the target.
-static int evConvertMeshIndex = -1;
+inline int evConvertMeshIndex = -1;
 
 struct EditorSelection {
     SelType type = SelType::NONE;
@@ -123,22 +126,22 @@ struct EditorSelection {
     // this flag.
     bool hasRotation = false;
 };
-static EditorSelection g_sel;       // left-click selected (red)
-static EditorSelection g_hoverSel;  // mouse hover (yellow)
+inline EditorSelection g_sel;       // left-click selected (red)
+inline EditorSelection g_hoverSel;  // mouse hover (yellow)
 
 // Right-click state: drag vs click detection
-static bool g_rbDown = false;
-static Vector2 g_rbDownPos{0,0};
+inline bool g_rbDown = false;
+inline Vector2 g_rbDownPos{0,0};
 // Left-click state: pick fires on release so a held drag (e.g. moving a
 // placement ghost) is not mistaken for a selection click.
-static bool g_lbDown = false;
-static Vector2 g_lbDownPos{0,0};
+inline bool g_lbDown = false;
+inline Vector2 g_lbDownPos{0,0};
 
 // Gizmo drag: moving a SELECTED entity requires an intentional gesture (Move
 // tool active, or the press landing on the selection) â€” a plain viewport click
 // must never translate it. g_suppressViewportDrag swallows stale mouse input
 // for the frame(s) around a native context menu.
-static bool g_gizmoDrag = false;
-static bool g_gizmoHistPushed = false;
-static bool g_suppressViewportDrag = false;
-static bool g_terrainHistPushed = false;
+inline bool g_gizmoDrag = false;
+inline bool g_gizmoHistPushed = false;
+inline bool g_suppressViewportDrag = false;
+inline bool g_terrainHistPushed = false;

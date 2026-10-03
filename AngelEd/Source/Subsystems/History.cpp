@@ -7,26 +7,26 @@
 // single TU for AngelEd's core layer. See Wiki/Editor-Architecture-Refactor.md.
 // =============================================================================
 
-static std::string HistoryCapture() {
+std::string HistoryCapture() {
     std::ostringstream oss;
     ExportToOzone(oss);
     return oss.str();
 }
 
-static void HistoryClear() {
+void HistoryClear() {
     g_histUndo.clear();
     g_histRedo.clear();
 }
 
 // Call BEFORE a mutation: snapshots current state and invalidates redo.
-static void HistoryPush() {
+void HistoryPush() {
     g_histRedo.clear();
     g_histUndo.push_back(HistoryCapture());
     if (g_histUndo.size() > kHistMax) g_histUndo.erase(g_histUndo.begin());
 }
 
 
-static void HistoryRestore(const std::string& text) {
+void HistoryRestore(const std::string& text) {
     ClearScene();
     OzoneLoader::Instance().LoadString(
         text.c_str(), OTEditor.Path[0] ? OTEditor.Path : nullptr);
@@ -38,7 +38,7 @@ static void HistoryRestore(const std::string& text) {
     OmegaTechEditor.DrawModel = false;
 }
 
-static void HistoryUndo() {
+void HistoryUndo() {
     if (g_histUndo.empty()) return;
     g_histRedo.push_back(HistoryCapture());
     std::string snap = g_histUndo.back();
@@ -47,7 +47,7 @@ static void HistoryUndo() {
     EditorLog("Undo (%zu undo / %zu redo)", g_histUndo.size(), g_histRedo.size());
 }
 
-static void HistoryRedo() {
+void HistoryRedo() {
     if (g_histRedo.empty()) return;
     g_histUndo.push_back(HistoryCapture());
     std::string snap = g_histRedo.back();

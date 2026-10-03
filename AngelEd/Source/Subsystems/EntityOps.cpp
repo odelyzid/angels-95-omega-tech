@@ -169,5 +169,3 @@ static int CommitBrushRenderable(int primType, const Vector3& center,
     return ridx;
 }
 
-// Editor log file (appended to System/AngelEd.log)
-static FILE* g_editorLog = nullptr;

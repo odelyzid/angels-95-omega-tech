@@ -15,6 +15,7 @@
 #endif
 
 #include "../Editor.hpp"
+#include "EditorPanelState.hpp"
 #include "raylib.h"
 #include "rlgl.h"
 #include "raymath.h"

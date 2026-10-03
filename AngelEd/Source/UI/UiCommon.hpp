@@ -33,7 +33,6 @@ namespace fs = std::filesystem;
 // =====================================================================
 // Globals
 // =====================================================================
-EditorPanelState g_editorPanels;
 
 // Extern accessors from Main.cpp for WorldGraph model data
 extern int WorldGraph_GetModelCount();
