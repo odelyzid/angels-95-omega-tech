@@ -1,6 +1,6 @@
 # AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
 
-**Status: R0–R3 DONE, R4 next.** This file is the source of truth. Update the
+**Status: R0–R4 DONE.** This file is the source of truth. Update the
 progress log as items land; do not work from memory of a plan held in context.
 
 **R2 result in one line:** 58 `action*` fields → **4**, and all 4 are documented
@@ -138,7 +138,7 @@ whose *interfaces* matter and they are far fewer per layer.
 | R0 | this document | **done** |
 | R1 | `EditorEventBus` + headless suite + `make test` in CI | **done** |
 | R2 | convert the action fields, batch by batch - **done** | 58 |
-| R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) - **done** | pending |
+| R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) | **done** |
 | R4 | split `Main.cpp` into `Core/` + `Subsystems/` | pending |
 | R5 | `AGENTS.md` + full verification | pending |
 
@@ -485,3 +485,70 @@ fixed.
   editor, because a layer split changes no behaviour and so has **no** headless
   signal at all. That is the main risk in this document and it is why R3/R4 are
   separate commits with a manual pass between them.
+## R4 outcome: Main.cpp
+
+Split into the same unity-TU shape as R3, so `Main.o` stays `Main.o` and **no build
+wiring changed at all** — the Makefile and the hand-rolled CI build were untouched.
+
+```
+AngelEd/Source/
+  Main.cpp                 the TU: preamble + 11 fragment includes + main()
+  Core/EditorShell.hpp     includes, shared editor globals, local types, fwd decls
+  Core/EditorShell.cpp     view presets, panel toggle shims, world dir, scene reset
+  Core/EditorLog.cpp       AngelEd.log appender
+  Core/EditorMenus.cpp     native menu bar
+  Subsystems/Selection.cpp          raycast, surface-face pick, gizmo snap, adopt
+  Subsystems/EntityOps.cpp          delete, duplicate, AutoConvex, CSG commit
+  Subsystems/WorldIO.cpp            LoadWorldDocument + name helpers
+  Subsystems/OzoneExport.cpp        ExportToOzone, Save, File menu, texture apply
+  Subsystems/WorldGraphBridge.cpp   UI accessor surface + Win32 menu dispatch
+  Subsystems/AnimEditing.cpp        vertex-keyframe editing + anim event handlers
+  Subsystems/History.cpp            OZONE-snapshot undo/redo + ApplyMapProperties
+  EditorEventBus.{hpp,cpp}          shared event contract
+  Editor.hpp, EditorIcons.{hpp,cpp}, SelType.hpp
+  UI/                        see R3
+```
+
+### Why a unity TU rather than 11 real TUs
+
+Almost every helper in the old file is `static`, and they share file-scope globals
+(`g_sel`, `g_placeMode`, `g_histUndo`, `g_selectedSurfaces`, `g_lastPreviewSel`,
+`g_editorPanels`, ...). Promoting them to real translation units means externalising
+~40 symbols and hoisting that shared state into a header — which changes **linkage
+and initialise order**. That is the one class of change in this whole refactor that
+`make test` cannot see, because AngelEd has no headless harness. A unity split keeps
+the declaration sequence byte-identical and the risk at zero.
+
+**Promotion to real TUs is the obvious R5** and is now unblocked: the cut points and
+the shared-state inventory are both known.
+
+### The include order is load-bearing
+
+The fragments carry no forward declarations of their own, so several statics are
+declared in the fragment *above* their user: `g_editorLog` lives at the top of
+`EntityOps.cpp` and is used in `EditorLog.cpp`; `g_originalWndProc` and
+`EditorWndProc` are declared in `WorldGraphBridge.cpp` and used in `EditorMenus.cpp`.
+Grouping the includes by layer ("core before subsystems") reads better and does not
+compile — it was tried, produced four errors, and `Main.cpp` now says so at the
+include list.
+
+### The one deliberate back-edge
+
+`UI/UiCommon.hpp` includes `Core/EditorEventBus.hpp`. That is not an accident and not
+a violation to fix by moving the file: UI uses the `ed::` vocabulary throughout
+(`Ev`, `Selection`, `SelKind`, `SelRef`, `SurfaceEdit`, `CsgIntent`, `AnimIntent`,
+`PlacementRequest`, `TextureApply`, `HeightmapDesc`). The bus is the **contract all
+three layers speak** — producers publish, `Main.cpp` drains, UI dispatches — with the
+queue in its `.cpp`. The layer rule is therefore stated as: UI may reach
+`EditorEventBus.hpp` and nothing else upward.
+
+### Verification
+
+Line-multiset comparison against the pre-split file: 237 lines added (banners, the
+include-order comment, the re-pathed includes) and exactly **16** removed, every one
+of them an `#include` whose path changed because the preamble moved from `Source/` to
+`Source/Core/`. Zero code lines lost or altered.
+
+> The comparison needs `-Encoding UTF8` on both sides. PowerShell 5.1's `Get-Content`
+> otherwise defaults to the ANSI codepage and mangles every em-dash in the file's
+> comments, which shows up as ~40 phantom "removed" lines and looks like data loss.

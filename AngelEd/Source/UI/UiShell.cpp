@@ -17,7 +17,8 @@
 // not state, because they all share this file scope. That is why every fragment
 // starts with a banner saying it is not a standalone TU. Panel code is UI-facing
 // and its dependencies are the panels, so in practice the coupling is along
-// lines the layer rule already accepts (UI -> Subsystems/Resources, never back up).
+// lines the layer rule already accepts: UI -> Subsystems/Resources, plus the one
+// deliberate back-edge, Core/EditorEventBus.hpp, for the shared ed:: type vocabulary.
 //
 // FRAGMENTS ARE NOT INCLUDED IN ANY ORDER-SENSITIVE WAY beyond needing the
 // preamble: every declaration they share lives in UiCommon.hpp, which is included
