@@ -3,6 +3,10 @@
 #include <string>
 #include <vector>
 #include "../../../Source/World/GameType.hpp"
+// LevelMetadata, ParticleType and Get/SetLevelMetadata moved to Subsystems in R6.
+// UI may call Subsystems, so this is the legal direction of that dependency - see
+// Subsystems/LevelState.hpp.
+#include "../Subsystems/LevelState.hpp"
 #include "../../../Source/World/SurfaceFlags.hpp"
 
 // =====================================================================
@@ -437,45 +441,6 @@ extern EditorPanelState g_editorPanels;
 void ShowDefPropertiesFor(const std::string& defName);
 
 // --- Level state ---
-// GameType is now defined in Source/World/GameType.hpp (oz::gametype::GameType)
-// so the editor, server and tests share one source of truth. The numeric values
-// are identical to the legacy enum, so every saved levelinfo line still loads.
-using oz::gametype::GameType;
-
-enum class ParticleType : uint8_t {
-    NONE,
-    SNOW,
-    RAIN,
-    VOID_REALM,
-    PSYCHIC_REALM
-};
-
-// Level metadata — persisted via LevelInfo/Particles instructions in both formats
-struct LevelMetadata {
-    // GameType / rules
-    GameType gameType = GameType::SINGLEPLAYER;
-    int maxPlayers = 8;
-    float respawnTime = 5.0f;
-    bool timeLimitEnabled = false;
-    float timeLimitMinutes = 10.0f;
-    int scoreLimit = 50;
-    bool friendlyFire = false;
-    std::string skyboxTexturePath;
-    // Side/cap skybox, the second path token on the OZONE `levelinfo` line. It
-    // was previously parsed into OzonePrimitive::entitySubType and then dropped:
-    // nothing read it on load and ExportToOzone never wrote it, so opening and
-    // re-saving a world silently deleted it.
-    std::string skyboxSidePath;
-    // Ambient particles
-    ParticleType particleType = ParticleType::NONE;
-    float particleDensity = 50.0f;
-    float particleSpeed = 1.0f;
-    int particleColorR = 200, particleColorG = 200, particleColorB = 200;
-    float particleWindX = 0.0f, particleWindZ = 0.0f;
-};
-
-LevelMetadata GetLevelMetadata();
-void SetLevelMetadata(const LevelMetadata& meta);   // the Map row's only owner
 
 // --- Portals ---
 // Portals are edited in the Entity Properties panel's PORTAL section, which reads
@@ -575,8 +540,6 @@ inline bool ChooseSaveWorldFile(std::string&) { return false; }
 inline void UpdateStatsSidebar(float, float, float, float, float, float, float, float, int, int, const char*, float, float, float) {}
 inline void LayoutStatsSidebar(int, int, int, int) {}
 inline int GetStatsSidebarWidth() { return 200; }
-inline LevelMetadata GetLevelMetadata() { return {}; }
-inline void SetLevelMetadata(const LevelMetadata&) {}
 inline void RefreshPortalList() {}
 inline int GetPortalCount() { return 0; }
 inline const char* GetPortalTargetWorld(int) { return nullptr; }

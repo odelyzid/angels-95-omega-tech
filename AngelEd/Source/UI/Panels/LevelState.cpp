@@ -18,19 +18,6 @@
 // GetZoneProperties, ClearZoneApplyFlags, ShowEnvPanel, ZonePropertiesProc and
 // SetLevelMetadata's 17-field mirror into g_zoneProps all went with it.
 
-// --- Level metadata (persisted via LevelInfo/Particles instructions) ---
-static LevelMetadata g_levelMeta;
-
-LevelMetadata GetLevelMetadata() { return g_levelMeta; }
-
-void SetLevelMetadata(const LevelMetadata& meta) {
-    // No mirror into a dialog any more. This used to copy all 17 fields into
-    // g_zoneProps so the Zone window's controls would show current values — one
-    // extra copy of the level state that had to be kept in step by hand, and the
-    // Map row reads g_levelMeta directly.
-    g_levelMeta = meta;
-}
-
 // --- Available worlds scan (for portal targets + LevelList) ---
 static std::vector<std::string> g_availableWorlds;
 

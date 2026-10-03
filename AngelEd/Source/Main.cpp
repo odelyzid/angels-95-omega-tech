@@ -57,7 +57,8 @@
 // Subsystems/WorldGraphBridge.cpp    UI accessor surface + Win32 menu dispatch
 // Core/EditorMenus.cpp               native menu bar construction
 // Subsystems/AnimEditing.cpp         vertex-keyframe editing + anim event handlers
-// Subsystems/History.cpp             OZONE-snapshot undo/redo + ApplyMapProperties
+// Subsystems/History.cpp             OZONE-snapshot undo/redo
+// Subsystems/LevelState.cpp          LevelMetadata owner + the Map-row apply
 // Subsystems/Placement.cpp           entity placement (was: direct PawnSystem calls
 //                                    from UI/Panels/PawnPanel.cpp). After History.cpp
 //                                    because it calls HistoryPush.
@@ -79,6 +80,7 @@
 #include "Core/EditorMenus.cpp"
 #include "Subsystems/AnimEditing.cpp"
 #include "Subsystems/History.cpp"
+#include "Subsystems/LevelState.cpp"
 #include "Subsystems/Placement.cpp"
 #include "Core/EditorDispatcher.cpp"
 
