@@ -144,6 +144,12 @@ struct EditorPanelState {
 
     // WorldGraph Explorer
     bool showWorldGraph = false;
+    // Its list is derived from PawnSystem/ZoneManager/OzoneLoader, but it was built
+    // exactly once - in WM_CREATE, from CreateAllEditorWindows, which runs BEFORE the
+    // world is loaded and before PawnDefs register. Opening the panel on a fresh session
+    // therefore showed one "Map (level)" row and stayed wrong until Refresh was pressed
+    // by hand. Mutations set this; the frame loop consumes it once per frame.
+    bool worldGraphDirty = false;
     // (the actionSelectFromGraph* fields moved to ed::Event SelectEntity — see above)
 
     // LevelList / Campaign panel
@@ -395,7 +401,7 @@ struct DefStatRow {
     struct WinPos { int x, y, w, h; };
     WinPos soundMgrPos   = {50, 50, 400, 280};
     WinPos textureMgrPos = {480, 50, 520, 480};
-    WinPos pawnMgrPos    = {50, 300, 400, 300};
+    WinPos pawnMgrPos    = {50, 300, 480, 300};
     WinPos scriptMgrPos  = {440, 340, 560, 450};
     WinPos modelBrwPos   = {100, 80, 540, 500};
     WinPos pickPanelPos  = {60, 400, 200, 280};
@@ -416,5 +422,11 @@ WinPos propsPanelPos = {300, 120, 540, 560};
 // plain definition, which would be a multiple-definition link error the moment a second
 // TU included this header.
 inline EditorPanelState g_editorPanels;
+
+// Flag the WorldGraph list as needing a rebuild. Cheaper to call from the ~30 mutation
+// sites than to call RefreshWorldGraph() from each, and it keeps the layer direction
+// right: Subsystems/ and Core/ set a flag, the Core frame loop makes the one call
+// downward into UI. Setting a flag is not a mutation.
+inline void MarkWorldGraphDirty() { g_editorPanels.worldGraphDirty = true; }
 
 #endif // ANGEL_ED_CORE_EDITORPANELSTATE_HPP

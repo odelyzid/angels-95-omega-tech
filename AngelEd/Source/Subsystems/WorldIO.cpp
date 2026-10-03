@@ -115,6 +115,9 @@ static bool LoadWorldDocument(const fs::path& path) {
                 SetLevelMetadata(meta);
             }
         }
+        // The scene was just replaced wholesale. The WorldGraph list is derived from
+        // PawnSystem/ZoneManager/OzoneLoader, so every row is now stale.
+        MarkWorldGraphDirty();
         return ok;
     }
     // OZONE-only editor: any non-.ozone world format is unsupported.

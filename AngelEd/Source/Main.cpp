@@ -382,10 +382,17 @@ int main(int argc, char **argv){
                     EditorPickEntity();
                 }
             }
+            // A gizmo drag wrote new positions every frame it was held, so the WorldGraph's
+            // position columns are stale. Flagging on release keeps the 60Hz rebuild off
+            // the drag itself. Gated on g_gizmoHistPushed because that is set only when
+            // a transform was actually pushed to history - without it every plain CLICK
+            // refreshed the list, since a pick is also a release.
+            const bool didTransform = g_gizmoHistPushed;
             g_gizmoDrag = false;
             g_gizmoHistPushed = false;
             g_suppressViewportDrag = false;
             g_terrainHistPushed = false;
+            if (didTransform) MarkWorldGraphDirty();
         }
         // Release the post-context-menu input guard once the button is no longer held.
         if (g_suppressViewportDrag && !IsMouseButtonDown(MOUSE_LEFT_BUTTON))
@@ -550,7 +557,7 @@ int main(int argc, char **argv){
                         else if (cmd == IDM_DELETE_ENTITY) DeleteSelectedEntity();
                         else if (cmd == IDM_DUPLICATE_ENTITY) DuplicateSelectedEntity();
                         else if (cmd == IDM_APPLY_TEXTURE) g_editorPanels.actionApplyTextureToSel = true;
-                        else if (cmd == IDM_APPEND_AUTOCONVEX) AppendAutoConvexForSelection();
+                        else if (cmd == IDM_APPEND_AUTOCONVEX) { AppendAutoConvexForSelection(); MarkWorldGraphDirty(); }
                         else if (cmd == IDM_SURFACE_PROPS) {
                             // Every picked face must belong to ONE renderable:
                             // the dialog edits a single BrushSurface, and mixing
@@ -1321,7 +1328,10 @@ if (g_editorPanels.showCollisionBounds) {
                     }
                 }
 
-                OmegaTechEditor.DrawModel = false;
+OmegaTechEditor.DrawModel = false;
+                // This whole block bypasses the event bus and mutates PawnSystem /
+                // ZoneManager directly, so it has to flag the WorldGraph itself.
+                MarkWorldGraphDirty();
 
                 // CSG: register brush renderable for OZONE primitives (EMID >= 200).
                 // Collision comes from OzoneLoader::RebuildCollisionVolumes(), which
@@ -1684,7 +1694,13 @@ if (g_editorPanels.showCollisionBounds) {
         // because a panel is mid-layout while it posts. What makes that safe is every
         // event carrying its own target captured at post time - not the timing.
         ed::EventBus::instance().drain(g_editorFrameEvents);
-        DispatchFrameEvents(g_editorFrameEvents);
+        if (!g_editorFrameEvents.empty()) {
+            DispatchFrameEvents(g_editorFrameEvents);
+            // Placement, delete, duplicate, CSG commit and portal link/delete all
+            // arrive here, and every one of them changes what the WorldGraph lists.
+            // Gated on non-empty: marking unconditionally rebuilt the list every frame.
+            MarkWorldGraphDirty();
+        }
 
         // --- Surface Properties apply / reset ------------------------------
         //
@@ -1697,6 +1713,9 @@ if (g_editorPanels.showCollisionBounds) {
             // Core calling into the UI layer is the legal direction. It used to be
             // SurfaceOps calling SurfacePropsRefresh itself, twice.
             SurfacePropsRefresh((HWND)g_editorPanels.hSurfaceProps);
+            // A surface apply can commit a brush, which rebuilds the collision volumes
+            // the WorldGraph lists as Brush rows.
+            MarkWorldGraphDirty();
         }
 
         // --- Properties apply -------------------------------------------------
@@ -1710,10 +1729,7 @@ if (g_editorPanels.showCollisionBounds) {
         ed::EventBus::instance().drain(g_editorPropsEvents);
         if (!g_editorPropsEvents.empty()) {
             ApplyPanelProperties(g_editorPropsEvents);
-            // The Map row renames the world in the WorldGraph, so repaint it. This
-            // was RefreshWorldGraph() inside ApplyMapProperties, i.e. Subsystems
-            // calling upward into UI. Core calling UI is the legal direction.
-            RefreshWorldGraph();
+            MarkWorldGraphDirty();
         }
 
         // --- Editable .ozls stat rows ---------------------------------------
@@ -1868,7 +1884,37 @@ if (g_editorPanels.showCollisionBounds) {
         // arrived without a usable payload, which is how the nine dead actionSpawn*
         // fields stayed invisible for so long.
         ed::EventBus::instance().drain(g_editorPlacementEvents);
-        ApplyPlacementSpawns(g_editorPlacementEvents);
+        if (!g_editorPlacementEvents.empty()) {
+            ApplyPlacementSpawns(g_editorPlacementEvents);
+            MarkWorldGraphDirty();
+        }
+
+        // --- WorldGraph Explorer ---------------------------------------------
+        //
+        // Its rows carry a selIndex into the very vectors BuildWorldGraphEntries
+        // iterates, so deleting or duplicating a row shifts every later row and a
+        // second right-click acts on the wrong entity until Refresh is pressed by
+        // hand. It was also built exactly once, in WM_CREATE from
+        // CreateAllEditorWindows - which runs BEFORE the world is loaded and before
+        // PawnDefs register - so opening the panel on a fresh session showed one
+        // "Map (level)" row and stayed that way.
+        //
+        // One refresh at the end of the frame closes both holes. The flag is set at
+        // the choke points - each event drain, the direct placement paths, AutoConvex,
+        // undo/redo, world load - and consumed here, after the LAST drain, so a
+        // mutation is never reflected a frame late. Subsystems and Core set the flag;
+        // this single call is Core reaching down into UI, which is the legal direction.
+        // Only rebuild while the panel is actually on screen. Opening it refreshes anyway
+        // (ShowWorldGraph), so a session that never opens it pays nothing.
+        if (g_editorPanels.worldGraphDirty && g_editorPanels.showWorldGraph) {
+            g_editorPanels.worldGraphDirty = false;
+            RefreshWorldGraph();
+            // Logged from Core, not from the panel: the rebuild is silent, and a list
+            // that quietly stays stale is exactly what this replaces. UI/ may not
+            // reach up into Core/ for a logging call - Core reaching down into UI here
+            // is the legal direction.
+            EditorLog("WorldGraph refreshed");
+        }
 
         // Save the clip file back to disk. Deliberately AFTER ApplyAnimIntents:
         // a NewClip/DeleteKey posted this frame sets actionAnimSave from inside the

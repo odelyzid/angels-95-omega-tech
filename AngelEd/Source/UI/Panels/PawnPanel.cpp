@@ -13,7 +13,7 @@
 static const int ID_PAWN_CLOSE     = 100;
 static const int ID_PAWN_SPAWN     = 103;
 static const int ID_PAWN_REFRESH   = 104;
-static const int ID_PAWN_SHOW_HIDDEN = 105;
+static const int ID_PAWN_SHOW_HIDDEN = 106;
 static const int ID_PAWN_TREE      = 105;
 
 static HTREEITEM AddTreeItem(HWND hTree, HTREEITEM hParent, const wchar_t* text, LPARAM lParam) {
@@ -397,7 +397,12 @@ static bool SpawnSelectedPawnTreeItem(HWND hTree) {
 
 // Lay the Actor-Hierarchy controls out to fill the current client area so the
 // tree (and buttons) track window resizes.
-static void LayoutPawnMgr(HWND hwnd, HWND hLabel, HWND hTree,
+//
+// The "Show Hidden" checkbox was created with a hard-coded rect and never passed in
+// here, so on WM_SIZE it stayed at y=228 while the tree and the three buttons all
+// re-flowed to y = 41 + treeH - a visible 9px desync at the default size. It also
+// shared its control ID (105) with the treeview, so it could not be addressed at all.
+static void LayoutPawnMgr(HWND hwnd, HWND hLabel, HWND hTree, HWND hShowHidden,
                           HWND hSpawn, HWND hRefresh, HWND hClose) {
     if (!hwnd) return;
     RECT rc; GetClientRect(hwnd, &rc);
@@ -410,11 +415,18 @@ static void LayoutPawnMgr(HWND hwnd, HWND hLabel, HWND hTree,
     int by = top + treeH + 6;
     if (hSpawn)   MoveWindow(hSpawn,   10, by, 110, btnH, TRUE);
     if (hRefresh) MoveWindow(hRefresh, 128, by, 80, btnH, TRUE);
-    if (hClose)   MoveWindow(hClose, (W - 10 - 80 < 216) ? 216 : (W - 10 - 80), by, 80, btnH, TRUE);
+    if (hShowHidden) MoveWindow(hShowHidden, 216, by, 110, btnH, TRUE);
+    // Close is right-aligned, and only falls back to the fixed slot when the window is
+    // too narrow to fit it - which is also when it would collide with the checkbox.
+    if (hClose) {
+        int cx = W - 10 - 80;
+        if (cx < 334) cx = 216;
+        MoveWindow(hClose, cx, by, 80, btnH, TRUE);
+    }
 }
 
 static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
-    static HWND hTree, hLabel, hSpawn, hRefresh, hClose;
+    static HWND hTree, hLabel, hSpawn, hRefresh, hClose, hShowHidden;
     switch (msg) {
     case WM_CREATE: {
         hLabel = CreateLabel(hwnd, L"Actor Hierarchy (select a leaf, then Spawn Selected):", 10, 10, 360, 20, 1);
@@ -424,13 +436,17 @@ static LRESULT CALLBACK PawnMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         hSpawn   = CreateButton(hwnd, L"Spawn Selected", 10, 228, 110, 28, ID_PAWN_SPAWN);
         hRefresh = CreateButton(hwnd, L"Refresh", 128, 228, 80, 28, ID_PAWN_REFRESH);
         hClose   = CreateButton(hwnd, L"Close", 216, 228, 80, 28, ID_PAWN_CLOSE);
-        CreateCtrl(hwnd, L"BUTTON", L"Show Hidden", 304, 228, 90, 24, ID_PAWN_SHOW_HIDDEN, BS_AUTOCHECKBOX);
-        LayoutPawnMgr(hwnd, hLabel, hTree, hSpawn, hRefresh, hClose);
+        CreateCtrl(hwnd, L"BUTTON", L"Show Hidden", 216, 228, 110, 24, ID_PAWN_SHOW_HIDDEN, BS_AUTOCHECKBOX);
+        hShowHidden = GetDlgItem(hwnd, ID_PAWN_SHOW_HIDDEN);
+        if (hShowHidden)
+            SendMessage(hShowHidden, BM_SETCHECK,
+                        g_editorPanels.showHidden ? BST_CHECKED : BST_UNCHECKED, 0);
+        LayoutPawnMgr(hwnd, hLabel, hTree, hShowHidden, hSpawn, hRefresh, hClose);
         SendMessage(hwnd, WM_USER + 50, 0, 0);
         break;
     }
     case WM_SIZE:
-        LayoutPawnMgr(hwnd, hLabel, hTree, hSpawn, hRefresh, hClose);
+        LayoutPawnMgr(hwnd, hLabel, hTree, hShowHidden, hSpawn, hRefresh, hClose);
         break;
     case WM_USER + 50: {
         PopulateTreeView(hTree);

@@ -368,8 +368,16 @@ static LRESULT CALLBACK WorldGraphProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
 
 void ShowWorldGraph(bool show) {
     g_editorPanels.showWorldGraph = show;
-    if (g_editorPanels.hWorldGraph)
+    if (g_editorPanels.hWorldGraph) {
         ShowWindow((HWND)g_editorPanels.hWorldGraph, show ? SW_SHOW : SW_HIDE);
+        // Opening is the one moment that MUST show current data. The list is built in
+        // WM_CREATE from CreateAllEditorWindows, which runs before the world is loaded,
+        // so without this the panel presents an empty scene and keeps it.
+        if (show) {
+            g_editorPanels.worldGraphDirty = false;
+            RefreshWorldGraph();
+        }
+    }
 }
 
 void RefreshWorldGraph() {
