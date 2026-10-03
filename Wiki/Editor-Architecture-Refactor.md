@@ -1,7 +1,11 @@
 # AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
 
-**Status: R1 DONE, R2 next.** This file is the source of truth. Update the
+**Status: R0–R2 DONE, R3 next.** This file is the source of truth. Update the
 progress log as items land; do not work from memory of a plan held in context.
+
+**R2 result in one line:** 58 `action*` fields → **4**, and all 4 are documented
+exceptions with a reason. Nine of the 58 turned out to have no writer at all. Five
+**live** bugs were found and fixed along the way — see the R2 section.
 
 This is the *deferred* follow-up to `Wiki/Editor-PropertyPanel-Refactor.md`. That
 work fixed the editor's behaviour and deliberately did **not** restructure it,
