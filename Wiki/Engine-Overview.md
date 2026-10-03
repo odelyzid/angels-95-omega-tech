@@ -130,7 +130,12 @@ Angels95/
     Source/
       Main.cpp              # Editor entrypoint, toolbar, 3D viewport, selection
       Editor.hpp            # Editor state, camera, lighting, cached models
-      Win32Dialogs.cpp/.hpp # Win32 native panels (Model Browser, Texture, etc.)
+      Core/                 # EditorShell, EditorDispatcher, EditorState, EditorPanelState, EditorLog
+      Subsystems/           # Placement, PropsApply, SurfaceOps, LevelState, History (real TUs)
+                            #   + Selection, EntityOps, WorldIO, OzoneExport, WorldGraphBridge,
+                            #     AnimEditing (still unity fragments, #included by Main.cpp)
+      UI/                   # Win32 native panels; UiShell.cpp is the single unity TU
+      Resources/            # AssetScope, PackageIO, AssetScan - shared by two panels each
       EditorIcons.cpp/.hpp  # Toolbar icon loader (AngelEd/UI/*.bmp)
       PPGIO.hpp             # Save/config I/O helpers (shared with Source/)
       raygui/               # Bundled raygui (dark.h, raygui.c/.h)

@@ -943,3 +943,19 @@ Still unity fragments in `Main.cpp`, with the seam that blocks each:
 
 Object lists verified in step: Makefile 44 / `ci.yml` 43, agreeing on all 43 editor
 objects, the sole difference being `OTCustom_stub.o`.
+
+## If you find `Win32Dialogs.cpp` referenced in these docs
+
+It was **deleted in R3**. It was the single 8k-line file that held every Win32 native
+panel; it is now `UI/Panels/*.cpp`, with `UI/UiShell.cpp` as the one unity TU that
+`#include`s them, and the shared two-consumer code moved to `Resources/`.
+
+Mentions of `Win32Dialogs.cpp` **inside the progress logs above are left as written** -
+they record what was true when the work was done, and rewriting them would falsify the
+record. The live pointers were fixed in `AGENTS.md` and `Wiki/Engine-Overview.md`:
+
+| Symbol | Now lives in |
+|---|---|
+| `BuildAssetScope`, `AssetScopeItem`, `AssetScopeNode` | `Resources/AssetScope.{hpp,cpp}` |
+| `PackIntoPackage`, `HotLoadPackage` | `Resources/PackageIO.{hpp,cpp}` |
+| `FillDefBlock`, `kWeaponStats`/`kPlayerStats`/`kPawnStats`/`kLightStats`, the `Props*Scroll` layout | `UI/Panels/PropsPanel.cpp` |
