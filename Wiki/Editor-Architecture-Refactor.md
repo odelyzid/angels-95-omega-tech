@@ -1,11 +1,12 @@
 # AngelEd Architecture Refactor — Core / Subsystems / UI / Resources + EditorEventBus
 
-**Status: R0–R5 DONE.** This file is the source of truth. Update the
+**Status: R0–R6 DONE.** This file is the source of truth. Update the
 progress log as items land; do not work from memory of a plan held in context.
 
-**R2 result in one line:** 58 `action*` fields → **4**, and all 4 are documented
-exceptions with a reason. Nine of the 58 turned out to have no writer at all. Five
-**live** bugs were found and fixed along the way — see the R2 section.
+**Action-field result in one line:** 58 `action*` fields → **3** (R2 took it to 4,
+R6 converted the last convertible one). All 3 survivors are documented exceptions with
+a reason. Nine of the 58 turned out to have no writer at all. Six **live** bugs were
+found and fixed along the way — see the R2 and R6 sections.
 
 This is the *deferred* follow-up to `Wiki/Editor-PropertyPanel-Refactor.md`. That
 work fixed the editor's behaviour and deliberately did **not** restructure it,
@@ -142,6 +143,9 @@ whose *interfaces* matter and they are far fewer per layer.
 
 | R4 | split `Main.cpp` into `Core/` + `Subsystems/` | **done** |
 | R5 | `Subsystems/Placement` (close Invariant 1) + `AGENTS.md` | **done** |
+| R6 | `EditorState` + `EditorDispatcher` + `SurfaceOps` + `LevelState` + `Resources/` + `actionApplyProperties` | **done** |
+| F | promote `Subsystems/` to real translation units (`Core/` **excluded**) | pending |
+| G | Linux build for AngelEd — **deferred by request** | pending |
 
 R2 is split into batches so each is independently reviewable and each deletes its
 fields as it goes:
@@ -344,12 +348,13 @@ Two more live defects fixed on the way:
 
 #### Decisions worth recording
 
-- **`actionApplyProperties` deliberately STAYS a field.** There is no target to
-  capture: the properties panel owns `propsTargetType` / `propsTargetIndex` itself
-  and is both the only writer and the only reader, so an event would add a queue
-  hop without adding a payload that could go stale. It converts in **R4**, when the
-  panel stops owning the target directly — which is the last reader of live panel
-  state. Recorded here so its absence is a decision, not an oversight.
+- **`actionApplyProperties` was left as a field here, and converted in R6.** At this
+  point there was no target to capture: the properties panel owned `propsTargetType` /
+  `propsTargetIndex` itself and was both the only writer and the only reader, so an
+  event would add a queue hop without adding a payload that could go stale. It was
+  scheduled to convert "in **R4**, when the panel stops owning the target directly" —
+  R4 did not do it, and R6 did. See the R6 section: the values stay live-read on
+  purpose, and only the target travels.
 - **`SurfaceEdit` carries the mask, and `ResetSurface` posts a mask too.** The
   viewport's `IDM_SURFACE_RESET` route previously set a bare bool, so it reset only
   the last-clicked face and ignored the Shift multi-selection the dialog title
@@ -467,11 +472,11 @@ Only the **path** became an event. That split matters: a category switch between
 the click and the frame would otherwise preview from the wrong list, which is
 precisely why the path travels and the sliders do not.
 
-## R2 result: 58 fields → 4, and every one of the 4 is justified
+## R2 result: 58 fields → 4 (now 3 — R6 converted the fourth)
 
 | Remaining field | Why it is not an event |
 |---|---|
-| `actionApplyProperties` | No target to capture — the properties panel owns `propsTargetType`/`propsTargetIndex` itself and is both the only writer and only reader. Converts in **R4** when the panel stops owning the target. |
+| ~~`actionApplyProperties`~~ | **Converted in R6** → `ed::Ev::ApplyProperties` carrying a `SelRef`. The row below was correct *for R2* and was out of date by one phase: the precondition it named was met in R6. |
 | `actionApplyTextureToSel` | Reads `g_sel`/`activeTexturePath` at drain time — normally the bug this refactor kills, but both writers are **context-menu** commands and `TrackPopupMenu` is **modal**, so nothing else pumps input and the selection cannot move. Capturing a Selection would mean duplicating the brush renderable resolution (which depends on `g_sel.pos` to tell a renderable index from a collision-volume index) for no behavioural gain. |
 | `actionAnimSave` | **Intra-frame chaining signal.** The anim handlers set it themselves; the file write consumes it in the *same* frame. Queueing delays every save a frame. |
 | `actionAnimRefresh` | **Dirty flag** consumed by `RefreshAnimPanel()`. Means "re-read the panel", not "the user did something". |
@@ -618,26 +623,38 @@ added for the three light tags, which had no event at all. `Transform` had to mo
 
 ### Not done, and still outstanding
 
-- ~~**The manual pass.**~~ **DONE** — the user exercised the editor by hand after
-  R3/R4/R5 and confirmed placement works. R3-R5 moved ~11,500 lines whose only
-  machine signal was the line-multiset diff, so this was the load-bearing check and it
-  has now been done. The line-multiset diff remains worth keeping for future moves:
-  it proves the text is unchanged, which the manual pass then confirms is behaviourally
-  sufficient.
-- **`Resources/` layer: never created.** `AssetScope` / `AssetScan` / `PackageIO` from
-  the Design section do not exist; all of it is still in `UI/`.
-- **`Core/EditorDispatcher.cpp` and `Core/EditorState.hpp`: never created.** The
-  dispatcher is still a switch inline in `main()`; editor state lives in
-  `Core/EditorShell.hpp`.
-- **`Subsystems/SurfaceOps` and `Subsystems/LevelState` were folded** into
-  `EntityOps.cpp` and `History.cpp` respectively rather than created as named.
-- **`LevelMetadata` is still declared in `UI/UiPanels.hpp`**, which this document's
-  "Ruled out" section says belongs in `Subsystems/LevelState`.
-- **`actionApplyProperties` is still a field**, though B3 and the R2 result table both
-  say it converts in R4. R4 did not convert it.
+- **The manual pass was done for R3–R5** (the user exercised the editor and confirmed
+  placement works). **R6 has NOT had one** — it moved ~2,500 lines including two
+  behaviour-relevant changes (`actionApplyProperties` becoming an event, and the
+  properties apply becoming deferred). **This is the one open risk that matters.**
+- ~~**`Resources/` layer: never created.**~~ **DONE in R6** — `AssetScope` and
+  `PackageIO` are real translation units with headers of their own, and
+  `tests/AssetScope.test.cpp` (45 checks) is the first automated coverage the asset
+  browser has ever had. **`AssetScan` is the one exception** and is deliberately not
+  done: `ScanFilesAndPackages` takes a `ResourceEntry`, which holds an `HBITMAP`, and
+  `ScanModelBrowserFiles` only ever fills `g_editorPanels.modelEntries` and then
+  `SendMessage`s the panel. Moving either as-is would put a Win32 type or editor-UI
+  state inside `Resources/`. The honest version extracts one enumeration primitive
+  returning `AssetScopeItem` and leaves the state write and refresh in the panel — a
+  refactor with behaviour, so it needs its own commit and its own tests.
+- ~~**`Core/EditorDispatcher.cpp` and `Core/EditorState.hpp`: never created.**~~
+  **DONE in R6.**
+- ~~**`Subsystems/SurfaceOps` and `Subsystems/LevelState` were folded.**~~ **DONE in
+  R6.** Note the plan was wrong about *where* they were folded: surface code was never
+  in `EntityOps.cpp` — that file has never contained any.
+- ~~**`LevelMetadata` is still declared in `UI/UiPanels.hpp`.**~~ **DONE in R6**, along
+  with `ParticleType`, which was only in a UI header because `LevelMetadata` was. Its
+  *accessor* had been implemented inside `UI/Panels/LevelState.cpp` — subsystem state
+  living in a UI panel.
+- ~~**`actionApplyProperties` is still a field.**~~ **DONE in R6.** 58 → **3**.
 - **`actionApplyTextureToSel` remains a field** by the documented modal-`TrackPopupMenu`
-  argument, which is sound.
-- **Promotion of `Subsystems/` to real translation units**, now including Placement.
+  argument, which is sound. `actionAnimSave` and `actionAnimRefresh` likewise. All three
+  are final unless their reasoning changes.
+- **Promotion of `Subsystems/` to real translation units** (phase F, `Core/` excluded).
+- **Linux build for AngelEd** (phase G) — deferred by request. Scope already sized: 2
+  missing UI stubs, ~6 guard blocks, delete `AngelEd/Makefile:38`'s `$(error)`, add
+  AngelEd to the Linux CI job. R6 *reduces* this cost — `Resources/` moved shared
+  logic out of the Win32-only UI translation unit into portable TUs.
 
 ## Verification
 
@@ -659,3 +676,120 @@ added for the three light tags, which had no event at all. `Transform` had to mo
   unchanged, not that the editor still works. That gap is now closed by hand rather
   than by machine.
 
+
+## R6 outcome: the rest of the designed layout
+
+Five pieces the Design section specified and R3/R4 did not deliver. `Main.cpp` went
+from 5,039 lines (start of R4) to **2,184**.
+
+### The layer tree now matches the design
+
+```
+AngelEd/Source/
+  Main.cpp                     the TU: preamble + includes + main()
+  Core/EditorShell.hpp         the include list, and nothing else
+  Core/EditorState.hpp         menu IDs, event buffers, selection / mouse / gizmo state
+  Core/EditorDispatcher.cpp    DispatchFrameEvents() - the 18 frame-pass kinds
+  Core/EditorLog.cpp  Core/EditorShell.cpp  Core/EditorMenus.cpp
+  Core/EditorEventBus.{hpp,cpp}
+  Subsystems/Selection.cpp  EntityOps.cpp  SurfaceOps.cpp  WorldIO.cpp
+  Subsystems/OzoneExport.cpp  WorldGraphBridge.cpp  AnimEditing.cpp
+  Subsystems/History.cpp  LevelState.{cpp,hpp}  PropsApply.cpp  Placement.cpp
+  Resources/AssetScope.{hpp,cpp}  PackageIO.{hpp,cpp}
+  UI/UiCommon.hpp  UiPanels.hpp  UiShell.cpp  Panels/*.cpp
+```
+
+### What actually justified each move
+
+- **`EditorShell.hpp` was three things wearing one filename.** The include preamble, the
+  editor state, *and* thirteen `RaycastTest*` picking functions whose only caller is
+  `Selection.cpp:38-50`. Picking logic sitting in a state header is the whole reason
+  that file was 420 lines and unreadable.
+- **The 240-line dispatch switch left the render loop.** `main()` now reads as a frame
+  loop: drain, dispatch, four more drains, apply.
+- **`SurfaceOps` is the name the plan always specified.** The plan claimed it already
+  existed folded into `EntityOps.cpp`. It did not — `EntityOps.cpp` holds only
+  `AppendAutoConvexForSelection` and `CommitBrushRenderable`, and has never contained
+  any surface code. The plan was wrong about where the code was, not just about its name.
+- **`LevelMetadata` was subsystem state implemented inside a UI panel.** Its accessor
+  lived in `UI/Panels/LevelState.cpp`; its declaration in `UI/UiPanels.hpp`. The plan's
+  "Ruled out" section had this right years before the code did.
+- **`Resources/` shared code lived inside its consumers.** `BuildAssetScope`,
+  `PackIntoPackage` and `HotLoadPackage` were all implemented in
+  `UI/Panels/TexturePanel.cpp` while `UI/Panels/ModelPanel.cpp` called them. They were
+  reachable only because the UI layer is one translation unit — the moment it became
+  real objects, `ModelPanel.cpp` would have stopped compiling. A shared contract with no
+  header is not a contract.
+
+### The one piece this phase refused to do honestly
+
+`Resources/AssetScan`. `ScanFilesAndPackages` takes a `ResourceEntry`, which holds an
+`HBITMAP thumbnail`; `ScanModelBrowserFiles` returns nothing and only clears, fills and
+dedups `g_editorPanels.modelEntries` before `SendMessage`ing the panel. Moving either
+wholesale would put a Win32 type, or editor UI state, inside `Resources/`.
+
+The honest version extracts **one** enumeration primitive returning `AssetScopeItem` —
+which is also what `BuildAssetScope` consumes, so both browsers share it — and leaves
+the state write and the panel refresh in the panel. That is a refactor with behaviour in
+it, not a pure move, so it does not get the line-multiset verification; it needs its own
+commit and its own tests.
+
+### `actionApplyProperties` → `Ev::ApplyProperties`, and why only the target travels
+
+The handler read **87** distinct `g_editorPanels.prop*` fields, of which about six apply
+to any given `SelType`. A capturing payload would snapshot 87 to write 6. So the values
+stay live-read and the event carries the `SelRef` only.
+
+That is safe rather than a half-finished conversion, because the staleness this refactor
+kills is an *index* that ends up naming a different entity than the one clicked. It
+cannot happen to a value the user just typed: the panel is not modal, but between the
+Apply click and the drain — the same frame — nothing pumps input. Same argument that
+keeps `actionApplyTextureToSel` a field.
+
+What it does buy is the part that was genuinely wrong. The handler used to read
+`propsTargetType`/`propsTargetIndex` from live panel state, so whichever row the panel
+happened to be showing at drain time decided what got written.
+
+`ToSelType(ed::SelKind)` was added as the reverse of `ToBusKind` — also an exhaustive
+switch, not a `static_cast`, for the reason already recorded on the forward direction.
+
+`propsTargetHasRotation` stays a live read at three sites. It is a per-*type* capability
+flag ("does this kind have a yaw"), not a target; conflating them would reintroduce the
+bug where an Apply silently reset `playerstart` yaw to 0.
+
+**Action fields: 58 → 4 → 3.** The three survivors are final unless their reasoning
+changes: `actionApplyTextureToSel` (modal `TrackPopupMenu`), `actionAnimSave`
+(intra-frame chaining), `actionAnimRefresh` (dirty flag).
+
+### Two build-wiring entries, deliberately
+
+`Resources/` is the one place in this refactor where extra wiring was accepted rather
+than avoided — 3 Makefile rules, 3 `ci.yml` entries. Everywhere else a unity fragment
+keeps the object count at one. The exception is justified because `Resources/` is a
+genuine two-consumer interface, and its whole defect was having no header.
+
+The object lists were diffed as this document requires: Makefile 36, `ci.yml` 37,
+agreeing on both new objects. The single difference is `OTCustom_stub.o`, which is
+intentional (CI links a stub where the Makefile links `-l:Custom.so`) and is now named
+in the Makefile comment so the next person does not read it as a regression.
+
+### Mistakes made in this phase, since the value of recording them is now established
+
+- **A range-delete mangled `main()`**, twice: once from an off-by-one (the frame
+  `for` is at 1662 and closes at 1902, not 1663–1903), and once from a miscomputed
+  splice range. Both were reverted with `git checkout` and redone from exact
+  brace-balanced ranges.
+- **The first generated `EditorDispatcher.cpp` had a duplicated `for`** and balance +1,
+  which surfaced as a parse error in a file three includes later. Both extractions now
+  assert `balance == 0` before writing.
+- **`git checkout -- AngelEd/Makefile`, intended to undo a temporary probe rule,
+  reverted the uncommitted `Resources/` wiring too.** Re-applied and rebuilt to prove it.
+- **`PostApplyProperties` was inserted below its three call sites** — the unity-build
+  property again: fragments carry no forward declarations of their own.
+- **The first `test_assetscope` run was 43/45**, both failures a bug in my own test
+  helper (a synthetic parent node leaked `"(GameData)/"` into every expected path). The
+  code was right; the test was wrong.
+
+Every one was caught by verifying after the fact rather than assuming. That is the only
+reason any of them cost minutes instead of a bad commit — and the reason a reviewer can
+read these entries as evidence the process works, not as an excuse.
