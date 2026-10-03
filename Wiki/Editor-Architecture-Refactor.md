@@ -133,7 +133,7 @@ whose *interfaces* matter and they are far fewer per layer.
 |---|---|---|
 | R0 | this document | **done** |
 | R1 | `EditorEventBus` + headless suite + `make test` in CI | **done** |
-| R2 | convert the 58 action fields, batch by batch | pending |
+| R2 | convert the action fields, batch by batch - **done** | 58 |
 | R3 | split `Win32Dialogs.cpp` into `UI/` (unity TU) | pending |
 | R4 | split `Main.cpp` into `Core/` + `Subsystems/` | pending |
 | R5 | `AGENTS.md` + full verification | pending |
@@ -147,7 +147,7 @@ fields as it goes:
 | B2 | world graph — **done** (level list deferred to B5, it is a world *name*, not a selection) | 8 |
 | B3 | surface / CSG / portal / reload / convert — **done** | 8 |
 | B4 | animation - **done** (11 events; Save/Refresh stay fields) | 12 |
-| B5 | assets (texture, model, sound, heightmap, level list) | 20 |
+| B5 | assets + level list - **done** | 20 |
 
 ## Invariants — do not regress
 
@@ -415,6 +415,60 @@ is a visible no-op instead of an edit to the wrong mesh.
   into its own `g_editorAnimEvents` pass.
 
 Action fields: **32 → 23**. `test_editorbus` 63/63.
+
+### R2 B5 — assets, level list (18 fields) — and R2 is complete
+
+New payloads: `PlacementRequest`, `TextureApply`, `HeightmapDesc`. Events:
+`BeginPlacement`, `ApplyTextureToModel`, `PlaySound`, `StopSoundPreview`,
+`GenerateHeightmap`, `RefreshModelBrowser`, `OpenWorld`, `LinkWorld`.
+
+One more live staleness bug:
+
+> **The Pickups panel could place the wrong pickup.** It sent a **list index** and
+> the main loop resolved it with `LegacyPickupType(idx)` at drain time. A panel
+> rebuild between the click and the frame placed a different def. The panel now
+> resolves the name itself — the button IDs are minted from the same
+> `FindByType(EntityType::PICKUP)` order the panel builds its list from, so the
+> lookup is exact — and the **name** travels in the event.
+
+The six `actionHm*`/`actionHeightmap*` fields collapse into one `HeightmapDesc`;
+four of them were read at drain time, so a panel edit between click and frame
+generated the heightmap from values the panel had already moved past.
+
+#### Three fields renamed off the `action*` prefix
+
+The prefix was *lying* about these — they are live state the loop re-reads every
+frame, not messages:
+
+| Was | Now | Why |
+|---|---|---|
+| `actionSoundVolume` | `previewSoundVolume` | Volume slider; re-applied every frame while the preview plays |
+| `actionSoundLoop` | `previewSoundLoop` | Same |
+| `actionSoundCategory` | `previewSoundCategory` | Same |
+| `actionRefreshBrowser` | `refreshModelBrowser` | Dirty flag, exactly like `actionAnimRefresh` |
+
+Only the **path** became an event. That split matters: a category switch between
+the click and the frame would otherwise preview from the wrong list, which is
+precisely why the path travels and the sliders do not.
+
+## R2 result: 58 fields → 4, and every one of the 4 is justified
+
+| Remaining field | Why it is not an event |
+|---|---|
+| `actionApplyProperties` | No target to capture — the properties panel owns `propsTargetType`/`propsTargetIndex` itself and is both the only writer and only reader. Converts in **R4** when the panel stops owning the target. |
+| `actionApplyTextureToSel` | Reads `g_sel`/`activeTexturePath` at drain time — normally the bug this refactor kills, but both writers are **context-menu** commands and `TrackPopupMenu` is **modal**, so nothing else pumps input and the selection cannot move. Capturing a Selection would mean duplicating the brush renderable resolution (which depends on `g_sel.pos` to tell a renderable index from a collision-volume index) for no behavioural gain. |
+| `actionAnimSave` | **Intra-frame chaining signal.** The anim handlers set it themselves; the file write consumes it in the *same* frame. Queueing delays every save a frame. |
+| `actionAnimRefresh` | **Dirty flag** consumed by `RefreshAnimPanel()`. Means "re-read the panel", not "the user did something". |
+
+`58 → 4`. Nine of the original 58 turned out to have **no writer at all** (B1), so
+the number of channels that actually needed converting was ~45, not 58. Nine fields
+that were never messages were renamed to stop pretending otherwise.
+
+**Live bugs found across R2: five.** WorldGraph Delete/Duplicate read `g_sel`
+instead of their own index; Reload indexed `GetMeshObject()` with a foreign index;
+Convert-to-Animated converted the wrong mesh; the Pickups panel resolved an index
+at drain time; and the b88 Light-window deletion orphaned its apply handler. All
+fixed.
 
 ## Verification
 

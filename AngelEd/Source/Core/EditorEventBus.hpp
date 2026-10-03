@@ -65,6 +65,36 @@ struct LevelStateEdit {
     int gameType = 0;
 };
 
+// Enter a placement mode.
+//
+// The Pickups panel used to send a LIST INDEX and the main loop resolved it via
+// LegacyPickupType(idx) at drain time — so a panel rebuild between the click and
+// the frame placed a different pickup. The def NAME is resolved by the poster and
+// travels here instead.
+struct PlacementRequest {
+    enum class Kind : uint8_t { Pickup, Node, Model };
+    Kind kind = Kind::Model;
+    std::string key;      // pickup def name; node type name for Kind::Node
+};
+
+// Apply a texture to a model by index.
+struct TextureApply {
+    int target = -1;
+    std::string path;
+};
+
+// A heightmap build request. Six separate action* fields used to carry this, and
+// four of them (image, texture, scale, size) were read at drain time — so a panel
+// edit between the click and the frame generated the heightmap from values the
+// panel had already moved past.
+struct HeightmapDesc {
+    std::string imagePath;
+    std::string texturePath;
+    float x = 0, y = 0, z = 0;
+    float scale = 1.0f;
+    float sizeX = 100, sizeY = 50, sizeZ = 100;
+};
+
 // An animation-editing intent.
 //
 // The clip name and the mesh id travel with the event because the anim panel's
@@ -144,6 +174,10 @@ enum class Ev : uint8_t {
     SpawnPawn, SpawnMesh, SpawnPickup, SpawnEmitter, SpawnZone,
     SpawnParticleEmitter, SpawnPathNode, SpawnWindZone, SpawnPlayerStart,
 
+    // Enter a placement mode (pickup ghost / node ghost / model ghost).
+    // Payload: PlacementRequest - carries the resolved def NAME, not a list index.
+    BeginPlacement,
+
     // CSG. Payload: CsgIntent — isPrimitive() for CsgPlace, isCommit() for CsgCommit.
     CsgPlace, CsgCommit,
 
@@ -167,13 +201,18 @@ enum class Ev : uint8_t {
 
     // Assets.
     ApplyTextureToSelection,   // Payload: std::string (asset path)
+    ApplyTextureToModel,       // Payload: TextureApply (target index + path)
     ReloadMesh,                // Payload: SelRef
     ConvertToAnimated,         // Payload: SelRef
-    PlaySound,                 // Payload: std::string (path); volume/loop in LevelStateEdit
+    PlaySound,                 // Payload: std::string (path)
     StopSoundPreview,          // Payload: none
 
     // Heightmap.
-    GenerateHeightmap,         // Payload: Transform
+    GenerateHeightmap,         // Payload: HeightmapDesc
+
+    // Model browser list changed and the preview must re-read it. A DIRTY FLAG, not
+    // a user action - see actionAnimRefresh for why that distinction matters.
+    RefreshModelBrowser,       // Payload: none
 
     // Level state. Payload: LevelStateEdit.
     ApplyLevelState,
@@ -205,6 +244,9 @@ using Payload = std::variant<std::monostate,
                              Selection,
                              SurfaceEdit,
                              AnimIntent,
+                             PlacementRequest,
+                             TextureApply,
+                             HeightmapDesc,
                              CsgIntent,
                              SpawnDesc,
                              Transform,
@@ -225,6 +267,9 @@ struct Event {
     const Selection& selection() const;
     const SurfaceEdit& surface() const;
     const AnimIntent& anim() const;
+    const PlacementRequest& placement() const;
+    const TextureApply& textureApply() const;
+    const HeightmapDesc& heightmap() const;
     const CsgIntent&   csg() const;
     const Transform& xform() const;
     const std::string& str() const;
@@ -258,6 +303,11 @@ public:
 
     template <class T>
     void post(Ev k, T v) { post(Event::make(k, std::move(v))); }
+
+    // For the genuinely payload-less events (StopSoundPreview, ClosePanel).
+    // Distinct from post<T> with a default T, which would accept a payload the
+    // handler then silently ignores.
+    void post(Ev k) { post(Event{k, Payload{}}); }
 
     // Move the queue out and empty it. Called once per frame, at the single point
     // where dispatching is safe — a panel is mid-layout while it is posting.

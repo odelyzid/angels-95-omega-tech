@@ -75,10 +75,9 @@ struct EditorPanelState {
     int selectedModel = -1;
 
     // Action flags (set by dialog procs, read by main raylib loop)
-    int actionPickupType = -1;
-    int actionNodeType = -1;
-    int actionPlaceModel = -1;
-    bool actionRefreshBrowser = false;
+    // Renamed off the action* prefix: it is a DIRTY FLAG (the preview must
+    // re-read the list), not a message. Same distinction as actionAnimRefresh.
+    bool refreshModelBrowser = false;
     // The nine `actionSpawn*` fields (pawn / mesh / pickup / emitter / zone /
     // particle emitter / path node / wind zone / player start) are GONE. They had
     // no writer anywhere in the editor: every one of their handlers in Main.cpp
@@ -96,20 +95,10 @@ struct EditorPanelState {
     // Camera aim point, refreshed every frame by Main.cpp, so Win32 panels can
     // spawn entities synchronously without waiting on the main-loop action flags.
     float spawnPos[3] = {0.0f, 0.0f, 0.0f};
-    std::string actionTexturePath;
-    int actionTextureTarget = -1;
-    std::string actionPreviewSoundPath;
-    bool actionStopSoundPreview = false;
-    int actionSoundCategory = 0;    // 0=SFX, 1=Music, 2=Ambience
-    int actionSoundLoop = 0;        // 0=no loop, 1=loop
-    int actionSoundVolume = 80;     // 0-100
+    int previewSoundCategory = 0;   // 0=SFX, 1=Music, 2=Ambience
+    int previewSoundLoop = 0;        // 0=no loop, 1=loop
+    int previewSoundVolume = 80;     // 0-100
         // Heightmap editor action flags
-    std::string actionHeightmapImage;
-    std::string actionHeightmapTexture;
-    float actionHmPosX = 0, actionHmPosY = 0, actionHmPosZ = 0;
-    float actionHmSx = 100, actionHmSy = 50, actionHmSz = 100;
-    float actionHmScale = 1.0f;
-    bool actionGenerateHeightmap = false;
 
     // Light properties live in propLight* (the Entity Properties panel's own state).
     // The 12 `light*` fields and actionApplyLight that used to sit here are GONE:
@@ -163,7 +152,18 @@ struct EditorPanelState {
     // Active texture tracking (for context menu apply + auto-apply)
     std::string activeTexturePath;   // currently selected texture in browser
     int activeTextureSlot = 0;       // tileset slot index if applicable
-    bool actionApplyTextureToSel = false;  // flag: apply activeTexturePath to selected entity
+    // actionApplyTextureToSel deliberately REMAINS a field, the fourth and last
+    // documented exception to "everything becomes an event".
+    //
+    // It reads `g_sel` and `activeTexturePath` at drain time, which is normally
+    // the staleness bug this refactor exists to kill. It is safe here for a
+    // specific reason: both writers are context-menu commands, and
+    // TrackPopupMenu is MODAL - the selection cannot move between the click and
+    // the frame that consumes it, because nothing else is pumping input. Capturing
+    // a Selection would mean duplicating the brush renderable resolution (which
+    // depends on g_sel.pos to disambiguate a renderable index from a collision-volume
+    // index) for no behavioural gain.
+    bool actionApplyTextureToSel = false;  // apply activeTexturePath to selected entity
 
     // WorldGraph Explorer
     bool showWorldGraph = false;
@@ -171,8 +171,6 @@ struct EditorPanelState {
 
     // LevelList / Campaign panel
     bool showLevelList = false;
-    std::string actionLevelListOpen;        // world folder name to open
-    std::string actionLevelListLink;        // create portal in current world -> target world
     std::string portalTargetWorld;          // default target for newly placed portals
 
     // Portal deletion action. Portal *editing* is the Entity Properties panel's

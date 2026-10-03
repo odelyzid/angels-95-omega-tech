@@ -212,6 +212,9 @@ static void test_event_coverage() {
         {Ev::AnimUndo, "AnimUndo"}, {Ev::AnimRedo, "AnimRedo"},
         {Ev::AnimSelectAll, "AnimSelectAll"},
         {Ev::AnimClearSelection, "AnimClearSelection"},
+        {Ev::BeginPlacement, "BeginPlacement"},
+        {Ev::ApplyTextureToModel, "ApplyTextureToModel"},
+        {Ev::RefreshModelBrowser, "RefreshModelBrowser"},
     };
     // AnimSave and AnimRefresh are deliberately NOT events - they are intra-frame
     // chaining signals, so asserting their absence keeps someone from "fixing" the
@@ -330,6 +333,50 @@ static void test_anim_intent_carries_its_clip() {
     check(!none.hasClip(), "a default AnimIntent has no clip, so clip-scoped ops skip");
 }
 
+// A PlacementRequest carries the resolved pickup NAME, not the button index the
+// panel used. The handler resolved LegacyPickupType(idx) at drain time, so a panel
+// rebuild between the click and the frame placed a different pickup.
+static void test_placement_carries_a_name_not_an_index() {
+    PlacementRequest p;
+    p.kind = PlacementRequest::Kind::Pickup;
+    p.key  = "pistol_01";
+    Event e = Event::make(Ev::BeginPlacement, p);
+
+    check(e.placement().kind == PlacementRequest::Kind::Pickup, "placement kind survives");
+    check(e.placement().key == "pistol_01", "placement carries the DEF NAME, not an index");
+    check(PlacementRequest{}.key.empty(),
+          "a default PlacementRequest has no name, so it places nothing");
+
+    PlacementRequest node;
+    node.kind = PlacementRequest::Kind::Node;
+    check(node.kind != PlacementRequest::Kind::Pickup,
+          "Node and Pickup are distinct kinds, not one enum value reused");
+}
+
+// Six action* fields used to carry a heightmap request, and four of them (image,
+// texture, scale, size) were read at drain time - so a panel edit between the
+// click and the frame generated the heightmap from stale values.
+static void test_heightmap_desc_is_one_payload() {
+    HeightmapDesc h;
+    h.imagePath   = "GameData/Worlds/X/height.png";
+    h.texturePath = "GameData/Worlds/X/oztex/tex/01_rock_32.png";
+    h.x = 1.0f; h.y = 2.0f; h.z = 3.0f;
+    h.scale = 0.5f;
+    h.sizeX = 128; h.sizeY = 64; h.sizeZ = 128;
+    Event e = Event::make(Ev::GenerateHeightmap, h);
+
+    check(e.heightmap().imagePath == h.imagePath, "heightmap carries the image path");
+    check(e.heightmap().texturePath == h.texturePath, "heightmap carries the texture path");
+    check(e.heightmap().scale == 0.5f, "heightmap carries the scale");
+    check(e.heightmap().sizeX == 128 && e.heightmap().sizeZ == 128,
+          "heightmap carries all three dimensions");
+    check(e.heightmap().x == 1.0f && e.heightmap().z == 3.0f,
+          "heightmap carries the position");
+
+    check(Event::make(Ev::GenerateHeightmap, HeightmapDesc{}).heightmap().imagePath.empty(),
+          "a default HeightmapDesc has no image, so the handler skips it");
+}
+
 int main() {
     printf("EditorEventBus tests:\n");
     test_typed_payloads();
@@ -337,6 +384,8 @@ int main() {
     test_surface_edit_carries_its_mask();
     test_csg_intent_distinguishes_place_from_commit();
     test_anim_intent_carries_its_clip();
+    test_placement_carries_a_name_not_an_index();
+    test_heightmap_desc_is_one_payload();
     test_wrong_shape_is_inert();
     test_target_is_captured_not_looked_up();
     test_fifo_drain();

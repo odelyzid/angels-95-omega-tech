@@ -2561,32 +2561,14 @@ int main(int argc, char **argv){
             LoadWorldDocument(g_pendingOpenPath);
             g_pendingOpenPath.clear();
         }
-        if (g_editorPanels.actionStopSoundPreview) {
-            StopSoundPreview();
-            g_editorPanels.actionStopSoundPreview = false;
-        }
-        if (!g_editorPanels.actionPreviewSoundPath.empty()) {
-            StopSoundPreview();
-            g_previewSound = LoadSound(g_editorPanels.actionPreviewSoundPath.c_str());
-            g_previewSoundLoaded = g_previewSound.frameCount > 0;
-            if (g_previewSoundLoaded) {
-                SetSoundVolume(g_previewSound, g_editorPanels.actionSoundVolume / 100.0f);
-                PlaySound(g_previewSound);
-            }
-            g_editorPanels.actionPreviewSoundPath.clear();
-        }
         // Live volume + optional loop for the sound preview (Sound has no loop
-        // flag, so looping is a replay poll).
+        // flag, so looping is a replay poll). This is LIVE STATE, not a message:
+        // the PlaySound/StopSoundPreview EVENTS carry the path, but volume and
+        // loop are re-applied every frame so dragging the slider is immediate.
         if (g_previewSoundLoaded) {
-            SetSoundVolume(g_previewSound, g_editorPanels.actionSoundVolume / 100.0f);
-            if (g_editorPanels.actionSoundLoop && !IsSoundPlaying(g_previewSound))
+            SetSoundVolume(g_previewSound, g_editorPanels.previewSoundVolume / 100.0f);
+            if (g_editorPanels.previewSoundLoop && !IsSoundPlaying(g_previewSound))
                 PlaySound(g_previewSound);
-        }
-        if (g_editorPanels.actionTextureTarget > 0 && !g_editorPanels.actionTexturePath.empty()) {
-            HistoryPush();
-            ApplyTextureToModel(g_editorPanels.actionTextureTarget, g_editorPanels.actionTexturePath.c_str());
-            g_editorPanels.actionTextureTarget = -1;
-            g_editorPanels.actionTexturePath.clear();
         }
 
         // Viewport bounds check â€” all raycasts only fire when mouse is inside 3D viewport
@@ -4096,6 +4078,117 @@ if (g_editorPanels.showCollisionBounds) {
                     // converted the wrong mesh.
                     evConvertMeshIndex = ev.sel().index;
                     break;
+                case ed::Ev::PlaySound: {
+                    // The PATH travelled with the event; volume/loop stay live
+                    // fields because they are re-applied every frame while the
+                    // preview plays (see the poll above).
+                    const std::string& path = ev.str();
+                    if (path.empty()) break;
+                    StopSoundPreview();
+                    g_previewSound = LoadSound(path.c_str());
+                    g_previewSoundLoaded = g_previewSound.frameCount > 0;
+                    if (g_previewSoundLoaded) {
+                        SetSoundVolume(g_previewSound,
+                                       g_editorPanels.previewSoundVolume / 100.0f);
+                        PlaySound(g_previewSound);
+                    }
+                    break;
+                }
+                case ed::Ev::StopSoundPreview:
+                    StopSoundPreview();
+                    break;
+                case ed::Ev::ApplyTextureToModel: {
+                    const ed::TextureApply& ta = ev.textureApply();
+                    if (ta.target <= 0 || ta.path.empty()) break;
+                    HistoryPush();
+                    ApplyTextureToModel(ta.target, ta.path.c_str());
+                    break;
+                }
+                case ed::Ev::RefreshModelBrowser:
+                    ScanModelBrowserFiles();
+                    g_lastPreviewSel = -1;   // force a fresh preview after the rebuild
+                    g_previewNeedsUpdate = false;
+                    break;
+                case ed::Ev::GenerateHeightmap: {
+                    const ed::HeightmapDesc& hd = ev.heightmap();
+                    if (hd.imagePath.empty()) break;
+                    HistoryPush();
+                    std::vector<float> args = {
+                        hd.x, hd.y, hd.z, hd.scale,
+                        hd.sizeX, hd.sizeY, hd.sizeZ
+                    };
+                    OzoneLoader::Instance().BuildHeightmap(hd.imagePath,
+                                                           hd.texturePath, args);
+                    EditorLog("Heightmap generated from %s", hd.imagePath.c_str());
+                    break;
+                }
+                case ed::Ev::BeginPlacement: {
+                    const ed::PlacementRequest& pr = ev.placement();
+                    // Every placement mode clears the selection first: a ghost and
+                    // a selection must not coexist, or the drag gate cannot tell
+                    // which the user means to move.
+                    g_sel = { SelType::NONE, -1, "", {0,0,0} };
+                    g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
+                    switch (pr.kind) {
+                        case ed::PlacementRequest::Kind::Pickup:
+                            g_placeMode = PlaceMode::PICKUP;
+                            // The def NAME came from the panel, already resolved from
+                            // the legacy index or the registry. Resolving it here from
+                            // an index meant a panel rebuild between the click and the
+                            // frame placed a different pickup.
+                            OmegaTechEditor.ActivePickupName = pr.key;
+                            break;
+                        case ed::PlacementRequest::Kind::Node:
+                            g_placeMode = PlaceMode::NODE;
+                            OmegaTechEditor.ActiveNodeType =
+                                (EditorNodeType)atoi(pr.key.c_str());
+                            break;
+                        case ed::PlacementRequest::Kind::Model:
+                            g_placeMode = PlaceMode::MODEL;
+                            EMID = 0;   // 0 = user-selected obj
+                            break;
+                    }
+                    OmegaTechEditor.DrawModel = true;
+                    OmegaTechEditor.X = OTEditor.MainCamera.position.x;
+                    OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
+                    OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
+                    OmegaTechEditor.R = 1;
+                    break;
+                }
+                case ed::Ev::OpenWorld: {
+                    const std::string& worldName = ev.str();
+                    if (worldName.empty()) break;
+                    fs::path ozone = fs::path("GameData/Worlds") / worldName / "World.ozone";
+                    if (!fs::exists(ozone))
+                        ozone = fs::path("../GameData/Worlds") / worldName / "World.ozone";
+                    if (fs::exists(ozone)) {
+                        g_pendingOpenPath = ozone;
+                        EditorLog("LevelList: opening world '%s'", worldName.c_str());
+                    } else {
+                        EditorLog("LevelList: world '%s' not found", worldName.c_str());
+                    }
+                    break;
+                }
+                case ed::Ev::LinkWorld: {
+                    // Create a portal in front of the camera linking to the target.
+                    const std::string& target = ev.str();
+                    if (target.empty()) break;
+                    Vector3 pos = OTEditor.MainCamera.target;
+                    HistoryPush();
+                    ZonePortal portal;
+                    portal.bounds = {{pos.x - 2, pos.y - 2, pos.z - 2},
+                                     {pos.x + 2, pos.y + 2, pos.z + 2}};
+                    portal.targetWorld = target;
+                    portal.targetSpawn = {0, 20, 0};
+                    portal.bidirectional = true;
+                    ZoneManager::Instance().AddPortal(portal);
+                    g_editorPanels.portalTargetWorld = target;
+                    RefreshPortalList();
+                    RefreshLevelList();
+                    EditorLog("Created portal link to '%s' at camera target",
+                              target.c_str());
+                    break;
+                }
                 case ed::Ev::ReloadMesh: {
                     const ed::SelRef& t = ev.sel();
                     if (!t.valid() || t.kind != ed::SelKind::Mesh) break;
@@ -4806,76 +4899,7 @@ if (g_editorPanels.showCollisionBounds) {
         g_editorPanels.spawnPos[2] = OTEditor.MainCamera.target.z;
 
         // Handle action flags from Win32 dialogs
-        if (g_editorPanels.actionPickupType >= 0) {
-            g_placeMode = PlaceMode::PICKUP;
-            // A placement ghost and a selection must not coexist, or the drag
-            // gate can't tell which the user means to move.
-            g_sel = { SelType::NONE, -1, "", {0,0,0} };
-            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
-            // Look up pickup name from legacy index or registry
-            int idx = g_editorPanels.actionPickupType;
-            const char* legacy = LegacyPickupType(idx);
-            if (legacy) {
-                OmegaTechEditor.ActivePickupName = legacy;
-            } else {
-                std::vector<const EntityDef*> pickups;
-                LightningEntityRegistry::Instance().FindByType(EntityType::PICKUP, pickups);
-                if (idx >= 0 && idx < (int)pickups.size())
-                    OmegaTechEditor.ActivePickupName = pickups[idx]->name;
-            }
-            OmegaTechEditor.DrawModel = true;
-            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-            OmegaTechEditor.R = 1;
-            g_editorPanels.actionPickupType = -1;
-        }
-        if (g_editorPanels.actionNodeType >= 0) {
-            g_placeMode = PlaceMode::NODE;
-            g_sel = { SelType::NONE, -1, "", {0,0,0} };
-            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
-            OmegaTechEditor.ActiveNodeType = (EditorNodeType)g_editorPanels.actionNodeType;
-            OmegaTechEditor.DrawModel = true;
-            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-            OmegaTechEditor.R = 1;
-            g_editorPanels.actionNodeType = -1;
-        }
-        if (g_editorPanels.actionPlaceModel >= 0) {
-            g_placeMode = PlaceMode::MODEL;
-            g_sel = { SelType::NONE, -1, "", {0,0,0} };
-            g_hoverSel = { SelType::NONE, -1, "", {0,0,0} };
-            OmegaTechEditor.DrawModel = true;
-            OmegaTechEditor.X = OTEditor.MainCamera.position.x;
-            OmegaTechEditor.Y = OTEditor.MainCamera.position.y;
-            OmegaTechEditor.Z = OTEditor.MainCamera.position.z;
-            OmegaTechEditor.R = 1;
-            EMID = 0; // 0 = user-selected obj
-            g_editorPanels.actionPlaceModel = -1;
-        }
-        if (g_editorPanels.actionRefreshBrowser) {
-            ScanModelBrowserFiles();
-            g_lastPreviewSel = -1; // force a fresh preview after the list rebuilds
-            g_previewNeedsUpdate = false;
-            g_editorPanels.actionRefreshBrowser = false;
-        }
         // Heightmap generate handler
-        if (g_editorPanels.actionGenerateHeightmap) {
-            auto& img = g_editorPanels.actionHeightmapImage;
-            auto& tex = g_editorPanels.actionHeightmapTexture;
-            if (!img.empty()) {
-                HistoryPush();
-                std::vector<float> args = {
-                    g_editorPanels.actionHmPosX, g_editorPanels.actionHmPosY, g_editorPanels.actionHmPosZ,
-                    g_editorPanels.actionHmScale,
-                    g_editorPanels.actionHmSx, g_editorPanels.actionHmSy, g_editorPanels.actionHmSz
-                };
-                OzoneLoader::Instance().BuildHeightmap(img, tex, args);
-                EditorLog("Heightmap generated from %s", img.c_str());
-            }
-            g_editorPanels.actionGenerateHeightmap = false;
-        }
         // The legacy Light Properties apply handler is GONE. It became unreachable
         // in b88 when LightPropsProc - its only writer - was deleted with the window,
         // and it was already a strict subset of the properties panel's
@@ -4891,37 +4915,6 @@ if (g_editorPanels.showCollisionBounds) {
         // Portal *editing* remains the panel's PORTAL section (generic apply).
 
         // LevelList / Campaign actions
-        if (!g_editorPanels.actionLevelListOpen.empty()) {
-            std::string worldName = g_editorPanels.actionLevelListOpen;
-            g_editorPanels.actionLevelListOpen.clear();
-            fs::path ozone = fs::path("GameData/Worlds") / worldName / "World.ozone";
-            if (!fs::exists(ozone)) ozone = fs::path("../GameData/Worlds") / worldName / "World.ozone";
-            fs::path target = ozone;
-            if (fs::exists(target)) {
-                g_pendingOpenPath = target;
-                EditorLog("LevelList: opening world '%s'", worldName.c_str());
-            } else {
-                EditorLog("LevelList: world '%s' not found", worldName.c_str());
-            }
-        }
-        if (!g_editorPanels.actionLevelListLink.empty()) {
-            std::string target = g_editorPanels.actionLevelListLink;
-            g_editorPanels.actionLevelListLink.clear();
-            // Create a portal in front of the camera linking to the target world
-            Vector3 pos = OTEditor.MainCamera.target;
-            HistoryPush();
-            ZonePortal portal;
-            portal.bounds = {{pos.x - 2, pos.y - 2, pos.z - 2},
-                             {pos.x + 2, pos.y + 2, pos.z + 2}};
-            portal.targetWorld = target;
-            portal.targetSpawn = {0, 20, 0};
-            portal.bidirectional = true;
-            ZoneManager::Instance().AddPortal(portal);
-            g_editorPanels.portalTargetWorld = target;
-            RefreshPortalList();
-            RefreshLevelList();
-            EditorLog("Created portal link to '%s' at camera target", target.c_str());
-        }
 
         // Mode switching
         if (IsKeyPressed(KEY_ONE))   g_placeMode = PlaceMode::MODEL;

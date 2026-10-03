@@ -447,7 +447,10 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     case WM_HSCROLL: {
         if ((HWND)l == hVolTrack) {
             int vol = (int)SendMessage(hVolTrack, TBM_GETPOS, 0, 0);
-            g_editorPanels.actionSoundVolume = vol;
+            // Live slider state, not a message: the main loop re-applies the
+            // volume every frame while the preview plays. Renamed off the
+            // action* prefix so it does not read as a request.
+            g_editorPanels.previewSoundVolume = vol;
         }
         break;
     }
@@ -458,15 +461,20 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         } else if (id == ID_SOUND_REFRESH) {
             ScanSoundBrowserFiles();
         } else if (id == ID_SOUND_STOP) {
-            g_editorPanels.actionStopSoundPreview = true;
+            ed::EventBus::instance().post(ed::Ev::StopSoundPreview);
         } else if (id == ID_SOUND_PLAY || (id == ID_SOUND_LIST && HIWORD(w) == LBN_DBLCLK)) {
             int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
             const auto& files = (g_soundCategory == 0) ? g_sfxFiles :
                                 (g_soundCategory == 1) ? g_musicFiles : g_ambFiles;
             if (sel >= 0 && sel < (int)files.size()) {
-                g_editorPanels.actionPreviewSoundPath = files[sel].path;
-                g_editorPanels.actionSoundCategory = g_soundCategory;
-                g_editorPanels.actionSoundLoop = (int)SendMessage(hLoopBtn, BM_GETCHECK, 0, 0);
+                // Playback settings stay FIELDS, not part of the payload: they
+                // are live slider state the main loop re-reads every frame, not part
+                // of the request. The PATH travels, because a category switch
+                // between the click and the frame would otherwise preview from
+                // the wrong list.
+                g_editorPanels.previewSoundCategory = g_soundCategory;
+                g_editorPanels.previewSoundLoop = (int)SendMessage(hLoopBtn, BM_GETCHECK, 0, 0);
+                ed::EventBus::instance().post(ed::Ev::PlaySound, files[sel].path);
             }
         } else if (id == ID_SOUND_CAT_SFX || id == ID_SOUND_CAT_MUS || id == ID_SOUND_CAT_AMB) {
             g_soundCategory = (id == ID_SOUND_CAT_SFX) ? 0 : (id == ID_SOUND_CAT_MUS) ? 1 : 2;
@@ -478,7 +486,7 @@ static LRESULT CALLBACK SoundMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         break;
     }
     case WM_CLOSE:
-        g_editorPanels.actionStopSoundPreview = true;
+        ed::EventBus::instance().post(ed::Ev::StopSoundPreview);
         ShowSoundManager(false);
         break;
     case WM_DESTROY:
@@ -1430,8 +1438,10 @@ static LRESULT CALLBACK TextureMgrProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) 
             if (sel >= 0 && sel < (int)g_textureFiles.size()) {
                 int target = (int)SendMessage(hTarget, CB_GETCURSEL, 0, 0);
                 if (target >= 0) {
-                    g_editorPanels.actionTexturePath = g_textureFiles[sel].path;
-                    g_editorPanels.actionTextureTarget = target + 1;
+                    ed::TextureApply ta;
+                    ta.target = target + 1;
+                    ta.path   = g_textureFiles[sel].path;
+                    ed::EventBus::instance().post(ed::Ev::ApplyTextureToModel, ta);
                 }
             }
         }
@@ -2531,7 +2541,10 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if (id == ID_MDL_CLOSE) {
             ShowModelBrowser(false);
         } else if (id == ID_MDL_REFRESH) {
-            g_editorPanels.actionRefreshBrowser = true;
+            // A DIRTY FLAG, not a user action: the preview must re-read the
+            // list. Renamed off the action* prefix so it does not read as a
+            // message - see actionAnimRefresh for the same distinction.
+            g_editorPanels.refreshModelBrowser = true;
         } else if (id == ID_MDL_SEARCH && HIWORD(w) == EN_CHANGE) {
             // Rebuild the tree from the current search text. modelEntries is
             // already populated, so this does not touch the filesystem.
@@ -2541,7 +2554,11 @@ static LRESULT CALLBACK ModelBrwProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             int sel = SelectedModelFromTree(hList);
             if (sel >= 0) {
                 g_editorPanels.selectedModel = sel;
-                g_editorPanels.actionPlaceModel = sel;
+                ed::PlacementRequest pr;
+                pr.kind = ed::PlacementRequest::Kind::Model;
+                if (sel < (int)g_editorPanels.modelEntries.size())
+                    pr.key = g_editorPanels.modelEntries[sel].path;
+                ed::EventBus::instance().post(ed::Ev::BeginPlacement, pr);
             }
         } else if (id == ID_MDL_IMPORT) {
             // Import an external model (and its companion texture) by packing it
@@ -2902,7 +2919,17 @@ static LRESULT CALLBACK PickupPanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         else if (id >= ID_PICKUP_BASE) {
             int type = id - ID_PICKUP_BASE;
             g_lastPickupType = type;
-            g_editorPanels.actionPickupType = type;
+            // Resolve the def NAME here, not in the main loop. The button IDs are
+            // minted from this same FindByType order (see WM_CREATE), so the lookup
+            // is exact. The old handler resolved the name at DRAIN time, so a panel
+            // rebuild between the click and the frame placed a different pickup.
+            std::vector<const EntityDef*> pickupDefs;
+            LightningEntityRegistry::Instance().FindByType(EntityType::PICKUP, pickupDefs);
+            if (type < 0 || type >= (int)pickupDefs.size()) break;
+            ed::PlacementRequest pr;
+            pr.kind = ed::PlacementRequest::Kind::Pickup;
+            pr.key  = pickupDefs[type]->name;
+            ed::EventBus::instance().post(ed::Ev::BeginPlacement, pr);
         }
         break;
     }
@@ -2956,7 +2983,12 @@ static LRESULT CALLBACK NodePanelProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             else if (id == ID_NODE_LIGHT) type = 2;
             else if (id == ID_NODE_ZONE) type = 3;
             else if (id == ID_NODE_PORTAL) type = 4;
-            if (type >= 0) g_editorPanels.actionNodeType = type;
+            if (type >= 0) {
+                ed::PlacementRequest pr;
+                pr.kind = ed::PlacementRequest::Kind::Node;
+                pr.key  = std::to_string(type);
+                ed::EventBus::instance().post(ed::Ev::BeginPlacement, pr);
+            }
         }
         break;
     }
@@ -3079,17 +3111,17 @@ static LRESULT CALLBACK HmEditorProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
             if (hSY) { GetWindowTextW(hSY, buf, 256); sy = wcstod(buf, nullptr); }
             if (hSZ) { GetWindowTextW(hSZ, buf, 256); sz = wcstod(buf, nullptr); }
             if (hSC) { GetWindowTextW(hSC, buf, 256); sc = wcstod(buf, nullptr); }
-            // Store to state that main loop reads to call BuildHeightmap
-            g_editorPanels.actionHeightmapImage = imgPathA;
-            g_editorPanels.actionHeightmapTexture = texPathA;
-            g_editorPanels.actionHmPosX = (float)px;
-            g_editorPanels.actionHmPosY = (float)py;
-            g_editorPanels.actionHmPosZ = (float)pz;
-            g_editorPanels.actionHmSx = (float)sx;
-            g_editorPanels.actionHmSy = (float)sy;
-            g_editorPanels.actionHmSz = (float)sz;
-            g_editorPanels.actionHmScale = (float)sc;
-            g_editorPanels.actionGenerateHeightmap = true;
+            // One payload. Six separate action* fields used to carry this and
+            // four of them (image, texture, scale, size) were read at DRAIN time,
+            // so a panel edit between the click and the frame generated the
+            // heightmap from values the panel had already moved past.
+            ed::HeightmapDesc hd;
+            hd.imagePath   = imgPathA;
+            hd.texturePath = texPathA;
+            hd.x = (float)px; hd.y = (float)py; hd.z = (float)pz;
+            hd.scale = (float)sc;
+            hd.sizeX = (float)sx; hd.sizeY = (float)sy; hd.sizeZ = (float)sz;
+            ed::EventBus::instance().post(ed::Ev::GenerateHeightmap, hd);
         }
         break;
     }
@@ -3625,7 +3657,7 @@ static LRESULT CALLBACK LevelListProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if (nm->idFrom == ID_LL_LIST && nm->code == NM_DBLCLK) {
             int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (sel >= 0 && sel < (int)g_levelList.size())
-                g_editorPanels.actionLevelListOpen = g_levelList[sel].world;
+                ed::EventBus::instance().post(ed::Ev::OpenWorld, g_levelList[sel].world);
         }
         break;
     }
@@ -3640,9 +3672,9 @@ static LRESULT CALLBACK LevelListProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         }
         if (sel < 0 || sel >= (int)g_levelList.size()) break;
         if (id == ID_LL_OPEN)
-            g_editorPanels.actionLevelListOpen = g_levelList[sel].world;
+            ed::EventBus::instance().post(ed::Ev::OpenWorld, g_levelList[sel].world);
         if (id == ID_LL_LINK && !g_levelList[sel].isCurrent)
-            g_editorPanels.actionLevelListLink = g_levelList[sel].world;
+            ed::EventBus::instance().post(ed::Ev::LinkWorld, g_levelList[sel].world);
         break;
     }
     case WM_CLOSE: ShowLevelList(false); break;
