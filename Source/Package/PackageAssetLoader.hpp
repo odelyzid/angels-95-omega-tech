@@ -1,4 +1,13 @@
 #pragma once
+// This include is the reason AngelServ has a build-time raylib dependency, and it is NOT
+// trivially removable: Source/Script/LightningEntityRegistry.cpp includes this header for
+// two pure methods (ListAllFiles, Find), but the *WithFallback helpers below return raylib
+// types (Texture2D, Model, Music, Sound, Image, Shader), so hiding raylib.h behind
+// OMEGA_TEST_ENV would break every test that compiles with it. Making the server genuinely
+// raylib-free means splitting the pure resolver out of this header, not guarding it.
+//
+// Until then the dependency is declared rather than accidental: SERVER_FLAGS carries
+// $(RAYLIB_INC), which the Linux arm of the Makefile now resolves.
 #include "raylib.h"
 #include "OzPackage.hpp"
 #include "../Log.hpp"

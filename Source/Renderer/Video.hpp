@@ -39,6 +39,7 @@ void ray_video_destroy(ray_video_t *);
 #include <stdint.h>
 #ifndef _WIN32
 #include <pthread.h>
+#include <time.h>   // clock_gettime / CLOCK_MONOTONIC for performance_counter_*
 #endif
 
 typedef void* thread_ptr_t;
@@ -138,6 +139,19 @@ inline void performance_counter_init(performance_counter_t * c) {
   QueryPerformanceCounter(&LL);
   c->start_time = LL.QuadPart;
   c->end_time = c->start_time;
+#else
+  // This branch used to be absent, which left ticktime_* at 0 and start_time at 0, so
+  // performance_counter_next_seconds() returned 0 forever and ctx->thread_worker_time
+  // (surfaced in ray_video_update) was permanently 0 on Linux. It compiled, linked and
+  // ran; it just reported a lie. CLOCK_MONOTONIC in nanoseconds gives all three scalers
+  // directly, and unlike gettimeofday it cannot jump when the wall clock is adjusted.
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  c->start_time = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+  c->end_time = c->start_time;
+  c->ticktime_seconds     = 1.0e-9;
+  c->ticktime_miliseconds = 1.0e-6;
+  c->ticktime_nanoseconds = 1.0;
 #endif  
 }
 
@@ -147,6 +161,10 @@ inline void performance_counter_next(performance_counter_t * c) {
   LARGE_INTEGER LL;
   QueryPerformanceCounter(&LL);
   c->end_time = LL.QuadPart;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  c->end_time = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 #endif  
 }
 

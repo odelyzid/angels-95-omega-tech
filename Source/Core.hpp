@@ -876,22 +876,39 @@ void PlayHomeScreen()
         SetServerJoinFlag = true;
         // Launch dedicated server as a subprocess
         int serverPort = port;
-        std::string cmd = "start /B \"\" System\\AngelServ.exe --port " +
-                          std::to_string(serverPort) + " --dir GameData";
+        std::string args = "--port " + std::to_string(serverPort) + " --dir GameData";
         // Announce the hosted server to the configured masters.
         for (const auto& m : master::LoadMasterUrls("System/Angels95.ini")) {
             if (m.rfind("http://", 0) == 0)
-                cmd += " --master-http \"" + m + "\"";
+                args += " --master-http \"" + m + "\"";
             else if (m.rfind("https://", 0) == 0)
                 OZ_WARN("Host: ignoring https master '%s' (plain http only)", m.c_str());
             else
-                cmd += " --master " + m;
+                args += " --master " + m;
         }
+#ifdef _WIN32
+        std::string cmd = "start /B \"\" System\\AngelServ.exe " + args;
+#else
+        // `start` is a cmd.exe builtin, so the old string reached /bin/sh as the command
+        // `start /B "" System\AngelServ.exe ...`, which fails with "start: not found" and
+        // reported a failed launch on every POSIX host. Detach explicitly instead: nohup
+        // plus & backgrounds it with the child's stdout redirected, so the server does not
+        // inherit our terminal and does not die with it.
+        std::string cmd = "nohup ./AngelServ " + args + " >/dev/null 2>&1 &";
+#endif
         int result = std::system(cmd.c_str());
         if (result == 0) {
+#ifdef _WIN32
             OZ_INFO("Launched AngelServ.exe on port %d", serverPort);
+#else
+            OZ_INFO("Launched AngelServ on port %d", serverPort);
+#endif
         } else {
+#ifdef _WIN32
             OZ_ERROR("Failed to launch AngelServ.exe");
+#else
+            OZ_ERROR("Failed to launch AngelServ");
+#endif
         }
     }
 

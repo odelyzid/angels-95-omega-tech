@@ -2,10 +2,25 @@
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
   PIC := -fPIC
-  LDFLAGS := -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+  # Where raylib.h lives. Previously RAYLIB_INC was only ever set in the Windows arm, so
+  # on Linux every raylib-dependent target found raylib.h solely because /usr/local/include
+  # is a gcc default search path. That made a non-default prefix - which build.sh's own
+  # CMake line and every distro packaging guide produce - fail with a bare
+  # "raylib.h: No such file". pkg-config is the portable answer; the two probes are
+  # ordered most-specific first and both may be empty.
+  RAYLIB_INC := $(shell pkg-config --cflags raylib 2>/dev/null)
+  ifeq ($(strip $(RAYLIB_INC)),)
+    RAYLIB_INC := $(shell test -f /usr/local/include/raylib.h && echo -I/usr/local/include)
+  endif
+  ifeq ($(strip $(RAYLIB_INC)),)
+    RAYLIB_INC := $(shell test -f /usr/include/raylib.h && echo -I/usr/include)
+  endif
+  # -pthread, not -lpthread: it also defines _REENTRANT, which libstdc++'s thread
+  # headers check. Video.hpp's title-screen fetch worker calls pthread_create directly.
+  LDFLAGS := -lraylib -lGL -lm -pthread -ldl -lrt -lX11
   RPATH := -Wl,-rpath=.
   EXE :=
-  SERVER_LIBS := -lm -lpthread
+  SERVER_LIBS := -lm -pthread
 else
   # Windows (MINGW/MSYS/CYGWIN)
   PIC :=
@@ -72,7 +87,12 @@ CFLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC)
 COMP := $(CCACHE_PREFIX) g++
 CC := $(CCACHE_PREFIX) gcc
 SERVER_CXX := $(CCACHE_PREFIX) g++
-SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(RAYLIB_INC)
+# $(PIC) was missing here while miniz.o below is built WITH it, so AngelServ linked a mix
+# of PIC and non-PIC objects. Harmless on the default x86-64 toolchain; a toolchain that
+# defaults to -no-pie with strict relocation checks rejects it. Also carries $(RAYLIB_INC)
+# because LightningEntityRegistry.cpp includes PackageAssetLoader.hpp, which pulls
+# raylib.h - see the note there on why that include has not been removed yet.
+SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC)
 
 BUILD_DIR := build
 # Every object Angels95 links. This list is the SINGLE source of truth: OTENGINE
