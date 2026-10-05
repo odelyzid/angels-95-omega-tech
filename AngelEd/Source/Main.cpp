@@ -509,6 +509,14 @@ int main(int argc, char **argv){
                             char lbl[96];
                             snprintf(lbl, sizeof(lbl), "Surface Properties (%d Selected)", nSurf);
                             AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_PROPS, lbl);
+                            // The brush-wide twin. Apply writes surface.def (the brush
+                            // default) instead of the faces in the mask, which is the only
+                            // way `flags=8` on a WHOLE brush - the form every shipped
+                            // painted backdrop uses - is reachable from the editor at all.
+                            // Two entries rather than one toggle, so the scope is stated
+                            // at the click and cannot be misread by the handler.
+                            AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_PROPS_BRUSH,
+                                        "Surface Properties (Brush-Wide)");
                             AppendMenuA(hMenu, MF_STRING, IDM_SURFACE_RESET, "Reset Surface");
                         }
                         AppendMenuA(hMenu, MF_STRING, IDM_PROPERTIES, "Properties");
@@ -558,11 +566,16 @@ int main(int argc, char **argv){
                         else if (cmd == IDM_DUPLICATE_ENTITY) DuplicateSelectedEntity();
                         else if (cmd == IDM_APPLY_TEXTURE) g_editorPanels.actionApplyTextureToSel = true;
                         else if (cmd == IDM_APPEND_AUTOCONVEX) { AppendAutoConvexForSelection(); MarkWorldGraphDirty(); }
-                        else if (cmd == IDM_SURFACE_PROPS) {
+                        else if (cmd == IDM_SURFACE_PROPS || cmd == IDM_SURFACE_PROPS_BRUSH) {
                             // Every picked face must belong to ONE renderable:
                             // the dialog edits a single BrushSurface, and mixing
                             // two brushes' faces into one mask would write face 3
                             // of brush A onto face 3 of brush B.
+                            //
+                            // Both scopes share this resolution because the mask is
+                            // needed either way - it says which faces the dialog
+                            // SHOWS - and brush-wide is deliberately NOT expressed
+                            // as an empty mask (see ed::SurfaceEdit::brushWide).
                             int rIdx = -1; uint32_t mask = 0; bool mixed = false;
                             for (const auto& sp : g_selectedSurfaces) {
                                 if (rIdx < 0) rIdx = sp.renderable;
@@ -575,7 +588,8 @@ int main(int argc, char **argv){
                                     "Right-click without Shift to start a new selection.",
                                     "Surface Properties", MB_OK | MB_ICONWARNING);
                             } else {
-                                ShowSurfaceProps(true, rIdx, mask);
+                                ShowSurfacePropsScoped(true, rIdx, mask,
+                                                        cmd == IDM_SURFACE_PROPS_BRUSH);
                             }
                         }
                         else if (cmd == IDM_SURFACE_RESET) {

@@ -1,6 +1,7 @@
 // Surface flag registry + per-face surface properties — standalone, no raylib.
 #include "../Source/World/SurfaceFlags.hpp"
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 using namespace oz::surface;
@@ -32,17 +33,28 @@ static void test_legacy_bits_stable() {
     check((newBits & (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY)) == 0,
           "no new surface flag overlaps the legacy bits");
     // Every bit unique (a duplicate would silently make one checkbox untoggleable).
+    // SURF_SPECIAL_LIT and SURF_FAKEBACKDROP were missing from this array even
+    // though BOTH are reachable from the editor's Flags tab - a collision on an
+    // untested bit is exactly the bug this test exists to catch, so the list must
+    // cover every flag the dialog can set.
     const uint32_t all[] = {SURF_INVISIBLE, SURF_MASKED, SURF_TRANSLUCENT, SURF_ALPHABLEND,
         SURF_MODULATED, SURF_TWO_SIDED, SURF_UNLIT, SURF_FAKE_LIT, SURF_GLOW, SURF_PORTAL,
         SURF_MIRROR, SURF_ENVIRONMENT, SURF_PAN_U, SURF_PAN_V, SURF_SMALL_WAVY,
         SURF_BRIGHT_CORNERS, SURF_DIRTY_SHADOWS, SURF_SHADOW_HI, SURF_SHADOW_LO,
         SURF_NO_SMOOTH, SURF_NO_FOG, SURF_NO_BOUNDS_REJECT, SURF_NO_BSP_CUTS,
-        SURF_ZONE_HACK, SURF_INVISIBLE_OCCLUDER, SURF_FORCE_VIEW_ZONE};
+        SURF_ZONE_HACK, SURF_INVISIBLE_OCCLUDER, SURF_FORCE_VIEW_ZONE,
+        SURF_SPECIAL_LIT, SURF_FAKEBACKDROP};
     bool unique = true;
     for (size_t i = 0; i < sizeof(all)/sizeof(all[0]); i++)
         for (size_t j = i + 1; j < sizeof(all)/sizeof(all[0]); j++)
             if (all[i] == all[j]) unique = false;
-    check(unique, "all 26 surface flag bits are distinct");
+    check(unique, "all 28 surface flag bits are distinct");
+
+    // No bit is a multi-bit alias: every flag is a single bit, because Surface.fs
+    // tests them with `uSurfaceFlags & bit` and the exporter writes one integer.
+    bool singleBit = true;
+    for (uint32_t b : all) if (b == 0 || (b & (b - 1)) != 0) singleBit = false;
+    check(singleBit, "every surface flag is exactly one bit wide");
 }
 
 // ---------------------------------------------------------------------------
@@ -251,10 +263,265 @@ static void test_legacy_flag_derivation() {
           "...and NeedsFlagsKwarg still emits, so the round trip survives");
 }
 
+// ---------------------------------------------------------------------------
+// Legacy renderable mirror
+// ---------------------------------------------------------------------------
+// OzoneRenderable::texScaleU/V, texOffsetU/V and texPath are VIEWS onto
+// surface.def. ExportToOzone emits the brush-wide UV fields from the mirrors and
+// suppresses `surfTex=` whenever the mirror's texPath is non-empty - so a stale
+// mirror is a silently discarded edit. SetRenderableFace used to re-derive
+// surfaceFlags alone, and that was latent only because nothing could write
+// surface.def; the editor's brush-wide scope is what made it live.
+static void test_derive_legacy_surface_mirror() {
+    SurfaceProps def;
+    def.flags      = SURF_FAKEBACKDROP | SURF_GLOW;
+    def.uvScaleU   = 2.0f;
+    def.uvScaleV   = 3.0f;
+    def.uvOffsetU  = 0.25f;
+    def.uvOffsetV  = 0.5f;
+    def.texPath    = "oztex/wall.png";
+
+    const LegacySurfaceMirror m = DeriveLegacySurfaceMirror(def);
+    check(m.surfaceFlags == (int)SURF_FAKEBACKDROP,
+          "mirror carries ONLY the legacy pipeline bits, not GLOW");
+    check(m.texScaleU == 2.0f && m.texScaleV == 3.0f,
+          "mirror carries brush-wide U/V scale - the field the exporter reads");
+    check(m.texOffsetU == 0.25f && m.texOffsetV == 0.5f,
+          "mirror carries brush-wide U/V offset");
+    check(m.texPath == "oztex/wall.png",
+          "mirror carries the brush-wide texture path");
+
+    // Clearing the surface texture must fall back to the tileset rather than
+    // latching the previous path - otherwise you cannot undo a texture assign.
+    def.texPath.clear();
+    check(DeriveLegacySurfaceMirror(def).texPath.empty(),
+          "clearing surface.texPath clears the mirror (falls back to the tileset)");
+
+    // Pristine defaults must not invent values.
+    const LegacySurfaceMirror pristine = DeriveLegacySurfaceMirror(SurfaceProps{});
+    check(pristine.surfaceFlags == 0 && !NeedsFlagsKwarg(pristine.surfaceFlags),
+          "a pristine surface derives a zero mirror and needs no flags= kwarg");
+    check(pristine.texScaleU == 1.0f && pristine.texScaleV == 1.0f &&
+          pristine.texOffsetU == 0.0f && pristine.texOffsetV == 0.0f &&
+          pristine.texPath.empty(),
+          "a pristine surface derives identity UVs and no texture");
+}
+
+// ---------------------------------------------------------------------------
+// Flag/value conjunctions
+// ---------------------------------------------------------------------------
+// Four flags are inert without a companion value. Surface.fs gates on the flag
+// (so a zero speed is a hard no-op rather than a per-frame divide), which means a
+// ticked checkbox does nothing until the value is also set. These pin the rule so
+// the editor's warning and the shader cannot drift apart.
+static void test_inert_flag_predicates() {
+    SurfaceProps p;
+
+    p.Set(SURF_MASKED, true);
+    check(!MaskedIsActive(p), "Masked with no cutoff is inert");
+    p.alphaCutoff = 0.5f;
+    check(MaskedIsActive(p), "Masked with a cutoff is active");
+
+    p = SurfaceProps{};
+    p.Set(SURF_GLOW, true);
+    check(!GlowIsActive(p), "Glow with no colour is inert");
+    p.glowB = 0.2f;   // only the blue channel set is enough
+    check(GlowIsActive(p), "Glow with any non-zero channel is active");
+
+    p = SurfaceProps{};
+    p.Set(SURF_PAN_U, true);
+    check(!PanIsActive(p), "U-Pan at zero speed is inert");
+    p.panU = -0.05f;
+    check(PanIsActive(p), "U-Pan at non-zero speed is active (negative is legal)");
+
+    p = SurfaceProps{};
+    p.Set(SURF_PAN_V, true);
+    p.panV = 0.05f;
+    check(PanIsActive(p), "V-Pan at non-zero speed is active");
+    p.panU = 0.05f;
+    check(PanIsActive(p), "PanIsActive covers either axis independently");
+
+    // The warning must fire for each inert combination and stay quiet once fixed.
+    const char* which = nullptr;
+    p = SurfaceProps{};
+    p.Set(SURF_MASKED, true);
+    check(SurfaceHasInertFlags(p, &which) && which != nullptr,
+          "SurfaceHasInertFlags reports a masked face with no cutoff");
+    p.alphaCutoff = 0.5f;
+    check(!SurfaceHasInertFlags(p, &which), "...and is quiet once the cutoff is set");
+
+    p = SurfaceProps{};
+    p.Set(SURF_GLOW, true);
+    check(SurfaceHasInertFlags(p, &which), "reports a glow face with no colour");
+    p.glowG = 1.0f;
+    check(!SurfaceHasInertFlags(p, &which), "...and is quiet once a colour is set");
+
+    // A face with no flags at all is never inert, whatever its values.
+    p = SurfaceProps{};
+    p.panU = 0.0f;
+    check(!SurfaceHasInertFlags(p, &which),
+          "a face with no pan flag is not inert just because its speed is zero");
+}
+
+// Seeding must make every flagged combination actually do something.
+static void test_seed_inert_values() {
+    SurfaceProps p;
+    p.Set(SURF_MASKED, true);
+    p.Set(SURF_GLOW, true);
+    p.Set(SURF_PAN_U, true);
+    p.Set(SURF_PAN_V, true);
+    check(SurfaceHasInertFlags(p), "four flagged-but-inert companions to seed");
+
+    check(SeedInertSurfaceValues(p) == 4, "seeds all four");
+    check(MaskedIsActive(p) && GlowIsActive(p) && PanIsActive(p),
+          "every previously inert flag is now active");
+    check(p.alphaCutoff == 0.5f, "seeded cutoff is the conventional binary cut");
+    check(p.glowR == 1.0f && p.glowG == 1.0f && p.glowB == 1.0f, "seeded glow is white");
+
+    // Idempotent: a second pass must not overwrite authored values or report work.
+    p.panU = 0.42f;
+    check(SeedInertSurfaceValues(p) == 0, "a second seed pass finds nothing to do");
+    check(p.panU == 0.42f, "an authored speed survives a later seed pass");
+
+    // Unflagged values are never touched.
+    SurfaceProps q;
+    q.panU = 0.0f; q.alphaCutoff = 0.0f;
+    check(SeedInertSurfaceValues(q) == 0, "an unflagged face is left alone");
+    check(q.panU == 0.0f && q.alphaCutoff == 0.0f,
+          "an unflagged face's zeros stay zero");
+}
+
+// ---------------------------------------------------------------------------
+// Shader / header bit parity
+// ---------------------------------------------------------------------------
+// GameData/Shaders/Surface.fs duplicates the flag VALUES as `#define SF_*`, and
+// AGENTS.md is explicit that renumbering a bit in the header means editing the
+// shader too "or the flag silently does nothing". Nothing enforced that until now,
+// so a renumber would have compiled cleanly, passed every other test here, and
+// shipped a flag that did nothing.
+//
+// This reads the shader and compares each #define against the header constant.
+// It is a file read rather than a compile-time check because the two values
+// genuinely live in two languages.
+static void test_shader_bit_parity() {
+    struct Pair { const char* sfName; uint32_t bit; };
+    // Every flag the shader gives a #define to. The shader does not need all 28:
+    // bits with no GLSL (shadow hints, PORTAL/MIRROR/ENVIRONMENT) are CPU or
+    // future-only, so their absence here is expected, not a failure.
+    const Pair pairs[] = {
+        { "SF_FAKEBACKDROP", SURF_FAKEBACKDROP },
+        { "SF_INVISIBLE",   SURF_INVISIBLE   },
+        { "SF_MASKED",      SURF_MASKED      },
+        { "SF_TRANSLUCENT", SURF_TRANSLUCENT },
+        { "SF_ALPHABLEND",  SURF_ALPHABLEND  },
+        { "SF_MODULATED",   SURF_MODULATED   },
+        { "SF_TWO_SIDED",   SURF_TWO_SIDED   },
+        { "SF_UNLIT",       SURF_UNLIT       },
+        { "SF_FAKE_LIT",    SURF_FAKE_LIT    },
+        { "SF_GLOW",        SURF_GLOW        },
+        { "SF_PAN_U",       SURF_PAN_U       },
+        { "SF_PAN_V",       SURF_PAN_V       },
+        { "SF_NO_SMOOTH",   SURF_NO_SMOOTH   },
+        { "SF_NO_FOG",      SURF_NO_FOG      },
+    };
+
+    FILE* f = fopen("GameData/Shaders/Surface.fs", "rb");
+    if (!f) {
+        // Not a failure: the suite must still run from a build directory or a
+        // checkout without GameData. Say so loudly so a silent skip is not
+        // mistaken for a passing parity check.
+        printf("  SKIP  shader bit parity (GameData/Shaders/Surface.fs not found)\n");
+        return;
+    }
+    char line[512];
+    int compared = 0, mismatched = 0;
+    char firstBad[256] = {0};
+    while (fgets(line, sizeof(line), f)) {
+        for (const Pair& p : pairs) {
+            char want[64];
+            snprintf(want, sizeof(want), "#define %s", p.sfName);
+            if (strncmp(line, want, strlen(want)) != 0) continue;
+            // Form is `(1 << N)` - evaluate it rather than string-matching, so a
+            // reformatted-but-correct shader still passes.
+            const char* lp = strchr(line, '(');
+            if (!lp) { ++mismatched; continue; }
+            unsigned shift = 0;
+            if (sscanf(lp, "( 1 << %u )", &shift) != 1) { ++mismatched; continue; }
+            ++compared;
+            if ((1u << shift) != p.bit) {
+                ++mismatched;
+                if (!firstBad[0])
+                    snprintf(firstBad, sizeof(firstBad),
+                             "%s is (1<<%u) in Surface.fs but (1<<%u) in SurfaceFlags.hpp",
+                             p.sfName, shift,
+                             (unsigned)(p.bit == 1 ? 0 : (p.bit & (p.bit - 1)) == 0 ? 31 - __builtin_clz(p.bit) : 0));
+            }
+            break;
+        }
+    }
+    fclose(f);
+
+    check(compared == (int)(sizeof(pairs) / sizeof(pairs[0])),
+          "every SF_* the shader defines was found and parsed by the parity check");
+    check(mismatched == 0,
+          firstBad[0] ? firstBad : "every SF_* bit matches oz::surface::SURF_* exactly");
+}
+
+// ---------------------------------------------------------------------------
+// Brush-wide default round trip (parse -> export shape)
+// ---------------------------------------------------------------------------
+// The exporter emits a brush-wide UV field from the legacy mirror and writes a
+// per-face field only when it DIFFERS from the default, because the parser
+// re-seeds a face from the default. That contract only holds if the mirrors and
+// the default agree, which is what DeriveLegacySurfaceMirror exists to guarantee.
+static void test_brush_wide_default_contract() {
+    BrushSurface bs;
+    // Brush-wide: the whole point of the brush-wide editor scope.
+    bs.def.flags     = SURF_FAKEBACKDROP;
+    bs.def.uvScaleU  = 2.0f;
+    bs.def.panU      = 0.05f;
+
+    const LegacySurfaceMirror m = DeriveLegacySurfaceMirror(bs.def);
+    check(m.texScaleU == bs.def.uvScaleU,
+          "the exported brush-wide U scale reads the same value the default holds");
+    check((int)bs.def.flags == m.surfaceFlags,
+          "the exported flags= equals the default's flags (this equality is what "
+          "silently dropped every flags= before NeedsFlagsKwarg existed)");
+
+    // An un-overridden face resolves to the default, so the exporter must write
+    // NOTHING for it (p.flags == d.flags and so on).
+    check(bs.Resolve(FACE_NX).flags == bs.def.flags &&
+          bs.Resolve(FACE_NX).uvScaleU == bs.def.uvScaleU,
+          "an untouched face resolves to the brush default, so the per-face diff is empty");
+
+    // A face override that only changes one field must still inherit the rest,
+    // so the exporter emits exactly one kwarg for it.
+    SurfaceProps over = bs.Resolve(FACE_PY);
+    over.alpha = 0.5f;
+    bs.SetFace(FACE_PY, over);
+    const SurfaceProps& r = bs.Resolve(FACE_PY);
+    check(r.alpha == 0.5f && r.flags == bs.def.flags && r.uvScaleU == bs.def.uvScaleU,
+          "a face override inherits every field it does not change");
+    check(r.flags != bs.def.flags || r.alpha != bs.def.alpha,
+          "so only the changed field differs, which is what the exporter keys on");
+
+    // ResetToDefault KEEPS def - the editor's brush-wide Reset therefore cannot
+    // reuse it, which is why OzoneLoader::ResetRenderableSurfaceDefault exists.
+    bs.ClearFace(FACE_PY);
+    bs.ResetToDefault();
+    check(bs.def.flags == SURF_FAKEBACKDROP && bs.def.uvScaleU == 2.0f,
+          "ResetToDefault keeps the brush default (so it is NOT the brush-wide reset)");
+}
+
 int main() {
     printf("Surface tests:\n");
     test_legacy_bits_stable();
     test_legacy_flag_derivation();
+    test_shader_bit_parity();
+    test_derive_legacy_surface_mirror();
+    test_inert_flag_predicates();
+    test_seed_inert_values();
+    test_brush_wide_default_contract();
     test_face_from_normal();
     test_face_names();
     test_props_is_non_default();

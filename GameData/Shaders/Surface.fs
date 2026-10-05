@@ -60,6 +60,12 @@ uniform float uAlpha        = 1.0;
 uniform float uAlphaCutoff  = 0.0;
 uniform vec3  uGlow         = vec3(0.0);
 uniform float uGlowScale    = 1.0;
+// Gain applied by the full-bright branch (UNLIT / FAKE_LIT / FAKEBACKDROP).
+// 1.0 means "the painted value exactly". The backdrop pass pushes 0.55, which is
+// the gain the old DrawZoneGeometry uniform hack produced via ambient/10 - see
+// OzoneLoader::DrawZoneGeometry. A per-pass scalar rather than a per-face one, so
+// it is uploaded once per pass instead of once per draw.
+uniform float uFullBright   = 1.0;
 
 uniform float fogStart = 10.0;
 uniform float fogEnd = 100.0;
@@ -137,8 +143,16 @@ void main()
     // U/V pan. The speed lives in the flag, not in the value, so a zero speed is
     // a hard no-op rather than a per-frame multiply.
     vec2 uv = fragTexCoord;
-    if (HasFlag(SF_PAN_U)) uv.x += uPan.x * uTime;
-    if (HasFlag(SF_PAN_V)) uv.y += uPan.y * uTime;
+    if (HasFlag(SF_PAN_U) || HasFlag(SF_PAN_V)) {
+        if (HasFlag(SF_PAN_U)) uv.x += uPan.x * uTime;
+        if (HasFlag(SF_PAN_V)) uv.y += uPan.y * uTime;
+        // Wrap instead of letting the offset grow without bound. uTime is seconds
+        // since startup, so at 0.5 units/s a long session reaches ~1800 texels of
+        // offset and texture() sampling precision visibly degrades long before
+        // that. fract() keeps the sampled argument small. Guarded by the pan flags
+        // so an un-panned surface takes the identical path it always did.
+        uv = fract(uv);
+    }
 
     vec4 baseColor = texture(texture0, uv);
 
@@ -202,7 +216,15 @@ void main()
         // LitFog program and then "restored" a constant - so everything drawn
         // after the sky pass inherited it. Here the override lives in this
         // draw's own uniforms and dies with the draw.
-        lit = baseColor.rgb * colDiffuse.rgb;
+        //
+        // uFullBright is 1.0 for the world pass and 0.55 for the backdrop pass;
+        // see the declaration for why. Note this branch deliberately does NOT
+        // include a light contribution: a painted backdrop exists to be seen at
+        // its authored value, and the old shared-uniform path added
+        // `baseColor * colDiffuse * lightAccum` on top of the gain, so a
+        // directional sun blew out one panel of a painting and left the rest of
+        // it dim. Dropping that term is what makes the flag mean what it says.
+        lit = baseColor.rgb * colDiffuse.rgb * uFullBright;
     } else {
         lit = baseColor.rgb * ((colDiffuse.rgb + specAccum) * lightAccum);
         lit += baseColor.rgb * (amb.rgb / 10.0) * colDiffuse.rgb;
@@ -218,9 +240,13 @@ void main()
 
     lit = pow(max(lit, vec3(0.0)), vec3(1.0 / 2.2));
 
-    // Fog, unless the surface opts out. Translucent/alpha surfaces fog too, so a
-    // sheet of glass in a foggy corridor still recedes correctly.
-    if (!HasFlag(SF_NO_FOG)) {
+    // Fog, unless the surface opts out. SF_ALPHABLEND opts out too - it is the
+    // documented "blend but do not fog" flag (SurfaceFlags.hpp), which TRANSLUCENT
+    // deliberately is NOT: a sheet of glass in a foggy corridor should still
+    // recede, whereas an AlphaBlend surface is used for UI-ish decals and signage
+    // that must stay legible at any distance. Before this distinction the two
+    // flags were pixel-identical and the header comment was simply false.
+    if (!HasFlag(SF_NO_FOG) && !HasFlag(SF_ALPHABLEND)) {
         float fogDist = length(viewPos - fragPosition);
         float fogFactor = clamp((fogDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
         fogFactor *= fogDensity * fogIntensity;

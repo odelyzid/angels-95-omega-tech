@@ -101,23 +101,23 @@ default.**
 
 | Bit | Name | Effect today |
 |---|---|---|
-| `1<<3` (8) | `SURF_FAKEBACKDROP` | painted backdrop, drawn at full value in the sky pass |
+| `1<<3` (8) | `SURF_FAKEBACKDROP` | painted backdrop, drawn at full value in the sky pass (uniformly 0.55x, never lit) |
 | `1<<4` (16) | `SURF_COLLISION_PROXY` | collision only, never drawn in game |
 | `1<<5` (32) | `SURF_INVISIBLE` | not drawn (still collides) |
-| `1<<6` (64) | `SURF_MASKED` | alpha test against `alphaCutoff` |
-| `1<<7` (128) | `SURF_TRANSLUCENT` | alpha blend, no depth write |
-| `1<<8` (256) | `SURF_ALPHABLEND` | explicit alpha blend |
+| `1<<6` (64) | `SURF_MASKED` | alpha test against `alphaCutoff`; **inert unless `cutoff > 0`** |
+| `1<<7` (128) | `SURF_TRANSLUCENT` | alpha blend, no depth write, **fogs normally** |
+| `1<<8` (256) | `SURF_ALPHABLEND` | alpha blend, no depth write, **skips fog** |
 | `1<<9` (512) | `SURF_MODULATED` | multiply blend |
 | `1<<10` (1024) | `SURF_TWO_SIDED` | back faces drawn too |
 | `1<<11` (2048) | `SURF_UNLIT` | full bright, lighting bypassed |
-| `1<<12` (4096) | `SURF_FAKE_LIT` | lit, no light contribution |
+| `1<<12` (4096) | `SURF_FAKE_LIT` | full bright, lighting bypassed (shares `UNLIT`'s branch) |
 | `1<<13` (8192) | `SURF_SPECIAL_LIT` | reserved |
-| `1<<14` (16384) | `SURF_GLOW` | self-illumination + additive halo pass |
+| `1<<14` (16384) | `SURF_GLOW` | self-illumination + additive halo pass; **inert unless the colour is non-zero** |
 | `1<<15` (32768) | `SURF_PORTAL` | reserved |
 | `1<<16` (65536) | `SURF_MIRROR` | reserved |
 | `1<<17` (131072) | `SURF_ENVIRONMENT` | reserved |
-| `1<<18` (262144) | `SURF_PAN_U` | scroll U |
-| `1<<19` (524288) | `SURF_PAN_V` | scroll V |
+| `1<<18` (262144) | `SURF_PAN_U` | scroll U; **inert unless `panU != 0`** |
+| `1<<19` (524288) | `SURF_PAN_V` | scroll V; **inert unless `panV != 0`** |
 | `1<<20` (1048576) | `SURF_SMALL_WAVY` | reserved |
 | `1<<21` (2097152) | `SURF_BRIGHT_CORNERS` | reserved |
 | `1<<22` (4194304) | `SURF_DIRTY_SHADOWS` | reserved |
@@ -134,10 +134,28 @@ default.**
 Bits 0-2 are unallocated and **must stay that way**: only `flags=8` appears in
 the shipped worlds, so nothing written today can collide with 1<<5 and above.
 The flag values are duplicated as `#define`s in `GameData/Shaders/Surface.fs`;
-if you renumber a bit you must change both places.
+if you renumber a bit you must change both places. `tests/Surface.test.cpp`
+parses the shader and asserts every `SF_*` equals the corresponding `SURF_*`,
+so a renumber that misses the shader fails the build rather than shipping a flag
+that silently does nothing.
 
 Flags marked *reserved* are stored, exported and round-tripped, but the renderer
 does not act on them yet.
+
+#### Where each flag is applied
+
+A brush's surface is resolved **per face**: face override, else brush-wide
+`flags=`, else engine default. Each face is then drawn in **exactly one** pass -
+the world pass, the sky (backdrop) pass, or the glow halo - and the filter for all
+three is `FaceBelongsToPass` in `Source/World/OzOzoneLoader.cpp`, keyed off the
+resolved face. Two consequences worth knowing when authoring:
+
+* **`SURF_FAKEBACKDROP` on one face moves that face to the sky pass** and it is no
+  longer drawn by the world pass. Painting it on the whole brush (`flags=8`, the
+  form all 69 shipped backdrops use) is equivalent and cheaper.
+* **`SURF_INVISIBLE` on one face hides that face only.** The brush stays pickable
+  and selectable in the editor as long as any face is visible, which is how you get
+  a face back.
 
 ### Skybox primitive
 

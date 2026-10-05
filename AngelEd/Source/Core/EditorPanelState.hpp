@@ -89,6 +89,11 @@ struct EditorPanelState {
     bool showSurfaceProps = false;
     int  surfaceRenderable = -1;      // OzoneRenderable index
     uint32_t surfaceFaceMask = 0;     // bitmask of SurfaceFace
+    // Write surface.def (the brush-wide default) instead of the faces in the mask.
+    // Lives here as well as on the event so the dialog can render the right scope
+    // on reopen; the AUTHORITATIVE copy is ed::SurfaceEdit::brushWide, which is
+    // what the handler reads.
+    bool surfaceBrushWide = false;
     // actionApplySurface / actionResetSurface are GONE -> ed::Ev::ApplySurface /
     // ed::Ev::ResetSurface, both carrying one ed::SurfaceEdit with the renderable,
     // the face mask AND the working props.

@@ -69,13 +69,19 @@ public:
     // brackets the draw with BeginSurfaceState/EndSurfaceState.
     void ApplyUniforms(const surface::SurfaceProps& p);
 
+    // Gain for the full-bright branch (UNLIT / FAKE_LIT / FAKEBACKDROP).
+    //
+    // This is a PASS-wide setting, not a per-face one, because it exists only to
+    // reproduce a per-pass decision: the backdrop pass runs at 0.55 so painted
+    // backdrops keep the tonality the old DrawZoneGeometry ambient/10 hack gave
+    // them, while the world pass runs at 1.0. Applied lazily in UpdateFrame, one
+    // upload per change rather than one per draw call.
+    void SetFullBright(float gain);
+
     // Bracket a translucent / masked / modulated / two-sided draw. No-op for
     // flags that do not change GL state.
     void BeginSurfaceState(const surface::SurfaceProps& p);
     void EndSurfaceState();
-
-    // True when `p` needs the GL state changed (blend mode, cull, depth mask).
-    static bool NeedsStateChange(const surface::SurfaceProps& p);
 
 private:
     SurfaceMaterial() = default;
@@ -94,6 +100,7 @@ private:
     int m_cutoffLoc = -1;
     int m_glowLoc = -1;
     int m_glowScaleLoc = -1;
+    int m_fullBrightLoc = -1;
 
     // Fog uniforms — Surface.fs declares and uses all five, but none were
     // cached, so surface-flagged brushes fogged at the shader defaults (10/100,
@@ -110,6 +117,11 @@ private:
     float m_fogDensity = 1.0f;
     float m_fogIntensity = 1.0f;
     bool  m_fogDirty = true;   // first UpdateFrame must push the defaults
+
+    // Full-bright gain. Default 1.0 so a shader that somehow misses the upload
+    // still renders a full-value unlit surface rather than a black one.
+    float m_fullBright = 1.0f;
+    bool  m_fullBrightDirty = true;
 
     // Blend/depth/cull state actually changed by the currently open bracket, so
     // EndSurfaceState restores exactly what it found instead of guessing.

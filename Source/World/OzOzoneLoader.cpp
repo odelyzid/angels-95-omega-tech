@@ -1057,10 +1057,10 @@ bool OzoneLoader::LoadFile(const char* path) {
 
     OzoneRenderable r;
     r.typeId = (int)prim.type;
-    r.csgOp = prim.csgOp;
-    r.surfaceFlags = prim.surfaceFlags;
+r.csgOp = prim.csgOp;
     r.surface = prim.surface;   // per-face surface props (flags/texture/UV/pan/alpha/glow)
-
+    // Derive, don't copy - see the twin load path above.
+    DeriveLegacyRenderable(r);
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
 
@@ -1160,8 +1160,13 @@ bool OzoneLoader::LoadString(const char* data, const char* worldDir) {
     OzoneRenderable r;
     r.typeId = (int)prim.type;
     r.csgOp = prim.csgOp;
-    r.surfaceFlags = prim.surfaceFlags;
     r.surface = prim.surface;   // per-face surface props (flags/texture/UV/pan/alpha/glow)
+    // Derive the legacy views rather than copying the parser's copy of them. The
+    // parser already ran DeriveLegacySurfaceFields, so the values agree today -
+    // but one code path is one thing that cannot forget a field, and a
+    // hand-assigned mirror is how surfaceFlags and surface.def.flags came to
+    // disagree in the first place.
+    DeriveLegacyRenderable(r);
     if (prim.args.size() >= 3)
         r.position = {prim.args[0], prim.args[2], prim.args[1]};
 
@@ -1225,11 +1230,18 @@ void OzoneLoader::DrawGlowGeometry(Camera3D& camera) {
     auto& sm = oz::SurfaceMaterial::Instance();
     if (!sm.Ready()) return;
 
+    // Cheap pre-scan so a level with no glowing brush pays two vector walks and
+    // no GL state changes. Resolved per FACE, not per brush, so a brush whose
+    // def carries the flag but whose only glowing face is invisible does not open
+    // a blend state for nothing.
     bool any = false;
     for (auto& r : m_renderables) {
         if (!r.loaded || (r.surfaceFlags & SURF_COLLISION_PROXY)) continue;
-        for (int f = 0; f < FACE_COUNT; f++)
-            if (r.surface.Resolve((SurfaceFace)f).Has(SURF_GLOW)) { any = true; break; }
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP) continue;
+        for (int f = 0; f < FACE_COUNT; f++) {
+            const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+            if (p.Has(SURF_GLOW) && !p.Has(SURF_INVISIBLE)) { any = true; break; }
+        }
         if (any) break;
     }
     if (!any) return;
@@ -1240,10 +1252,15 @@ void OzoneLoader::DrawGlowGeometry(Camera3D& camera) {
         if (!r.loaded || (r.surfaceFlags & SURF_COLLISION_PROXY)) continue;
         if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP) continue;
         bool glows = false;
-        for (int f = 0; f < FACE_COUNT; f++)
-            if (r.surface.Resolve((SurfaceFace)f).Has(SURF_GLOW)) { glows = true; break; }
+        for (int f = 0; f < FACE_COUNT; f++) {
+            const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+            if (p.Has(SURF_GLOW) && !p.Has(SURF_INVISIBLE)) { glows = true; break; }
+        }
         if (!glows) continue;
-        DrawSurface(r);
+        // GlowingOnly, NOT the whole brush. This used to re-draw all six faces of
+        // any brush with one glowing face, so a wall with a single glowing sign
+        // face picked up an additive ghost of its other five faces.
+        DrawSurface(r, SurfacePass::GlowingOnly);
     }
     rlEnableDepthMask();
     EndBlendMode();
@@ -1262,7 +1279,32 @@ void OzoneLoader::DrawGlowGeometry(Camera3D& camera) {
 // painted value WITHOUT mutating the shared LitFog uniforms the way the old
 // DrawZoneGeometry did.
 // ---------------------------------------------------------------------------
-void OzoneLoader::DrawSurface(OzoneRenderable& r) {
+// A face is drawn in exactly ONE pass (see SurfacePass in OzOzoneLoader.hpp).
+//
+// The exclusion rules live here, in one loop, rather than as a brush-wide skip
+// in each of the three pass entry points. That is the whole point: the old
+// arrangement filtered on OzoneRenderable::surfaceFlags, which is a derived mirror
+// of surface.def only, so a PER-FACE backdrop was invisible to every filter - it
+// got drawn by the world pass AND by the sky pass. A per-face Invisible face is
+// likewise only honoured by this loop.
+static bool FaceBelongsToPass(oz::surface::SurfaceFace f,
+                              const oz::surface::SurfaceProps& p,
+                              OzoneLoader::SurfacePass pass) {
+    using namespace oz::surface;
+    if (p.Has(SURF_INVISIBLE)) return false;
+    switch (pass) {
+        case OzoneLoader::SurfacePass::Full:
+            // Backdrops belong to the sky pass alone.
+            return !p.Has(SURF_FAKEBACKDROP);
+        case OzoneLoader::SurfacePass::GlowingOnly:
+            return p.Has(SURF_GLOW);
+        case OzoneLoader::SurfacePass::BackdropOnly:
+            return p.Has(SURF_FAKEBACKDROP);
+    }
+    return false;
+}
+
+void OzoneLoader::DrawSurface(OzoneRenderable& r, SurfacePass pass) {
     using namespace oz::surface;
     auto& sm = oz::SurfaceMaterial::Instance();
     if (!sm.Ready() || r.model.meshCount == 0) {
@@ -1284,7 +1326,7 @@ void OzoneLoader::DrawSurface(OzoneRenderable& r) {
 
     for (int f = 0; f < FACE_COUNT; f++) {
         const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
-        if (p.Has(SURF_INVISIBLE)) continue;
+        if (!FaceBelongsToPass((SurfaceFace)f, p, pass)) continue;
         if (r.faceMesh[f].vaoId == 0) continue;   // no geometry on this axis
 
         mat.shader = sm.Get();
@@ -1323,7 +1365,6 @@ void OzoneLoader::Draw(Camera3D& camera, bool cullBackfaces) {
         // explicitly asked for them - otherwise a single AutoConvex pass would
         // bury the level in a wall of grey boxes.
         if ((r.surfaceFlags & SURF_COLLISION_PROXY) && !m_drawCollisionProxies) continue;
-        if (r.surface.def.flags & (uint32_t)oz::surface::SURF_INVISIBLE) continue;
         if (r.hasBounds && (r.bounds.min.x < r.bounds.max.x ||
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
@@ -1338,14 +1379,15 @@ void OzoneLoader::Draw(Camera3D& camera, bool cullBackfaces) {
 }
 
 // ---------------------------------------------------------------------------
-// DrawWorldGeometry â€” skip SURF_FAKEBACKDROP flagged brushes
-// ---------------------------------------------------------------------------
+// DrawWorldGeometry - the main world pass. Facets that belong to another pass
+// (backdrops) are excluded per-FACE inside DrawSurface, not per-brush here: a
+// brush-wide skip on the derived mirror was invisible to a per-face backdrop, so
+// such a face was drawn by BOTH this pass and the sky pass.
 void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
     FrustumPlane planes[6];
     BuildFrustum(camera, planes);
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        if (r.surfaceFlags & SURF_FAKEBACKDROP) continue;
         // Collision proxies are never drawn in-game, whatever the editor toggle
         // says: they exist to stop the player falling through a prop.
         if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
@@ -1353,7 +1395,6 @@ void OzoneLoader::DrawWorldGeometry(Camera3D& camera) {
                             r.bounds.min.y < r.bounds.max.y ||
                             r.bounds.min.z < r.bounds.max.z) &&
             !AabbInFrustum(planes, r.bounds)) continue;
-        if (r.surface.def.flags & (uint32_t)oz::surface::SURF_INVISIBLE) continue;
         if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP && m_hmReady) {
             DrawModelEx(m_hmModel, m_hmPosition, (Vector3){0,1,0}, 0,
                         (Vector3){m_hmScale, m_hmScale, m_hmScale}, WHITE);
@@ -1582,7 +1623,7 @@ int OzoneLoader::AddBrushRenderable(int primType, const Vector3& pos,
     // against 16 and wrote a literal `flags=0`, i.e. a proxy that collided but was
     // then drawn in game on the next reload.
     r.surface.def.flags = (uint32_t)surfaceFlags;
-    r.surfaceFlags = oz::surface::DeriveLegacyFlags(r.surface.def);
+    DeriveLegacyRenderable(r);
     m_renderables.push_back(r);
     return (int)m_renderables.size() - 1;
 }
@@ -1781,10 +1822,21 @@ void OzoneLoader::SetRenderableFace(int idx, oz::surface::SurfaceFace face,
     OzoneRenderable* r = Get(idx);
     if (!r) return;
     if (face == oz::surface::FACE_NONE) r->surface.def = p;
-    else                                       r->surface.SetFace(face, p);
-    // The surface flags that the existing pipeline branches on are derived from
-    // the resolved state so DrawWorldGeometry / DrawZoneGeometry stay correct.
-    r->surfaceFlags = oz::surface::DeriveLegacyFlags(r->surface.def);
+    else                                r->surface.SetFace(face, p);
+    // Every derived view, not just surfaceFlags: ExportToOzone emits the
+    // brush-wide UV fields from r->texScaleU/V and suppresses `surfTex=` when
+    // r->texPath is non-empty, so re-deriving the flag bit alone would discard a
+    // brush-wide texture or UV edit on save. See DeriveLegacySurfaceMirror.
+    DeriveLegacyRenderable(*r);
+    // Brush-wide U/V scale and offset live in surface.def but the MESH texcoords
+    // are what actually get sampled, so a brush-wide UV edit has to be pushed into
+    // the mesh too. Per-face UV cannot be: all six face sub-meshes alias one
+    // texcoord array (BuildFaceMeshes), which is why uvScale/uvOffset are
+    // brush-wide in practice.
+    if (face == oz::surface::FACE_NONE) {
+        const oz::surface::SurfaceProps& d = r->surface.def;
+        ApplyRenderableUV(idx, d.uvScaleU, d.uvScaleV, d.uvOffsetU, d.uvOffsetV);
+    }
     RebuildSurfaceMeshes(idx);
 }
 
@@ -1792,7 +1844,22 @@ void OzoneLoader::ResetRenderableSurface(int idx) {
     OzoneRenderable* r = Get(idx);
     if (!r) return;
     r->surface.ResetToDefault();
-    r->surfaceFlags = oz::surface::DeriveLegacyFlags(r->surface.def);
+    DeriveLegacyRenderable(*r);
+    RebuildSurfaceMeshes(idx);
+}
+
+// Reset the BRUSH-WIDE default, leaving per-face overrides alone.
+//
+// BrushSurface::ResetToDefault deliberately KEEPS def - it means "push the
+// brush default onto every face", not "wipe the brush". So the editor's brush-wide
+// Reset cannot reuse ResetRenderableSurface; it needs this.
+void OzoneLoader::ResetRenderableSurfaceDefault(int idx) {
+    OzoneRenderable* r = Get(idx);
+    if (!r) return;
+    r->surface.def = oz::surface::SurfaceProps{};
+    DeriveLegacyRenderable(*r);
+    // def's UVs are back at 1/0, so re-tile the mesh from the pristine snapshot.
+    ApplyRenderableUV(idx, 1.0f, 1.0f, 0.0f, 0.0f);
     RebuildSurfaceMeshes(idx);
 }
 
@@ -1924,56 +1991,88 @@ void OzoneLoader::GetWorldFog(float colorOut[3], float& start, float& end,
 }
 
 // ---------------------------------------------------------------------------
-// DrawZoneGeometry — draw renderables with SURF_FAKEBACKDROP flag set
+// DrawZoneGeometry - draw renderables with SURF_FAKEBACKDROP flag set
 // (with optional bounds filter for backward compat)
+//
+// SURF_FAKEBACKDROP brushes are 2D painted backdrops, the Ocarina of Time trick:
+// they stand in for distant scenery and must be seen at their painted value.
+// Through the lit shader they do not get that:
+//   litColor = baseColor * (colDiffuse * lightAccum)
+//            + baseColor * (ambient / 10) * colDiffuse
+// so a panel facing away from the directional sun has colDiffuse ~ 0 and
+// collapses to black, which is what turned the fortress perimeter into a void.
+//
+// THIS FUNCTION USED TO MUTATE THE SHARED LitFog UNIFORMS to force that value
+// (set colDiffuse to white and ambient to 5.5, then "restore" it afterwards).
+// Three things were wrong with that:
+//   * the "restore" put back a hardcoded constant, so every world surface drawn
+//     after the sky pass rendered at ambient/10 == 0.1 instead of the world's
+//     authored ambient;
+//   * the shader carried no idea WHY its uniforms were wrong, so the override
+//     leaked into anything else that read them;
+//   * a PER-FACE backdrop could not be honoured at all, because the filter read
+//     OzoneRenderable::surfaceFlags, which is a derived mirror of surface.def
+//     only.
+//
+// Surface.fs has a full-bright branch for SURF_FAKEBACKDROP whose override lives
+// in that draw's own uniforms, so this pass only has to choose a gain and route
+// through DrawSurface. See SurfaceMaterial::SetFullBright.
 // ---------------------------------------------------------------------------
 void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBounds) {
-    // SURF_FAKEBACKDROP brushes are 2D painted backdrops, the Ocarina of Time /
-    // Majora's Mask trick: they stand in for distant scenery and must be seen at
-    // their full painted value. Through the lit shader they do not get that:
-    //   litColor = baseColor * (colDiffuse * lightAccum)
-    //            + baseColor * (ambient / 10) * colDiffuse
-    // so any panel facing away from the directional sun has colDiffuse ~ 0 and
-    // collapses to black â€” which is what turned the fortress perimeter into a
-    // black void. For this pass only, force colDiffuse to white and ambient to
-    // 1.0-in-units, which reduces the expression to exactly the painted texture.
+    using namespace oz::surface;
+    auto& sm = oz::SurfaceMaterial::Instance();
+
+    // 0.55 reproduces the gain the old ambient/10 hack produced (5.5 / 10). A full
+    // value of 1.0 renders the painted panels at 100% and blows pale stone out to
+    // flat white, so the 0.55 is a deliberate tone curve, not an accident.
     //
-    // These are SHARED shader uniforms, so whatever is left behind is inherited
-    // by whatever draws next. This function is called from Core.hpp's sky pass
-    // immediately BEFORE DrawWorldGeometry() in the same frame, so the "restore"
-    // must put back the world's REAL ambient - restoring a hardcoded 1.0 meant
-    // every world surface in a sky zone rendered with ambient/10 == 0.1 instead
-    // of its authored value. Read the live values first and write them back.
-    Shader lit = s_litFogShader;
-    static int locDiffuse = -1, locAmbient = -1;
-    // raylib has no GetShaderValue, so the "current" ambient is whatever the
-    // owner last published via SetWorldAmbient (default 0.1 matches the client's
-    // initial uniform). Restoring that instead of a hardcoded 1.0 is what stops
-    // the sky pass from flattening the ambient of everything drawn after it.
-    float savedDiffuse[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float savedAmbient[4] = {m_worldAmbient[0], m_worldAmbient[1],
-                             m_worldAmbient[2], m_worldAmbient[3]};
-    const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    // 5.5 rather than 10.0: full value (10.0) renders the painted panels at 100%
-    // and blows the pale stone out to flat white. 5.5 keeps them clearly brighter
-    // than the lit geometry while preserving the painting's own tonality.
-    const float backdrop[4] = { 5.5f, 5.5f, 5.5f, 1.0f };
-    if (lit.id > 0) {
-        if (locDiffuse < 0) {
-            locDiffuse = GetShaderLocation(lit, "colDiffuse");
-            locAmbient = GetShaderLocation(lit, "ambient");
+    // The old path also added `baseColor * colDiffuse * lightAccum` on top of that
+    // gain, so a backdrop in direct sunlight used to brighten with the sun. It no
+    // longer does, on purpose: a painting whose panels brighten independently
+    // according to the level's one directional light is not a painting. See the
+    // SF_FAKEBACKDROP branch in Surface.fs.
+    const float kBackdropGain = 0.55f;
+
+    bool any = false;
+    for (auto& r : m_renderables) {
+        if (!r.loaded) continue;
+        if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
+        if (r.typeId == (int)OzonePrimitiveType::HEIGHTMAP) continue;
+        for (int f = 0; f < FACE_COUNT; f++) {
+            const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+            if (p.Has(SURF_FAKEBACKDROP) && !p.Has(SURF_INVISIBLE)) { any = true; break; }
         }
-        if (locDiffuse >= 0)
-            SetShaderValue(lit, locDiffuse, white, SHADER_UNIFORM_VEC4);
-        if (locAmbient >= 0)
-            SetShaderValue(lit, locAmbient, backdrop, SHADER_UNIFORM_VEC4);
+        if (any) break;
+    }
+if (!any) return;
+
+    // No surface shader: DrawSurface's fallback would DrawModel the whole brush,
+    // which for this pass is actually the right thing - a painted backdrop still
+    // has to be visible. Reproduces the pre-surface-path behaviour exactly.
+    if (!sm.Ready()) {
+        for (auto& r : m_renderables) {
+            if (!r.loaded) continue;
+            if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
+            if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
+            DrawModel(r.model, r.position, r.scale, WHITE);
+        }
+        return;
     }
 
+    sm.SetFullBright(kBackdropGain);
 
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
-        if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
-        // Optional bounds filter: skip if brush AABB doesn't overlap zone
+        if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
+        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
+            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+            continue;
+
+        // Optional bounds filter: skip if the brush AABB doesn't overlap the zone.
         BoundingBox mb = GetMeshBoundingBox(r.model.meshes[0]);
         BoundingBox worldBounds;
         worldBounds.min = {r.position.x + mb.min.x * r.scale,
@@ -1983,32 +2082,21 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
                            r.position.y + mb.max.y * r.scale,
                            r.position.z + mb.max.z * r.scale};
         if (!CheckCollisionBoxes(worldBounds, zoneBounds)) continue;
-        if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
-            r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
-            r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
-            continue;
 
-        // SURF_FAKEBACKDROP brushes are 2D painted backdrops, the Ocarina of
-        // Time / Majora's Mask trick: they stand in for distant scenery and are
-        // meant to be seen at full painted value. Drawing them through the lit
-        // shader made every panel facing away from the directional sun collapse
-        // to black (litColor = baseColor * colDiffuse * lightAccum, and ambient
-        // only contributes ambient/10), which turned the fortress perimeter into
-        // a black void. The uniforms set above reduce the lit expression to the
-        // painted texture for this pass.
-        DrawModel(r.model, r.position, r.scale, WHITE);
+        bool drawable = false;
+        for (int f = 0; f < FACE_COUNT; f++) {
+            const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+            if (p.Has(SURF_FAKEBACKDROP) && !p.Has(SURF_INVISIBLE)) { drawable = true; break; }
+        }
+        if (!drawable) continue;
+
+        DrawSurface(r, SurfacePass::BackdropOnly);
     }
 
-    // Restore exactly what was in effect before this pass. The next frame's
-    // lighting pass re-applies the world's ambient anyway, but DrawWorldGeometry
-    // runs later in THIS frame and would otherwise inherit the backdrop value.
-    if (lit.id > 0) {
-        if (locDiffuse >= 0) SetShaderValue(lit, locDiffuse, savedDiffuse, SHADER_UNIFORM_VEC4);
-        if (locAmbient >= 0) SetShaderValue(lit, locAmbient, savedAmbient, SHADER_UNIFORM_VEC4);
-    }
+    // Back to 1.0 for whichever pass runs next (the world pass). Restored here
+    // rather than only on the early-out above so a level that loses its backdrops
+    // cannot leave every following frame's world pass dimmed.
+    sm.SetFullBright(1.0f);
 }
 
 

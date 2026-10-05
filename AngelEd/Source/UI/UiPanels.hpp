@@ -85,6 +85,11 @@ void ShowWorldGraph(bool show);
     // OzoneRenderable index and `faceMask` a bitmask of SurfaceFace, so one
     // dialog can edit "(3 Selected)" at once. Rebuilds the controls on open.
     void ShowSurfaceProps(bool show, int renderable, uint32_t faceMask);
+// Same, but explicitly choosing the brush-wide scope (write surface.def instead of
+// the faces in faceMask). faceMask must still be non-zero - brush-wide is never
+// expressed as an empty mask. The two-arg form above always means face scope.
+void ShowSurfacePropsScoped(bool show, int renderable, uint32_t faceMask,
+                            bool brushWide);
     // Re-read from the renderable and rebuild the controls, so the dialog shows
     // what was actually stored after an Apply.
     void SurfacePropsRefresh(void* hwnd);

@@ -158,8 +158,30 @@ struct SurfaceEdit {
     float uvScaleU = 1.0f, uvScaleV = 1.0f, uvOffsetU = 0.0f, uvOffsetV = 0.0f;
     float panU = 0.0f, panV = 0.0f;
     int  texSlot = 0;
+    // Free-placement texture path. This WAS smuggled through live panel state
+    // instead of the event, because the payload had no field for it - which is
+    // precisely the hazard the comment above describes, and it worked only
+    // because the drain happens in the same frame.
+    std::string texPath;
+
+    // Write BrushSurface::def (the brush-wide default) instead of the faces in
+    // faceMask. Brush-wide is what makes `flags=8` on a whole brush - the form
+    // all 299 shipped painted backdrops use - reachable from the editor at all;
+    // every Apply before this wrote only per-face overrides.
+    //
+    // It is an EXPLICIT bool precisely because it must never be expressed as
+    // faceMask == 0. Zero is the documented "no face selected, do nothing" value,
+    // and overloading it would resurrect exactly the bug hasFaces() exists to
+    // prevent. A brush-wide edit carries BOTH: faceMask still names the faces the
+    // dialog was showing, so a handler that ignores brushWide still does the
+    // narrow thing.
+    bool brushWide = false;
 
     bool hasFaces() const { return faceMask != 0; }
+    // True when this edit targets anything at all. Note brushWide alone is NOT
+    // enough: faceMask must still be non-zero, so "no face was ever selected"
+    // remains a no-op regardless of scope.
+    bool isTargeted() const { return faceMask != 0; }
 };
 
 // A complete selection, captured by value.

@@ -76,15 +76,17 @@ static void BuildWorldGraphEntries() {
     // SURF_COLLISION_PROXY boxes and drops `sub`-carved geometry, so the Explorer listed
     // rows that a click cannot select, and omitted rows it can.
     //
-    // The skip filter and the world-space AABB must stay identical to Selection.cpp's
-    // RaycastTestOzPrimitives. Two copies of "what counts as a visible brush" is how
-    // the two drifted apart in the first place.
+    // The skip filter is now the shared IsEditorPickableSurface predicate, which
+    // Selection.cpp's raycast and the surface picker also call. This used to be a
+    // hand-copied third version of the same test, and two copies of "what counts
+    // as a visible brush" is exactly how the Explorer and the raycast drifted
+    // apart in the first place.
     {
         const int count = OzoneLoader::Instance().Count();
         for (int i = 0; i < count; i++) {
             const OzoneRenderable* r = OzoneLoader::Instance().Get(i);
             if (!r || !r->loaded || r->model.meshCount == 0) continue;
-            if (r->surfaceFlags & (oz::surface::SURF_COLLISION_PROXY | oz::surface::SURF_INVISIBLE))
+            if (!IsEditorPickableSurface(*r))
                 continue;
             const BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
             const float cx = r->position.x + (mb.min.x + mb.max.x) * 0.5f * r->scale;

@@ -83,6 +83,55 @@ struct OzoneRenderable {
     bool hasBounds = false;      // true once bounds is meaningful
 };
 
+// ---------------------------------------------------------------------------
+// IsEditorPickableSurface — may the editor select this brush at all?
+//
+// ONE definition of "visible", because this predicate now has three call sites
+// (the viewport brush raycast, the per-face surface picker, and the WorldGraph
+// brush list) and two copies of "what counts as visible" previously drifted:
+// the raycast skipped SURF_COLLISION_PROXY|SURF_INVISIBLE while the surface
+// picker skipped nothing, so right-clicking an invisible AutoConvex box offered
+// "Surface Properties" for geometry the user cannot see or otherwise select.
+//
+// The rule is "no part of this brush is drawn":
+//   * collision proxies are skipped by every drawing path, always;
+//   * a brush is unpickable only when ALL SIX resolved faces are SURF_INVISIBLE.
+//     A brush-wide invisible flag with a visible face override is still pickable,
+//     because that face is on screen and there is otherwise no way to select the
+//     brush and put the face back.
+//
+// Per-FACE, matching DrawSurface's filter, rather than per-brush on the derived
+// mirror `surfaceFlags` - the mirror only reflects surface.def, so it cannot see
+// a per-face override at all.
+// ---------------------------------------------------------------------------
+inline bool IsEditorPickableSurface(const OzoneRenderable& r) {
+    using namespace oz::surface;
+    if (r.surfaceFlags & (int)SURF_COLLISION_PROXY) return false;
+    for (int f = 0; f < FACE_COUNT; f++)
+        if (!r.surface.Resolve((SurfaceFace)f).Has(SURF_INVISIBLE)) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// DeriveLegacyRenderable — write surface.def's derived views onto `r`.
+//
+// The renderable-shaped wrapper around oz::surface::DeriveLegacySurfaceMirror,
+// which is raylib-free and lives in the header the headless tests link. EVERY
+// writer of surface.def must call this; see that function for why re-deriving
+// surfaceFlags alone is not enough (ExportToOzone emits the brush-wide UV
+// fields from the legacy mirrors, so a stale mirror is a lost edit).
+// ---------------------------------------------------------------------------
+inline void DeriveLegacyRenderable(OzoneRenderable& r) {
+    const oz::surface::LegacySurfaceMirror m =
+        oz::surface::DeriveLegacySurfaceMirror(r.surface.def);
+    r.surfaceFlags = m.surfaceFlags;
+    r.texScaleU    = m.texScaleU;
+    r.texScaleV    = m.texScaleV;
+    r.texOffsetU   = m.texOffsetU;
+    r.texOffsetV   = m.texOffsetV;
+    r.texPath      = m.texPath;
+}
+
 // Collision AABB for an OZONE brush primitive.
 struct OzoneCollisionVolume {
     BoundingBox aabb;
@@ -225,6 +274,10 @@ public:
                            const oz::surface::SurfaceProps& p);
     // Drop every per-face override, leaving the brush-wide default.
     void ResetRenderableSurface(int idx);
+// Reset the BRUSH-WIDE default only, leaving per-face overrides intact.
+// Distinct from ResetRenderableSurface because BrushSurface::ResetToDefault
+// deliberately keeps def. This is what the editor's brush-wide scope resets.
+void ResetRenderableSurfaceDefault(int idx);
     // Split mesh 0 into per-face sub-meshes and re-upload. No-op until the brush
     // actually needs per-face drawing.
     void RebuildSurfaceMeshes(int idx);
@@ -261,10 +314,27 @@ public:
     // Draw all non-FAKEBACKDROP renderables (main world pass)
     void DrawWorldGeometry(Camera3D& camera);
 
+    // Which faces a given pass is responsible for.
+    //
+    // A face must be drawn in EXACTLY one of these passes. That used to be a
+    // convention spread across three functions - DrawZoneGeometry filtered on the
+    // brush-wide SURF_FAKEBACKDROP mirror, DrawWorldGeometry skipped whole
+    // brushes, and DrawGlowGeometry re-drew all six faces of any brush with one
+    // glowing face - which is why a per-face backdrop could be drawn twice and a
+    // wall with a single glowing face picked up an additive ghost of its other
+    // five. Making the filter a parameter makes "exactly once" structural.
+    enum class SurfacePass {
+        Full,          // the world pass: every face except backdrop + invisible
+        GlowingOnly,   // the glow halo: only SURF_GLOW faces
+        BackdropOnly,  // the sky pass: only SURF_FAKEBACKDROP faces
+    };
+
     // Draw one renderable through the surface-flagged path: up to six per-face
     // DrawMesh calls, each with its own SurfaceProps uniforms. Public because the
-    // glow pass re-draws glowing faces additively after the world pass.
-    void DrawSurface(OzoneRenderable& r);
+    // glow and backdrop passes re-draw subsets of faces outside the world pass.
+    //
+    // `pass` selects which faces are eligible; see SurfacePass above.
+    void DrawSurface(OzoneRenderable& r, SurfacePass pass = SurfacePass::Full);
     // Faces carrying SURF_GLOW, re-drawn additively over the composited frame.
     void DrawGlowGeometry(Camera3D& camera);
 

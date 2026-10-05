@@ -22,11 +22,12 @@ static RayCollision RaycastTestOzPrimitives(Ray ray, EditorSelection& out) {
     for (int i = 0; i < count; i++) {
         OzoneRenderable* r = OzoneLoader::Instance().Get(i);
         if (!r || !r->loaded || r->model.meshCount == 0) continue;
-        // Never pick what cannot be seen. Every drawing path skips collision proxies
-        // (DrawWorldGeometry, DrawZoneGeometry, DrawGlowGeometry) and SURF_INVISIBLE,
+        // Never pick what cannot be seen: every drawing path skips collision proxies
+        // (DrawWorldGeometry, DrawZoneGeometry, DrawGlowGeometry) and invisible faces,
         // so without this guard a plain click can select an invisible AutoConvex box
-        // and then go on to move, resize or delete it.
-        if (r->surfaceFlags & (oz::surface::SURF_COLLISION_PROXY | oz::surface::SURF_INVISIBLE))
+        // and then go on to move, resize or delete it. The predicate is shared with
+        // the WorldGraph list and the surface picker - see IsEditorPickableSurface.
+        if (!IsEditorPickableSurface(*r))
             continue;
         BoundingBox mb = GetMeshBoundingBox(r->model.meshes[0]);
         // Apply mesh-local AABB transformed by position + scale (handles non-centered meshes)
@@ -369,6 +370,12 @@ static SurfaceFacePick PickSurfaceFace(Vector2 mousePos) {
         if (!r || !r->loaded || r->model.meshCount == 0) continue;
         Mesh& m = r->model.meshes[0];
         if (!m.vertices || !m.indices) continue;
+        // Same visibility rule as the brush raycast, via the same predicate. This
+        // guard was MISSING here, so right-clicking an invisible AutoConvex box
+        // reported a hit and the context menu offered "Surface Properties" for
+        // geometry that could not otherwise be selected - and whose Apply went on
+        // to write a face override and rebuild its collision volumes.
+        if (!IsEditorPickableSurface(*r)) continue;
         for (int t = 0; t < m.triangleCount; t++) {
             unsigned short i0 = m.indices[t * 3 + 0];
             unsigned short i1 = m.indices[t * 3 + 1];

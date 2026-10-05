@@ -232,6 +232,47 @@ inline int DeriveLegacyFlags(const SurfaceProps& def) {
     return (int)(def.flags & kLegacyPipelineFlags);
 }
 
+// Re-derive every DERIVED field on an OzoneRenderable from its surface block.
+//
+// OzoneRenderable::texScaleU/V, texOffsetU/V and texPath are VIEWS onto
+// surface.def, not independent state - the parser's twin for this is
+// OzoneParser.cpp's DeriveLegacySurfaceFields(OzonePrimitive&). They exist
+// because DrawWorldGeometry, DrawZoneGeometry, ApplyRenderableUV and
+// ExportToOzone still read them, and because the shipped worlds rely on the
+// legacy `texScale=`/`texPath=` spelling.
+//
+// Every writer of surface.def MUST call this. SetRenderableFace used to
+// re-derive surfaceFlags alone, which meant a brush-wide edit of U/V scale or
+// texture left the mirrors holding the pre-edit values - and ExportToOzone emits
+// the brush-wide UV fields FROM THE MIRRORS and suppresses `surfTex=` whenever
+// the mirror's texPath is non-empty. So brush-wide texture and UV edits were
+// silently discarded on save. The bug was latent only because nothing could write
+// surface.def at all; the editor's brush-wide scope is what made it live.
+//
+// Takes a small struct rather than OzoneRenderable so it stays raylib-free and
+// testable in the headless harness; the caller copies the results in. See
+// DeriveLegacyRenderable in OzOzoneLoader.hpp for the renderable-shaped wrapper.
+struct LegacySurfaceMirror {
+    int         surfaceFlags = 0;
+    float       texScaleU = 1.0f, texScaleV = 1.0f;
+    float       texOffsetU = 0.0f, texOffsetV = 0.0f;
+    std::string texPath;
+};
+
+inline LegacySurfaceMirror DeriveLegacySurfaceMirror(const SurfaceProps& def) {
+    LegacySurfaceMirror m;
+    m.surfaceFlags = DeriveLegacyFlags(def);
+    m.texScaleU  = def.uvScaleU;
+    m.texScaleV  = def.uvScaleV;
+    m.texOffsetU = def.uvOffsetU;
+    m.texOffsetV = def.uvOffsetV;
+    // Only adopt the surface's own texture path when it actually has one, so
+    // clearing the surface texture falls back to the tileset instead of latching
+    // the previous value.
+    if (!def.texPath.empty()) m.texPath = def.texPath;
+    return m;
+}
+
 // Whether a brush line needs an explicit `flags=` kwarg.
 //
 // This used to be written inline in the exporter as
@@ -247,6 +288,85 @@ inline int DeriveLegacyFlags(const SurfaceProps& def) {
 // mask, so the exporter's decision is a named, testable predicate rather than an
 // inline comparison someone can invert again.
 inline constexpr bool NeedsFlagsKwarg(uint32_t defFlags) { return defFlags != 0; }
+
+// ---------------------------------------------------------------------------
+// Flag/value conjunctions
+//
+// Four flags do NOTHING unless a second value is also set, which made a ticked
+// checkbox silently inert:
+//
+//   SURF_MASKED       needs alphaCutoff  > 0   (Surface.fs's discard predicate)
+//   SURF_GLOW         needs glowR|G|B != 0     (the added emissive term)
+//   SURF_PAN_U / _V   needs panU|panV  != 0
+//
+// The shader gates on the flag because a zero speed must be a hard no-op rather
+// than a per-frame divide; the cost is that the flag alone is inert. These
+// predicates are the one place that knows it, so the editor can warn or seed a
+// sane value instead of letting the user wonder why nothing happened, and the
+// tests can pin the rule instead of it being folklore in a GLSL comment.
+//
+// `Resolve`ing a face is the caller's job: pass the RESOLVED props (brush
+// default unless the face overrides), since an inherited value counts.
+// ---------------------------------------------------------------------------
+
+// Does SURF_MASKED actually do anything on this face?
+inline constexpr bool MaskedIsActive(const SurfaceProps& p) {
+    return p.Has(SURF_MASKED) && p.alphaCutoff > 0.0f;
+}
+// Does SURF_GLOW actually do anything on this face?
+inline constexpr bool GlowIsActive(const SurfaceProps& p) {
+    return p.Has(SURF_GLOW) && (p.glowR != 0.0f || p.glowG != 0.0f || p.glowB != 0.0f);
+}
+// Does either pan flag actually do anything on this face?
+inline constexpr bool PanIsActive(const SurfaceProps& p) {
+    return (p.Has(SURF_PAN_U) && p.panU != 0.0f) || (p.Has(SURF_PAN_V) && p.panV != 0.0f);
+}
+
+// True when the face carries at least one flag whose companion value is missing,
+// i.e. the editor has something to tell the author about. `which` (optional)
+// receives a short label for the log line.
+//
+// Written off the *IsActive predicates above rather than re-deriving the rules,
+// so the warning and the tests cannot disagree with the shader's own gate.
+inline bool SurfaceHasInertFlags(const SurfaceProps& p, const char** which = nullptr) {
+    if (p.Has(SURF_MASKED) && !MaskedIsActive(p)) {
+        if (which) *which = "Masked needs Alpha Cutoff > 0";
+        return true;
+    }
+    if (p.Has(SURF_GLOW) && !GlowIsActive(p)) {
+        if (which) *which = "Glow needs a non-zero colour";
+        return true;
+    }
+    if (p.Has(SURF_PAN_U) && p.panU == 0.0f) {
+        if (which) *which = "U-Pan needs a non-zero speed";
+        return true;
+    }
+    if (p.Has(SURF_PAN_V) && p.panV == 0.0f) {
+        if (which) *which = "V-Pan needs a non-zero speed";
+        return true;
+    }
+    return false;
+}
+
+// Fill in a usable companion value for any flag whose companion is missing, so
+// Apply never commits an inert combination. Returns the number of values seeded.
+//
+// Chosen defaults: a cutoff of 0.5 (the conventional binary alpha cut), white
+// glow at scale 1, and 0.1 texels/sec (slowly enough to read as movement rather
+// than as a broken texture lookup). Seeding beats rejecting the edit - the user
+// asked for the flag, and the value is one keystroke away in the dialog.
+inline int SeedInertSurfaceValues(SurfaceProps& p) {
+    int n = 0;
+    if (p.Has(SURF_MASKED) && p.alphaCutoff <= 0.0f) { p.alphaCutoff = 0.5f; n++; }
+    if (p.Has(SURF_GLOW) && !GlowIsActive(p)) {
+        p.glowR = p.glowG = p.glowB = 1.0f;
+        if (p.glowScale <= 0.0f) p.glowScale = 1.0f;
+        n++;
+    }
+    if (p.Has(SURF_PAN_U) && p.panU == 0.0f) { p.panU = 0.1f; n++; }
+    if (p.Has(SURF_PAN_V) && p.panV == 0.0f) { p.panV = 0.1f; n++; }
+    return n;
+}
 
 } // namespace surface
 } // namespace oz

@@ -181,6 +181,9 @@ void DestroyAllEditorWindows() {
     destroy(g_editorPanels.hPropsPanel);
     destroy(g_editorPanels.hLevelList);
     destroy(g_editorPanels.hStatsSidebar);
+    // Was missing: the Surface Properties window was created at startup like every
+    // other panel but never destroyed here, so it outlived the editor session.
+    destroy(g_editorPanels.hSurfaceProps);
     if (g_sbBgBrush) { DeleteObject(g_sbBgBrush); g_sbBgBrush = nullptr; }
     if (g_editorPanels.hPreviewBitmap) {
         DeleteObject((HGDIOBJ)g_editorPanels.hPreviewBitmap);

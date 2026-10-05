@@ -50,6 +50,7 @@ void SurfaceMaterial::CacheLocations() {
     m_cutoffLoc    = GetShaderLocation(m_shader, "uAlphaCutoff");
     m_glowLoc      = GetShaderLocation(m_shader, "uGlow");
     m_glowScaleLoc = GetShaderLocation(m_shader, "uGlowScale");
+    m_fullBrightLoc = GetShaderLocation(m_shader, "uFullBright");
     // Surface.fs declares and uses all five fog uniforms (see the SF_NO_FOG block
     // in its fragment stage) but none were cached here, so surface-flagged
     // brushes always fogged at the GLSL defaults — 10/100 with density 1 —
@@ -71,6 +72,12 @@ void SurfaceMaterial::SetFog(const float color[3], float start, float end,
     m_fogDensity = density;
     m_fogIntensity = intensity;
     m_fogDirty   = true;
+}
+
+void SurfaceMaterial::SetFullBright(float gain) {
+    if (m_fullBright == gain) return;
+    m_fullBright = gain;
+    m_fullBrightDirty = true;
 }
 
 void SurfaceMaterial::UpdateFrame(std::vector<LightNode>& lights,
@@ -108,6 +115,14 @@ void SurfaceMaterial::UpdateFrame(std::vector<LightNode>& lights,
         m_fogDirty = false;
     }
 
+    // Same treatment as fog: the backdrop pass and the world pass want different
+    // full-bright gains, and this runs once per pass boundary rather than per draw.
+    if (m_fullBrightDirty) {
+        if (m_fullBrightLoc >= 0)
+            SetShaderValue(m_shader, m_fullBrightLoc, &m_fullBright, SHADER_UNIFORM_FLOAT);
+        m_fullBrightDirty = false;
+    }
+
     if (m_timeLoc >= 0) {
         const float t = (float)GetTime();
         SetShaderValue(m_shader, m_timeLoc, &t, SHADER_UNIFORM_FLOAT);
@@ -135,12 +150,6 @@ void SurfaceMaterial::ApplyUniforms(const surface::SurfaceProps& p) {
     }
     if (m_glowScaleLoc >= 0)
         SetShaderValue(m_shader, m_glowScaleLoc, &p.glowScale, SHADER_UNIFORM_FLOAT);
-}
-
-bool SurfaceMaterial::NeedsStateChange(const surface::SurfaceProps& p) {
-    using namespace oz::surface;
-    return p.Has(SURF_TRANSLUCENT) || p.Has(SURF_ALPHABLEND) ||
-           p.Has(SURF_MODULATED)   || p.Has(SURF_TWO_SIDED);
 }
 
 void SurfaceMaterial::BeginSurfaceState(const surface::SurfaceProps& p) {

@@ -298,6 +298,62 @@ static void test_surface_edit_carries_its_mask() {
           "ResetSurface uses the same SurfaceEdit payload as ApplySurface");
 }
 
+// Every field the dialog can edit must travel ON THE EVENT. texPath did not, and
+// the handler picked it up from live panel state instead - which is exactly the
+// hazard the test above describes, still live for one field, and it only worked
+// because the drain happened in the same frame as the click.
+static void test_surface_edit_carries_tex_path() {
+    SurfaceEdit s;
+    s.renderable = 2;
+    s.faceMask    = 1u << 0;
+    s.texPath     = "oztex/signage/custom.png";
+    const Event e = Event::make(Ev::ApplySurface, s);
+    check(e.surface().texPath == "oztex/signage/custom.png",
+          "SurfaceEdit carries texPath, so a face texture is not read from live panel state");
+
+    SurfaceEdit cleared;
+    cleared.renderable = 2;
+    cleared.faceMask    = 1u << 0;
+    check(Event::make(Ev::ApplySurface, cleared).surface().texPath.empty(),
+          "an omitted texPath arrives empty (so a texture can be cleared)");
+}
+
+// Brush-wide scope is an EXPLICIT bool, never an overloaded faceMask. Zero mask is
+// the documented "nothing selected" value that hasFaces() exists to protect; if
+// brush-wide were expressed as mask 0, a brush-wide reset would be
+// indistinguishable from "reset nothing" and one of the two would be broken.
+static void test_surface_edit_scope_is_explicit() {
+    SurfaceEdit faces;
+    faces.renderable = 7;
+    faces.faceMask    = (1u << 2) | (1u << 4);
+    faces.brushWide   = false;
+    check(Event::make(Ev::ApplySurface, faces).surface().brushWide == false,
+          "face scope is the default and travels as brushWide=false");
+
+    SurfaceEdit brush;
+    brush.renderable = 7;
+    brush.faceMask    = (1u << 2) | (1u << 4);
+    brush.brushWide   = true;
+    const Event e = Event::make(Ev::ApplySurface, brush);
+    check(e.surface().brushWide, "brush scope travels as brushWide=true");
+    check(e.surface().faceMask == ((1u << 2) | (1u << 4)),
+          "a brush-wide edit STILL names the faces the dialog was showing");
+    check(e.surface().isTargeted(),
+          "so a handler that ignores brushWide does the narrow thing, not nothing");
+
+    // The critical invariant: brushWide alone must not make an edit targeted,
+    // because that would resurrect "mask 0 means all faces".
+    SurfaceEdit orphan;
+    orphan.renderable = 7;
+    orphan.faceMask    = 0;
+    orphan.brushWide   = true;
+    const Event o = Event::make(Ev::ApplySurface, orphan);
+    check(!o.surface().isTargeted(),
+          "brushWide with an empty mask is still a no-op - scope does not override the mask");
+    check(!o.surface().hasFaces(),
+          "...and hasFaces() still reports false for it, as before");
+}
+
 // CsgPlace and CsgCommit are separate kinds because "arm a primitive" resets the
 // ghost while "commit the ghost" reads it. A merged event would either lose the
 // reset or commit a brush nobody positioned.
@@ -398,6 +454,8 @@ int main() {
     test_typed_payloads();
     test_selection_is_one_atomic_message();
     test_surface_edit_carries_its_mask();
+    test_surface_edit_carries_tex_path();
+    test_surface_edit_scope_is_explicit();
     test_csg_intent_distinguishes_place_from_commit();
     test_anim_intent_carries_its_clip();
     test_placement_carries_a_name_not_an_index();

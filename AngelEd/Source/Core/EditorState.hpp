@@ -57,9 +57,13 @@ enum EditorMenuCmd {
     IDM_DUPLICATE_ENTITY,
     IDM_CANCEL,
     IDM_APPLY_TEXTURE,
-IDM_APPEND_AUTOCONVEX,
-IDM_SURFACE_PROPS,
-IDM_SURFACE_RESET,
+    IDM_APPEND_AUTOCONVEX,
+    IDM_SURFACE_PROPS,
+    // Opens the same dialog in brush-wide scope: Apply writes surface.def
+    // (the brush default) rather than the selected faces. Distinct from
+    // IDM_SURFACE_PROPS so the two scopes cannot be confused at the call site.
+    IDM_SURFACE_PROPS_BRUSH,
+    IDM_SURFACE_RESET,
 };
 
 // Box budget for one "Append AutoConvex Collision" run. Past this the command
