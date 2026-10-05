@@ -1782,10 +1782,25 @@ static void BuildFaceMeshes(OzoneRenderable& r) {
         tris[face].push_back(i2);
     }
 
-    // Second pass: one Mesh per face, sharing the source's vertex arrays. A Mesh
-    // may reference arrays it does not own when vaoId/vboId are set from
-    // UploadMesh, so copy the triangle list into fresh buffers instead of
-    // aliasing the source indices (which UnloadModel would free).
+    // Second pass: one Mesh per face, sharing the source's vertex arrays.
+    //
+    // The sub-meshes ALIAS src.vertices/texcoords/normals/colors while
+    // UploadMesh reads them and uploads its own VBO copies. Only the index
+    // buffer is fresh, because it is the one array that must differ per face.
+    //
+    // The aliases are then DROPPED before the Mesh is stored. That is the whole
+    // point: UnloadMesh frees EVERY CPU array a Mesh points at, not just
+    // `indices`, so a stored alias makes the four teardown paths
+    // (RebuildSurfaceMeshes, RemoveRenderable, UpdateBrushRenderable, Unload)
+    // free arrays that UnloadModel is about to free again. That double free
+    // silently corrupted the heap, and it did not surface until the next world
+    // load - OzoneLoader::Unload() is where the damage was detected, inside
+    // ClearScene(), BEFORE the new world's "OZONE format:" log line. So the
+    // level you opened was never the level at fault: any world with a
+    // surface-flagged brush (SURF_FAKEBACKDROP backdrops in particular) poisons
+    // the heap, and the NEXT world you open dies in ClearScene. Nulling the
+    // pointers is safe because nothing reads a face sub-mesh's CPU arrays: the
+    // only consumer is DrawMesh, which draws from the VBO ids UploadMesh set.
     for (int f = 0; f < oz::surface::FACE_COUNT; f++) {
         const size_t n = tris[f].size();
         if (n < 3) continue;   // primitive has no geometry on this axis
@@ -1796,12 +1811,15 @@ static void BuildFaceMeshes(OzoneRenderable& r) {
         m.texcoords = src.texcoords;
         m.normals = src.normals;
         m.colors = src.colors;
-        // UploadMesh copies the indices and generates the VAO sharing the
-        // existing VBO ids for the other streams.
         m.indices = (unsigned short*)RL_MALLOC(n * sizeof(unsigned short));
         if (!m.indices) continue;
         memcpy(m.indices, tris[f].data(), n * sizeof(unsigned short));
         UploadMesh(&m, false);
+        // Keep the index buffer (owned here), drop the four borrowed arrays.
+        m.vertices = nullptr;
+        m.texcoords = nullptr;
+        m.normals = nullptr;
+        m.colors = nullptr;
         r.faceMesh[f] = m;
     }
 }
