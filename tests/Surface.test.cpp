@@ -488,6 +488,97 @@ static void test_light_budget_parity() {
           "(so a full-budget world is knowingly over-subscribed when one is live)");
 }
 
+// The THREE fogFactorAt copies.
+//
+// LitFog.fs and Surface.fs were already two hand-maintained copies of the same
+// fog curve, and they had drifted in four places (fog light-influence, Fresnel
+// specular, negative clamp, opt-out flags) - so a surface-flagged brush could
+// disagree with the room it stands in, in the same frame. That is the failure
+// mode AGENTS.md warns about and the reason the light budget is policed by
+// test_light_budget_parity rather than by convention.
+//
+// Sky.fs is now a THIRD copy, added for horizon fog on the skybox cube. Adding a
+// copy is only defensible if adding a copy cannot silently succeed, which is what
+// this does: it extracts all three bodies, strips comments and whitespace, and
+// requires them to be identical. A comment-only edit passes; a changed constant,
+// a renamed variable or a reintroduced clamp fails the build.
+//
+// It also checks that Sky.fs still DECLARES all five fog uniforms it reads. A
+// missing declaration does not fail to compile - GLSL substitutes a default - so
+// the sky would quietly render with start=10/end=100/rate=1.0 while the world
+// used the level's, which is the exact bug SurfaceMaterial shipped with.
+static std::string ExtractFogFn(const std::string& src) {
+    const size_t at = src.find("float fogFactorAt(");
+    if (at == std::string::npos) return std::string();
+    const size_t open = src.find('{', at);
+    if (open == std::string::npos) return std::string();
+    int depth = 0;
+    size_t i = open;
+    for (; i < src.size(); i++) {
+        if (src[i] == '{') depth++;
+        else if (src[i] == '}') { depth--; if (depth == 0) { i++; break; } }
+    }
+    std::string body = src.substr(at, i - at);
+
+    // Strip // comments, then all whitespace. Both are cosmetic; comparing them
+    // would fail this test on a reformat, which is how parity tests get disabled.
+    std::string noComment;
+    for (size_t p = 0; p < body.size(); p++) {
+        if (body[p] == '/' && p + 1 < body.size() && body[p+1] == '/') {
+            while (p < body.size() && body[p] != '\n') p++;
+            noComment += ' ';
+        } else {
+            noComment += body[p];
+        }
+    }
+    std::string tight;
+    for (size_t p = 0; p < noComment.size(); p++) {
+        const char c = noComment[p];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+        tight += c;
+    }
+    return tight;
+}
+
+static void test_fog_curve_parity() {
+    const std::string lit  = ReadFile("GameData/Shaders/Lights/LitFog.fs");
+    const std::string surf = ReadFile("GameData/Shaders/Surface.fs");
+    const std::string sky  = ReadFile("GameData/Shaders/Sky.fs");
+    if (lit.empty() || surf.empty() || sky.empty()) {
+        printf("  SKIP  fog curve parity (a shader not found from cwd)\n");
+        return;
+    }
+
+    const std::string a = ExtractFogFn(lit);
+    const std::string b = ExtractFogFn(surf);
+    const std::string c = ExtractFogFn(sky);
+
+    check(!a.empty() && !b.empty() && !c.empty(),
+          "fogFactorAt is defined in all three shaders (LitFog.fs, Surface.fs, Sky.fs)");
+    if (a.empty() || b.empty() || c.empty()) return;
+
+    check(a == b,
+          "LitFog.fs and Surface.fs agree on fogFactorAt - a divergence means a "
+          "surface-flagged brush fogs differently from the lit room beside it");
+    check(a == c,
+          "Sky.fs agrees on fogFactorAt - a divergence means the sky fogs on a "
+          "different curve from the world it sits in, which is the seam this "
+          "shader exists to remove");
+
+    // Every uniform the body reads must be declared, or GLSL silently substitutes
+    // a default and the shader disagrees with C++ without any diagnostic.
+    const char* needed[] = { "fogColor", "fogStart", "fogEnd", "fogDensity", "fogIntensity" };
+    for (const char* u : needed) {
+        const std::string decl = std::string("uniform float ") + u;
+        const std::string dcol = std::string("uniform vec3  ") + u;
+        const bool ok = sky.find(decl) != std::string::npos ||
+                        sky.find(dcol) != std::string::npos;
+        check(ok, (std::string("Sky.fs declares ") + u +
+                   " - a missing declaration compiles fine and renders with GLSL's "
+                   "default instead of the level's fog").c_str());
+    }
+}
+
 static void test_shader_bit_parity() {
     struct Pair { const char* sfName; uint32_t bit; };
     // Every flag the shader gives a #define to. The shader does not need all 28:
@@ -811,6 +902,7 @@ int main() {
     test_legacy_flag_derivation();
     test_shader_bit_parity();
     test_light_budget_parity();
+    test_fog_curve_parity();
     test_full_bright_is_not_batched();
     test_derive_legacy_surface_mirror();
     test_backdrop_gain();

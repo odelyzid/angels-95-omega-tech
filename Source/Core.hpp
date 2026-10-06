@@ -72,6 +72,19 @@ Texture2D g_skySideTex = {0};   // optional horizon/side skybox variant
 // and 700 stays well inside the 4000 far plane.
 constexpr float kSkyboxDist = 700.0f;
 
+// How fast the sky returns to its authored colour above the horizon.
+//
+// This is the SINE of the elevation, so 0.10 is about 5.7 degrees. The skybox's
+// side faces straddle the horizon, so this is the band over which the sky blends
+// from fogColor (at the horizon, full) to the raw texture (above this angle).
+//
+// A constant rather than a per-level setting on purpose: it is a property of how
+// the skybox geometry is built (side faces are vertical planes through the camera,
+// so the horizon is always at dir.y == 0), not of any one level's art. A level
+// that wants a different haze profile authors it in fog density and colour, which
+// both feed the same blend.
+constexpr float kSkyHorizonBlend = 0.10f;
+
 // Set from PlayHomeScreen to request a server join
 bool SetServerJoinFlag = false;
 const char *SetServerJoinIP = nullptr;
@@ -83,6 +96,7 @@ void SaveGame();
 
 #include "Renderer/CombatFX.hpp"
 #include "Renderer/SurfaceMaterial.hpp"
+#include "Renderer/SkyMaterial.hpp"
 
 // ---------------------------------------------------------------------------
 // OzoneCollisionQuery — adapter that feeds OzoneLoader's chunked collision
@@ -559,6 +573,14 @@ void OmegaTechInit()
     // depends on Lighting.vs/LitFog.fs output is affected. Failure is non-fatal
     // and logged by SurfaceMaterial: brushes then fall back to DrawModel.
     oz::SurfaceMaterial::Instance().Init("GameData/Shaders/");
+
+    // Sky.vs/fs - horizon fog for the skybox cube. Also non-fatal and logged by
+    // SkyMaterial: without it the skybox falls back to raylib's default material
+    // shader, i.e. unfogged. Worth knowing before blaming a level: in all six
+    // shipped worlds the FAKEBACKDROP ring stands ~13 degrees above the horizon and
+    // occludes the whole band this affects, so it is a correctness fix that is
+    // invisible there. See SkyMaterial.hpp.
+    oz::SkyMaterial::Instance().Init("GameData/Shaders/");
 
     // Initialize combat FX (procedural decal/particle textures)
     CombatFX::Instance().Init();
@@ -1333,134 +1355,128 @@ void DrawWorld()
 
     BeginMode3D(OmegaTechData.MainCamera);
 
-    // -----------------------------------------------------------------------
-    // 3D Skybox Cube — drawn first with depth-write disabled so it sits
-    // behind all world geometry. Top/bottom use the active skybox (cap),
-    // 4 sides use the side texture from LevelInfo (g_skySideTex).
-    // -----------------------------------------------------------------------
-    {
-        Texture2D capTex = {0};
-        // Precedence: the level skybox (levelinfo / set_skybox / world default)
-        // is authoritative; a zone's authored skybox is only used when the level
-        // defines none. Previously the zone texture always won, so a saved
-        // levelinfo skybox appeared to be ignored inside sky zones.
-        if (WorldModels.Skybox.id > 0 && OmegaTechData.SkyboxEnabled) {
+// ---------------------------------------------------------------------------
+// 3D Skybox Cube - drawn first with depth-write disabled so it sits behind all
+// world geometry. Top/bottom use the active skybox (cap), 4 sides use the side
+// texture from LevelInfo (g_skySideTex).
+//
+// The six faces are one table and one loop, not six hand-copied blocks. They were
+// six blocks, which is how the sky could be drawn without fog while the world
+// fogged: there was no single point to attach the horizon-fog shader to, and each
+// face had its own DrawModel with raylib's default material.
+//
+// Each row is (face index, offset from the camera, euler rotation, which texture,
+// fallback tint). The rotations are not arbitrary:
+//   * The plane is generated in the XZ plane, so a vertical wall needs a rotation
+//     about X or Z. A rotation about Y only spins the quad within its own plane
+//     and leaves it horizontal, i.e. edge-on and invisible at the camera's own
+//     height - which is why outdoor levels once showed a black void wherever a
+//     side face should have been.
+//   * top is additionally flipped 180 about X so its -Y normal faces down.
+// ---------------------------------------------------------------------------
+{
+    Texture2D capTex = {0};
+    // Precedence: the level skybox (levelinfo / set_skybox / world default)
+    // is authoritative; a zone's authored skybox is only used when the level
+    // defines none. Previously the zone texture always won, so a saved
+    // levelinfo skybox appeared to be ignored inside sky zones.
+    if (WorldModels.Skybox.id > 0 && OmegaTechData.SkyboxEnabled) {
+        capTex = WorldModels.Skybox;
+    } else if (inSkyZone) {
+        SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
+        if (sky && sky->skyboxTex.id > 0)
+            capTex = sky->skyboxTex;
+        else if (WorldModels.Skybox.id > 0)
             capTex = WorldModels.Skybox;
-        } else if (inSkyZone) {
-            SkyZoneNode* sky = PawnSystem::Instance().GetActiveSkyZone();
-            if (sky && sky->skyboxTex.id > 0)
-                capTex = sky->skyboxTex;
-            else if (WorldModels.Skybox.id > 0)
-                capTex = WorldModels.Skybox;
-        }
-        // Sides use an authored side texture when available; otherwise reuse the
-        // cap texture so the sky renders all around (previously they drew a flat
-        // color and appeared black).
-        Texture2D sideTex = g_skySideTex;
-        if (sideTex.id == 0) sideTex = capTex;
-
-        if (capTex.id > 0 || sideTex.id > 0) {
-            Vector3 camPos = OmegaTechData.MainCamera.position;
-            rlDisableDepthMask();
-            oz::SetBackfaceCulling(false);
-
-            // Top face (index 0) — at y=+1000, normal -Y (faces down)
-            {
-                Color fallback = {80, 120, 200, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y + kSkyboxDist, camPos.z);
-                rlRotatef(180.0f, 1.0f, 0.0f, 0.0f);
-                if (capTex.id > 0) {
-                    OmegaTechData.SkyboxFace[0].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
-                    DrawModel(OmegaTechData.SkyboxFace[0], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[0], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // Bottom face (index 1) — at y=-1000, normal +Y (faces up)
-            {
-                Color fallback = {80, 120, 200, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y - kSkyboxDist, camPos.z);
-                if (capTex.id > 0) {
-                    OmegaTechData.SkyboxFace[1].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = capTex;
-                    DrawModel(OmegaTechData.SkyboxFace[1], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[1], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // +X face (index 2) - vertical wall at x=+kSkyboxDist
-            // NOTE: the plane is generated in the XZ plane, so standing it up
-            // requires a rotation about X or Z. A rotation about Y (as this code
-            // previously used) only spins the quad within its own plane and
-            // leaves it horizontal, i.e. edge-on and invisible at the camera's
-            // own height - which is why outdoor levels showed a black void
-            // wherever a side face should have been.
-            {
-                Color fallback = {120, 180, 240, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x + kSkyboxDist, camPos.y, camPos.z);
-                rlRotatef(90.0f, 0.0f, 0.0f, 1.0f);
-                if (sideTex.id > 0) {
-                    OmegaTechData.SkyboxFace[2].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
-                    DrawModel(OmegaTechData.SkyboxFace[2], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[2], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // -X face (index 3) - vertical wall at x=-kSkyboxDist
-            {
-                Color fallback = {120, 180, 240, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x - kSkyboxDist, camPos.y, camPos.z);
-                rlRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
-                if (sideTex.id > 0) {
-                    OmegaTechData.SkyboxFace[3].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
-                    DrawModel(OmegaTechData.SkyboxFace[3], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[3], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // +Z face (index 4) - vertical wall at z=+kSkyboxDist
-            {
-                Color fallback = {120, 180, 240, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y, camPos.z + kSkyboxDist);
-                rlRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-                if (sideTex.id > 0) {
-                    OmegaTechData.SkyboxFace[4].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
-                    DrawModel(OmegaTechData.SkyboxFace[4], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[4], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // -Z face (index 5) - vertical wall at z=-kSkyboxDist
-            {
-                Color fallback = {120, 180, 240, 255};
-                rlPushMatrix();
-                rlTranslatef(camPos.x, camPos.y, camPos.z - kSkyboxDist);
-                rlRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-                if (sideTex.id > 0) {
-                    OmegaTechData.SkyboxFace[5].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = sideTex;
-                    DrawModel(OmegaTechData.SkyboxFace[5], {0,0,0}, 1.0f, WHITE);
-                } else {
-                    DrawModel(OmegaTechData.SkyboxFace[5], {0,0,0}, 1.0f, fallback);
-                }
-                rlPopMatrix();
-            }
-            // Culling ON for the rest of the frame: the generated OZONE brushes
-            // have correct winding and want it. Imported meshes opt back out via
-            // oz::ScopedCullOff in oz::Mesh::Draw (see Renderer/CullState.hpp —
-            // this used to be a raw call that nothing ever turned back off).
-            oz::SetBackfaceCulling(true);
-            rlEnableDepthMask();
-        }
     }
+    // Sides use an authored side texture when available; otherwise reuse the
+    // cap texture so the sky renders all around (previously they drew a flat
+    // color and appeared black).
+    Texture2D sideTex = g_skySideTex;
+    if (sideTex.id == 0) sideTex = capTex;
+
+    if (capTex.id > 0 || sideTex.id > 0) {
+        const Vector3 camPos = OmegaTechData.MainCamera.position;
+        const bool skyReady = oz::SkyMaterial::Instance().Ready();
+
+        // Horizon fog for the sky. The world's fog is owned by OzoneLoader (raylib
+        // has no GetShaderValue) and UpdateLightSources() is the single mirror
+        // point into SurfaceMaterial; the sky is a third consumer of the SAME
+        // state, so it is published the same way rather than read back here.
+        //
+        // fogIntensity doubles as the on/off switch, so a level that never set
+        // fog gets the sky exactly as it was before this existed.
+        if (skyReady) {
+            float fogCol[3] = { 0.7f, 0.7f, 0.8f };
+            float fogStart = 10.0f, fogEnd = 100.0f, fogDensity = 1.0f, fogIntensity = 1.0f;
+            OzoneLoader::Instance().GetWorldFog(fogCol, fogStart, fogEnd,
+                                                fogDensity, fogIntensity);
+            auto& skyMat = oz::SkyMaterial::Instance();
+            skyMat.SetFog(fogCol, fogStart, fogEnd, fogDensity, fogIntensity);
+            skyMat.SetHorizonBlend(kSkyHorizonBlend);
+            skyMat.Apply(camPos, WHITE);
+        }
+
+        rlDisableDepthMask();
+        oz::SetBackfaceCulling(false);
+
+        struct SkyFace {
+            int index;
+            Vector3 offset;
+            float rx, ry, rz;
+            bool useCap;
+            Color fallback;
+        };
+        const SkyFace faces[6] = {
+            // 0 top     at y=+D, normal -Y (faces down)
+            { 0, { 0.0f,  kSkyboxDist, 0.0f }, 180.0f, 0.0f, 0.0f, true,  { 80, 120, 200, 255 } },
+            // 1 bottom  at y=-D, normal +Y (faces up)
+            { 1, { 0.0f, -kSkyboxDist, 0.0f },   0.0f, 0.0f, 0.0f, true,  { 80, 120, 200, 255 } },
+            // 2 +X       3 -X
+            { 2, {  kSkyboxDist, 0.0f, 0.0f },   0.0f, 0.0f,  90.0f, false, { 120, 180, 240, 255 } },
+            { 3, { -kSkyboxDist, 0.0f, 0.0f },   0.0f, 0.0f, -90.0f, false, { 120, 180, 240, 255 } },
+            // 4 +Z       5 -Z
+            { 4, { 0.0f, 0.0f,  kSkyboxDist },  -90.0f, 0.0f, 0.0f, false, { 120, 180, 240, 255 } },
+            { 5, { 0.0f, 0.0f, -kSkyboxDist },   90.0f, 0.0f, 0.0f, false, { 120, 180, 240, 255 } },
+        };
+
+        for (const SkyFace& f : faces) {
+            const Texture2D tex = f.useCap ? capTex : sideTex;
+            Model& model = OmegaTechData.SkyboxFace[f.index];
+
+            rlPushMatrix();
+            rlTranslatef(camPos.x + f.offset.x, camPos.y + f.offset.y, camPos.z + f.offset.z);
+            rlRotatef(f.rx, 1.0f, 0.0f, 0.0f);
+            rlRotatef(f.ry, 0.0f, 1.0f, 0.0f);
+            rlRotatef(f.rz, 0.0f, 0.0f, 1.0f);
+
+            if (tex.id > 0) {
+                model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+                // Bind the horizon-fog program. raylib uploads `mvp` and
+                // `matModel` automatically for whatever program is on the
+                // material (rlgl looks those two names up by name), so the
+                // vertex stage gets what it needs with no manual plumbing.
+                if (skyReady) model.materials[0].shader = oz::SkyMaterial::Instance().Get();
+                DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
+            } else {
+                // No texture for this row: fall back to a flat tint. Deliberately
+                // NOT given the sky shader - a solid colour has no horizon to
+                // blend, and multiplying the tint through the fog blend would just
+                // darken the fallback.
+                if (skyReady) model.materials[0].shader = {0};
+                DrawModel(model, {0, 0, 0}, 1.0f, f.fallback);
+            }
+            rlPopMatrix();
+        }
+
+        // Culling ON for the rest of the frame: the generated OZONE brushes
+        // have correct winding and want it. Imported meshes opt back out via
+        // oz::ScopedCullOff in oz::Mesh::Draw (see Renderer/CullState.hpp -
+        // this used to be a raw call that nothing ever turned back off).
+        oz::SetBackfaceCulling(true);
+        rlEnableDepthMask();
+    }
+}
 
     // -----------------------------------------------------------------------
     // SKY PASS — render SURF_FAKEBACKDROP brushes from the main camera with
