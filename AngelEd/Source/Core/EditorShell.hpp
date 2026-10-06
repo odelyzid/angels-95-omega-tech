@@ -33,6 +33,7 @@
 #include "../../../Source/Audio/SoundManager.hpp"
 #include "../../../Source/Physics/OzBsp.hpp"
 #include "../../../Source/Renderer/LitLightning.hpp"
+#include "../../../Source/Renderer/CullState.hpp"
 #ifdef _WIN32
 #include <GL/gl.h>
 #endif

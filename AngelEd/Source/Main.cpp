@@ -845,7 +845,7 @@ int main(int argc, char **argv){
             if (s_skyTex.id > 0) {
                 Vector3 cp = OTEditor.MainCamera.position;
                 rlDisableDepthMask();
-                rlDisableBackfaceCulling();
+                oz::SetBackfaceCulling(false);
                 auto drawFace = [&](int idx, float x, float y, float z, float rotY, float rotX, Texture2D tex) {
                     rlPushMatrix();
                     rlTranslatef(x, y, z);
@@ -861,10 +861,19 @@ int main(int argc, char **argv){
                 drawFace(3, cp.x - 1000.0f, cp.y, cp.z, -90.0f,   0.0f, s_skyTex);  // -X
                 drawFace(4, cp.x, cp.y, cp.z + 1000.0f, 180.0f,   0.0f, s_skyTex);  // +Z
                 drawFace(5, cp.x, cp.y, cp.z - 1000.0f,   0.0f,   0.0f, s_skyTex);  // -Z
-                if (OTEditor.ViewMode == LightingMode::WIREFRAME)
-                    rlDisableBackfaceCulling();
-                else
-                    rlEnableBackfaceCulling();
+                // Culling ON for the rest of the frame (the generated OZONE
+                // brushes have correct winding and want it); wireframe wants it
+                // off so the far side of a brush stays visible.
+                //
+                // This used to be two raw rl* calls, and the wireframe branch
+                // DISABLED culling and never turned it back on, so a frame drawn
+                // in wireframe mode inherited "off" for everything after it -
+                // including imported models, which is the exact case CullState
+                // exists to make impossible. It now states the same one-line
+                // intent the client uses (OzoneLoader::Draw's cullBackfaces) and
+                // routes through the tracked setter, so a level that switches
+                // ViewMode cannot leak the flag into the next frame.
+                oz::SetBackfaceCulling(OTEditor.ViewMode != LightingMode::WIREFRAME);
                 rlEnableDepthMask();
             }
         }
@@ -2101,9 +2110,10 @@ OmegaTechEditor.DrawModel = false;
             BeginMode3D(prevCam);
             DrawGrid(20, radius / 2.0f); // scale the grid to the model
             if (mdl.meshes != nullptr) {
-                rlDisableBackfaceCulling();
+                // Imported models opt out of culling via the RAII guard rather
+                // than a paired raw rl* call - see Renderer/CullState.hpp.
+                oz::ScopedCullOff cullOff;
                 DrawModel(mdl, {0, 0, 0}, 1.0f, WHITE);
-                rlEnableBackfaceCulling();
             }
             EndMode3D();
             EndTextureMode();
