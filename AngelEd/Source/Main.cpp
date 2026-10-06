@@ -889,6 +889,15 @@ int main(int argc, char **argv){
             }
         }
 
+        // Additive glow halo, after the opaque world so it lands on top of the
+        // composited frame - the same place the client draws it (Core.hpp, right
+        // after DrawWorldGeometry). Without this call the editor showed the
+        // emissive term from Surface.fs but never the halo, and since the halo is
+        // the ONLY thing the glow COLOUR affects, surfGlow was not authorable:
+        // you could set the colour and see no difference at all.
+        // No-op unless a surface actually carries SURF_GLOW.
+        OzoneLoader::Instance().DrawGlowGeometry(OTEditor.MainCamera);
+
         // Pawn system (use lit shader for billboards when in lit/unlit mode)
         {
             Shader bbShader = {0};
@@ -1336,9 +1345,32 @@ if (g_editorPanels.showCollisionBounds) {
                         PawnSystem::Instance().Spawn(
                             {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z}, "Walker");
                     } else if (OmegaTechEditor.ActiveNodeType == EditorNodeType::LIGHT) {
+                        // The Enter-key / double-click placement path. It used to
+                        // AddLight a bare default-constructed LightNode, which has
+                        // FOUR problems:
+                        //   * active defaults to FALSE, so the light was stored,
+                        //     listed in the WorldGraph, exported to World.ozone, and
+                        //     lit NOTHING until the level was reloaded from disk
+                        //     (the loader sets active = true).
+                        //   * no name, so the .ozls defaults layer never ran and the
+                        //     Entity Properties panel showed no def section.
+                        //   * a directional light placed at the camera sat AT the
+                        //     aim point, so its direction normalized to zero.
+                        //   * no zone rebind, so AssignLightZones could not classify
+                        //     it.
+                        // The event-bus path (Subsystems/Placement.cpp) already did
+                        // all four; this now matches it.
                         LightNode node;
+                        node.active = true;
                         node.position = {OmegaTechEditor.X, OmegaTechEditor.Y, OmegaTechEditor.Z};
+                        node.target = {0.0f, 0.0f, 0.0f};
+                        node.color = WHITE;
+                        node.intensity = 1.0f;
+                        node.radius = 20.0f;
+                        node.type = LitLightType::POINT;
+                        ApplyLightDefDefaultsToNode(node);
                         PawnSystem::Instance().AddLight(node);
+                        PawnSystem::Instance().AssignLightZones();
                     }
                 }
 

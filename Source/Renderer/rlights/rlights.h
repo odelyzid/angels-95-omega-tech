@@ -36,7 +36,28 @@
 //----------------------------------------------------------------------------------
 // Defines and Macros
 //----------------------------------------------------------------------------------
-#define MAX_LIGHTS  64        // Max dynamic lights supported by shader
+
+// The light budget. This value is written into THREE places and must agree in
+// all of them, because a mismatch is invisible at compile time and destroys lights
+// at run time:
+//
+//   * here                                   (C++ submission)
+//   * GameData/Shaders/Lights/LitFog.fs      (the world's program)
+//   * GameData/Shaders/Surface.fs            (the surface program)
+//
+// It was 64 here while both shaders said 32. The submission loop therefore wrote
+// slots 32..63, every one of which is a guaranteed-miss uniform lookup that the
+// driver discards - so half of the "64 supported lights" reached the GPU as nothing,
+// and WHICH half depended on the per-frame distance sort.
+//
+// The GLSL values cannot #include this header, so `tests/Surface.test.cpp` parses
+// all three files and fails if they disagree. That test is the enforcement
+// mechanism; this comment is why it exists.
+//
+// Changing this number means changing all three, and it changes the per-fragment
+// cost of EVERY lit mesh, particle, pickup, projectile and the view-model, because
+// both live shaders run an unrolled `for (i < MAX_LIGHTS)` loop per fragment.
+#define MAX_LIGHTS  32
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -67,15 +88,26 @@ typedef struct {
     Vector3 target;
     Color color;
     float attenuation;
-    float intensity;     // brightness multiplier 0.0-1.0
-    float radius;        // point/spot light range
-    float innerCone;     // spot light inner angle (degrees)
-    float outerCone;     // spot light outer angle (degrees)
+    float intensity;     // brightness multiplier. Applied ONCE, in the shader. Do
+                         // NOT also pre-multiply it into `color` - that is how this
+                         // engine used to render intensity squared.
+    float radius;        // point/spot light range; <= 0 means unlimited
+    // Spot cone half-angles as COSINES (cos(halfAngle)), NOT degrees. That is what
+    // spotCone()'s smoothstep expects, what LightNode stores, and what the editor
+    // round-trips (it edits degrees, converts on apply). They were documented as
+    // degrees here while CreateLight seeded them as 15/45 - and nothing noticed,
+    // because neither was ever uploaded: the shader degenerated to
+    // smoothstep(0,0,x) == 1 and every spot light behaved as a bare point light.
+    float innerCone;
+    float outerCone;
+    // Animation clock in radians, uploaded so the shader's per-effect flicker is a
+    // property of THE LIGHT rather than of its slot in the uniform array. The slot
+    // changes whenever the per-frame distance sort reorders, and a slot-derived
+    // flicker pops when it does.
+    float phase;
     int effect;          // LightEffect (0=none, 1=watery, 2=torch, 3=fire, 4=lamp)
-    bool hasFlare;       // lens flare enabled
-    bool hasCorona;      // corona glow enabled
-    int worldIndex;      // which world this light belongs to
-    char label[64];      // editor label
+    int hasFlare;        // lens flare requested (drawn CPU-side in Core.hpp)
+    int hasCorona;       // corona glow requested (drawn CPU-side in Core.hpp)
     
     // Shader locations
     int enabledLoc;
@@ -86,6 +118,9 @@ typedef struct {
     int attenuationLoc;
     int intensityLoc;
     int radiusLoc;
+    int innerConeLoc;
+    int outerConeLoc;
+    int phaseLoc;
     int effectLoc;
 } Light;
 
@@ -154,10 +189,13 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.color = color;
         light.intensity = 1.0f;
         light.radius = 50.0f;
-        light.innerCone = 15.0f;
-        light.outerCone = 45.0f;
+        // Cosines, matching LightNode's defaults (0.95 ~ 18 deg, 0.80 ~ 37 deg)
+        // and spotCone()'s smoothstep. These were 15/45 here, documented as
+        // degrees - a third convention, in a third place.
+        light.innerCone = 0.95f;
+        light.outerCone = 0.80f;
+        light.phase = 0.0f;
         light.effect = LIGHT_EFFECT_NONE;
-        snprintf(light.label, sizeof(light.label), "Light_%d", lightsCount);
 
         // NOTE: Lighting shader naming must be the provided ones
         light.enabledLoc = GetShaderLocation(shader, TextFormat("lights[%i].enabled", lightsCount));
@@ -167,6 +205,9 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.colorLoc = GetShaderLocation(shader, TextFormat("lights[%i].color", lightsCount));
         light.intensityLoc = GetShaderLocation(shader, TextFormat("lights[%i].intensity", lightsCount));
         light.radiusLoc = GetShaderLocation(shader, TextFormat("lights[%i].radius", lightsCount));
+        light.innerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].innerCone", lightsCount));
+        light.outerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].outerCone", lightsCount));
+        light.phaseLoc = GetShaderLocation(shader, TextFormat("lights[%i].phase", lightsCount));
         light.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", lightsCount));
 
         UpdateLightValues(shader, light);
@@ -195,6 +236,16 @@ void UpdateLightValues(Shader shader, Light light)
 
     SetShaderValue(shader, light.intensityLoc, &light.intensity, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.radiusLoc, &light.radius, SHADER_UNIFORM_FLOAT);
+
+    // These three were declared in the shader's Light struct and read by spotCone()
+    // and applyLightEffect(), but nothing ever uploaded them - so they stayed 0 and
+    // smoothstep(0.0, 0.0, cosAngle) collapsed to 1.0, making every spot light
+    // omnidirectional. That is why the whole inner_cone/outer_cone authoring path
+    // (OZONE args 11/12, kLightStats, the Properties panel's degree conversion, the
+    // gizmo cone footprint) described geometry the renderer never produced.
+    SetShaderValue(shader, light.innerConeLoc, &light.innerCone, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shader, light.outerConeLoc, &light.outerCone, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shader, light.phaseLoc, &light.phase, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.effectLoc, &light.effect, SHADER_UNIFORM_INT);
 }
 

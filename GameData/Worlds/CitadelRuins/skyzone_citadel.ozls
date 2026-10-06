@@ -2,12 +2,12 @@
 // two previously disagreed, so the authored dusk sky was being overridden.
 entity "citadel_sky" : skyzone {
     fog_color = (0.62, 0.52, 0.46)
-    fog_density = 0.0022
+    fog_density = 0.005
     ambient_light = (0.50, 0.46, 0.46)
     skybox = "GameData/Global/sky/sky_evening.dds"
     actions {
         on_enter {
-            set_fog 0.62 0.52 0.46 0.0022
+            set_fog 0.62 0.52 0.46 0.005
             set_ambient 0.50 0.46 0.46
             set_skybox "GameData/Global/sky/sky_evening.dds"
             say "Citadel Ruins - hold the courtyard, watch the towers"

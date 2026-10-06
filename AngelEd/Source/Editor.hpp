@@ -256,6 +256,18 @@ inline void Init(){
                             1.0f};
         if (OTEditor.AmbientLoc >= 0)
             SetShaderValue(OTEditor.LitFogShader, OTEditor.AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
+
+        // PUBLISH the ambient, do not just push it to this one program.
+        //
+        // OzoneLoader owns the world's ambient (Set/GetWorldAmbient) precisely
+        // because raylib has no GetShaderValue, and SurfaceMaterial::UpdateFrame
+        // READS IT BACK from there rather than taking its own copy. The editor
+        // never published, so OzoneLoader stayed at its header default
+        // {0.1,0.1,0.1,1} while LitFog got ~{0.28,...} - and since both shaders
+        // divide by 10, a flagged brush rendered at 0.01 next to a room at 0.028
+        // in the SAME viewport frame. The client's Core.hpp has always published
+        // correctly; the editor had a private copy nobody could read.
+        OzoneLoader::Instance().SetWorldAmbient(ambient[0], ambient[1], ambient[2], ambient[3]);
     }
 
     // Load unlit shader for Unlit ViewMode (pass-through, no lighting)

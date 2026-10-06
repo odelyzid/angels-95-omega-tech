@@ -271,8 +271,11 @@ npc Skaarj 262 95 0.1
 npc Walker 335 0 0.1
 light point 64 34 24.2 255 140 60 0.911361 40.1432 effect=2
 light point 64 51 16.2 255 150 70 0.911361 40.1432 effect=2
-light directional 0 0 0 120 130 150 1
-light directional 0 0 0 180 210 230 1
+# A flat overcast key and a brighter sky bounce from the far side. Both were
+# `light directional 0 0 0` (authored at the origin), which normalizes to NaN and
+# made each one contribute nothing while still counting as an active light.
+light directional -60 40 70 120 130 150 1
+light directional 70 -50 45 180 210 230 1
 light point 0 -26 8 255 140 60 0.911361 40.1432 effect=2
 light point -64 51 16.2 255 150 70 0.911361 40.1432 effect=2
 light point -90 25 40.5 255 130 50 0.911361 40.1432 effect=2

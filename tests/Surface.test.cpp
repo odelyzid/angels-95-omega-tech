@@ -1,10 +1,26 @@
 // Surface flag registry + per-face surface properties — standalone, no raylib.
 #include "../Source/World/SurfaceFlags.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
 using namespace oz::surface;
+
+// EVERY flag in World/SurfaceFlags.hpp, once. The bit-allocation test, the
+// shader parity test and the dead-flag register all index off this list, so a new
+// flag cannot be added to the header without the suite noticing it is unclassified.
+static const uint32_t kAllSurfaceFlags[] = {
+    SURF_FAKEBACKDROP, SURF_COLLISION_PROXY, SURF_INVISIBLE, SURF_MASKED,
+    SURF_TRANSLUCENT, SURF_ALPHABLEND, SURF_MODULATED, SURF_TWO_SIDED,
+    SURF_UNLIT, SURF_FAKE_LIT, SURF_SPECIAL_LIT, SURF_GLOW, SURF_PORTAL,
+    SURF_MIRROR, SURF_ENVIRONMENT, SURF_PAN_U, SURF_PAN_V, SURF_SMALL_WAVY,
+    SURF_BRIGHT_CORNERS, SURF_DIRTY_SHADOWS, SURF_SHADOW_HI, SURF_SHADOW_LO,
+    SURF_NO_SMOOTH, SURF_NO_FOG, SURF_NO_BOUNDS_REJECT, SURF_NO_BSP_CUTS,
+    SURF_ZONE_HACK, SURF_INVISIBLE_OCCLUDER, SURF_FORCE_VIEW_ZONE,
+};
+static const int kAllSurfaceFlagCount =
+    (int)(sizeof(kAllSurfaceFlags) / sizeof(kAllSurfaceFlags[0]));
 
 static int test_count = 0, pass_count = 0;
 
@@ -33,28 +49,21 @@ static void test_legacy_bits_stable() {
     check((newBits & (SURF_FAKEBACKDROP | SURF_COLLISION_PROXY)) == 0,
           "no new surface flag overlaps the legacy bits");
     // Every bit unique (a duplicate would silently make one checkbox untoggleable).
-    // SURF_SPECIAL_LIT and SURF_FAKEBACKDROP were missing from this array even
-    // though BOTH are reachable from the editor's Flags tab - a collision on an
-    // untested bit is exactly the bug this test exists to catch, so the list must
-    // cover every flag the dialog can set.
-    const uint32_t all[] = {SURF_INVISIBLE, SURF_MASKED, SURF_TRANSLUCENT, SURF_ALPHABLEND,
-        SURF_MODULATED, SURF_TWO_SIDED, SURF_UNLIT, SURF_FAKE_LIT, SURF_GLOW, SURF_PORTAL,
-        SURF_MIRROR, SURF_ENVIRONMENT, SURF_PAN_U, SURF_PAN_V, SURF_SMALL_WAVY,
-        SURF_BRIGHT_CORNERS, SURF_DIRTY_SHADOWS, SURF_SHADOW_HI, SURF_SHADOW_LO,
-        SURF_NO_SMOOTH, SURF_NO_FOG, SURF_NO_BOUNDS_REJECT, SURF_NO_BSP_CUTS,
-        SURF_ZONE_HACK, SURF_INVISIBLE_OCCLUDER, SURF_FORCE_VIEW_ZONE,
-        SURF_SPECIAL_LIT, SURF_FAKEBACKDROP};
+    // Built from kAllSurfaceFlags so a new header flag is automatically covered.
     bool unique = true;
-    for (size_t i = 0; i < sizeof(all)/sizeof(all[0]); i++)
-        for (size_t j = i + 1; j < sizeof(all)/sizeof(all[0]); j++)
-            if (all[i] == all[j]) unique = false;
-    check(unique, "all 28 surface flag bits are distinct");
+    for (int i = 0; i < kAllSurfaceFlagCount; i++)
+        for (int j = i + 1; j < kAllSurfaceFlagCount; j++)
+            if (kAllSurfaceFlags[i] == kAllSurfaceFlags[j]) unique = false;
+    check(unique, "every surface flag bit is distinct");
 
     // No bit is a multi-bit alias: every flag is a single bit, because Surface.fs
     // tests them with `uSurfaceFlags & bit` and the exporter writes one integer.
     bool singleBit = true;
-    for (uint32_t b : all) if (b == 0 || (b & (b - 1)) != 0) singleBit = false;
+    for (uint32_t b : kAllSurfaceFlags) if (b == 0 || (b & (b - 1)) != 0) singleBit = false;
     check(singleBit, "every surface flag is exactly one bit wide");
+
+    // Bits 3 and 4 are the pre-existing pair; 5..31 is 27 more.
+    check(kAllSurfaceFlagCount == 29, "the header defines 29 flags");
 }
 
 // ---------------------------------------------------------------------------
@@ -392,17 +401,93 @@ static void test_seed_inert_values() {
 }
 
 // ---------------------------------------------------------------------------
-// Shader / header bit parity
+// Shader / header bit parity, and the light budget
 // ---------------------------------------------------------------------------
 // GameData/Shaders/Surface.fs duplicates the flag VALUES as `#define SF_*`, and
 // AGENTS.md is explicit that renumbering a bit in the header means editing the
 // shader too "or the flag silently does nothing". Nothing enforced that until now,
 // so a renumber would have compiled cleanly, passed every other test here, and
-// shipped a flag that did nothing.
+// shipped a flag that does nothing.
 //
 // This reads the shader and compares each #define against the header constant.
 // It is a file read rather than a compile-time check because the two values
 // genuinely live in two languages.
+//
+// The same hazard, worse, applies to MAX_LIGHTS, which lives in THREE files
+// (rlights.h + both live shaders). It was 64 in C++ and 32 in both GLSL programs,
+// so the submission loop wrote slots the driver does not have and half of the
+// "supported" lights were silently discarded - WHICH half being decided per frame
+// by the distance sort. See test_light_budget_parity below.
+// Defined below, next to the other source-reading helpers.
+static std::string ReadFile(const char* path);
+
+static int ReadDefineInt(const std::string& src, const char* name) {
+    const std::string want = std::string("#define ") + name;
+    size_t p = src.find(want);
+    if (p == std::string::npos) return -1;
+    p += want.size();
+    while (p < src.size() && (src[p] == ' ' || src[p] == '\t')) p++;
+    if (p >= src.size()) return -1;
+    // Accept the two spellings in use: "32" and "(1 << 5)".
+    if (src[p] >= '0' && src[p] <= '9') return std::atoi(src.c_str() + p);
+    if (src[p] == '(') {
+        const size_t shift = src.find("<<", p);
+        if (shift == std::string::npos) return -1;
+        return 1 << std::atoi(src.c_str() + shift + 2);
+    }
+    return -1;
+}
+
+static void test_light_budget_parity() {
+    const std::string lit  = ReadFile("GameData/Shaders/Lights/LitFog.fs");
+    const std::string surf = ReadFile("GameData/Shaders/Surface.fs");
+    const std::string rl   = ReadFile("Source/Renderer/rlights/rlights.h");
+    if (lit.empty() || surf.empty() || rl.empty()) {
+        printf("  SKIP  light budget parity (shader or rlights.h not found from cwd)\n");
+        return;
+    }
+
+    const int cLit  = ReadDefineInt(lit,  "MAX_LIGHTS");
+    const int cSurf = ReadDefineInt(surf, "MAX_LIGHTS");
+    const int cRl   = ReadDefineInt(rl,   "MAX_LIGHTS");
+
+    check(cLit > 0 && cSurf > 0 && cRl > 0,
+          "MAX_LIGHTS is defined in all three places (rlights.h, LitFog.fs, Surface.fs)");
+    check(cLit == cSurf,
+          "the two shaders agree on the light budget - a mismatch makes one program's "
+          "scene lighter than the other's in the same frame");
+    check(cRl == cLit,
+          "C++ agrees with the shaders on the light budget - a mismatch means the "
+          "submission loop writes slots the driver discards, losing lights silently "
+          "and per-frame, decided by the distance sort");
+
+    // A power-of-two budget is not required, but a tiny or absurd one is a
+    // configuration mistake worth failing on rather than discovering in-game.
+    check(cLit >= 8, "the light budget is at least 8");
+    check(cLit <= 64, "the light budget is at most 64");
+
+    // The transient reservation is the other half of the real budget: transients are
+    // submitted FIRST and cannot be evicted, so a world authored to the full budget
+    // silently loses world lights the moment a weapon fires. Both numbers have to be
+    // visible together or the "design to N lights" advice in Wiki/Lighting-Plan.md
+    // cannot be checked.
+    //
+    // Read as text because LitLightning.hpp needs raylib and this suite is
+    // deliberately raylib-free.
+    const std::string litHdr = ReadFile("Source/Renderer/LitLightning.hpp");
+    int transient = -1;
+    if (!litHdr.empty()) {
+        const size_t p = litHdr.find("MAX_TRANSIENT_LIGHTS");
+        if (p != std::string::npos) {
+            const size_t eq = litHdr.find('=', p);
+            if (eq != std::string::npos) transient = std::atoi(litHdr.c_str() + eq + 1);
+        }
+    }
+    check(transient > 0 && transient < cLit,
+          "the transient reservation is non-zero and smaller than the total budget "
+          "(so a full-budget world is knowingly over-subscribed when one is live)");
+}
+
 static void test_shader_bit_parity() {
     struct Pair { const char* sfName; uint32_t bit; };
     // Every flag the shader gives a #define to. The shader does not need all 28:
@@ -513,12 +598,223 @@ static void test_brush_wide_default_contract() {
           "ResetToDefault keeps the brush default (so it is NOT the brush-wide reset)");
 }
 
+// ---------------------------------------------------------------------------
+// Backdrop full-bright gain
+// ---------------------------------------------------------------------------
+// The gain is a per-PASS value, and the bug it replaces was a timing one: an
+// earlier version batched it into SurfaceMaterial::UpdateFrame, which runs once
+// per frame BEFORE DrawWorld, while DrawZoneGeometry sets it from INSIDE the draw
+// passes. The flush had therefore already happened and uFullBright stayed at
+// 1.0 forever - every painted backdrop rendered at full value rather than the
+// 0.55 it was tuned for.
+//
+// These pin the VALUE and, more importantly, the property that matters: the gain
+// must be reachable as a constant from raylib-free code, so a test can assert it
+// at all. A local inside DrawZoneGeometry was untestable by construction.
+static void test_backdrop_gain() {
+    check(kBackdropGain > 0.0f && kBackdropGain < kFullBrightGain,
+          "the backdrop gain is a dimmer tone curve, not full value");
+    check(kFullBrightGain == 1.0f, "the world pass full-bright gain is 1.0");
+
+    // 0.55 must stay exactly the legacy hack's gain: that hack forced ambient to
+    // 5.5 and Surface.fs divides ambient by 10. If either number moves, the
+    // 69 shipped flags=8 backdrops change brightness.
+    check(kBackdropGain == 5.5f / 10.0f,
+          "the backdrop gain equals the old ambient/10 hack's gain (5.5 / 10)");
+
+    // Both passes must agree on what "no override" is, or a world pass that runs
+    // after a backdrop pass would inherit 0.55 forever.
+    check(kFullBrightGain != kBackdropGain,
+          "the two gains differ, so DrawZoneGeometry's restore is meaningful");
+}
+
+// A structural guard, because the timing bug above is not visible from the API:
+// SetFullBright took a float and looked correct in every review. It failed
+// because of WHERE it was read back. So assert the shape of the code itself.
+//
+// This reads source files, which is unusual for a unit test but is the same
+// discipline as the shader bit-parity check above: two artefacts that must agree
+// cannot both be expressed in one language, so one of them has to be inspected
+// as text. If the file is missing the suite skips loudly rather than passing
+// silently.
+static std::string ReadFile(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return std::string();
+    std::string out;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
+    fclose(f);
+    return out;
+}
+
+static void test_full_bright_is_not_batched() {
+    const std::string mat = ReadFile("Source/Renderer/SurfaceMaterial.cpp");
+    const std::string hdr = ReadFile("Source/Renderer/SurfaceMaterial.hpp");
+    const std::string ldr = ReadFile("Source/World/OzOzoneLoader.cpp");
+    if (mat.empty() || hdr.empty() || ldr.empty()) {
+        printf("  SKIP  full-bright upload shape (source files not found from cwd)\n");
+        return;
+    }
+
+    check(hdr.find("m_fullBrightDirty") == std::string::npos,
+          "SurfaceMaterial has no fullBright dirty flag - the lazy flush is gone");
+
+    // The setter must do the upload itself, not delegate to a per-frame flush.
+    const size_t setAt = mat.find("void SurfaceMaterial::SetFullBright");
+    const bool found = setAt != std::string::npos;
+    check(found, "SurfaceMaterial.cpp still defines SetFullBright");
+    if (found) {
+        // Isolate the function body: from its opening brace to the next
+        // "\n}" at column 0, which is how this file ends every definition.
+        const size_t bodyEnd = mat.find("\n}", setAt);
+        const std::string body = mat.substr(setAt, (bodyEnd - setAt) + 2);
+        check(body.find("SetShaderValue") != std::string::npos,
+              "SetFullBright uploads with SetShaderValue (not deferred)");
+        check(body.find("m_fullBrightDirty") == std::string::npos,
+              "SetFullBright does not set a dirty flag");
+    }
+
+    // UpdateFrame must NOT have regained a flush, which is where it used to live.
+    const size_t updAt = mat.find("void SurfaceMaterial::UpdateFrame");
+    if (updAt != std::string::npos) {
+        const size_t bodyEnd = mat.find("\n}", updAt);
+        const std::string body = mat.substr(updAt, (bodyEnd - updAt) + 2);
+        check(body.find("m_fullBrightLoc") == std::string::npos,
+              "UpdateFrame no longer flushes uFullBright (it runs before the draw passes)");
+    }
+
+    // The backdrop pass must both set and restore, so the world pass that follows
+    // cannot inherit the dimmer gain.
+    const size_t dzgAt = ldr.find("void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox&");
+    check(dzgAt != std::string::npos, "DrawZoneGeometry(bounds) is still defined");
+    if (dzgAt != std::string::npos) {
+        const size_t bodyEnd = ldr.find("\n}", dzgAt);
+        const std::string body = ldr.substr(dzgAt, (bodyEnd - dzgAt) + 2);
+        const size_t setGain = body.find("SetFullBright");
+        check(setGain != std::string::npos, "the backdrop pass sets the full-bright gain");
+        check(body.find("kBackdropGain") != std::string::npos,
+              "...using the shared oz::surface::kBackdropGain, not a local literal");
+        check(body.find("kFullBrightGain") != std::string::npos,
+              "...and restores kFullBrightGain on the way out");
+        check(body.find("SurfacePass::BackdropOnly") != std::string::npos,
+              "the backdrop pass draws through DrawSurface(BackdropOnly)");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dead-flag register, and what the editor is allowed to offer
+// ---------------------------------------------------------------------------
+// Fourteen flags parse, export and round-trip, and NOTHING in the engine reads
+// them. They used to be live checkboxes in the Surface Properties dialog, so
+// ticking one saved a bit that then did nothing - strictly worse than not offering
+// it, because the author cannot tell which half of the dialog works.
+//
+// This is the register, and it is asserted rather than described: a flag added to
+// the dialog without a consumer fails here.
+static void test_dead_flags_are_still_dead() {
+    struct Named { uint32_t bit; const char* name; };
+    // SURF_NO_SMOOTH is the nasty one: the shader DOES read it, at
+    // `normal = normal;`, so it looks implemented and is not. It belongs here
+    // because inert is the property that matters, not unread.
+    const Named dead[] = {
+        { SURF_SPECIAL_LIT, "SURF_SPECIAL_LIT" }, { SURF_PORTAL, "SURF_PORTAL" },
+        { SURF_MIRROR, "SURF_MIRROR" }, { SURF_ENVIRONMENT, "SURF_ENVIRONMENT" },
+        { SURF_SMALL_WAVY, "SURF_SMALL_WAVY" },
+        { SURF_BRIGHT_CORNERS, "SURF_BRIGHT_CORNERS" },
+        { SURF_DIRTY_SHADOWS, "SURF_DIRTY_SHADOWS" },
+        { SURF_SHADOW_HI, "SURF_SHADOW_HI" }, { SURF_SHADOW_LO, "SURF_SHADOW_LO" },
+        { SURF_NO_BOUNDS_REJECT, "SURF_NO_BOUNDS_REJECT" },
+        { SURF_ZONE_HACK, "SURF_ZONE_HACK" },
+        { SURF_INVISIBLE_OCCLUDER, "SURF_INVISIBLE_OCCLUDER" },
+        { SURF_FORCE_VIEW_ZONE, "SURF_FORCE_VIEW_ZONE" },
+        { SURF_NO_SMOOTH, "SURF_NO_SMOOTH" },
+    };
+    const int deadCount = (int)(sizeof(dead) / sizeof(dead[0]));
+    check(deadCount == 14, "the dead-flag register has 14 entries");
+
+    // The dialog's Flags tab exposes 16 rows: these 14 live flags plus PORTAL and
+    // MIRROR shown-but-disabled as "(planned)".
+    const uint32_t live[] = {
+        SURF_FAKEBACKDROP, SURF_INVISIBLE, SURF_MASKED, SURF_TRANSLUCENT,
+        SURF_ALPHABLEND, SURF_MODULATED, SURF_TWO_SIDED, SURF_UNLIT,
+        SURF_FAKE_LIT, SURF_GLOW, SURF_PAN_U, SURF_PAN_V,
+        SURF_NO_FOG, SURF_NO_BSP_CUTS,
+    };
+    const int liveCount = (int)(sizeof(live) / sizeof(live[0]));
+    check(liveCount == 14, "14 flags are live and offered as enabled checkboxes");
+
+    bool overlap = false;
+    for (int i = 0; i < liveCount; i++)
+        for (int j = 0; j < deadCount; j++)
+            if (live[i] == dead[j].bit) overlap = true;
+    check(!overlap, "no flag is in both the live and dead registers");
+
+    // SURF_COLLISION_PROXY must be in NEITHER: AutoConvex generates it, so exposing
+    // it would let an author hand-write "invisible but still solid".
+    bool proxyClassified = false;
+    for (int i = 0; i < liveCount; i++)  if (live[i] == SURF_COLLISION_PROXY) proxyClassified = true;
+    for (int j = 0; j < deadCount; j++) if (dead[j].bit == SURF_COLLISION_PROXY) proxyClassified = true;
+    check(!proxyClassified, "SURF_COLLISION_PROXY is in neither register (AutoConvex-generated)");
+
+    // Every flag in the header must be classified, or one exists that nobody has
+    // decided about.
+    uint32_t accounted = SURF_COLLISION_PROXY;
+    for (int i = 0; i < liveCount; i++)  accounted |= live[i];
+    for (int j = 0; j < deadCount; j++) accounted |= dead[j].bit;
+    uint32_t missing = 0;
+    for (uint32_t b : kAllSurfaceFlags) if ((accounted & b) == 0) missing |= b;
+    check(missing == 0,
+          "every flag in the header is classified live or dead - none is unaccounted for");
+
+    // The dialog must not offer a dead flag as enabled. Source-level, because the
+    // table lives in a Win32 UI fragment that cannot be linked here - same
+    // discipline as the shader parity check.
+    const std::string panel = ReadFile("AngelEd/Source/UI/Panels/SurfacePropsPanel.cpp");
+    if (panel.empty()) {
+        printf("  SKIP  dead flags are hidden in the dialog (panel source not found)\n");
+        return;
+    }
+    check(panel.find("bool implemented;") != std::string::npos,
+          "the dialog's flag table carries an `implemented` column");
+
+    // Scan the table rows. A row looks like:  { L"Label", SURF_NAME, true },
+    // A dead flag's row must not say `true`.
+    int wrongRows = 0;
+    size_t p = 0;
+    while ((p = panel.find("{ L\"", p)) != std::string::npos) {
+        const size_t end = panel.find("}", p);
+        if (end == std::string::npos) break;
+        const std::string row = panel.substr(p, end - p);
+        const bool enabled = row.find(", true }") != std::string::npos;
+        for (int j = 0; j < deadCount; j++) {
+            if (row.find(dead[j].name) == std::string::npos) continue;
+            if (enabled) {
+                printf("    FAIL: the dialog offers dead flag %s as ENABLED\n", dead[j].name);
+                wrongRows++;
+            }
+        }
+        p = end;
+    }
+    check(wrongRows == 0, "no dead flag is offered as an enabled checkbox");
+
+    check(panel.find("L\"Portal (planned)\"") != std::string::npos &&
+          panel.find("L\"Mirror (planned)\"") != std::string::npos,
+          "PORTAL and MIRROR are labelled '(planned)' rather than hidden");
+    check(panel.find("EnableWindow(c, FALSE)") != std::string::npos,
+          "the dialog disables its unimplemented rows rather than leaving them live");
+}
+
 int main() {
     printf("Surface tests:\n");
     test_legacy_bits_stable();
     test_legacy_flag_derivation();
     test_shader_bit_parity();
+    test_light_budget_parity();
+    test_full_bright_is_not_batched();
     test_derive_legacy_surface_mirror();
+    test_backdrop_gain();
+    test_dead_flags_are_still_dead();
     test_inert_flag_predicates();
     test_seed_inert_values();
     test_brush_wide_default_contract();

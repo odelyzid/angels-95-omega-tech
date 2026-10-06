@@ -58,6 +58,25 @@ namespace surface {
 inline constexpr uint32_t SURF_FAKEBACKDROP      = (1u << 3);
 inline constexpr uint32_t SURF_COLLISION_PROXY   = (1u << 4);
 
+// Gain the sky pass applies to a SURF_FAKEBACKDROP face.
+//
+// A painted backdrop must be seen at its authored value, so the pass runs the
+// face through Surface.fs's full-bright branch at a fixed tone-curve gain rather
+// than through lighting. 0.55 is NOT arbitrary and NOT 1.0: it reproduces the
+// gain the old shared-uniform DrawZoneGeometry hack produced (it forced ambient
+// to 5.5, and the shader divides ambient by 10 -> 0.55). At 1.0 the pale stone in
+// the shipped backdrops blows out to flat white, which is why the 0.55 was chosen
+// in the first place.
+//
+// Lives here, next to the flag, rather than as a local in DrawZoneGeometry so it
+// is (a) raylib-free and therefore assertable from tests/Surface.test.cpp and
+// (b) impossible to silently change in one of the two passes that read it. Only
+// the backdrop pass should ever use it; OzoneLoader::DrawZoneGeometry sets
+// SurfaceMaterial::SetFullBright to this and back to 1.0.
+inline constexpr float kBackdropGain = 0.55f;
+// The full-bright gain for every OTHER pass (the world pass, and the editor).
+inline constexpr float kFullBrightGain = 1.0f;
+
 // --- rendering behaviour ---------------------------------------------------
 inline constexpr uint32_t SURF_INVISIBLE       = (1u << 5);   // not drawn (still collides)
 inline constexpr uint32_t SURF_MASKED          = (1u << 6);   // alpha test vs cutoff
@@ -65,8 +84,12 @@ inline constexpr uint32_t SURF_TRANSLUCENT     = (1u << 7);   // alpha blend, no
 inline constexpr uint32_t SURF_ALPHABLEND      = (1u << 8);   // explicit blend, no fog
 inline constexpr uint32_t SURF_MODULATED       = (1u << 9);   // multiply blend
 inline constexpr uint32_t SURF_TWO_SIDED       = (1u << 10);  // draw back faces too
-inline constexpr uint32_t SURF_UNLIT           = (1u << 11);  // full-bright
-inline constexpr uint32_t SURF_FAKE_LIT        = (1u << 12);  // lit, no light contribution
+inline constexpr uint32_t SURF_UNLIT           = (1u << 11);  // flat albedo, no ambient
+// Lit geometry, NO light contribution: takes the world's ambient term so the
+// surface sits in the room's exposure, but no directional/point/spot light
+// touches it. Distinct from SURF_UNLIT, which takes no ambient either - the two
+// shared one shader branch until FAKE_LIT was given its own.
+inline constexpr uint32_t SURF_FAKE_LIT        = (1u << 12);
 inline constexpr uint32_t SURF_SPECIAL_LIT     = (1u << 13);  // reserved: custom model
 inline constexpr uint32_t SURF_GLOW            = (1u << 14);  // self-illumination
 inline constexpr uint32_t SURF_PORTAL          = (1u << 15);  // portal surface
@@ -382,6 +405,8 @@ inline int SeedInertSurfaceValues(SurfaceProps& p) {
 // ---------------------------------------------------------------------------
 using oz::surface::SURF_FAKEBACKDROP;
 using oz::surface::SURF_COLLISION_PROXY;
+using oz::surface::kBackdropGain;
+using oz::surface::kFullBrightGain;
 using oz::surface::SURF_INVISIBLE;
 using oz::surface::SURF_MASKED;
 using oz::surface::SURF_TRANSLUCENT;

@@ -1,11 +1,11 @@
 entity "dd_sky" : skyzone {
     fog_color = (0.86, 0.80, 0.68)
-    fog_density = 0.0012
+    fog_density = 0.004
     ambient_light = (0.72, 0.70, 0.66)
     skybox = "GameData/Global/sky/sky_noon.dds"
     actions {
         on_enter {
-            set_fog 0.86 0.80 0.68 0.0012
+            set_fog 0.86 0.80 0.68 0.004
             set_ambient 0.72 0.70 0.66
             set_skybox "GameData/Global/sky/sky_noon.dds"
             say "Desert Dreams - the oasis is held, something moves in the outpost"

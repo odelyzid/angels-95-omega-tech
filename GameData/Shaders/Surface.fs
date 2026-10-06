@@ -45,6 +45,12 @@ struct Light {
     float radius;
     float innerCone;
     float outerCone;
+    // The light's own animation clock and flicker speed. Both were absent while
+    // the shader declared them; `phase` was derived from the uniform array index
+    // instead, so a light's flicker identity changed whenever the per-frame
+    // distance sort reordered the array.
+    float phase;
+    float period;
     int effect;
 };
 
@@ -109,33 +115,84 @@ float spotCone(vec3 lightPos, vec3 lightTarget, vec3 fragPos, float innerCone, f
     return smoothstep(outerCone, innerCone, cosAngle);
 }
 
-vec3 applyLightEffect(vec3 lightColor, float intensity, int effect, float phase, float ndotl) {
+// `phase` is the LIGHT's own clock (LightNode::phase, advanced once per frame by
+// LitLightning_Animate), NOT a function of the uniform array index. It used to be
+// `float(i) * 2.399` - the slot index - so a light's flicker identity changed
+// whenever the per-frame distance sort reordered the array, and the flicker popped.
+// Carrying the clock on the light makes the animation stable under reordering.
+//
+// `period` scales the authored flicker speed. It is uploaded so the `.ozls`
+// `period` stat and LightNode::period actually reach the shader instead of being
+// CPU-only, and so the frequencies below are multipliers on one clock rather than
+// six unrelated literals.
+vec3 applyLightEffect(vec3 lightColor, float intensity, int effect,
+                      float phase, float period, float ndotl) {
     vec3 col = lightColor;
     float f = intensity;
+    // period <= 0 means "no animation": a static light authored with period 0 would
+    // otherwise divide by zero here.
+    float w = (period > 0.0) ? (phase / period) : 0.0;
 
     if (effect == LIGHT_EFFECT_TORCH) {
-        float flicker = 0.85 + 0.15 * sin(uTime * 17.0 + phase) * cos(uTime * 13.0 + phase * 0.5);
+        float flicker = 0.85 + 0.15 * sin(w * 17.0) * cos(w * 13.0);
         f *= flicker;
         col *= vec3(1.0, 0.85, 0.6);
     }
     else if (effect == LIGHT_EFFECT_FIRE) {
-        float pulse = 0.7 + 0.3 * sin(uTime * 5.0 + phase) * sin(uTime * 7.3 + phase * 1.2);
-        float noise = hash11(phase + floor(uTime * 10.0)) * 0.2;
+        float pulse = 0.7 + 0.3 * sin(w * 5.0) * sin(w * 7.3 + 1.2);
+        float noise = hash11(w * 4.0 + floor(w * 10.0)) * 0.2;
         f *= pulse + noise;
         col *= vec3(1.4, 0.7, 0.3);
     }
     else if (effect == LIGHT_EFFECT_WATERY) {
-        float shimmer = 0.9 + 0.1 * sin(uTime * 3.0 + phase);
+        float shimmer = 0.9 + 0.1 * sin(w * 3.0);
         f *= shimmer;
         col *= vec3(0.8, 0.9, 1.2);
     }
     else if (effect == LIGHT_EFFECT_LAMP) {
-        float pulse = 0.95 + 0.05 * sin(uTime * 2.0 + phase * 1.5);
+        float pulse = 0.95 + 0.05 * sin(w * 2.0 + 1.5);
         f *= pulse;
         col *= vec3(1.1, 0.9, 0.7);
     }
 
     return col * f;
+}
+
+// ---------------------------------------------------------------------------
+// Distance haze.
+//
+// `fogDensity` is an EXPONENTIAL RATE per world unit, not a multiplier on a
+// linear ramp. The values these levels shipped with (0.0012..0.003 in every
+// GameData/Worlds/*/skyzone_*.ozls) were only coherent as a rate, which is what
+// gave the bug away:
+//
+//   old formula  clamp((d - start) / (end - start), 0, 1) * density
+//               -> 0.2% haze at 100 units. Effectively fog OFF in all six
+//                  shipped worlds, at any distance.
+//
+//   this formula 1 - exp(-d * density)
+//               -> 12% at 62 units, 20% at 100, 48% at 300, 73% at 600.
+//
+// That is the whole point of atmospheric perspective, and its absence is why the
+// painted backdrops read as flat cardboard: nothing separated distant scenery
+// from the wall it was pasted behind, so a 62-unit-away backdrop and the 8-unit
+// wall in front of it rendered at the same crispness.
+//
+// `fogStart` is a hard floor (nothing within it is fogged). `fogEnd` ramps the
+// exponential to full strength so the far plane saturates instead of crawling
+// toward 1 asymptotically. Both knobs stay live.
+//
+// NOTE: LitFog.fs and Surface.fs must keep IDENTICAL fog maths - a surface-flagged
+// brush next to a lit wall that disagrees with it in the same frame is the exact
+// failure mode of the ambient leak and the backdrop hack documented in AGENTS.md.
+float fogFactorAt(float dist) {
+    float d = max(dist - fogStart, 0.0);
+    float expo = 1.0 - exp(-d * fogDensity);
+    // The ramp is a CEILING, not a multiplier. Multiplying (expo * ramp) silently
+    // halved the haze over exactly the range that matters - the mid-field - and
+    // made fogEnd read as if it were an authorable strength knob.
+    float ramp = clamp(d / max(fogEnd - fogStart, 0.001), 0.0, 1.0);
+    return min(expo, ramp);
 }
 
 void main()
@@ -193,9 +250,9 @@ void main()
             }
 
             float NdotL = max(dot(normal, lightDir), 0.0);
-            float phase = float(i) * 2.399;
             vec3 effColor = applyLightEffect(lights[i].color.rgb, lights[i].intensity,
-                                              lights[i].effect, phase, NdotL);
+                                              lights[i].effect, lights[i].phase,
+                                              lights[i].period, NdotL);
 
             lightAccum += effColor * NdotL * attenuation * spotFactor;
 
@@ -210,21 +267,30 @@ void main()
     vec4 amb = ambient;
     vec3 lit;
 
-    if (HasFlag(SF_UNLIT) || HasFlag(SF_FAKE_LIT) || HasFlag(SF_FAKEBACKDROP)) {
-        // Full-bright. This is the PER-DRAW replacement for the old
-        // DrawZoneGeometry hack, which forced colDiffuse/ambient on the shared
-        // LitFog program and then "restored" a constant - so everything drawn
-        // after the sky pass inherited it. Here the override lives in this
-        // draw's own uniforms and dies with the draw.
-        //
-        // uFullBright is 1.0 for the world pass and 0.55 for the backdrop pass;
-        // see the declaration for why. Note this branch deliberately does NOT
-        // include a light contribution: a painted backdrop exists to be seen at
-        // its authored value, and the old shared-uniform path added
-        // `baseColor * colDiffuse * lightAccum` on top of the gain, so a
-        // directional sun blew out one panel of a painting and left the rest of
-        // it dim. Dropping that term is what makes the flag mean what it says.
+    // Two flat branches, then the real lit one.
+    //
+    //   UNLIT / FAKEBACKDROP
+    //       Flat: the painted value, scaled by the PASS gain (uFullBright). Both
+    //       share this because a painted backdrop's job is to be seen at its
+    //       authored value - the only thing that distinguishes a backdrop is WHICH
+    //       pass draws it, not how it is shaded.
+    //
+    //   FAKE_LIT
+    //       Lit geometry with NO light contribution: takes the world's ambient
+    //       term only, so it sits in the room's exposure but no
+    //       directional/point/spot light touches it. This is what a signage panel
+    //       wants - present in the room, not blown out by the sun.
+    //
+    // FAKE_LIT must NOT carry uFullBright. The ambient term is a floor
+    // (0.1 / 10 == 0.01 by default), not an exposure reference, so multiplying it
+    // by the backdrop gain turned a 0.55 backdrop into 0.0055 - a 100x darkening
+    // of every shipped painted backdrop. Caught by rendering, not by reading.
+    //
+    // FAKE_LIT used to share UNLIT's branch, which made it a dead checkbox.
+    if (HasFlag(SF_UNLIT) || HasFlag(SF_FAKEBACKDROP)) {
         lit = baseColor.rgb * colDiffuse.rgb * uFullBright;
+    } else if (HasFlag(SF_FAKE_LIT)) {
+        lit = baseColor.rgb * (amb.rgb / 10.0) * colDiffuse.rgb;
     } else {
         lit = baseColor.rgb * ((colDiffuse.rgb + specAccum) * lightAccum);
         lit += baseColor.rgb * (amb.rgb / 10.0) * colDiffuse.rgb;
@@ -248,8 +314,7 @@ void main()
     // flags were pixel-identical and the header comment was simply false.
     if (!HasFlag(SF_NO_FOG) && !HasFlag(SF_ALPHABLEND)) {
         float fogDist = length(viewPos - fragPosition);
-        float fogFactor = clamp((fogDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
-        fogFactor *= fogDensity * fogIntensity;
+        float fogFactor = fogFactorAt(fogDist) * fogIntensity;
         lit = mix(lit, fogColor, fogFactor);
     }
 

@@ -74,9 +74,15 @@ public:
     // This is a PASS-wide setting, not a per-face one, because it exists only to
     // reproduce a per-pass decision: the backdrop pass runs at 0.55 so painted
     // backdrops keep the tonality the old DrawZoneGeometry ambient/10 hack gave
-    // them, while the world pass runs at 1.0. Applied lazily in UpdateFrame, one
-    // upload per change rather than one per draw call.
+    // them, while the world pass runs at 1.0.
+    //
+    // Uploaded IMMEDIATELY by SetFullBright, not batched into UpdateFrame: the
+    // caller sets this from inside the draw passes, which run after the frame's
+    // single UpdateFrame, so a lazy flush here would never land.
     void SetFullBright(float gain);
+    // Last value passed to SetFullBright. Exposed for the headless tests and for
+    // asserting a pass set the gain it meant to.
+    float GetFullBright() const { return m_fullBright; }
 
     // Bracket a translucent / masked / modulated / two-sided draw. No-op for
     // flags that do not change GL state.
@@ -121,7 +127,6 @@ private:
     // Full-bright gain. Default 1.0 so a shader that somehow misses the upload
     // still renders a full-value unlit surface rather than a black one.
     float m_fullBright = 1.0f;
-    bool  m_fullBrightDirty = true;
 
     // Blend/depth/cull state actually changed by the currently open bracket, so
     // EndSurfaceState restores exactly what it found instead of guessing.

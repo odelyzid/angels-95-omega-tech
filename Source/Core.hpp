@@ -504,6 +504,22 @@ void DrawLightFlares(Camera3D& camera)
     EndBlendMode();
 }
 
+// The LEVEL's fog, captured at startup.
+//
+// `restore_fog` promises to "hand fog back to the level defaults" but had nowhere
+// to restore from: it read the dead post-process FogTint state, so it produced
+// density 0 on LitFog and left SurfaceMaterial untouched. This is the thing both
+// script fog opcodes now publish through OzoneLoader (the single owner, because
+// raylib has no GetShaderValue) and restore to.
+struct LevelFogState {
+    float fogColor[3] = {0.7f, 0.7f, 0.8f};
+    float fogStart = 10.0f;
+    float fogEnd = 100.0f;
+    float fogDensity = 1.0f;
+    float fogIntensity = 1.0f;
+};
+static LevelFogState g_levelFog;
+
 void OmegaTechInit()
 {
     OZ_INFO("=== OmegaTech Engine starting ===");
@@ -716,6 +732,15 @@ void OmegaTechInit()
     // which happened to match only by coincidence).
     OzoneLoader::Instance().SetWorldFog(fogColor, fogStart, fogEnd,
                                         fogDensity, fogIntensity);
+    // Remember the LEVEL's fog, because `restore_fog` promises to "hand fog back
+    // to the level defaults" and had nothing to restore from - it re-used the dead
+    // post-process FogTint state instead. Nothing else records these, and a script
+    // that sets and then restores fog should land exactly here.
+    g_levelFog.fogStart    = fogStart;
+    g_levelFog.fogEnd      = fogEnd;
+    g_levelFog.fogDensity  = fogDensity;
+    g_levelFog.fogIntensity = fogIntensity;
+    for (int i = 0; i < 3; i++) g_levelFog.fogColor[i] = fogColor[i];
 
     // uTime uniform for GPU light animation
     static int uTimeLoc = GetShaderLocation(OmegaTechData.Lights, "uTime");
@@ -1604,12 +1629,32 @@ if (inSkyZone)
         if (lem.TakePendingFogRestore()) {
             static int fogD = GetShaderLocation(OmegaTechData.Lights, "fogDensity");
             static int fogC = GetShaderLocation(OmegaTechData.Lights, "fogColor");
-            float density = 0.0f;
-            float color[3] = {FogTint.r / 255.0f, FogTint.g / 255.0f, FogTint.b / 255.0f};
-            SetShaderValue(OmegaTechData.Lights, fogD, &density, SHADER_UNIFORM_FLOAT);
-            SetShaderValue(OmegaTechData.Lights, fogC, color, SHADER_UNIFORM_VEC3);
-            FogEnabled = false;
-            FogIntensity = 0.0f;
+            static int fogS = GetShaderLocation(OmegaTechData.Lights, "fogStart");
+            static int fogE = GetShaderLocation(OmegaTechData.Lights, "fogEnd");
+            static int fogI = GetShaderLocation(OmegaTechData.Lights, "fogIntensity");
+            const LevelFogState& L = g_levelFog;
+            SetShaderValue(OmegaTechData.Lights, fogS, &L.fogStart, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(OmegaTechData.Lights, fogE, &L.fogEnd, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(OmegaTechData.Lights, fogD, &L.fogDensity, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(OmegaTechData.Lights, fogC, L.fogColor, SHADER_UNIFORM_VEC3);
+            SetShaderValue(OmegaTechData.Lights, fogI, &L.fogIntensity, SHADER_UNIFORM_FLOAT);
+            // PUBLISH, or SurfaceMaterial keeps the previous fog.
+            //
+            // OzoneLoader owns the world's fog because raylib has no
+            // GetShaderValue, and UpdateLightSources() is the single mirror point
+            // into the surface program. Writing LitFog's uniforms directly - which
+            // is what both script opcodes used to do - leaves OzoneLoader stale, so
+            // a flagged brush (including every painted backdrop) rendered with the
+            // STARTUP fog while the lit geometry around it used the level's. The
+            // two programs disagreed in the same frame, which is exactly the class
+            // of bug the ambient leak and the backdrop hack produced.
+            //
+            // This was measured: with set_fog active, LitFog carried density 0.0022
+            // while SurfaceMaterial still carried the startup 1.0.
+            OzoneLoader::Instance().SetWorldFog(L.fogColor, L.fogStart, L.fogEnd,
+                                                L.fogDensity, L.fogIntensity);
+            FogEnabled = true;      // the post-process is dead either way; the flags
+            FogIntensity = 0.0f;    // track the real state rather than lie about it
             OZ_INFO("LightningScript: restore_fog - reverted to level default");
         }
 
@@ -1621,6 +1666,11 @@ if (inSkyZone)
             float color[3] = {lem.PendingFogR(), lem.PendingFogG(), lem.PendingFogB()};
             SetShaderValue(OmegaTechData.Lights, fogDensityLoc, &density, SHADER_UNIFORM_FLOAT);
             SetShaderValue(OmegaTechData.Lights, fogColorLoc, color, SHADER_UNIFORM_VEC3);
+            // PUBLISH. See the note on restore_fog above: writing only this
+            // program leaves SurfaceMaterial - and therefore every painted backdrop
+            // and every surface-flagged brush - on the startup fog.
+            OzoneLoader::Instance().SetWorldFog(color, g_levelFog.fogStart, g_levelFog.fogEnd,
+                                                density, 1.0f);
             FogEnabled = true;
             FogIntensity = (density > 0) ? density : 0.3f;
             FogTint = {(unsigned char)(color[0] * 255), (unsigned char)(color[1] * 255),

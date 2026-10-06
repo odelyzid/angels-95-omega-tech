@@ -64,7 +64,14 @@ struct LightNode {
 // ---------------------------------------------------------------------------
 
 // Update all active lights: animate dynamics, sort by distance, submit to shader
-void LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D camera, float dt);
+// Submit the lights to one shader program. Does NOT animate - see
+// LitLightning_Animate, which is called once per frame rather than once per
+// program.
+//
+// Returns how many lights actually reached the GPU. That number is the only
+// truthful answer to "is this scene lit", because a light can be active, sorted
+// first and still be force-disabled when the budget is full.
+int LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D camera, float dt);
 
 // Full per-frame lighting pass: uploads the camera view uniform, submits
 // `lights` via LitLightning_Update, applies a directional camera fill light
@@ -77,7 +84,16 @@ void LitLightning_UpdateFrame(std::vector<LightNode>& lights, Shader shader,
 // Animate a dynamic light based on its effect type and phase/period
 void LitLightning_Animate(LightNode& node, float dt);
 
-// Sort lights by distance to camera (nearest first)
+// Order lights for submission: most wanted first, then nearest.
+//
+// The sort DECIDES WHICH LIGHTS SURVIVE when a level has more than MAX_LIGHTS of
+// them, so "most wanted" is a correctness question, not a quality one. A
+// directional light has no radius and no attenuation, so ranking it by distance
+// like a point light put it last in any busy level - measured: 40 point lights
+// plus a sun rendered byte-identically to the same level with the sun deleted.
+//
+// Order: active, then tier (directional, in-range, out-of-range), then distance.
+// Tiers are computed in LitLightning.cpp; see LightSubmitTier for why.
 void LitLightning_SortByDistance(std::vector<LightNode>& lights, Vector3 cameraPos);
 
 // ---------------------------------------------------------------------------

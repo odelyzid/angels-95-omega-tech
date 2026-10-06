@@ -446,6 +446,31 @@ static bool ParseOzoneEntity(const OzonePrimitive& prim,
                 // light the ground.
                 node.position = node.target;
                 node.target = {0.0f, 0.0f, 0.0f};
+
+                // A directional light's direction is `normalize(position - target)`
+                // and the target is hardcoded to the world origin, so an authored
+                // source at the ORIGIN makes the direction normalize(vec3(0)).
+                //
+                // In GLSL normalize() of a zero vector is undefined - in practice
+                // NaN - and NaN propagates through NdotL, where max(NaN, 0.0) is
+                // implementation-defined. The light then contributes nothing while
+                // still occupying a slot in the 32-light budget, and
+                // LitLightning_UpdateFrame's `anyActiveLight` scan counts it, so it
+                // also SUPPRESSES the camera fill light: a level whose suns are all
+                // degenerate renders with no light at all.
+                //
+                // `light directional 0 0 0 ...` appears three times in the shipped
+                // worlds, so this is not hypothetical.
+                //
+                // Fall back to the same direction the light gizmo already uses for
+                // the degenerate case (OzPawnSystem.cpp, `travel` fallback), so the
+                // gizmo and the shader agree. Displace the SOURCE, keeping the aim
+                // at the origin, so the resulting direction is straight down.
+                if (Vector3Length(node.position) < 0.01f) {
+                    node.position = {0.0f, -1.0f, 0.0f};
+                    OZ_WARN("OZONE: directional light has no aim point "
+                            "(source at the world origin); treated as a straight-down sun");
+                }
                 node.color = (Color){(unsigned char)arg(3), (unsigned char)arg(4), (unsigned char)arg(5), 255};
                 node.intensity = arg(6);
                 if (prim.args.size() >= 8) node.flare = arg(7) != 0.0f;
@@ -1244,7 +1269,7 @@ void OzoneLoader::DrawGlowGeometry(Camera3D& camera) {
         }
         if (any) break;
     }
-    if (!any) return;
+    if (!any || !sm.Ready()) return;
 
     BeginBlendMode(BLEND_ADDITIVE);
     rlDisableDepthMask();
@@ -1469,7 +1494,20 @@ void OzoneLoader::RebuildCollisionVolumes() {
         // A skybox is a hollow room, not a solid. Feeding it to CSG would put an
         // invisible wall around the player and, worse, any `sub` against it would
         // carve away the sky. Render-only by construction.
+        //
+        // This is a SPECIAL CASE of SURF_NO_BSP_CUTS, which the parser forces on
+        // every skybox (OzoneParser.cpp) - but the type check runs first, so the
+        // flag was never what kept a skybox out of the collision world. The docs
+        // claimed the flag did. It did not, and the flag had no other consumer at
+        // all, so it round-tripped through every .ozone doing nothing.
         if (r.typeId == (int)OzonePrimitiveType::SKYBOX) continue;
+
+        // SURF_NO_BSP_CUTS, made real: opt a brush out of collision entirely.
+        // Cosmetic-only geometry (a trigger volume's visual, a skybox authored as a
+        // plain box, a decorative wall the player should pass through) previously
+        // had no way to say so - the collision world is AABB-only and every loaded
+        // brush was a solid unless it was an entity.
+        if (r.surface.def.flags & (uint32_t)oz::surface::SURF_NO_BSP_CUTS) continue;
         // Skip entity types Ã¢â‚¬â€ handled by PawnSystem
         if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
             r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
@@ -2040,16 +2078,17 @@ void OzoneLoader::DrawZoneGeometry(Camera3D& camera, const BoundingBox& zoneBoun
     using namespace oz::surface;
     auto& sm = oz::SurfaceMaterial::Instance();
 
-    // 0.55 reproduces the gain the old ambient/10 hack produced (5.5 / 10). A full
+// 0.55 reproduces the gain the old ambient/10 hack produced (5.5 / 10). A full
     // value of 1.0 renders the painted panels at 100% and blows pale stone out to
-    // flat white, so the 0.55 is a deliberate tone curve, not an accident.
+    // flat white, so the 0.55 is a deliberate tone curve, not an accident. See
+    // oz::surface::kBackdropGain for the full reasoning.
     //
     // The old path also added `baseColor * colDiffuse * lightAccum` on top of that
     // gain, so a backdrop in direct sunlight used to brighten with the sun. It no
     // longer does, on purpose: a painting whose panels brighten independently
     // according to the level's one directional light is not a painting. See the
     // SF_FAKEBACKDROP branch in Surface.fs.
-    const float kBackdropGain = 0.55f;
+    const float kBackdropPassGain = oz::surface::kBackdropGain;
 
     bool any = false;
     for (auto& r : m_renderables) {
@@ -2077,7 +2116,7 @@ if (!any) return;
         return;
     }
 
-    sm.SetFullBright(kBackdropGain);
+    sm.SetFullBright(kBackdropPassGain);
 
     for (auto& r : m_renderables) {
         if (!r.loaded) continue;
@@ -2114,7 +2153,7 @@ if (!any) return;
     // Back to 1.0 for whichever pass runs next (the world pass). Restored here
     // rather than only on the early-out above so a level that loses its backdrops
     // cannot leave every following frame's world pass dimmed.
-    sm.SetFullBright(1.0f);
+    sm.SetFullBright(oz::surface::kFullBrightGain);
 }
 
 

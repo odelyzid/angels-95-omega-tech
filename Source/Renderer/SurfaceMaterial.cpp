@@ -74,10 +74,25 @@ void SurfaceMaterial::SetFog(const float color[3], float start, float end,
     m_fogDirty   = true;
 }
 
+// Uploads IMMEDIATELY, and that is the whole point.
+//
+// This used to set a dirty flag and flush inside UpdateFrame. That is wrong by
+// construction: UpdateFrame runs once per frame from UpdateLightSources(), which
+// is called BEFORE DrawWorld(), whereas SetFullBright is called from INSIDE the
+// draw passes (DrawZoneGeometry). So the flush had already happened by the time
+// the value changed, and uFullBright stayed at 1.0 forever - every painted
+// backdrop rendered at full value instead of the 0.55 it was tuned for, and the
+// gain nobody could see was not the gain in effect.
+//
+// A per-pass scalar cannot be batched the way per-frame uniforms can: it changes
+// at most twice per frame (down into the sky pass, back out), so paying two
+// uploads is free and correctness is not negotiable. Do NOT reintroduce a lazy
+// flush for this value.
 void SurfaceMaterial::SetFullBright(float gain) {
     if (m_fullBright == gain) return;
     m_fullBright = gain;
-    m_fullBrightDirty = true;
+    if (m_shader.id > 0 && m_fullBrightLoc >= 0)
+        SetShaderValue(m_shader, m_fullBrightLoc, &m_fullBright, SHADER_UNIFORM_FLOAT);
 }
 
 void SurfaceMaterial::UpdateFrame(std::vector<LightNode>& lights,
@@ -113,14 +128,6 @@ void SurfaceMaterial::UpdateFrame(std::vector<LightNode>& lights,
         if (m_fogDensityLoc   >= 0) SetShaderValue(m_shader, m_fogDensityLoc,   &m_fogDensity,   SHADER_UNIFORM_FLOAT);
         if (m_fogIntensityLoc >= 0) SetShaderValue(m_shader, m_fogIntensityLoc, &m_fogIntensity, SHADER_UNIFORM_FLOAT);
         m_fogDirty = false;
-    }
-
-    // Same treatment as fog: the backdrop pass and the world pass want different
-    // full-bright gains, and this runs once per pass boundary rather than per draw.
-    if (m_fullBrightDirty) {
-        if (m_fullBrightLoc >= 0)
-            SetShaderValue(m_shader, m_fullBrightLoc, &m_fullBright, SHADER_UNIFORM_FLOAT);
-        m_fullBrightDirty = false;
     }
 
     if (m_timeLoc >= 0) {
