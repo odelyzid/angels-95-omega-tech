@@ -579,6 +579,106 @@ static void test_fog_curve_parity() {
     }
 }
 
+// One skybox, one implementation.
+//
+// The client (Source/Core.hpp) and the editor (AngelEd/Source/Main.cpp) each
+// built and drew their own skybox cube. They were near-identical and had drifted:
+// face geometry duplicated verbatim, distance 700 vs a hardcoded 1000, and fog in
+// one but not the other - so the editor viewport could not show the horizon fog
+// the player actually gets, and drew the sky at a different apparent size than the
+// game. A skybox is not a place for two implementations to disagree.
+//
+// Both now go through oz::Skybox (Source/Renderer/Skybox.hpp). This asserts that,
+// by source, because a refactor that leaves the editor's copy in place still
+// compiles and still runs - it just drifts again, silently, which is how the drift
+// arrived in the first place.
+// Remove // line comments. A comment that names a function is documentation, not a
+// call site, and counting it would make the structural checks below fail on prose.
+static std::string StripLineComments(const std::string& src) {
+    std::string out;
+    out.reserve(src.size());
+    for (size_t p = 0; p < src.size(); p++) {
+        if (src[p] == '/' && p + 1 < src.size() && src[p+1] == '/') {
+            while (p < src.size() && src[p] != '\n') p++;
+            out += ' ';
+        } else {
+            out += src[p];
+        }
+    }
+    return out;
+}
+
+static int CountCalls(const std::string& src, const char* needle) {
+    int n = 0;
+    for (size_t p = src.find(needle); p != std::string::npos; p = src.find(needle, p + 1)) n++;
+    return n;
+}
+
+static void test_skybox_has_one_implementation() {
+    const std::string box  = ReadFile("Source/Renderer/Skybox.hpp");
+    const std::string core = ReadFile("Source/Core.hpp");
+    const std::string ed   = ReadFile("AngelEd/Source/Main.cpp");
+    if (box.empty() || core.empty() || ed.empty()) {
+        printf("  SKIP  skybox single implementation (a source file not found from cwd)\n");
+        return;
+    }
+    const std::string boxCode  = StripLineComments(box);
+    const std::string coreCode = StripLineComments(core);
+    const std::string edCode   = StripLineComments(ed);
+
+    check(boxCode.find("constexpr float kSkyboxDist = 700.0f;") != std::string::npos,
+          "oz::Skybox owns the cube distance (700) - it is a frustum-coverage "
+          "decision and both callers must use the same one");
+
+    // Exactly one construction site, comments excluded. Two means somebody copied
+    // the cube again.
+    check(CountCalls(boxCode, "GenMeshPlane(") == 1,
+          "the six skybox faces are constructed in exactly one place");
+
+    check(coreCode.find("GenMeshPlane(") == std::string::npos,
+          "Core.hpp no longer builds skybox faces - they belong to oz::Skybox");
+    check(coreCode.find("SkyboxFace") == std::string::npos,
+          "OmegaTechData has no SkyboxFace array - the client does not own the "
+          "cube's models");
+    check(edCode.find("GenMeshPlane(") == std::string::npos,
+          "AngelEd no longer builds skybox faces - it shares oz::Skybox");
+    check(edCode.find("s_skyFaces") == std::string::npos,
+          "AngelEd has no private skybox face array");
+
+    // Neither caller may reintroduce its own distance. The two drifting to 700 and
+    // 1000 is exactly how this happened; oz::Skybox is the only place it belongs.
+    check(coreCode.find("kSkyboxDist") == std::string::npos &&
+          edCode.find("kSkyboxDist") == std::string::npos,
+          "neither caller references the distance - they use oz::Skybox's");
+
+    // And both must actually route through it, or the checks above pass on two
+    // independent implementations that happen to avoid the tested spellings.
+    check(coreCode.find("oz::Skybox::Instance().Draw(") != std::string::npos,
+          "the client draws the sky through oz::Skybox");
+    check(edCode.find("oz::Skybox::Instance().Draw(") != std::string::npos,
+          "the editor draws the sky through the same oz::Skybox");
+
+    // The horizon fog is what makes sharing worth it: both callers must publish
+    // fog, or the editor silently renders an unfogged sky again.
+    check(coreCode.find("oz::SkyboxFog") != std::string::npos,
+          "the client publishes world fog to the sky");
+    check(edCode.find("oz::SkyboxFog") != std::string::npos,
+          "the editor publishes world fog to the sky - this is the half that used "
+          "to be missing, and it fails silently because oz::Skybox falls back to "
+          "raylib's default material when Sky.fs is absent");
+
+    // Both callers must also initialise SkyMaterial, or Ready() is false and the
+    // fog upload is skipped with no diagnostic anywhere.
+    const std::string edShell = ReadFile("AngelEd/Source/Editor.hpp");
+    check(ReadFile("Source/Core.hpp").find("oz::SkyMaterial::Instance().Init(") != std::string::npos,
+          "the client initialises SkyMaterial");
+    check(!edShell.empty() &&
+          StripLineComments(edShell).find("oz::SkyMaterial::Instance().Init(") != std::string::npos,
+          "the editor initialises SkyMaterial with the same cwd-relative shader "
+          "directory SurfaceMaterial uses - without this the shared sky silently "
+          "renders unfogged");
+}
+
 static void test_shader_bit_parity() {
     struct Pair { const char* sfName; uint32_t bit; };
     // Every flag the shader gives a #define to. The shader does not need all 28:
@@ -903,6 +1003,7 @@ int main() {
     test_shader_bit_parity();
     test_light_budget_parity();
     test_fog_curve_parity();
+    test_skybox_has_one_implementation();
     test_full_bright_is_not_batched();
     test_derive_legacy_surface_mirror();
     test_backdrop_gain();

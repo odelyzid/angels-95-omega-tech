@@ -4,6 +4,7 @@
 #include "../../Source/Package/PackageAssetLoader.hpp"
 #include "../../Source/Renderer/EngineBillboard.hpp"
 #include "../../Source/Renderer/SurfaceMaterial.hpp"
+#include "../../Source/Renderer/SkyMaterial.hpp"
 #include "../../Source/World/OzOzoneLoader.hpp"
 #include "../../Source/Script/LightningEntityRegistry.hpp"
 #include <cstring>
@@ -286,9 +287,16 @@ inline void Init(){
     // Per-face surface shader. The editor resolves shaders through OTEditor.Path
     // (which is the GameData parent when cwd=System/), so reuse it rather than
     // hardcoding a path that only works from the repo root.
+    //
+    // SkyMaterial needs the same treatment and the same directory. oz::Skybox -
+    // which the client and the editor now share - silently falls back to
+    // raylib's default material when the sky shader is missing, so an editor that
+    // forgot this would show an unfogged sky with no diagnostic anywhere, which is
+    // precisely the drift the shared Skybox exists to remove.
     {
         std::string sdir = std::string(OTEditor.Path) + "Shaders/";
         oz::SurfaceMaterial::Instance().Init(sdir.c_str());
+        oz::SkyMaterial::Instance().Init(sdir.c_str());
     }
 
     if (IsPathFile(TextFormat("%s/Models/HeightMap.png", OTEditor.Path)))

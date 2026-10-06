@@ -34,6 +34,7 @@
 #include "../../../Source/Physics/OzBsp.hpp"
 #include "../../../Source/Renderer/LitLightning.hpp"
 #include "../../../Source/Renderer/CullState.hpp"
+#include "../../../Source/Renderer/Skybox.hpp"
 #ifdef _WIN32
 #include <GL/gl.h>
 #endif

@@ -796,28 +796,8 @@ int main(int argc, char **argv){
         // unless a dedicated side skybox is authored.
         // -------------------------------------------------------------------
         if (OTEditor.ShowSkybox) {
-            static Model s_skyFaces[6];
-            static bool s_skyFacesReady = false;
             static Texture2D s_skyTex = {0};
             static std::string s_skyPath;
-
-            if (!s_skyFacesReady) {
-                const float skySize = 2000.0f;
-                for (int i = 0; i < 6; i++) {
-                    Mesh plane = GenMeshPlane(skySize, skySize, 1, 1);
-                    float* tc = (float*)plane.texcoords;
-                    int vc = plane.vertexCount;
-                    if (tc) {
-                        switch (i) {
-                            case 0: for (int v = 0; v < vc; v++) tc[v*2+1] = 1.0f - tc[v*2+1]; break;
-                            case 2: for (int v = 0; v < vc; v++) tc[v*2]   = 1.0f - tc[v*2];   break;
-                            case 5: for (int v = 0; v < vc; v++) tc[v*2]   = 1.0f - tc[v*2];   break;
-                        }
-                    }
-                    s_skyFaces[i] = LoadModelFromMesh(plane);
-                }
-                s_skyFacesReady = true;
-            }
 
             // Resolve the skybox texture: an explicitly-applied levelinfo skybox
             // path takes priority; otherwise fall back to the world's
@@ -843,38 +823,28 @@ int main(int argc, char **argv){
             }
 
             if (s_skyTex.id > 0) {
-                Vector3 cp = OTEditor.MainCamera.position;
-                rlDisableDepthMask();
-                oz::SetBackfaceCulling(false);
-                auto drawFace = [&](int idx, float x, float y, float z, float rotY, float rotX, Texture2D tex) {
-                    rlPushMatrix();
-                    rlTranslatef(x, y, z);
-                    if (rotX != 0.0f) rlRotatef(rotX, 1, 0, 0);
-                    if (rotY != 0.0f) rlRotatef(rotY, 0, 1, 0);
-                    s_skyFaces[idx].materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-                    DrawModel(s_skyFaces[idx], {0,0,0}, 1.0f, WHITE);
-                    rlPopMatrix();
-                };
-                drawFace(0, cp.x, cp.y + 1000.0f, cp.z,   0.0f, 180.0f, s_skyTex);  // top
-                drawFace(1, cp.x, cp.y - 1000.0f, cp.z,   0.0f,   0.0f, s_skyTex);  // bottom
-                drawFace(2, cp.x + 1000.0f, cp.y, cp.z,  90.0f,   0.0f, s_skyTex);  // +X
-                drawFace(3, cp.x - 1000.0f, cp.y, cp.z, -90.0f,   0.0f, s_skyTex);  // -X
-                drawFace(4, cp.x, cp.y, cp.z + 1000.0f, 180.0f,   0.0f, s_skyTex);  // +Z
-                drawFace(5, cp.x, cp.y, cp.z - 1000.0f,   0.0f,   0.0f, s_skyTex);  // -Z
-                // Culling ON for the rest of the frame (the generated OZONE
-                // brushes have correct winding and want it); wireframe wants it
-                // off so the far side of a brush stays visible.
+                // The cube itself - face geometry, per-face rotations, distance,
+                // fog and the draw loop - is oz::Skybox's, shared with the client.
+                // This block used to carry its own copy of all of it at radius
+                // 1000 with no fog, so the editor viewport showed a sky at a
+                // different angular size than the game and could not show the
+                // horizon fog the player actually gets. Both were the same bug in
+                // two places.
                 //
-                // This used to be two raw rl* calls, and the wireframe branch
-                // DISABLED culling and never turned it back on, so a frame drawn
-                // in wireframe mode inherited "off" for everything after it -
-                // including imported models, which is the exact case CullState
-                // exists to make impossible. It now states the same one-line
-                // intent the client uses (OzoneLoader::Draw's cullBackfaces) and
-                // routes through the tracked setter, so a level that switches
-                // ViewMode cannot leak the flag into the next frame.
-                oz::SetBackfaceCulling(OTEditor.ViewMode != LightingMode::WIREFRAME);
-                rlEnableDepthMask();
+                // The fog is the world's, read from the same owner the client uses
+                // (OzoneLoader, because raylib has no GetShaderValue).
+                oz::SkyboxFog fog;
+                fog.active = true;
+                OzoneLoader::Instance().GetWorldFog(fog.color, fog.start, fog.end,
+                                                    fog.density, fog.intensity);
+
+                // No side texture in the editor: passing {0} makes oz::Skybox fall
+                // back to the cap, which is what the old drawFace calls did by
+                // passing s_skyTex for all six faces.
+                oz::Skybox::Instance().Draw(
+                    OTEditor.MainCamera.position, s_skyTex, Texture2D{0},
+                    /*cullBackfaces=*/OTEditor.ViewMode != LightingMode::WIREFRAME,
+                    &fog);
             }
         }
 

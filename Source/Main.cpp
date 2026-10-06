@@ -1242,12 +1242,8 @@ int main(int argc, char** argv){
         UnloadRenderTexture(Target);
         EngineBillboard::Shutdown();
         oz::SurfaceMaterial::Instance().Shutdown();
-        for (int i = 0; i < 6; i++) {
-            if (OmegaTechData.SkyboxFace[i].meshCount > 0) {
-                UnloadModel(OmegaTechData.SkyboxFace[i]);
-                OmegaTechData.SkyboxFace[i] = Model{0};
-            }
-        }
+        oz::Skybox::Instance().Shutdown();
+        oz::SkyMaterial::Instance().Shutdown();
     }
     CloseWindow();
 }
