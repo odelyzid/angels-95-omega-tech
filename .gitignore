@@ -1,6 +1,10 @@
 # Build artifacts
 *.o
 *.so
+# Generated header-dependency files (make -MMD -MP). Most land beside their object
+# in build/ (already ignored); the rules that compile-and-link in one step
+# (AngelServ / AngelMaster / ozpack) emit them next to the EXE, i.e. the repo root.
+*.d
 Angels95
 AngelServ
 AngelMaster

@@ -36,12 +36,17 @@ endif
 
 ifeq ($(UNAME_S),Linux)
   $(error AngelEd requires Win32 API (native panels). Build on Windows with w64devkit or MSYS2.)
-  CFLAGS   = $(OPTFLAGS) --std=c++20 -fPIC -Wno-narrowing
+  CFLAGS   = $(OPTFLAGS) --std=c++20 -fPIC -Wno-narrowing -MMD -MP
   LDFLAGS  = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
   WIN32_OBJS :=
 else
   # Windows (MSYS2/MINGW64)
-  CFLAGS   = $(OPTFLAGS) --std=c++20 -Wno-narrowing -DWIN32_LEAN_AND_MEAN -I../Source
+  # -MMD -MP emits ../build-ed/<obj>.d listing every header that went into it, so
+  # a header edit recompiles its consumers. The hand-maintained prerequisites used
+  # to be incomplete (OzOzoneLoader.o and SurfaceOps.o both consume
+  # Source/World/SurfaceFlags.hpp and neither listed it), which silently produced a
+  # stale object and an editor that disagreed with the client. See the root Makefile.
+  CFLAGS   = $(OPTFLAGS) --std=c++20 -Wno-narrowing -DWIN32_LEAN_AND_MEAN -I../Source -MMD -MP
   LDFLAGS  = -lraylib -lopengl32 -lgdi32 -lcomctl32 -lwinmm -lcomdlg32 -lm
   # The UI layer is ONE object. Source/UI/UiShell.cpp is a unity TU that includes
 # every Source/UI/Panels/*.cpp fragment, so adding a panel means adding a fragment
@@ -53,6 +58,25 @@ endif
 
 COMP := $(CCACHE_PREFIX) g++
 BUILD_DIR := ../build-ed
+
+# Generated header dependencies. Same reason as the root Makefile, and the editor
+# had the identical gap: OzOzoneLoader.o and SurfaceOps.o both consume
+# Source/World/SurfaceFlags.hpp and neither listed it, so a flag-bit change left
+# a stale object and the editor disagreed with the client about what a surface
+# flag means. See the root Makefile for the full account.
+#
+# This is MAKE's -include, not the compiler's: a .d file is makefile syntax.
+# make's -include also silently ignores a missing file, which is what you want on
+# a clean tree.
+#
+# .DEFAULT_GOAL is REQUIRED and must come first. A -included .d file begins with
+# a target line, and if that file is read before the Makefile names a default,
+# make adopts the .d file's first target as the default goal. Symptom: bare
+# `make` builds ONE object and exits, printing only that object's name, while
+# `make AngelEd` works fine - which looks like a flaky build rather than a
+# default-goal hijack.
+.DEFAULT_GOAL := all
+-include $(wildcard $(BUILD_DIR)/*.d)
 
 .PHONY: all clean
 

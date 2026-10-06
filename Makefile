@@ -83,7 +83,21 @@ else
   LDEXTRA ?=
 endif
 
-CFLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC)
+# -MMD -MP emits a .d file next to every .o naming every header that went into
+# it; -include then reads those back so make knows the .o is stale. This exists
+# because the hand-maintained header prerequisites were INCOMPLETE and silently
+# so: OzOzoneLoader.o listed .cpp/.hpp/OzoneParser.hpp but NOT
+# Source/World/SurfaceFlags.hpp, which its own header includes. So changing a flag
+# bit - or the backdrop gain - left a stale OzOzoneLoader.o in build/, and a
+# renumber compiled cleanly against a renderer that disagreed with the header.
+# Nothing warned; the flag just did nothing.
+#
+# Hand-written prerequisites rot exactly this way (a new #include is not a build
+# edit). Generated ones cannot. The explicit prerequisites below are harmless but
+# are no longer load-bearing.
+DEPFLAGS := -MMD -MP
+
+CFLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC) $(DEPFLAGS)
 COMP := $(CCACHE_PREFIX) g++
 CC := $(CCACHE_PREFIX) gcc
 SERVER_CXX := $(CCACHE_PREFIX) g++
@@ -92,9 +106,23 @@ SERVER_CXX := $(CCACHE_PREFIX) g++
 # defaults to -no-pie with strict relocation checks rejects it. Also carries $(RAYLIB_INC)
 # because LightningEntityRegistry.cpp includes PackageAssetLoader.hpp, which pulls
 # raylib.h - see the note there on why that include has not been removed yet.
-SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC)
+SERVER_FLAGS := $(OPTFLAGS) --std=c++20 $(PIC) $(RAYLIB_INC) $(DEPFLAGS)
 
 BUILD_DIR := build
+
+# Read back the generated dependency files. This is MAKE's -include, not the
+# compiler's: a .d file is makefile syntax, and make's -include silently ignores
+# a missing file (which is what you want on a clean tree). Passing these to the
+# COMPILER's -include instead makes gcc try to preprocess makefile text as C++,
+# which fails with "'build' does not name a type" on the first target line.
+#
+# .DEFAULT_GOAL is REQUIRED and must come first. A -included .d file begins with
+# a target line; if it is read before this Makefile names a default goal, make
+# adopts the .d file's first target as the default. Symptom: bare `make` builds
+# ONE object and exits while `make OTENGINE` works - which reads as a flaky build
+# rather than a default-goal hijack.
+.DEFAULT_GOAL := all
+-include $(wildcard $(BUILD_DIR)/*.d)
 # Every object Angels95 links. This list is the SINGLE source of truth: OTENGINE
 # depends on $(OBJS), so a new object added here is picked up by the link
 # automatically. It previously kept a second hand-maintained copy in the OTENGINE
