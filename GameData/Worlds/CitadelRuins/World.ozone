@@ -165,21 +165,40 @@ add box 0 -43.5 -1.25 4.5 0.5 1 0 1
 
 # ==============================================================================
 # Painted cliff backdrop (SURF_FAKEBACKDROP, flags=8). Unlit at full painted
-# value and the map's outer collision edge. Replaces the unused bb_wall_13.dds.
-# Heights alternate so the skyline is broken.
+# value and the map's outer collision edge. Heights alternate so the skyline
+# is broken.
+#
+# texScale is 1x1 on purpose. At 3x2 a 256x256 source tiled across a 60-unit
+# panel works out to ~12 texels per world unit - far too crisp for something
+# 42 units away, so it read as a stone wall standing next to the arena instead
+# of a cliff receding past it, and the 3x2 repeat grid made that worse on every
+# panel. At 1x1 the whole image covers the face once: no internal repeat, and the
+# texel density drops to ~4/unit, which is soft enough to sit back. Per-panel
+# offsets are deliberately NOT used - at scale 1 an offset would run the UVs past
+# 1.0 and seam across the middle of the panel.
+#
+# These boxes are also the arena's collision boundary (flags=8 does not imply
+# SURF_NO_BSP_CUTS, which is 1<<28), so their positions and extents are gameplay
+# and must not be changed for purely visual reasons. Texture and UVs only.
+#
+# The texScale kwargs are written out even though 1.0 is the default, to record
+# that the tiling was a deliberate choice. ExportToOzone omits them when they
+# equal 1.0, so saving from AngelEd will strip both kwargs off all 12 lines and
+# leave a larger-than-necessary diff - the render is identical either way, because
+# uvScaleU/uvScaleV default to 1.0 (SurfaceFlags.hpp).
 # ==============================================================================
-add box -30 42 11 30 22 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 0 42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 30 42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -30 -42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 0 -42 12 30 24 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 30 -42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 -30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 0 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box 42 30 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 -30 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 0 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
-add box -42 30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=3 texScaleV=2
+add box -30 42 11 30 22 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 0 42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 30 42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box -30 -42 9 30 18 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 0 -42 12 30 24 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 30 -42 13 30 26 1 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 42 -30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 42 0 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box 42 30 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box -42 -30 12 1 24 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box -42 0 10 1 20 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
+add box -42 30 11 1 22 30 0 flags=8 texPath=oztex/tileset/bb_wall_13.dds texScaleU=1 texScaleV=1
 
 # ==============================================================================
 # Entities
