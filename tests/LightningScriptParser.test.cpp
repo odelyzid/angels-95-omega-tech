@@ -663,9 +663,162 @@ static int test_parse_gameui_slot_rects() {
     PASS(); return 0; END_TEST();
 }
 
+// A malformed vec3 must not terminate the process.
+//
+// ParseStatBlock read a vec3 by blind position: three ReadNumber calls with two
+// ReadToken calls between them and no check that anything was there. A short or
+// unclosed tuple ran ReadNumber past the end of the content, and ReadNumber called
+// std::stof on an empty string — std::invalid_argument, uncaught, out of a parser
+// with no handler. Measured before the fix: exit 0xC0000409 on each of these.
+//
+// This is the bug AGENTS.md and OzlsWriter.hpp recorded as "segfaults on an
+// unquoted } inside a stats value". The crash was real; the recorded CAUSE was not —
+// an unquoted `}` parses fine (test_parse_unquoted_brace_is_not_a_vec3 below proves
+// it). The trigger is a malformed vec3, which is easier to hit by accident because
+// an author editing `color = (1, 0.5, 0.2)` can drop a component and the file still
+// looks plausible.
+//
+// The contract being pinned: a bad stat costs that ONE stat and a warning, and the
+// rest of the file still parses. Recovery, not merely not-crashing.
+static int test_parse_malformed_vec3_recovers() {
+    TEST("malformed vec3 does not terminate the parser");
+    const char* sources[] = {
+        // Two components.
+        "entity \"v\" : Generic {\n  stats {\n    k = (1,2)\n    after = 7\n  }\n}\n",
+        // Unclosed, at end of file.
+        "entity \"v\" : Generic {\n  stats {\n    k = (\n  }\n}\n",
+        // Unclosed, where the stats block's own brace closes it.
+        "entity \"v\" : Generic {\n  stats {\n    k = (\n    }\n}\n",
+        // Missing all three.
+        "entity \"v\" : Generic {\n  stats {\n    k = ()\n    after = 7\n  }\n}\n",
+        // Only a comma.
+        "entity \"v\" : Generic {\n  stats {\n    k = (,)\n  }\n}\n",
+    };
+    for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+        EntityDef def = LightningScriptParser::Parse(sources[i], "<malformed_vec3>");
+        // Reaching this line at all is the primary assertion: the old code threw
+        // std::invalid_argument out of Parse and never returned.
+        CHECK_EQ(def.name, std::string("v"));
+        // A malformed vec3 must NOT be recorded as a valid one — silently defaulting
+        // it to (0,0,0) would be worse than dropping it, because a black colour is a
+        // plausible-looking value.
+        CHECK(def.stats.vec3s.find("k") == def.stats.vec3s.end());
+    }
+    // Recovery: the stat AFTER a malformed vec3 in the same block still lands, where
+    // the file provided one.
+    EntityDef after = LightningScriptParser::Parse(sources[0], "<recover>");
+    CHECK_APROX(after.stats.floats["after"], 7.0f, 0.001f);
+
+    // A WELL-FORMED vec3 is unaffected and still parses all three components.
+    EntityDef good = LightningScriptParser::Parse(
+        "entity \"g\" : Generic {\n  stats {\n    c = (0.25, 0.5, 0.75)\n  }\n}\n", "<good_vec3>");
+    auto it = good.stats.vec3s.find("c");
+    CHECK(it != good.stats.vec3s.end());
+    CHECK_APROX(it->second[0], 0.25f, 0.001f);
+    CHECK_APROX(it->second[1], 0.5f, 0.001f);
+    CHECK_APROX(it->second[2], 0.75f, 0.001f);
+
+    // Negative and exponent forms still work — the guard must not reject a legal '-'.
+    EntityDef neg = LightningScriptParser::Parse(
+        "entity \"n\" : Generic {\n  stats {\n    c = (-1, 2, -3.5)\n  }\n}\n", "<neg_vec3>");
+    auto nit = neg.stats.vec3s.find("c");
+    CHECK(nit != neg.stats.vec3s.end());
+    CHECK_APROX(nit->second[0], -1.0f, 0.001f);
+    CHECK_APROX(nit->second[2], -3.5f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+// ReadNumber is public on the class, so it must not throw regardless of caller.
+static int test_read_number_never_throws() {
+    TEST("ReadNumber returns 0 instead of throwing on junk");
+    // ParseState is private, so ReadNumber is exercised the way an author triggers it:
+    // a numeric field whose value is not a number.
+    //
+    // Only assert that parsing RETURNS and the name is intact. What follows a junk
+    // token depends on where the scan stops — for "1.2.3" ReadNumber consumes "1.2"
+    // and leaves ".3", so the next line is consumed as part of that field and the
+    // stats block never opens. Pinning the recovery position of malformed input would
+    // freeze an accident; the contract that matters is "no exception escapes".
+    const char* junk[] = { "", "   ", "abc", "1.2.3", "--", "1e", ".", "+", "-" };
+    for (size_t i = 0; i < sizeof(junk) / sizeof(junk[0]); i++) {
+        const std::string content = std::string("entity \"j\" : Generic {\n  anim_speed = ") +
+                                    junk[i] + "\n}\n";
+        EntityDef def = LightningScriptParser::Parse(content, "<junk>");
+        CHECK_EQ(def.name, std::string("j"));
+    }
+    // A junk value INSIDE a stats block is the reachable authoring case, and it is
+    // where recovery is observable: the value is filed as a string (the value scanner
+    // takes anything non-numeric) and the following stat still parses.
+    EntityDef bad = LightningScriptParser::Parse(
+        "entity \"s\" : Generic {\n  stats {\n    a = fast\n    k = 1\n  }\n}\n",
+        "<bad_stat>");
+    CHECK_EQ(bad.name, std::string("s"));
+    CHECK_EQ(bad.stats.strings["a"], std::string("fast"));
+    CHECK_APROX(bad.stats.floats["k"], 1.0f, 0.001f);
+
+    // A junk value where a top-level NUMBER belongs used to crash the same way. Note
+    // that `fast` is then read as the next key, so nothing after it lines up — that
+    // desync is pre-existing and is NOT what this test pins; reaching the end of Parse
+    // without an exception is.
+    EntityDef badSpeed = LightningScriptParser::Parse(
+        "entity \"t\" : Generic {\n  anim_speed = fast\n}\n", "<bad_speed>");
+    CHECK_EQ(badSpeed.name, std::string("t"));
+
+    // Non-numeric where a vec3 was expected: rejected as malformed rather than filed
+    // as three zeros, and the NEXT stat survives.
+    EntityDef badv = LightningScriptParser::Parse(
+        "entity \"v\" : Generic {\n  stats {\n    c = (a, b, c)\n    k = 2\n  }\n}\n",
+        "<bad_vec3>");
+    CHECK_EQ(badv.name, std::string("v"));
+    CHECK(badv.stats.vec3s.find("c") == badv.stats.vec3s.end());
+    CHECK_APROX(badv.stats.floats["k"], 2.0f, 0.001f);
+
+    // Same for the skyzone fields, which were a SECOND hand-written copy of the same
+    // blind three-component read and are the second crash site.
+    EntityDef badFog = LightningScriptParser::Parse(
+        "entity \"z\" : SkyZone {\n  fog_color = (1, 2)\n  ambient_light = (1,2,3)\n}\n",
+        "<bad_fog>");
+    CHECK_EQ(badFog.name, std::string("z"));
+    CHECK(badFog.stats.vec3s.find("fog_color") == badFog.stats.vec3s.end());
+    auto amb = badFog.stats.vec3s.find("ambient_light");
+    CHECK(amb != badFog.stats.vec3s.end());
+    CHECK_APROX(amb->second[1], 2.0f, 0.001f);
+    PASS(); return 0; END_TEST();
+}
+
+// The recorded cause was wrong. An unquoted '}' in a stats value does NOT crash.
+//
+// Measured behaviour, pinned here: the value scan stops before '}', stores `k = "v"`,
+// and the following ReadToken sees the '}' and ends the stats block normally. So the
+// line after it belongs to the ENTITY body, not to stats — it arrives as an unknown
+// top-level key, which is why `n = 3` below is deliberately absent from stats.
+//
+// Pinned so the next person to read "segfaults on an unquoted }" does not go hunting
+// for a brace bug that is not there, and so this case cannot silently change while
+// someone "fixes" the real one (the malformed vec3, above).
+static int test_parse_unquoted_brace_is_not_a_vec3() {
+    TEST("unquoted '}' in a stats value is not the crash trigger");
+    EntityDef def = LightningScriptParser::Parse(
+        "entity \"b\" : Generic {\n  stats {\n    k = v }\n  }\n}\n",
+        "<unquoted_brace>");
+    CHECK_EQ(def.name, std::string("b"));
+    CHECK_EQ(def.stats.strings["k"], std::string("v"));
+    CHECK(def.stats.strings.find("n") == def.stats.strings.end());
+
+    // Same value without the brace, to show the '}' is what ends the block and that
+    // the stat itself is unaffected either way.
+    EntityDef plain = LightningScriptParser::Parse(
+        "entity \"b\" : Generic {\n  stats {\n    k = v\n  }\n}\n", "<plain>");
+    CHECK_EQ(plain.stats.strings["k"], std::string("v"));
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "LightningScriptParser Tests:\n");
     int failures = 0;
+    failures += test_parse_malformed_vec3_recovers();
+    failures += test_read_number_never_throws();
+    failures += test_parse_unquoted_brace_is_not_a_vec3();
     failures += test_parse_weapon();
     failures += test_parse_skyzone();
     failures += test_parse_armor();

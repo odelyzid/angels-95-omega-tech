@@ -112,7 +112,29 @@ enum class MessageType : uint32_t {
     // be collected again. Like any new MessageType this is forward/backward
     // compatible by definition: an older client never sends it, an older server
     // ignores it. PROTOCOL_VERSION stays at 2.
-    PICKUP_RESYNC = 26
+    PICKUP_RESYNC = 26,
+    // Client -> server: "put me in world N". The server validates N against its own
+    // loaded world list and answers with WORLD_CHANGE; it never trusts the client's
+    // idea of what exists.
+    //
+    // This exists because ServerPlayer::world_index was written once at creation and
+    // never updated, so it was permanently 0. That made two authoritative checks
+    // compare against 0 forever — collect_pickup's WRONG_WORLD reject (GameState.cpp
+    // collect_pickup) and MELEE_HIT's world match — and it pinned the 15 s per-player
+    // pickup resync to world 0. Any server whose active world was not index 0 rejected
+    // every collect and dropped every melee hit, silently except for one OZ_WARN on
+    // the melee path.
+    //
+    // PROTOCOL_VERSION stays at 2: a new MessageType is forward/backward compatible
+    // by definition (an older client never sends it; an older server ignores it),
+    // which is the same reasoning as SCORE_STATE and PICKUP_RESYNC.
+    REQUEST_WORLD = 27,
+    // Server -> client: the world the server actually moved this player into, plus
+    // that world's spawn point. Sent as the answer to REQUEST_WORLD and on join, so
+    // the client learns the server's decision rather than assuming its request
+    // succeeded. `accepted == 0` means the request was refused; `world_index` is
+    // then the world the player remains in.
+    WORLD_CHANGE = 28
 };
 
 // Melee stamina: the server keeps its own pool per player so a swinging client
@@ -282,6 +304,36 @@ struct NpcStateUpdateData {
     bool active;
     char npc_type[32];  // pawn def name (e.g. "Walker") so clients spawn the right sprite/scream
 };
+
+// Client -> server world request. The client names a world by its INDEX into the
+// server's loaded world list, because that is what every other message already
+// carries (`world_index` on pickup, melee and NPC payloads) and what the client
+// itself learned from SCENE_UPDATE's world list.
+//
+// UNTRUSTED: the client-claimed index is validated against the server's own world
+// count before use. A client cannot create a world, move itself into a world that
+// does not exist, or move a DIFFERENT player.
+struct RequestWorldData {
+    int world_index;
+};
+
+// Server -> client world assignment. See WORLD_CHANGE in MessageType.
+struct WorldChangeData {
+    int world_index;   // the world the player is now IN (never -1)
+    int accepted;      // 1 = the request was honoured, 0 = refused, player unchanged
+    float spawnX;      // optional tail: authoritative spawn for that world
+    float spawnY;
+    float spawnZ;
+};
+
+// Bytes a reader must see before it can trust the trailing spawn. The world
+// assignment itself is what gates pickup and melee validation, so a peer predating
+// the tail still gets the part that matters.
+//
+// Gate on THIS, never on sizeof(WorldChangeData) — requiring the full size made a
+// client drop every message from a server predating the field, which is the same
+// trap as PickupRespawnData::typeName.
+constexpr uint32_t kWorldChangeSizeBase = offsetof(WorldChangeData, spawnZ);
 
 struct XpUpdateData {
     uint32_t player_id;

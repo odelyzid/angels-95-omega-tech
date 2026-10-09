@@ -736,6 +736,75 @@ static int test_stashed_weapon_drop() {
     PASS(); return 0; END_TEST();
 }
 
+// Despawn must invalidate m_playerEntityIndex when it removes the PLAYER.
+//
+// Despawn maintains every index into m_instances: the hotbar array, the equipment
+// array, and — as of this test — m_playerEntityIndex. It handled the first two and
+// not the third, even though m_playerEntityIndex is the same kind of index and is
+// what GetPlayerHealth / SetPlayerLevel / ResolveScriptStat read through.
+//
+// Despawning the player left the index pointing at a slot that no longer holds the
+// player. The read sites all bounds-check (`m_playerEntityIndex < m_instances.size()`)
+// so this did not corrupt memory, but HasPlayerEntity() is just `>= 0`, so it
+// reported a live player over an empty instance list — and every $health script
+// variable silently fell back to its compiled-in default instead of the player's
+// real value. TriggerEntityAction's own comment already claimed the remap happened.
+//
+// Note on the OTHER half of the fix (remapping the index across a swap-with-last):
+// that branch is currently UNREACHABLE, and this test does not pretend otherwise.
+// m_playerEntityIndex is assigned in exactly one place — Init(), immediately after
+// Spawn("Player") on a just-cleared vector — so it is always 0, and the swap only
+// moves index 0 when the player is the LAST element, which needs size == 1, where
+// `index < size - 1` cannot hold. The remap is defensive: it keeps the invariant
+// true if the spawn order ever changes. A test that "drove the swap with a player at
+// the tail" would have passed against the unfixed code too, because no sequence of
+// public calls produces that state — which is why this test asserts the reachable
+// half instead.
+static int test_despawn_clears_player_index() {
+    TEST("Despawn of the player invalidates m_playerEntityIndex");
+    auto& reg = LightningEntityRegistry::Instance();
+    auto& em  = LightningEntityManager::Instance();
+
+    // A minimal def Init() will spawn as "Player". Registered here rather than at
+    // file scope because the registry is a process-wide singleton and every test
+    // above assumes the Player spawn FAILS (leaving Count() == 0). Hence "run last".
+    EntityDef pdef;
+    pdef.name = "Player";
+    pdef.type = EntityType::UPGRADE;
+    reg.Register(pdef);
+
+    em.Init();
+    CHECK(em.HasPlayerEntity());
+    const int playerIdx = em.PlayerEntityIndex();
+    CHECK(playerIdx >= 0 && playerIdx < em.Count());
+
+    // Despawn the player. The index must not keep naming a slot it no longer owns.
+    em.Despawn(playerIdx);
+    CHECK_EQ(em.Count(), 0);
+    CHECK_EQ(em.PlayerEntityIndex(), -1);
+    CHECK(!em.HasPlayerEntity());
+
+    // A stale index also has to stay out of range even when other instances remain,
+    // so it cannot silently attach the player's stats to one of them.
+    EntityDef fdef;
+    fdef.name = "leftover_filler";
+    fdef.type = EntityType::UPGRADE;
+    reg.Register(fdef);
+    em.Init();                                  // player back at 0, alone
+    CHECK(em.HasPlayerEntity());
+    em.Despawn(em.PlayerEntityIndex());         // player gone, none left
+    CHECK(!em.HasPlayerEntity());
+    const int filler = em.Spawn(fdef.name.c_str());
+    CHECK(filler >= 0);
+    CHECK(!em.HasPlayerEntity());               // must NOT adopt the new instance
+    CHECK_EQ(em.PlayerEntityIndex(), -1);
+
+    // Restore the state the tests above expect: Init() with a registered "Player"
+    // def now DOES spawn one, so nothing further may assume Count() == 0.
+    em.Init();
+    PASS(); return 0; END_TEST();
+}
+
 static int test_multi_despawn_cycles() {
     TEST("Multiple init cycles do not crash");
     auto& em = LightningEntityManager::Instance();
@@ -991,6 +1060,9 @@ int main() {
     // player-instance assumptions of the tests above.
     failures += test_variant_selected_by_level();
     failures += test_no_variants_leaves_index();
+    // Last of all: registers a "Player" def permanently (no Unregister exists), so
+    // it must follow every other test that assumes Init() spawns nothing.
+    failures += test_despawn_clears_player_index();
 
     fprintf(stdout, "============================\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

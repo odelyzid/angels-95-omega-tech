@@ -51,11 +51,23 @@ public:
     // Returns number of merges performed.
     int MergePass();
 
+    // How many Subtract calls gave up because the split would exceed MAX_SPLITS,
+    // leaving that solid WHOLE. Non-zero means the world has `sub` brushes that
+    // carved nothing: geometry the author intended to cut stays solid and blocks the
+    // player. Counted because a per-brush stderr line is easy to lose in a load log
+    // and impossible to assert on; Reset() clears it with the rest of the state.
+    //
+    // Not asserted internally: whether a given count is acceptable depends on the
+    // level, and CsgProcessor has no opinion about level authoring. The editor
+    // surfaces it through CommitBrushRenderable's existing "no solid" warning.
+    int overflow_count() const { return m_overflowCount; }
+
 private:
     struct AABB { float minX, minY, minZ, maxX, maxY, maxZ; };
 
     std::vector<float> m_solidMinX, m_solidMinY, m_solidMinZ;
     std::vector<float> m_solidMaxX, m_solidMaxY, m_solidMaxZ;
+    int m_overflowCount = 0;
 
     bool Overlaps(int idx, const AABB& brush) const;
     void RemoveAt(int idx);

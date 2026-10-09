@@ -30,6 +30,7 @@ static inline bool AABB_Contains(
 void CsgProcessor::Clear() {
     m_solidMinX.clear(); m_solidMinY.clear(); m_solidMinZ.clear();
     m_solidMaxX.clear(); m_solidMaxY.clear(); m_solidMaxZ.clear();
+    m_overflowCount = 0;
 }
 
 bool CsgProcessor::Overlaps(int idx, const AABB& brush) const {
@@ -69,14 +70,27 @@ void CsgProcessor::Subtract(int idx, const AABB& sub) {
     }
 
     // Overflow protection: if this split would push the total over MAX_SPLITS,
-    // skip the split and keep the original solid intact (log via stderr).
+    // skip the split and keep the original solid intact.
+    //
+    // This is a SILENT failure and has to stay visible. The split not happening means
+    // the `sub` carved NOTHING, so a wall the author intended to cut a doorway through
+    // stays solid and the player is blocked by geometry that looks open. Previously it
+    // logged to stderr behind a `static bool warned` that fires ONCE PER PROCESS, so
+    // every subsequent overflowing brush was invisible — a level with 200 of them
+    // produced exactly one line, naming no brush and no position.
+    //
+    // MAX_SPLITS is 64 and one split can add up to 6 volumes, so any world with more
+    // than ~60 CSG brushes starts hitting this. TestMap ships 230 collision proxies.
+    // Log every occurrence: the count is the diagnostic (how many brushes stopped
+    // carving), and the index is the locator.
     int currentCount = (int)m_solidMinX.size();
     if (currentCount + 6 > MAX_SPLITS) {
-        static bool warned = false;
-        if (!warned) {
-            fprintf(stderr, "[CSG] Overflow: split would exceed %d volumes, aborting split\n", MAX_SPLITS);
-            warned = true;
-        }
+        fprintf(stderr,
+                "[CSG] Overflow: split of solid #%d at (%.1f %.1f %.1f)-(%.1f %.1f %.1f) "
+                "would exceed %d volumes (%d present) — SUBTRACTION SKIPPED, this "
+                "solid stays whole. Raise MAX_SPLITS or reduce brush count.\n",
+                idx, sx, sy, sz, ex, ey, ez, MAX_SPLITS, currentCount);
+        m_overflowCount++;
         return;
     }
 

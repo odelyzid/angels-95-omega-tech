@@ -3,6 +3,7 @@
 #include <cctype>
 #include <algorithm>
 #include <sstream>
+#include <exception>   // std::exception, caught in ReadNumber
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -63,7 +64,22 @@ float LightningScriptParser::ReadNumber(ParseState& s) {
         if ((*s.content)[s.pos] == '.') { if (dot) break; dot = true; }
         s.pos++;
     }
-    return std::stof(s.content->substr(start, s.pos - start));
+    const std::string text = s.content->substr(start, s.pos - start);
+    // std::stof throws std::invalid_argument on an empty or non-numeric string and
+    // std::out_of_range on a huge one. This is called from the top-level body loop for
+    // anim_speed / movement_speed and from ParseStatBlock, so a `.ozls` with a
+    // non-numeric value where a number belongs terminated the process inside the
+    // parser. Callers now check for a missing component before calling, but the guard
+    // belongs here too: ReadNumber is public on the class, and a throwing number reader
+    // is a trap for every future caller.
+    if (text.empty()) return 0.0f;
+    try {
+        return std::stof(text);
+    } catch (const std::exception&) {
+        fprintf(stderr, "[LightningParser] %s:%d: '%s' is not a number — using 0\n",
+                s.sourcePath.c_str(), s.line, text.c_str());
+        return 0.0f;
+    }
 }
 
 void LightningScriptParser::Expect(ParseState& s, const std::string& expected) {
@@ -72,6 +88,92 @@ void LightningScriptParser::Expect(ParseState& s, const std::string& expected) {
         fprintf(stderr, "[LightningParser] %s:%d: expected '%s', got '%s'\n",
                 s.sourcePath.c_str(), s.line, expected.c_str(), tok.c_str());
     }
+}
+
+// Read a `(a, b, c)` tuple into `out`. Returns false and recovers if it is not one.
+//
+// TWO call sites need this and there were two hand-written copies that had drifted,
+// which is how one got a bounds guard and the other did not. Both now share this.
+//
+// The failure this exists for: the original read three components by blind position
+// (three ReadNumber calls, two ReadToken calls between them) with no check that
+// anything was there. A short or unclosed tuple ran ReadNumber past the end of the
+// content, and ReadNumber called std::stof on an empty string — std::invalid_argument,
+// uncaught, terminating the process. Reproduced at exit 0xC0000409 with `k = (1,2)`,
+// `k = (` and `k = ( )`.
+//
+// Note the original separator handling used ReadToken, which reads until whitespace or
+// a block character — so it only worked because every shipped vec3 has a SPACE after
+// each comma (`fog_color = (179, 179, 204)`). `(1,2)` lost the second component. This
+// consumes exactly one separator character, so both spellings work.
+//
+// On failure: nothing is written, a warning naming the field is printed, and `s` is
+// left on the next plausible boundary so the rest of the file still parses. A bad vec3
+// costs one value, not the file.
+bool LightningScriptParser::ReadVec3(ParseState& s, float out[3], const char* fieldName) {
+    out[0] = out[1] = out[2] = 0.0f;
+    SkipWhitespace(s);
+    if (s.pos >= s.content->size() || (*s.content)[s.pos] != '(') {
+        fprintf(stderr, "[LightningParser] %s:%d: '%s' — expected '(', skipping\n",
+                s.sourcePath.c_str(), s.line, fieldName);
+        return false;
+    }
+    const size_t openParen = s.pos;
+    s.pos++;   // skip '('
+
+    bool complete = true;
+    for (int comp = 0; comp < 3; comp++) {
+        if (comp > 0) {
+            SkipWhitespace(s);
+            if (s.pos >= s.content->size()) { complete = false; break; }
+            const char sep = (*s.content)[s.pos];
+            if (sep == ',' || sep == ';') {
+                s.pos++;
+            } else if (sep != ')' && sep != '}' && sep != '\n' && sep != '\r') {
+                complete = false;   // missing separator
+                break;
+            }
+        }
+        SkipWhitespace(s);
+        if (s.pos >= s.content->size()) { complete = false; break; }
+        const char c = (*s.content)[s.pos];
+        // Refuse to read a component from a closer, a newline, a stray comma or EOF.
+        if (c == ')' || c == '}' || c == '\n' || c == '\r' || c == ',') {
+            complete = false;
+            break;
+        }
+        // Only a digit, sign or '.' can begin a number — this also rejects a second
+        // '(' and any stray word, so `c = (a, b, c)` is malformed rather than 0.
+        if (!(std::isdigit((unsigned char)c) || c == '-' || c == '+' || c == '.')) {
+            complete = false;
+            break;
+        }
+        out[comp] = ReadNumber(s);
+    }
+
+    if (complete) {
+        SkipWhitespace(s);
+        if (s.pos < s.content->size() && (*s.content)[s.pos] == ')') {
+            s.pos++;
+        } else {
+            fprintf(stderr, "[LightningParser] %s:%d: '%s' is missing its ')' — "
+                    "using the three values read\n",
+                    s.sourcePath.c_str(), s.line, fieldName);
+        }
+        return true;
+    }
+
+    fprintf(stderr, "[LightningParser] %s:%d: malformed vec3 for '%s' (expected three "
+            "numbers) — skipping this value\n",
+            s.sourcePath.c_str(), s.line, fieldName);
+    // Resume at the closing paren when one exists, else at the end of the line, never
+    // past the enclosing block's own '}'.
+    size_t scan = s.pos;
+    while (scan < s.content->size() && (*s.content)[scan] != ')' &&
+           (*s.content)[scan] != '\n') scan++;
+    if (scan < s.content->size() && (*s.content)[scan] == ')') scan++;
+    s.pos = (scan > openParen) ? scan : openParen + 1;
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,20 +192,20 @@ EntityStatBlock LightningScriptParser::ParseStatBlock(ParseState& s) {
                     s.sourcePath.c_str(), s.line, eq.c_str());
             break;
         }
-        // Check for vec3: (r, g, b)
+        // vec3 form: key = (r, g, b). ReadVec3 owns the recovery and the bounds
+        // checks — see its comment for the crash it prevents and why there is only one
+        // implementation of this.
         SkipWhitespace(s);
         if (s.pos < s.content->size() && (*s.content)[s.pos] == '(') {
-            s.pos++; // skip (
             float v[3];
-            v[0] = ReadNumber(s);
-            ReadToken(s); // skip comma or close
-            v[1] = ReadNumber(s);
-            ReadToken(s);
-            v[2] = ReadNumber(s);
-            ReadToken(s); // skip )
-            block.vec3s[key][0] = v[0];
-            block.vec3s[key][1] = v[1];
-            block.vec3s[key][2] = v[2];
+            if (ReadVec3(s, v, key.c_str())) {
+                block.vec3s[key][0] = v[0];
+                block.vec3s[key][1] = v[1];
+                block.vec3s[key][2] = v[2];
+            }
+            // On failure ReadVec3 left s on a sane boundary and wrote nothing, so the
+            // malformed stat is simply absent rather than defaulted to (0,0,0) —
+            // a silent black colour would be worse than a missing one.
         } else {
             SkipWhitespace(s);
             std::string valStr;
@@ -286,15 +388,16 @@ EntityDef LightningScriptParser::Parse(const std::string& content, const std::st
                 def.variants.push_back(var);
             }
         } else if (tok == "fog_color" || tok == "ambient_light") {
-            // skyzone-specific vec3 fields stored in stats.vec3s
+            // skyzone-specific vec3 fields stored in stats.vec3s.
+            //
+            // This was a SECOND copy of the blind three-component read that crashed in
+            // ParseStatBlock (a truncated or unclosed tuple ran ReadNumber off the end
+            // and std::stof threw out of the parser). Both copies are now routed
+            // through ReadVec3, so a malformed fog_color recovers the same way a
+            // malformed stat does instead of being a second crash site.
             Expect(s, "=");
-            SkipWhitespace(s);
-            if (s.pos < s.content->size() && (*s.content)[s.pos] == '(') {
-                s.pos++;
-                float v[3];
-                v[0] = ReadNumber(s); ReadToken(s);
-                v[1] = ReadNumber(s); ReadToken(s);
-                v[2] = ReadNumber(s); ReadToken(s);
+            float v[3];
+            if (ReadVec3(s, v, tok.c_str())) {
                 def.stats.vec3s[tok][0] = v[0];
                 def.stats.vec3s[tok][1] = v[1];
                 def.stats.vec3s[tok][2] = v[2];

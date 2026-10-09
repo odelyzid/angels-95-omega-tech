@@ -24,7 +24,20 @@ static std::vector<LightNode> g_transientLights;
 // phase twice per frame and ran every flicker at double speed.
 void LitLightning_Animate(LightNode& node, float dt) {
     if (node.isStatic) return;
-    node.phase += dt * (1.0f / fmaxf(node.period, 0.01f));
+    // A PLAIN ELAPSED-TIME CLOCK. It used to advance by `dt * (1.0f / period)`,
+    // and then the shader divided by `period` AGAIN to build its animation clock:
+    //
+    //     w = phase / period = (t / period) / period = t / period^2
+    //
+    // so an authored period of 0.25 ran the flicker at 16x the intended rate and a
+    // period of 2 ran it at a quarter. That was invisible only because the one
+    // shipped `.ozls` default is `period = 1`, where 1/period^2 == 1/period == 1
+    // and the two forms coincide. `period` was ALSO never uploaded (see the Light
+    // struct in rlights.h), so the shader saw 0 and never flickered at all - which
+    // masked the CPU-side error rather than causing it.
+    //
+    // The shader owns the conversion. Scale `period` in one place, not two.
+    node.phase += dt;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +68,12 @@ static Light BuildRLight(const LightNode& node, Shader shader, int index) {
     // slot it happens to occupy this frame (the distance sort reorders).
     light.phase = node.phase;
 
+    // Never assigned before, and never uploaded before. Both shaders read
+    // `lights[i].period` and use `<= 0` to mean "do not animate", so the missing
+    // member left every torch / fire / water / lamp rendering as a steady light
+    // with a correct colour tint and no flicker whatsoever.
+    light.period = node.period;
+
     // Never assigned before. `Light light = {0}` left this 0 == LIGHT_EFFECT_NONE,
     // so applyLightEffect()'s four tint branches were unreachable: a torch was
     // white, fire was not orange.
@@ -72,6 +91,7 @@ static Light BuildRLight(const LightNode& node, Shader shader, int index) {
     light.innerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].innerCone", index));
     light.outerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].outerCone", index));
     light.phaseLoc = GetShaderLocation(shader, TextFormat("lights[%i].phase", index));
+    light.periodLoc = GetShaderLocation(shader, TextFormat("lights[%i].period", index));
     light.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", index));
 
     return light;
@@ -174,6 +194,7 @@ int LitLightning_Update(std::vector<LightNode>& lights, Shader shader, Camera3D 
         dummy.innerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].innerCone", i));
         dummy.outerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].outerCone", i));
         dummy.phaseLoc = GetShaderLocation(shader, TextFormat("lights[%i].phase", i));
+        dummy.periodLoc = GetShaderLocation(shader, TextFormat("lights[%i].period", i));
         dummy.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", i));
         dummy.enabled = false;
         UpdateLightValues(shader, dummy);

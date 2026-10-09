@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <exception>   // std::exception, caught by GetInt/GetFloat (see below)
 
 class IniConfig {
 public:
@@ -67,14 +68,32 @@ public:
         return def;
     }
 
+    // std::stoi / std::stof THROW std::invalid_argument on a non-numeric string and
+    // std::out_of_range on an unparsable one, and neither was caught. These files are
+    // user-editable and this header is included by the CLIENT's startup path, so a
+    // typo like `window_width = abc` in System/Angels95.ini threw straight out of
+    // LoadClientSettings() — which runs BEFORE InitWindow, so the process died with no
+    // window, no message and no log line, for a file the docs invite you to hand-edit.
+    // A malformed value now falls back to the caller's default, which is the same
+    // path a MISSING key already takes.
     int GetInt(const char* section, const char* key, int def = 0) {
         std::string v = Get(section, key);
-        return v.empty() ? def : std::stoi(v);
+        if (v.empty()) return def;
+        try {
+            return std::stoi(v);
+        } catch (const std::exception&) {
+            return def;
+        }
     }
 
     float GetFloat(const char* section, const char* key, float def = 0.0f) {
         std::string v = Get(section, key);
-        return v.empty() ? def : std::stof(v);
+        if (v.empty()) return def;
+        try {
+            return std::stof(v);
+        } catch (const std::exception&) {
+            return def;
+        }
     }
 
     bool GetBool(const char* section, const char* key, bool def = false) {

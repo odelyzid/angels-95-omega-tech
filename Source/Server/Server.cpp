@@ -172,6 +172,31 @@ static net::NpcStateUpdateData make_npc_state(const WorldState& ws, int npc_inde
     return nsud;
 }
 
+// Tell a client which world the server put it in, and where to stand.
+//
+// Sent on join AND as the answer to REQUEST_WORLD, because the client's request is
+// advisory: the server validates the index against its own loaded worlds, so the
+// client must not assume its request took. `accepted` distinguishes the two cases.
+static void send_world_change(net::NetworkPlayer& player, int world_index, bool accepted) {
+    net::WorldChangeData wcd{};
+    wcd.world_index = world_index;
+    wcd.accepted = accepted ? 1 : 0;
+    wcd.spawnX = 0.0f;
+    wcd.spawnY = 0.0f;
+    wcd.spawnZ = 0.0f;
+
+    net::NetworkMessage msg;
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::WORLD_CHANGE);
+    msg.size = sizeof(wcd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    memcpy(msg.payload, &wcd, sizeof(wcd));
+    g_game_server->send_message(player, msg);
+    OZ_INFO("WORLD_CHANGE -> player %u: world=%d accepted=%d",
+            player.id, world_index, wcd.accepted);
+}
+
 static void on_player_join(net::NetworkPlayer& player) {
     OZ_INFO("Player %s (id=%u) joined from %s:%u",
             player.name, player.id, player.ip_address, player.port);
@@ -190,6 +215,13 @@ static void on_player_join(net::NetworkPlayer& player) {
     // periodic re-sync in the main loop for the lost-datagram case.
     ServerPlayer* sp = g_game_state.get_player(player.id);
     const int wi = sp ? sp->world_index : 0;
+
+    // Tell the client its authoritative world assignment before the pickup snapshot
+    // that is scoped to it. Order matters: the client derives its own world index
+    // from this message, and a pickup for world N arriving before the client knows
+    // it is in world N is filtered out by the pickup draw path.
+    send_world_change(player, wi, /*accepted=*/true);
+
     send_pickup_snapshot(player, wi);
 }
 
@@ -447,22 +479,83 @@ static void on_server_message(const net::NetworkMessage& msg,
             break;
         }
         case net::MessageType::NPC_STATE_UPDATE: {
-            if (msg.size < sizeof(net::NpcStateUpdateData)) break;
-            net::NpcStateUpdateData nsu;
-            memcpy(&nsu, msg.payload, sizeof(nsu));
-            // Update NPC state in GameState
-            g_game_state.update_npc_state(nsu.world_index, nsu.npc_index,
-                                          nsu.position, nsu.yaw,
-                                          (NpcState)nsu.state, nsu.health, nsu.active);
-            // Relay NPC state to all clients
-            net::NetworkMessage relay;
-            relay.magic = net::MAGIC;
-            relay.type = static_cast<uint32_t>(net::MessageType::NPC_STATE_UPDATE);
-            relay.size = sizeof(nsu);
-            relay.sequence = 0;
-            relay.timestamp = static_cast<uint32_t>(time(nullptr));
-            memcpy(relay.payload, &nsu, sizeof(nsu));
-            g_game_server->broadcast_message(relay);
+            // Server->client ONLY. The server is authoritative over NPCs: it derives
+            // their state in tick_npcs and broadcasts it (see the spawn broadcast at
+            // the bottom of this function, and the two make_npc_state relays after
+            // NPC_DAMAGE and MELEE_HIT).
+            //
+            // This case used to apply the client's values to GameState and re-broadcast
+            // them verbatim, with no ownership, range, world or rate check — unlike
+            // both neighbouring handlers, NPC_DAMAGE (reach + rate limit) and MELEE_HIT
+            // (reach + stamina + world match). Any client could therefore set
+            // health = 0 and active = false on any npc_index in any world and have the
+            // server broadcast it, i.e. teleport or kill any NPC on demand.
+            //
+            // No legitimate client sends this: the shipped client's only occurrence of
+            // the type is the RECEIVE case in Client.cpp's handle_message, and its NPCs
+            // are networkControlled so they never report state. So the whole handler
+            // was attack surface with no caller. Dropping it is the fix; the enum value
+            // stays, because the server->client direction is the protocol's contract.
+            //
+            // A future legitimate client->server NPC report belongs on a NEW message
+            // type with real validation, not by relaxing this one.
+            OZ_WARN("NPC_STATE_UPDATE from player %u — server sends these, ignoring "
+                    "incoming (client-claimed NPC state is never authoritative)",
+                    sender.id);
+            break;
+        }
+        case net::MessageType::REQUEST_WORLD: {
+            if (msg.size < sizeof(net::RequestWorldData)) break;
+            net::RequestWorldData rwd;
+            memcpy(&rwd, msg.payload, sizeof(rwd));
+
+            ServerPlayer* sp = g_game_state.get_player(sender.id);
+            if (!sp) break;
+
+            // UNTRUSTED INDEX. The client names a world by position in the server's
+            // own list, so the only safe thing to do with that number is bounds-check
+            // it against the server's world_count() before it reaches anything that
+            // indexes m_worlds. get_world() would return nullptr and the move would
+            // silently no-op, but a refused request must be REPORTED, not silent —
+            // otherwise the client waits forever for a world it never got.
+            const int want = rwd.world_index;
+            const int worldCount = g_game_state.world_count();
+            if (want < 0 || want >= worldCount) {
+                OZ_WARN("REQUEST_WORLD from player %u — index %d out of range "
+                        "(server has %d world(s)); staying in world %d",
+                        sender.id, want, worldCount, sp->world_index);
+                // Answer with where the player ACTUALLY is, so the client can
+                // reconcile rather than assume it is lost.
+                send_world_change(const_cast<net::NetworkPlayer&>(sender),
+                                  sp->world_index, /*accepted=*/false);
+                break;
+            }
+
+            // Already there: still answer, so a client that re-requests after a lost
+            // datagram converges instead of waiting.
+            if (sp->world_index == want) {
+                send_world_change(const_cast<net::NetworkPlayer&>(sender), want,
+                                  /*accepted=*/true);
+                break;
+            }
+
+            const int previous = sp->world_index;
+            sp->world_index = want;
+
+            // A client's own position is meaningless in the world it just left, and
+            // carrying it across would drop the player inside or outside geometry.
+            // Reset to the origin-ish default the rest of the server assumes.
+            // (ServerPlayer has no velocity field — velocity is client-side and
+            // arrives with the next PLAYER_UPDATE.)
+            sp->position = NetVec3{ 0.0f, 0.0f, 0.0f };
+
+            OZ_INFO("Player %u moved world %d -> %d", sender.id, previous, want);
+            send_world_change(const_cast<net::NetworkPlayer&>(sender), want,
+                              /*accepted=*/true);
+            // The pickup snapshot is scoped to the player's world, so it must be
+            // re-sent after the move — otherwise the new world arrives empty and
+            // PickupPawns has nothing to draw until the 15 s resync.
+            send_pickup_snapshot(const_cast<net::NetworkPlayer&>(sender), want);
             break;
         }
         case net::MessageType::XP_UPDATE: {

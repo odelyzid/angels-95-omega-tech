@@ -708,6 +708,29 @@ void LightningEntityManager::Despawn(int index) {
         for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
             if (m_equipment[s] == (int)m_instances.size() - 1) m_equipment[s] = index;
         }
+        // ...and the player index, which is the same kind of index with the same
+        // swap semantics and was NOT remapped. Health, mana, XP, stamina and every
+        // `$health`-style script variable resolve through m_playerEntityIndex, so a
+        // stale one attaches them to a different entity with no diagnostic.
+        //
+        // DEFENSIVE, not a live bug: m_playerEntityIndex is assigned in exactly one
+        // place — Init(), immediately after Spawn("Player") on a just-cleared
+        // vector — so it is always 0, and the swap only moves index 0 when the
+        // player is the LAST element, which needs size == 1, where
+        // `index < size - 1` cannot hold. It is written because this is the third
+        // index into m_instances and two of the three were maintained: an omission
+        // here is a trap for whoever spawns the player anywhere other than first.
+        if (m_playerEntityIndex == (int)m_instances.size() - 1) {
+            m_playerEntityIndex = index;
+        }
+    }
+    // Despawning the player itself. This one IS reachable and was a live bug:
+    // m_playerEntityIndex kept naming a slot that no longer held the player. Every
+    // read site bounds-checks, so nothing corrupted memory, but HasPlayerEntity() is
+    // only `>= 0` — it reported a live player over a slot holding something else,
+    // and every $health script variable fell back to its compiled-in default.
+    if (m_playerEntityIndex == index) {
+        m_playerEntityIndex = -1;   // the documented "no player entity" sentinel
     }
     m_instances.pop_back();
 }

@@ -186,6 +186,17 @@ public:
         m_on_pickups_changed = std::move(cb);
     }
 
+    // Fired when the server assigns this client to a world (on join, and as the
+    // answer to request_world). `accepted` is false when the server refused the
+    // request — the world index is still where we actually are, so a consumer that
+    // wants to reconcile reads the index and only uses `accepted` for feedback.
+    //
+    // Called with m_msg_mutex HELD, unlike set_on_pickups_changed which snapshots
+    // and releases first. Do not call back into the client from here.
+    void set_on_world_changed(std::function<void(int world_index, bool accepted)> cb) {
+        m_on_world_changed = std::move(cb);
+    }
+
     // Worlds the server has actually issued pickups for. Preferred over parsing
     // the world list out of the SCENE_UPDATE JSON: this is stated by the server
     // in the same packet that carries the pickups, so it cannot disagree with
@@ -195,6 +206,20 @@ public:
     // Ask the server to re-send this player's pickup list for their own world.
     // Cheap; the server answers with a full PICKUP_RESPAWN snapshot.
     void request_pickup_resync();
+
+    // Ask the server to move this client into `world_index` (an index into the
+    // world's list, as learned from SCENE_UPDATE). The request is ADVISORY: the
+    // server bounds-checks it against its own loaded worlds and answers with
+    // WORLD_CHANGE either way. Never assume this took — read server_world_index().
+    void request_world(int world_index);
+
+    // The world the SERVER last told us we are in. Distinct from the client's own
+    // view (which drives what it renders): the server's word is the one that gates
+    // pickup collection and melee validation, so a client that switches worlds
+    // locally without asking the server will have its collects rejected.
+    int server_world_index() const;
+    // Whether the most recent WORLD_CHANGE granted the request.
+    bool world_change_accepted() const;
 
     // Worlds the server has issued pickups for (world indices only).
     std::vector<int> pickup_worlds() const;
@@ -225,6 +250,17 @@ private:
     std::function<void(const char* weapon_def_name)> m_on_weapon_collected;
     std::function<void(int damage, float remaining_health)> m_on_player_hurt;
     std::function<void(const std::vector<ClientPickup>&)> m_on_pickups_changed;
+    std::function<void(int world_index, bool accepted)> m_on_world_changed;
+
+    // The server's authoritative world assignment for this client, from
+    // WORLD_CHANGE. -1 means "the server has not said yet", which is different from
+    // 0 and must not be treated as world 0 — that conflation is what made the pickup
+    // path silently filter everything out.
+    int m_serverWorldIndex = -1;
+    bool m_worldChangeAccepted = false;
+    double m_lastWorldChangeAt = 0.0;
+    net::NetVec3 m_worldSpawn{0, 0, 0};
+    bool m_hasWorldSpawn = false;
     // Pickup collects we have requested but not yet seen acknowledged, keyed by
     // (pickup_id, world_index). A set rather than a single slot: overwriting one
     // entry with another used to drop the earlier grant on the floor even though

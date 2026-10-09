@@ -180,6 +180,259 @@ static int test_zone_crud() {
     PASS(); return 0; END_TEST();
 }
 
+// PointRegion::Rebuild is the whole zone contract — priority ordering, env-merge
+// layering, and the primary-zone identity that player physics and reverb read — and
+// it had no test at all.
+//
+// The bug it pins: primaryZoneId and primaryZoneType were two DIFFERENT lookups of
+// one concept. The type came from activeZones[0], which GetActiveZones sorts
+// highest-priority-first (priority desc, then smaller volume wins), while the id
+// came from `*activeZoneIds.begin()` — the first bucket of an unordered_set, i.e.
+// whichever one the integer hash landed in. With two overlapping zones they could
+// name DIFFERENT zones, so the player was handed ladder volume's water physics, or
+// GetZone(primaryZoneId) returned a zone whose envOverrides were never consulted.
+static int test_point_region_primary_matches_type() {
+    TEST("PointRegion: primaryZoneId names the SAME zone as primaryZoneType");
+    auto& zones = ZoneManager::Instance();
+    zones.ClearZones();
+
+    // FOUR overlapping zones, all containing the same point, with distinct
+    // priorities. The count is not incidental — see the mismatch-rate note below.
+    ZoneVolumeNode water;
+    water.bounds = {{-50, -50, -50}, {50, 50, 50}};
+    water.zoneType = ZoneType::ZONE_WATER;
+    water.name = "overlap_water";
+    water.priority = 1;
+    water.envOverrides.ambIntensity = 0.25f;
+    water.envOverrides.applyAmbient = true;
+
+    ZoneVolumeNode ladder;                    // the winner: highest priority
+    ladder.bounds = {{-50, -50, -50}, {50, 50, 50}};
+    ladder.zoneType = ZoneType::ZONE_LADDER;
+    ladder.name = "overlap_ladder";
+    ladder.priority = 9;
+    ladder.envOverrides.ambIntensity = 0.9f;
+    ladder.envOverrides.applyAmbient = true;
+
+    // Only six ZoneType values exist, so the extra overlapping volumes reuse types;
+    // what matters here is the distinct PRIORITIES, not the types.
+    ZoneVolumeNode reverbVol;
+    reverbVol.bounds = {{-50, -50, -50}, {50, 50, 50}};
+    reverbVol.zoneType = ZoneType::ZONE_REVERB;
+    reverbVol.name = "overlap_reverb";
+    reverbVol.priority = 4;
+
+    ZoneVolumeNode skyVol;
+    skyVol.bounds = {{-50, -50, -50}, {50, 50, 50}};
+    skyVol.zoneType = ZoneType::ZONE_SKY;
+    skyVol.name = "overlap_sky";
+    skyVol.priority = 6;
+
+    // THE IDS ARE THE POINT, and the mechanism is specific enough to construct.
+    //
+    // The bug: primaryZoneType came from activeZones[0] (priority-sorted by
+    // GetActiveZones), while primaryZoneId came from `*activeZoneIds.begin()` — an
+    // unordered_set, whose first element is a function of BUCKET LAYOUT, not of
+    // priority. When they disagree, the player is handed water physics from the
+    // ladder volume, and GetZone(primaryZoneId) returns a zone whose envOverrides
+    // were never consulted.
+    //
+    // WHY this survived review, and why an ordinary two-zone test cannot catch it:
+    // libstdc++'s _Hashtable keeps ONE global forward list and PREPENDS a new node
+    // when its bucket is empty. Rebuild() fills the set in reverse priority order, so
+    // the priority winner is inserted LAST — therefore, while every id lands in a
+    // DISTINCT bucket, iteration is reverse-insertion order and begin() returns the
+    // winner. The two fields agree BY CONSTRUCTION. Measured: dense ids 1..n never
+    // disagree at any n, and two overlapping zones never disagree at all.
+    //
+    // The disagreement needs a BUCKET COLLISION. libstdc++'s bucket count here is 13,
+    // so two ids differing by a multiple of 13 share a bucket, the list is re-chained,
+    // and begin() starts returning a different zone. Verified breaking
+    // configuration: ids {1,14,15,16} with the winner at id 1 yields begin() == 16.
+    //
+    // That is reachable in real content: ClearZones() does NOT reset m_nextZoneId
+    // (ZoneManager.cpp:29), and RemoveZone exists for the editor's delete flow, so
+    // session ids are neither dense nor bounded by any table size.
+    //
+    // Explicit ids are used rather than relying on the counter, so the layout is
+    // exact and the test does not depend on how many zones earlier tests created.
+    // AddZone honours a non-zero id (ZoneManager.cpp:18), so this is the supported way
+    // to place zones.
+    zones.ClearZones();
+    const int kWinId = 1;
+    const int kCollideId = kWinId + 13;      // same bucket mod 13
+    const int kOther1 = kCollideId + 1;
+    const int kOther2 = kCollideId + 2;
+
+    ZoneVolumeNode winZone = ladder;
+    winZone.id = (uint32_t)kWinId;
+    // Losers registered first, so Rebuild's reverse walk inserts the winner LAST —
+    // the precondition that makes the collision decide begin().
+    ZoneVolumeNode collideZone = water;
+    collideZone.id = (uint32_t)kCollideId;
+    collideZone.priority = 3;
+    ZoneVolumeNode other1 = reverbVol;
+    other1.id = (uint32_t)kOther1;
+    other1.priority = 5;
+    ZoneVolumeNode other2 = skyVol;
+    other2.id = (uint32_t)kOther2;
+    other2.priority = 7;
+
+    zones.AddZone(collideZone);
+    zones.AddZone(other1);
+    zones.AddZone(other2);
+    zones.AddZone(winZone);
+
+    std::vector<ZoneVolumeNode*> act =
+        zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}});
+    CHECK_EQ(act.size(), (size_t)4);
+    // GetActiveZones must put the priority winner first, or "primary" is undefined.
+    CHECK(act[0] != nullptr);
+    CHECK(act[0]->id == (uint32_t)kWinId);
+    CHECK(act[0]->zoneType == ZoneType::ZONE_LADDER);
+    CHECK(act[0]->priority == 9);
+
+    PointRegion r;
+    r.Rebuild(act);
+
+    // THE invariant: the id and the type describe ONE zone.
+    CHECK(r.primaryZoneType == ZoneType::ZONE_LADDER);
+    CHECK(r.primaryZoneId == kWinId);
+    CHECK(r.primaryZoneId == (int)act[0]->id);
+    ZoneVolumeNode* viaId = zones.GetZone(r.primaryZoneId);
+    CHECK(viaId != nullptr);
+    CHECK(viaId->zoneType == r.primaryZoneType);
+    CHECK(viaId->priority == 9);
+    CHECK(r.HasZoneType(ZoneType::ZONE_LADDER));
+
+    // Sweep the collision distance. Every multiple of 13 must behave identically, and
+    // this also guards against a "fix" that merely reshuffles the set — the invariant
+    // has to hold for layouts the old code happened to get right too.
+    for (int mult = 1; mult <= 40; mult++) {
+        zones.ClearZones();
+        ZoneVolumeNode w2 = ladder;    w2.id = 2;
+        ZoneVolumeNode c2 = water;     c2.id = (uint32_t)(2 + 13 * mult); c2.priority = 3;
+        ZoneVolumeNode o1 = reverbVol; o1.id = (uint32_t)(3 + 13 * mult); o1.priority = 5;
+        ZoneVolumeNode o2 = skyVol;    o2.id = (uint32_t)(4 + 13 * mult); o2.priority = 7;
+        zones.AddZone(c2);
+        zones.AddZone(o1);
+        zones.AddZone(o2);
+        zones.AddZone(w2);
+        std::vector<ZoneVolumeNode*> a2 =
+            zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}});
+        CHECK_EQ(a2.size(), (size_t)4);
+        CHECK(a2[0] != nullptr);
+        CHECK(a2[0]->id == (uint32_t)2);
+        PointRegion r2;
+        r2.Rebuild(a2);
+        CHECK(r2.primaryZoneId == 2);
+        CHECK(r2.primaryZoneType == ZoneType::ZONE_LADDER);
+        ZoneVolumeNode* vi2 = zones.GetZone(r2.primaryZoneId);
+        CHECK(vi2 != nullptr);
+        CHECK(vi2->zoneType == r2.primaryZoneType);
+    }
+    zones.ClearZones();
+
+    // Settle on one pair for the remaining behavioural assertions.
+    // Ladder first: these two have IDENTICAL volumes, so with equal bounds the
+    // volume tie-break cannot separate them and the winner is decided by priority
+    // alone. Registering the winner first keeps the expectation explicit.
+    const int ladderId2 = zones.AddZone(ladder);
+    const int waterId2  = zones.AddZone(water);
+    CHECK(ladderId2 != waterId2);
+
+    std::vector<ZoneVolumeNode*> active =
+        zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}});
+    CHECK(active.size() == 2);
+    // GetActiveZones must put the priority winner first, or "primary" is meaningless.
+    CHECK(active[0] != nullptr);
+    CHECK(active[0]->zoneType == ZoneType::ZONE_LADDER);
+
+    PointRegion region;
+    region.Rebuild(active);
+
+    CHECK(region.primaryZoneType == ZoneType::ZONE_LADDER);
+    CHECK(region.primaryZoneId == ladderId2);
+    CHECK(region.primaryZoneId == active[0]->id);
+    // Both zones are still active; only the PRIMARY is the winner.
+    CHECK(region.HasZoneId(waterId2));
+    CHECK(region.HasZoneId(ladderId2));
+    CHECK_EQ(region.activeZoneIds.size(), (size_t)2);
+    CHECK(region.HasZoneType(ZoneType::ZONE_LADDER));
+    CHECK(!region.HasZoneType(ZoneType::ZONE_WATER));
+
+    // Rebuilding repeatedly must be STABLE. activeZoneIds is rebuilt into a fresh
+    // unordered_set each Rebuild, so its iteration order can vary with insertion
+    // history; a correct implementation must not vary at all.
+    for (int i = 0; i < 32; i++) {
+        PointRegion again;
+        again.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
+        CHECK(again.primaryZoneId == ladderId2);
+        CHECK(again.primaryZoneType == ZoneType::ZONE_LADDER);
+    }
+
+    // Env overrides layer lowest-priority-first so the highest-priority zone has
+    // the final word. Water (priority 1) must not win ambIntensity over ladder.
+    CHECK(region.combinedEnv.applyAmbient);
+    CHECK_APROX(region.combinedEnv.ambIntensity, 0.9f, 0.001f);
+
+    // Empty region clears the primary.
+    PointRegion empty;
+    empty.Rebuild({});
+    CHECK(empty.primaryZoneId == -1);
+    CHECK(!empty.HasZoneType(ZoneType::ZONE_LADDER));
+
+    // Ties are broken by SMALLER volume (the second sort key), so a big generic
+    // volume must not shadow a small specific one at equal priority. This is the
+    // SHIPPED case: no world in GameData/Worlds authors `priority=` at all, so every
+    // zone is priority 0 and this second key is what actually picks the primary.
+    //
+    // Clear first: the zones above (and the padding) are still registered and the
+    // ladder at priority 9 would outrank both, making this assert about the wrong
+    // zone. Ids stay gapped, which is the state after any world reload.
+    zones.ClearZones();
+    ZoneVolumeNode big;
+    big.bounds = {{-50, -50, -50}, {50, 50, 50}};
+    big.zoneType = ZoneType::ZONE_WATER;
+    big.name = "tie_big";
+    big.priority = 0;
+    const int bigId = zones.AddZone(big);
+    ZoneVolumeNode small;
+    small.bounds = {{-5, -5, -5}, {5, 5, 5}};
+    small.zoneType = ZoneType::ZONE_LADDER;
+    small.name = "tie_small";
+    small.priority = 0;
+    const int smallId = zones.AddZone(small);
+    CHECK(bigId != smallId);
+    PointRegion tie;
+    tie.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
+    CHECK(tie.primaryZoneType == ZoneType::ZONE_LADDER);
+    CHECK(tie.primaryZoneId == smallId);
+    CHECK(tie.primaryZoneId != bigId);
+    ZoneVolumeNode* tieViaId = zones.GetZone(tie.primaryZoneId);
+    CHECK(tieViaId != nullptr);
+    CHECK(tieViaId->zoneType == tie.primaryZoneType);
+
+    // Entered/exited sets drive the zone on_enter / on_exit LightningScript hooks.
+    // CommitFrame(), the API meant to clear them per frame, has ZERO callers
+    // (ZoneManager.cpp:183) — they are only correct because Rebuild() clears them
+    // itself. Pin that, since the next person to "use CommitFrame properly" would
+    // otherwise change hook firing with nothing to notice.
+    PointRegion flow;
+    flow.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
+    CHECK_EQ(flow.enteredZoneIds.size(), (size_t)2);   // first frame: both are new
+    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)0);
+    flow.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
+    CHECK_EQ(flow.enteredZoneIds.size(), (size_t)0);   // unchanged -> nothing entered
+    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)0);
+    flow.Rebuild({});
+    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)2);    // left both volumes
+    CHECK_EQ(flow.primaryZoneId, -1);
+
+    zones.ClearZones();
+    PASS(); return 0; END_TEST();
+}
+
 static int test_skyzone_crud() {
     TEST("AddSkyZone, GetSkyZone, active state");
     reset_pawn_system();
@@ -550,6 +803,7 @@ int main() {
     failures += test_pickup_crud();
     failures += test_pickup_unlisted_item_no_crash();
     failures += test_zone_crud();
+    failures += test_point_region_primary_matches_type();
     failures += test_skyzone_crud();
     failures += test_skyzone_active();
     failures += test_emitter_crud();

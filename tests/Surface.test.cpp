@@ -3,7 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <string>
+#include <vector>
 
 using namespace oz::surface;
 
@@ -420,6 +422,9 @@ static void test_seed_inert_values() {
 // by the distance sort. See test_light_budget_parity below.
 // Defined below, next to the other source-reading helpers.
 static std::string ReadFile(const char* path);
+
+// Defined below, next to StripLineComments.
+static std::string StripLineComments(const std::string& src);
 
 static int ReadDefineInt(const std::string& src, const char* name) {
     const std::string want = std::string("#define ") + name;
@@ -996,12 +1001,163 @@ static void test_dead_flags_are_still_dead() {
           "the dialog disables its unimplemented rows rather than leaving them live");
 }
 
+// Every uniform the shader reads is actually uploaded.
+//
+// The existing parity tests all compare CONSTANTS between two hand-maintained
+// copies (MAX_LIGHTS in three places, fogFactorAt in three shaders, the surface
+// flag bits in two). They are green, and they would all stay green through the
+// bug this test exists for.
+//
+// Both live shaders declared `float period;` in their `Light` struct and read it
+// in applyLightEffect() with `period <= 0` meaning "do not animate". The C `Light`
+// struct had NO `period` member at all — so there was no `periodLoc`, no
+// GetShaderLocation, and no SetShaderValue. The uniform stayed at GLSL's default of
+// 0, `w` collapsed to 0, and every torch / fire / water / lamp light in the game
+// rendered as a perfectly steady light with a correct colour tint and no flicker.
+// `Surface.fs` carried a comment asserting the upload happened. It did not.
+//
+// A missing C member is invisible to a constant-parity test: the constant is
+// identical on both sides, the shader compiles, and the scene renders. The only
+// honest check is to read the GLSL `Light` struct and require, per field, that C++
+// has a member, a location, and an upload. That is this test.
+//
+// Read as text because rlights.h and LitLightning.cpp both need raylib and this
+// suite is deliberately raylib-free — the same reason test_light_budget_parity
+// reads rlights.h instead of including it.
+// The INNER body of the brace-matched definition that follows `marker`.
+//
+// Two things this has to get right, both of which produce a false PASS rather than
+// a false failure, which is the dangerous direction for a parity test:
+//
+//   * It must return the inner text, not `marker {...}`. The first `;`-delimited
+//     chunk would then be "typedef struct { int type", and any brace-aware filter
+//     skips it — so the first field of every struct goes unchecked.
+//   * It must find the DEFINITION, not the prototype. `UpdateLightValues` is
+//     declared as `void UpdateLightValues(Shader, Light);` above the implementation
+//     section, so a naive forward search grabs the NEXT brace in the file, which is
+//     CreateLight's body — and CreateLight fetches locations without ever uploading
+//     them, so every upload assertion would pass against the wrong function.
+//
+// So: skip any occurrence where a `;` comes before the `{`.
+static std::string ExtractBraceBody(const std::string& src, const std::string& marker) {
+    size_t from = 0;
+    for (;;) {
+        const size_t at = src.find(marker, from);
+        if (at == std::string::npos) return std::string();
+        from = at + marker.size();
+        const size_t semi = src.find(';', at);
+        const size_t open = src.find('{', at);
+        if (open == std::string::npos) return std::string();
+        if (semi != std::string::npos && semi < open) continue;   // a prototype
+        int depth = 0;
+        size_t i = open;
+        for (; i < src.size(); i++) {
+            if (src[i] == '{') depth++;
+            else if (src[i] == '}') { depth--; if (depth == 0) { i++; break; } }
+        }
+        return src.substr(open + 1, i - open - 2);
+    }
+}
+
+// Field names of a C or GLSL aggregate: split on ';', take the last token of each
+// chunk. Comments are stripped first so prose inside the struct cannot register as
+// a field, and chunks containing braces (a nested struct) are skipped.
+static std::vector<std::string> StructFieldNames(const std::string& body) {
+    std::vector<std::string> names;
+    if (body.empty()) return names;
+    const std::string src = StripLineComments(body);
+    size_t start = 0;
+    while (start < src.size()) {
+        size_t end = src.find(';', start);
+        if (end == std::string::npos) break;
+        std::string chunk = src.substr(start, end - start);
+        start = end + 1;
+        while (!chunk.empty() && isspace((unsigned char)chunk.front())) chunk.erase(0, 1);
+        while (!chunk.empty() && isspace((unsigned char)chunk.back()))  chunk.pop_back();
+        if (chunk.empty()) continue;
+        if (chunk.find('{') != std::string::npos || chunk.find('}') != std::string::npos) continue;
+        const size_t sp = chunk.find_last_of(" \t\n\r");
+        std::string name = (sp == std::string::npos) ? chunk : chunk.substr(sp + 1);
+        const size_t comma = name.find(',');
+        if (comma != std::string::npos) name = name.substr(0, comma);
+        if (!name.empty()) names.push_back(name);
+    }
+    return names;
+}
+
+static void test_light_uniform_upload_parity() {
+    const std::string lit  = ReadFile("GameData/Shaders/Lights/LitFog.fs");
+    const std::string surf = ReadFile("GameData/Shaders/Surface.fs");
+    const std::string rl   = ReadFile("Source/Renderer/rlights/rlights.h");
+    const std::string ll   = ReadFile("Source/Renderer/LitLightning.cpp");
+    if (lit.empty() || surf.empty() || rl.empty() || ll.empty()) {
+        printf("  SKIP  light uniform upload parity (a file not found from cwd)\n");
+        return;
+    }
+
+    const std::vector<std::string> litFields =
+        StructFieldNames(ExtractBraceBody(lit, "struct Light"));
+    const std::vector<std::string> surfFields =
+        StructFieldNames(ExtractBraceBody(surf, "struct Light"));
+    const std::vector<std::string> cFields =
+        StructFieldNames(ExtractBraceBody(rl, "typedef struct"));
+
+    check(!litFields.empty() && !surfFields.empty() && !cFields.empty(),
+          "the GLSL and C++ Light structs are all found in the sources (test can run)");
+    if (litFields.empty() || surfFields.empty() || cFields.empty()) return;
+
+    // The two shaders are hand-maintained copies of one struct, so a field added to
+    // one and not the other means one program's lighting disagrees with the other's
+    // in the same frame — the exact failure mode test_fog_curve_parity guards.
+    for (const std::string& f : litFields) {
+        bool inSurf = false;
+        for (const std::string& g : surfFields) if (g == f) { inSurf = true; break; }
+        check(inSurf, ("Surface.fs declares Light." + f +
+                       " - the two shaders are copies of one struct and must agree").c_str());
+    }
+
+    const std::string updateBody = ExtractBraceBody(rl, "void UpdateLightValues");
+    check(!updateBody.empty(),
+          "UpdateLightValues' DEFINITION is found (not its prototype, whose next "
+          "brace belongs to CreateLight and would pass every upload check)");
+
+    for (const std::string& f : litFields) {
+        bool hasMember = false;
+        for (const std::string& g : cFields) if (g == f) { hasMember = true; break; }
+        check(hasMember, ("the C++ Light struct has a '" + f +
+            "' member - a shader field with no C++ member has no location and no "
+            "upload, so it silently reads GLSL's default").c_str());
+
+        const std::string locName = f + "Loc";
+        bool hasLoc = false;
+        for (const std::string& g : cFields) if (g == locName) { hasLoc = true; break; }
+        check(hasLoc, ("the C++ Light struct has an '" + locName +
+            "' shader-location slot").c_str());
+
+        const std::string lookup = "lights[%i]." + f;
+        check(rl.find(lookup) != std::string::npos || ll.find(lookup) != std::string::npos,
+              ("'" + lookup + "' is fetched with GetShaderLocation - never asking for "
+               "the location is how a uniform stays at its default forever").c_str());
+
+        check(updateBody.find("light." + locName) != std::string::npos,
+              ("UpdateLightValues uploads light." + locName +
+               " - fetched but never set is the same as never fetched").c_str());
+    }
+
+    // The C struct carries `attenuation`, `hasFlare` and `hasCorona`, which the
+    // shader does not. Extra C-side fields are harmless (unused uniform slots are
+    // dropped at link time); the dangerous direction is the one asserted above, and
+    // the asymmetry is deliberately one-directional so a reader does not "fix" it by
+    // deleting a C member the shader happens not to read.
+}
+
 int main() {
     printf("Surface tests:\n");
     test_legacy_bits_stable();
     test_legacy_flag_derivation();
     test_shader_bit_parity();
     test_light_budget_parity();
+    test_light_uniform_upload_parity();
     test_fog_curve_parity();
     test_skybox_has_one_implementation();
     test_full_bright_is_not_batched();

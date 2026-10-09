@@ -446,6 +446,32 @@ void OmegaClient::handle_message(const net::NetworkMessage& msg) {
             }
             break;
         }
+        case net::MessageType::WORLD_CHANGE: {
+            // Gate on kWorldChangeSizeBase, never sizeof(): a server predating the
+            // spawn tail sends a shorter message, and requiring the full size made a
+            // client drop every one of them — the same trap as
+            // PickupRespawnData::typeName. The world assignment is the part that
+            // matters, so it is the part that must survive.
+            if (msg.size < net::kWorldChangeSizeBase) return;
+            const std::lock_guard<std::mutex> lock(m_msg_mutex);
+            net::WorldChangeData wcd;
+            memcpy(&wcd, msg.payload, sizeof(wcd));
+
+            // The server is authoritative: `world_index` is where we ARE, whether or
+            // not our request was granted. A refusal still carries the real world so
+            // the client can reconcile instead of waiting for a reply that already
+            // arrived saying no.
+            m_serverWorldIndex = wcd.world_index;
+            m_worldChangeAccepted = (wcd.accepted != 0);
+            m_lastWorldChangeAt = now_seconds();
+            // The spawn tail is optional; only trust it if it actually arrived.
+            if (msg.size >= sizeof(net::WorldChangeData)) {
+                m_worldSpawn = net::NetVec3{ wcd.spawnX, wcd.spawnY, wcd.spawnZ };
+                m_hasWorldSpawn = true;
+            }
+            if (m_on_world_changed) m_on_world_changed(wcd.world_index, wcd.accepted != 0);
+            break;
+        }
         case net::MessageType::PLAYER_UPDATE: {
             // Relayed player update from another player
             if (msg.size < sizeof(net::PlayerUpdateData)) return;
@@ -550,6 +576,33 @@ void OmegaClient::request_pickup_resync() {
     m_client.send_message(msg);
 }
 
+void OmegaClient::request_world(int world_index) {
+    if (!m_client.is_connected()) return;
+    if (world_index < 0) return;   // the server validates too; do not send nonsense
+
+    net::RequestWorldData rwd{};
+    rwd.world_index = world_index;
+
+    net::NetworkMessage msg{};
+    msg.magic = net::MAGIC;
+    msg.type = static_cast<uint32_t>(net::MessageType::REQUEST_WORLD);
+    msg.size = sizeof(rwd);
+    msg.sequence = 0;
+    msg.timestamp = static_cast<uint32_t>(time(nullptr));
+    memcpy(msg.payload, &rwd, sizeof(rwd));
+    m_client.send_message(msg);
+}
+
+int OmegaClient::server_world_index() const {
+    const std::lock_guard<std::mutex> l(m_msg_mutex);
+    return m_serverWorldIndex;
+}
+
+bool OmegaClient::world_change_accepted() const {
+    const std::lock_guard<std::mutex> l(m_msg_mutex);
+    return m_worldChangeAccepted;
+}
+
 std::vector<int> OmegaClient::pickup_worlds() const {
     const std::lock_guard<std::mutex> l(m_msg_mutex);
     std::vector<int> out;
@@ -583,6 +636,12 @@ void OmegaClient::on_disconnected() {
     m_pickups.clear();
     m_pending_collects.clear();
     m_scores.clear();
+    // The world assignment is per-session server state too: -1 is "the new server has
+    // not told us yet", which is exactly the state a stale 0 would masquerade as.
+    m_serverWorldIndex = -1;
+    m_worldChangeAccepted = false;
+    m_lastWorldChangeAt = 0.0;
+    m_hasWorldSpawn = false;
 }
 
 std::string OmegaClient::consume_pending_scene_data() {

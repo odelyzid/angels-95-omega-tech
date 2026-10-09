@@ -1580,10 +1580,45 @@ void OzoneLoader::RebuildCollisionVolumes() {
         m_collisionVolumes.push_back(cv);
     }
 
-    // Phase 2b: copy texture settings from renderables to collision volumes
-    // when the counts match (no CSG merging occurred).
+    // Phase 2b: copy texture settings from renderables to collision volumes.
+    //
+    // ONLY valid when the two lists are in one-to-one correspondence. The comment
+    // used to say "when the counts match (no CSG merging occurred)" and then never
+    // checked that — it only bounded the write with `rCount < volumes.size()`, which
+    // prevents an out-of-bounds write but not a MIS-MAPPED one.
+    //
+    // m_collisionVolumes is the CSG OUTPUT, and CSG does not preserve index order:
+    //   * Subtract replaces one solid with up to 6 parts (OzBsp.cpp:127-133), so the
+    //     list GROWS and every later solid keeps its index while the count shifts.
+    //   * Intersect calls RemoveAt for a non-overlapping solid (:150), and RemoveAt is
+    //     SWAP-WITH-LAST (:44) — so an unrelated solid is moved into the freed slot
+    //     and the last one disappears.
+    //   * MergePass merges adjacent boxes (:223/:239/:255), again via RemoveAt.
+    // So once anything but plain `add` brushes is present, output index k bears no
+    // relation to input index k, and the copy puts one brush's UVs onto a different
+    // brush's collision box.
+    //
+    // Count equality is a heuristic, not a proof: CSG can split one solid and drop
+    // another in the same rebuild and land back on the input count. It is adopted
+    // anyway because it is exactly what the comment already claimed, it is exact for
+    // every world built only from `add` brushes, and it fails to the SAFE side
+    // (engine defaults) rather than the dangerous one (another brush's texture).
+    // Carrying a source index through CsgProcessor would be exact but is a larger
+    // change than the consumers justify: the only reader of these fields is the
+    // editor's props-panel size/UV fallback, which is itself keyed on a selection
+    // index rather than a volume index.
+    //
+    // Also surface the CSG overflow count here: a non-zero value means some `sub`
+    // brush carved NOTHING, which is invisible from the render mesh alone.
+    if (csg.overflow_count() > 0) {
+        OZ_WARN("CSG: %d subtraction(s) were skipped after hitting the %d-volume "
+                "cap — those brushes did NOT carve, so geometry you intended to cut "
+                "is still solid",
+                csg.overflow_count(), CsgProcessor::MAX_SPLITS);
+    }
+
     {
-        int rCount = 0;
+        int renderableBrushCount = 0;
         for (auto& r : m_renderables) {
             if (!r.loaded) continue;
             if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
@@ -1593,15 +1628,35 @@ void OzoneLoader::RebuildCollisionVolumes() {
                 r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
                 r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
                 continue;
-            if (rCount < (int)m_collisionVolumes.size()) {
-                m_collisionVolumes[rCount].texScaleU = r.texScaleU;
-                m_collisionVolumes[rCount].texScaleV = r.texScaleV;
+            renderableBrushCount++;
+        }
+
+        const bool oneToOne = (renderableBrushCount == (int)m_collisionVolumes.size());
+        if (!oneToOne && renderableBrushCount > 0) {
+            OZ_INFO("CSG: %d brush renderables produced %d collision volumes — "
+                    "skipping texture copy (index spaces no longer correspond)",
+                    renderableBrushCount, (int)m_collisionVolumes.size());
+        }
+
+        if (oneToOne) {
+            int rCount = 0;
+            for (auto& r : m_renderables) {
+                if (!r.loaded) continue;
+                if (r.typeId == (int)OzonePrimitiveType::ENTITY_PLAYERSTART ||
+                    r.typeId == (int)OzonePrimitiveType::ENTITY_PICKUP    ||
+                    r.typeId == (int)OzonePrimitiveType::ENTITY_ZONE      ||
+                    r.typeId == (int)OzonePrimitiveType::ENTITY_NPC       ||
+                    r.typeId == (int)OzonePrimitiveType::ENTITY_LIGHT     ||
+                    r.typeId == (int)OzonePrimitiveType::HEIGHTMAP)
+                    continue;
+                m_collisionVolumes[rCount].texScaleU  = r.texScaleU;
+                m_collisionVolumes[rCount].texScaleV  = r.texScaleV;
                 m_collisionVolumes[rCount].texOffsetU = r.texOffsetU;
                 m_collisionVolumes[rCount].texOffsetV = r.texOffsetV;
-                m_collisionVolumes[rCount].texSlot = r.texSlot;
-                m_collisionVolumes[rCount].texPath = r.texPath;
+                m_collisionVolumes[rCount].texSlot     = r.texSlot;
+                m_collisionVolumes[rCount].texPath     = r.texPath;
+                rCount++;
             }
-            rCount++;
         }
     }
 

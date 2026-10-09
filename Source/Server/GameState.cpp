@@ -54,6 +54,30 @@ static void load_server_pawn_defs() {
         if (!f.is_open()) continue;
         std::string name; float speed=1.5f, aggro=6.0f, attack=1.5f, dmg=10.0f; int hp=100;
         std::string line;
+        // std::stof / std::stoi THROW on a non-numeric value and nothing caught them,
+        // so one typo in one GameData/Global/PawnDefs/*.cfg terminated the dedicated
+        // server during world init — no log line naming the file, no partial load, and
+        // no way to tell a bad def from a bad build. OzoneParser wraps every stof for
+        // exactly this reason. A malformed value now keeps the default and the rest of
+        // the file still loads; the file and key are named so the bad line is findable.
+        // Both take the value as a parameter rather than capturing it, because `v` is
+        // declared inside the loop below.
+        auto readFloat = [&](const std::string& key, const std::string& val, float& out) {
+            try { out = std::stof(val); }
+            catch (const std::exception&) {
+                OZ_WARN("Pawn def %s/%s: '%s = %s' is not a number — keeping %g",
+                        entry.path().filename().string().c_str(), name.c_str(),
+                        key.c_str(), val.c_str(), (double)out);
+            }
+        };
+        auto readInt = [&](const std::string& key, const std::string& val, int& out) {
+            try { out = std::stoi(val); }
+            catch (const std::exception&) {
+                OZ_WARN("Pawn def %s/%s: '%s = %s' is not an integer — keeping %d",
+                        entry.path().filename().string().c_str(), name.c_str(),
+                        key.c_str(), val.c_str(), out);
+            }
+        };
         while (std::getline(f, line)) {
             line.erase(0, line.find_first_not_of(" \t\r\n"));
             if (line.empty() || line[0]=='#' || line[0]==';') continue;
@@ -61,11 +85,12 @@ static void load_server_pawn_defs() {
             std::string k = line.substr(0,eq), v = line.substr(eq+1);
             k.erase(0,k.find_first_not_of(" \t")); k.erase(k.find_last_not_of(" \t")+1);
             v.erase(0,v.find_first_not_of(" \t")); v.erase(v.find_last_not_of(" \t\r")+1);
-            if (k=="name") name=v; else if (k=="speed") speed=std::stof(v);
-            else if (k=="aggroRange") aggro=std::stof(v);
-            else if (k=="attackRange") attack=std::stof(v);
-            else if (k=="damage") dmg=std::stof(v);
-            else if (k=="maxHealth") hp=std::stoi(v);
+            if (k=="name") name=v;
+            else if (k=="speed")        readFloat(k, v, speed);
+            else if (k=="aggroRange")   readFloat(k, v, aggro);
+            else if (k=="attackRange")  readFloat(k, v, attack);
+            else if (k=="damage")       readFloat(k, v, dmg);
+            else if (k=="maxHealth")    readInt(k, v, hp);
         }
         if (!name.empty()) {
             ServerPawnDef& d = g_serverPawnDefs[name];
@@ -529,37 +554,6 @@ bool GameState::update_player_position(uint32_t id, float x, float y, float z,
     p->has_position = true;
     p->last_seen = time(nullptr);
     return true;
-}
-
-// ---------------------------------------------------------------------------
-// NPC state update from network
-// ---------------------------------------------------------------------------
-void GameState::update_npc_state(int world_index, int npc_index,
-                                 const NetVec3& position, float yaw,
-                                 NpcState state, int health, bool active) {
-    WorldState* ws = get_world(world_index);
-    if (!ws) return;
-    // Check partition NPCs first, then global NPCs
-    for (auto& part : ws->partitions) {
-        if (npc_index >= 0 && npc_index < (int)part.npcs.size()) {
-            ServerNPC& npc = part.npcs[npc_index];
-            npc.position = position;
-            npc.yaw = yaw;
-            npc.state = state;
-            npc.health = health;
-            npc.active = active;
-            return;
-        }
-    }
-    // Try global NPCs
-    if (npc_index >= 0 && npc_index < (int)ws->global_npcs.size()) {
-        ServerNPC& npc = ws->global_npcs[npc_index];
-        npc.position = position;
-        npc.yaw = yaw;
-        npc.state = state;
-        npc.health = health;
-        npc.active = active;
-    }
 }
 
 // ---------------------------------------------------------------------------

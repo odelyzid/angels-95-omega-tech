@@ -25,6 +25,11 @@ private:
     static std::string ReadToken(ParseState& s);
     static std::string ReadString(ParseState& s);
     static float ReadNumber(ParseState& s);
+    // Read a `(a, b, c)` tuple into `out` (3 floats). Returns false on a malformed or
+    // unterminated tuple, having printed a warning and left `s` on the next parseable
+    // boundary — recovery, so one bad value costs one value rather than the file.
+    // `fieldName` is used only for the diagnostic.
+    static bool ReadVec3(ParseState& s, float out[3], const char* fieldName);
     static void Expect(ParseState& s, const std::string& expected);
 
     static EntityStatBlock ParseStatBlock(ParseState& s);

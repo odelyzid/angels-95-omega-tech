@@ -157,9 +157,22 @@ void PointRegion::Rebuild(const std::vector<ZoneVolumeNode*>& activeZones) {
         primaryZoneId = -1;
         primaryZoneType = ZoneType::ZONE_WATER;
     } else {
-        primaryZoneId = *activeZoneIds.begin();
-        primaryZoneType = (!activeZones.empty() && activeZones[0])
-            ? activeZones[0]->zoneType : ZoneType::ZONE_WATER;
+        // Take the id from the SAME zone the type comes from.
+        //
+        // These were two different lookups of one concept: the type read
+        // activeZones[0], which GetActiveZones sorted highest-priority-first
+        // (priority desc, then smaller volume wins), while the id read
+        // `*activeZoneIds.begin()` — the first element of an unordered_set, i.e.
+        // whichever bucket the hash landed in. So with two overlapping zones the id
+        // and the type could name DIFFERENT zones: the player got water physics from
+        // the ladder volume, or `GetZone(primaryZoneId)` handed back a zone whose
+        // envOverrides were never the ones consulted.
+        //
+        // GetActiveZones computes a full priority sort and this was throwing it away
+        // at the one place it mattered.
+        const ZoneVolumeNode* primary = activeZones.empty() ? nullptr : activeZones[0];
+        primaryZoneId    = primary ? (int)primary->id : -1;
+        primaryZoneType  = primary ? primary->zoneType : ZoneType::ZONE_WATER;
     }
 }
 

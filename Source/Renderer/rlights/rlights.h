@@ -100,11 +100,29 @@ typedef struct {
     // smoothstep(0,0,x) == 1 and every spot light behaved as a bare point light.
     float innerCone;
     float outerCone;
-    // Animation clock in radians, uploaded so the shader's per-effect flicker is a
+    // Animation clock in SECONDS, uploaded so the shader's per-effect flicker is a
     // property of THE LIGHT rather than of its slot in the uniform array. The slot
     // changes whenever the per-frame distance sort reorders, and a slot-derived
     // flicker pops when it does.
+    //
+    // Seconds, not radians, and NOT pre-scaled by `period`: the shader owns the
+    // conversion (`w = phase / period`). It used to be pre-divided on the CPU as
+    // well, which squared the divisor - an authored period of 0.25 ran the torch
+    // flicker at 1/0.0625 of the intended rate.
     float phase;
+    // Flicker cycle length in seconds. <= 0 means "no animation". Authored by the
+    // `.ozls` `period` stat and by OZONE `period=`.
+    //
+    // This field and its uniform location DID NOT EXIST until now, while BOTH live
+    // shaders declared `float period;` and read it. A missing C member means a
+    // missing GetShaderLocation and a missing SetShaderValue, so the uniform stayed
+    // at its GLSL default of 0 - which the shaders treat as "no animation" - and
+    // every torch / fire / water / lamp light rendered as a perfectly steady light
+    // with a correct colour tint and zero flicker.
+    //
+    // `tests/Surface.test.cpp` now parses this header and both shaders and fails if
+    // a field declared in the GLSL `Light` struct has no location fetched here.
+    float period;
     int effect;          // LightEffect (0=none, 1=watery, 2=torch, 3=fire, 4=lamp)
     int hasFlare;        // lens flare requested (drawn CPU-side in Core.hpp)
     int hasCorona;       // corona glow requested (drawn CPU-side in Core.hpp)
@@ -121,6 +139,7 @@ typedef struct {
     int innerConeLoc;
     int outerConeLoc;
     int phaseLoc;
+    int periodLoc;
     int effectLoc;
 } Light;
 
@@ -195,6 +214,7 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.innerCone = 0.95f;
         light.outerCone = 0.80f;
         light.phase = 0.0f;
+        light.period = 1.0f;
         light.effect = LIGHT_EFFECT_NONE;
 
         // NOTE: Lighting shader naming must be the provided ones
@@ -208,6 +228,7 @@ Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shade
         light.innerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].innerCone", lightsCount));
         light.outerConeLoc = GetShaderLocation(shader, TextFormat("lights[%i].outerCone", lightsCount));
         light.phaseLoc = GetShaderLocation(shader, TextFormat("lights[%i].phase", lightsCount));
+        light.periodLoc = GetShaderLocation(shader, TextFormat("lights[%i].period", lightsCount));
         light.effectLoc = GetShaderLocation(shader, TextFormat("lights[%i].effect", lightsCount));
 
         UpdateLightValues(shader, light);
@@ -246,6 +267,10 @@ void UpdateLightValues(Shader shader, Light light)
     SetShaderValue(shader, light.innerConeLoc, &light.innerCone, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.outerConeLoc, &light.outerCone, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.phaseLoc, &light.phase, SHADER_UNIFORM_FLOAT);
+    // `period` gates the entire flicker in both shaders (`w = (period > 0.0) ?
+    // phase / period : 0.0`), so an un-uploaded 0.0 here means "no animation" for
+    // every light in the world, not "one light looks wrong".
+    SetShaderValue(shader, light.periodLoc, &light.period, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shader, light.effectLoc, &light.effect, SHADER_UNIFORM_INT);
 }
 

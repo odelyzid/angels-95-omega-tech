@@ -84,6 +84,8 @@ const char* message_type_string(MessageType type) {
         case MessageType::PROFILE_STATE:     return "PROFILE_STATE";
         case MessageType::SCORE_STATE:      return "SCORE_STATE";
         case MessageType::PICKUP_RESYNC:   return "PICKUP_RESYNC";
+        case MessageType::REQUEST_WORLD:    return "REQUEST_WORLD";
+        case MessageType::WORLD_CHANGE:     return "WORLD_CHANGE";
         case MessageType::WEAPON_AMMO:      return "WEAPON_AMMO";
         case MessageType::SERVER_CHALLENGE: return "SERVER_CHALLENGE";
         case MessageType::CLIENT_AUTH:      return "CLIENT_AUTH";

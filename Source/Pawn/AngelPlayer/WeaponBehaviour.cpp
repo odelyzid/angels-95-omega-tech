@@ -7,6 +7,7 @@
 #include "../../Audio/SoundManager.hpp"
 #include "raymath.h"
 #include "../../Particle/OzParticleSimulationManager.hpp"
+#include "../../Network/NetworkSession.hpp"   // g_network_world_index
 #include <cstdlib>
 #include <cmath>
 
@@ -20,6 +21,25 @@ float WeaponBehaviour::SelectedWeaponStat(const std::string& key, float defVal) 
     if (rit != ent->runtimeStats.end()) return rit->second;
     auto dit = ent->def->stats.floats.find(key);
     return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
+}
+
+// The world index to stamp on an outgoing NPC damage report.
+//
+// These two calls used to pass a literal 0. That is only correct if the server's
+// active world happens to be index 0 — NPC_DAMAGE looks the NPC up by
+// (world_index, npc_index) and does NOT validate world_index against the attacker
+// (unlike MELEE_HIT, which does), so in any other world the lookup silently no-ops
+// or hits a same-numbered NPC in the wrong world. The pickup path five lines away
+// in Main.cpp already used g_network_world_index correctly, which is exactly why the
+// literal survived: nothing else on this path disagreed with it visibly.
+//
+// -1 means "not yet known" (no handshake, or a parse miss). Sending -1 is better
+// than sending 0: the server's get_world(-1) finds nothing, so the hit is dropped,
+// whereas a hardcoded 0 would damage an unrelated NPC in world 0. Falling back to 0
+// only after a handshake that never arrived would reintroduce the original bug for
+// the frames before the index resolves, so this does NOT fall back.
+static int NetworkWorldIndex() {
+    return g_network_world_index;
 }
 
 // The stats parser stores string values verbatim: no quote handling, and a
@@ -141,7 +161,7 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
                 }
             }
             if (hitIdx >= 0) {
-                m_client->send_npc_damage(0, hitIdx, hitPart, (int)damage);
+                m_client->send_npc_damage(NetworkWorldIndex(), hitIdx, hitPart, (int)damage);
             }
         } else {
             // Ranged: send weapon fire + raycast hit
@@ -168,7 +188,7 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
                 }
             }
             if (hitIdx >= 0) {
-                m_client->send_npc_damage(0, hitIdx, hitPart, (int)damage);
+                m_client->send_npc_damage(NetworkWorldIndex(), hitIdx, hitPart, (int)damage);
             }
         }
     }
