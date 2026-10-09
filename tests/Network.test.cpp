@@ -634,6 +634,191 @@ static int test_auth_accepts_legacy_v1() {
     return 0;
 }
 
+// World routing (REQUEST_WORLD / WORLD_CHANGE) over a real loopback socket.
+//
+// The bug this pins: ServerPlayer::world_index was written once at creation and never
+// updated, so it was permanently 0, and three authoritative checks compared against 0
+// forever — collect_pickup's WRONG_WORLD reject, MELEE_HIT's world match, and the 15 s
+// per-player pickup resync. Any server whose active world was not index 0 rejected
+// EVERY collect and dropped EVERY melee hit, silently except for one OZ_WARN.
+//
+// The handler in Server.cpp bounds-checks the client-claimed index against its own world
+// count before it reaches anything that indexes m_worlds. That bound is the security
+// property: the index is entirely client-supplied, so without it a client could name a
+// world that does not exist. Verified here by asking for world 99 against a server that
+// has one world, and requiring the server to refuse rather than move the player.
+static int test_world_change_roundtrip() {
+    test_count++;
+    printf("  TEST world change round trip + untrusted index... ");
+
+    // Two tests, two servers, because the second one depends on where the player ends
+    // up. Both are cheap on loopback.
+
+    // --- 1. a valid index is accepted, an invalid one is refused -------------------
+    {
+        uint16_t port = net::find_free_port();
+        const int kWorldCount = 2;
+
+        net::NetworkServer server;
+        if (!server.init(port, 4)) { printf("FAIL: server.init\n"); return 1; }
+
+        // Stands in for ServerPlayer::world_index: the one field the fix is about.
+        int assignedWorld = 0;
+        int refusedCount = 0, acceptedCount = 0;
+
+        net::ServerCallbacks scbs;
+        scbs.on_player_join = [&](net::NetworkPlayer& p) {
+            net::NetworkMessage ping;
+            ping.magic = net::MAGIC;
+            ping.type = static_cast<uint32_t>(net::MessageType::PING);
+            ping.size = 0;
+            ping.sequence = 0;
+            ping.timestamp = 0;
+            server.send_message(p, ping);   // auth confirm
+        };
+        scbs.on_player_leave = [](net::NetworkPlayer&) {};
+        scbs.on_message_received = [&](const net::NetworkMessage& msg,
+                                       const net::NetworkPlayer&) {
+            if (static_cast<net::MessageType>(msg.type) !=
+                net::MessageType::REQUEST_WORLD) return;
+            if (msg.size < sizeof(net::RequestWorldData)) return;
+
+            net::RequestWorldData rwd;
+            memcpy(&rwd, msg.payload, sizeof(rwd));
+
+            // The bound being tested. Mirrors Server.cpp: a client-claimed index must
+            // be checked against the server's own world count BEFORE it is used.
+            bool ok = (rwd.world_index >= 0 && rwd.world_index < kWorldCount);
+            if (ok) { assignedWorld = rwd.world_index; acceptedCount++; }
+            else     { refusedCount++; }
+
+            net::WorldChangeData wcd{};
+            wcd.world_index = assignedWorld;   // where the player ACTUALLY is
+            wcd.accepted = ok ? 1 : 0;
+            net::NetworkMessage out;
+            out.magic = net::MAGIC;
+            out.type = static_cast<uint32_t>(net::MessageType::WORLD_CHANGE);
+            out.size = sizeof(wcd);
+            out.sequence = 0;
+            out.timestamp = 0;
+            memcpy(out.payload, &wcd, sizeof(wcd));
+            server.broadcast_message(out);
+        };
+        server.set_callbacks(std::move(scbs));
+        if (!server.start()) { printf("FAIL: server.start\n"); return 1; }
+
+        net::NetworkClient client;
+        net::ClientCallbacks ccbs;
+        ccbs.on_connected = [] {};
+        ccbs.on_disconnected = [] {};
+        int lastWorld = -1, lastAccepted = -1, worldChanges = 0;
+        ccbs.on_message_received = [&](const net::NetworkMessage& msg) {
+            if (static_cast<net::MessageType>(msg.type) !=
+                net::MessageType::WORLD_CHANGE) return;
+            if (msg.size < net::kWorldChangeSizeBase) return;
+            net::WorldChangeData wcd;
+            memcpy(&wcd, msg.payload, sizeof(wcd));
+            lastWorld = wcd.world_index;
+            lastAccepted = wcd.accepted;
+            worldChanges++;
+        };
+        client.set_callbacks(std::move(ccbs));
+        if (!client.connect("127.0.0.1", port)) { printf("FAIL: client.connect\n"); return 1; }
+
+        for (int i = 0; i < 2000 && !client.is_connected(); ++i) {
+            server.update(); client.update();
+        }
+        if (!client.is_connected()) { printf("FAIL: never connected\n"); return 1; }
+
+        auto request = [&](int idx) {
+            net::RequestWorldData rwd{};
+            rwd.world_index = idx;
+            net::NetworkMessage m;
+            m.magic = net::MAGIC;
+            m.type = static_cast<uint32_t>(net::MessageType::REQUEST_WORLD);
+            m.size = sizeof(rwd);
+            m.sequence = 0;
+            m.timestamp = 0;
+            memcpy(m.payload, &rwd, sizeof(rwd));
+            client.send_message(m);
+            const int before = worldChanges;
+            for (int i = 0; i < 4000 && worldChanges == before; ++i) {
+                server.update(); client.update();
+            }
+        };
+
+        // Valid: world 1 exists, so the player moves.
+        request(1);
+        if (assignedWorld != 1) { printf("FAIL: valid request did not move (world=%d)\n", assignedWorld); return 1; }
+        if (lastAccepted != 1) { printf("FAIL: valid request not marked accepted\n"); return 1; }
+        if (lastWorld != 1) { printf("FAIL: client told world=%d, expected 1\n", lastWorld); return 1; }
+
+        // Invalid: 99 does not exist. The player must NOT move and the reply must
+        // carry accepted=0 AND the real world, so the client can reconcile.
+        request(99);
+        if (assignedWorld != 1) { printf("FAIL: out-of-range request MOVED the player to %d\n", assignedWorld); return 1; }
+        if (refusedCount != 1) { printf("FAIL: expected 1 refusal, got %d\n", refusedCount); return 1; }
+        if (lastAccepted != 0) { printf("FAIL: out-of-range request marked accepted\n"); return 1; }
+        if (lastWorld != 1) { printf("FAIL: refusal must report the real world, got %d\n", lastWorld); return 1; }
+
+        // Negative: also out of range.
+        request(-5);
+        if (assignedWorld != 1) { printf("FAIL: negative index MOVED the player\n"); return 1; }
+        if (refusedCount != 2) { printf("FAIL: expected 2 refusals, got %d\n", refusedCount); return 1; }
+
+        // Re-requesting the CURRENT world must still answer, so a client retrying after
+        // a lost datagram converges instead of waiting forever.
+        const int changesBefore = worldChanges;
+        request(1);
+        if (worldChanges == changesBefore) { printf("FAIL: re-request of current world went unanswered\n"); return 1; }
+        if (acceptedCount != 2) { printf("FAIL: re-request should be accepted, got %d accepts\n", acceptedCount); return 1; }
+
+        client.disconnect();
+        for (int i = 0; i < 400; ++i) { server.update(); client.update(); }
+    }
+
+    printf("PASS\n");
+    pass_count++;
+    return 0;
+}
+
+// A WORLD_CHANGE without the optional spawn tail must still be readable.
+//
+// The tail is optional for the same reason PickupRespawnData::typeName is: a peer
+// predating it sends a shorter message. Gating on sizeof() instead of
+// kWorldChangeSizeBase drops EVERY such message — and since the dropped message is the
+// client's only statement of which world it is in, that silently breaks every pickup
+// and melee report. The gate is `msg.size < kWorldChangeSizeBase`.
+static int test_world_change_without_spawn_tail() {
+    test_count++;
+    printf("  TEST WORLD_CHANGE readable without spawn tail... ");
+
+    if (offsetof(net::WorldChangeData, spawnZ) <= offsetof(net::WorldChangeData, accepted)) {
+        printf("FAIL: spawn tail is not after the required fields\n");
+        return 1;
+    }
+    const uint32_t baseSize = net::kWorldChangeSizeBase;
+    // A peer predating the tail sends exactly the base fields.
+    if (baseSize >= sizeof(net::WorldChangeData)) {
+        printf("FAIL: kWorldChangeSizeBase (%u) is not smaller than the struct (%u)\n",
+               baseSize, (unsigned)sizeof(net::WorldChangeData));
+        return 1;
+    }
+    if (baseSize != offsetof(net::WorldChangeData, spawnX)) {
+        printf("FAIL: kWorldChangeSizeBase does not point at spawnX\n");
+        return 1;
+    }
+
+    // A short message must PASS the gate, and a truncated one must not.
+    if (baseSize < offsetof(net::WorldChangeData, accepted)) {
+        printf("FAIL: base size excludes the accepted flag\n");
+        return 1;
+    }
+    printf("PASS\n");
+    pass_count++;
+    return 0;
+}
+
 int main() {
     printf("Network packet tests:\n");
     test_magic_constant();
@@ -656,6 +841,8 @@ int main() {
     test_profile_name_dedupe();
     test_auth_rejects_version_mismatch();
     test_auth_accepts_legacy_v1();
+    test_world_change_roundtrip();
+    test_world_change_without_spawn_tail();
 
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;

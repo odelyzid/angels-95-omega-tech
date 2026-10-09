@@ -93,6 +93,28 @@ static struct InventoryClientBinder {
     }
 } g_inventoryClientBinder;
 int g_network_world_index = -1;
+
+// The server's world list, as sent in the scene handshake. Kept so the portal path —
+// which knows a world by NAME, from an OZONE `portal <WorldName>` line — can turn that
+// into the INDEX the protocol uses. Populated by the same handler that derives
+// g_network_world_index, because both come from one JSON payload and must agree.
+static std::vector<std::string> g_serverWorldNames;
+
+void NetworkRequestWorld(int world_index) {
+    if (!g_network_enabled) return;      // offline: nothing to ask
+    if (world_index < 0) return;         // unknown world; do not send a bad request
+    g_client.request_world(world_index);
+}
+
+int NetworkWorldIndexByName(const char* world_name) {
+    if (!world_name || !*world_name) return -1;
+    for (size_t i = 0; i < g_serverWorldNames.size(); i++) {
+        if (g_serverWorldNames[i] == world_name) return (int)i;
+    }
+    // -1, never 0: a miss must not silently resolve to whichever world is first.
+    return -1;
+}
+
 static bool ShowInventory = false;
 static bool ShowSkillTree = false;
 
@@ -670,6 +692,43 @@ int main(int argc, char** argv){
         PawnSystem::Instance().ApplyPickupNetState(net, g_network_world_index);
     });
 
+    // The server's authoritative world assignment.
+    //
+    // This is the reconciliation point between the two world indices, and it has to
+    // update g_network_world_index because THAT is the value the pickup filter above
+    // and WeaponBehaviour's NPC-damage reports read. Without it, g_network_world_index
+    // only ever moved in the scene handshake (which follows the SERVER's active world,
+    // not the player's), so after a portal the client filtered pickups by the wrong
+    // world and stamped NPC damage with the wrong index.
+    //
+    // Guard the -1 case explicitly: WORLD_CHANGE carries a real index, but if a future
+    // peer ever sent none, assigning -1 would make PickupPawns' filter reject every
+    // pickup and the server reject every collect — the exact failure the "must never be
+    // -1" rule exists to prevent.
+    g_client.set_on_world_changed([](int world_index, bool accepted) {
+        if (world_index < 0) {
+            OZ_WARN("Network: WORLD_CHANGE carried no world index — keeping %d",
+                    g_network_world_index);
+            return;
+        }
+        if (world_index != g_network_world_index) {
+            OZ_INFO("Network: server moved us to world %d (accepted=%d, was %d)",
+                    world_index, (int)accepted, g_network_world_index);
+            g_network_world_index = world_index;
+        } else if (!accepted) {
+            // Refused: we are already where the server thinks we are, so the index is
+            // right. Worth logging because the client's own world did NOT change and a
+            // player who walked into a portal would otherwise see pickups simply stop
+            // working with no explanation.
+            OZ_WARN("Network: world request refused — server has us in world %d",
+                    world_index);
+        }
+        // A refused request can leave the client rendering a world the server is not
+        // in. Ask for pickups so the drawn world is populated rather than empty, and
+        // so anything already drawn from a stale snapshot gets corrected.
+        if (g_network_enabled) g_client.request_pickup_resync();
+    });
+
     // Ammo changes (fire/reload) are reported to the server for remote sync.
     LightningEntityManager::Instance().set_on_ammo_changed([](int slot, int ammo, int magazine, int action) {
         if (g_network_enabled) g_client.send_weapon_ammo(slot, ammo, magazine, action);
@@ -717,6 +776,10 @@ int main(int argc, char** argv){
                 size_t p = wpos + wkey.size();
                 int idx = 0;
                 bool found = false;
+                // Repopulate from scratch: this handler runs on every scene packet, and
+                // a stale entry would let NetworkWorldIndexByName resolve a portal
+                // target against a world the server has since stopped offering.
+                g_serverWorldNames.clear();
                 while (p < sceneJson.size()) {
                     while (p < sceneJson.size() && (sceneJson[p] == ' ' || sceneJson[p] == ',')) ++p;
                     if (p >= sceneJson.size() || sceneJson[p] == ']') break;
@@ -724,6 +787,7 @@ int main(int argc, char** argv){
                     size_t s2 = ++p;
                     while (p < sceneJson.size() && sceneJson[p] != '"') ++p;
                     std::string entry = sceneJson.substr(s2, p - s2);
+                    g_serverWorldNames.push_back(entry);
                     if (entry == activeWorld) { g_network_world_index = idx; found = true; }
                     ++idx;
                     if (p < sceneJson.size()) ++p;
@@ -740,6 +804,12 @@ int main(int argc, char** argv){
         strncpy(g_world_to_load, activeWorld.c_str(), sizeof(g_world_to_load) - 1);
         g_world_to_load[sizeof(g_world_to_load) - 1] = '\0';
         SetSceneFlag = true;
+        // No REQUEST_WORLD here: this path is the server TELLING us to switch (the
+        // scene handshake's active_world), so the server already has us in that
+        // world. Asking again would be a no-op round trip. WORLD_CHANGE — sent
+        // separately on join and on any portal request — is the client's
+        // authoritative view, and server_world_index() is what gates pickups and
+        // melee regardless of what g_world_to_load says.
     });
 
     if (SetServerJoinFlag && SetServerJoinIP) {

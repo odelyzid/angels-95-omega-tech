@@ -333,7 +333,7 @@ struct WorldChangeData {
 // Gate on THIS, never on sizeof(WorldChangeData) — requiring the full size made a
 // client drop every message from a server predating the field, which is the same
 // trap as PickupRespawnData::typeName.
-constexpr uint32_t kWorldChangeSizeBase = offsetof(WorldChangeData, spawnZ);
+constexpr uint32_t kWorldChangeSizeBase = offsetof(WorldChangeData, spawnX);
 
 struct XpUpdateData {
     uint32_t player_id;

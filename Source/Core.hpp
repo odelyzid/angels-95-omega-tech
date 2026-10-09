@@ -975,6 +975,27 @@ void UpdateEntitiesSim(float dt)
             g_portalTransitionPending = true;
             SetSceneFlag = true;      // LoadWorld runs at end of frame
             g_portalCooldown = 3.0f;  // latch so the trigger can't re-fire mid-transition
+
+            // Tell the server we moved. Without this the client rendered the target
+            // world while the server still had the player in world 0 — because
+            // ServerPlayer::world_index was written once at creation and never
+            // updated. Every collect in the new level was then rejected
+            // WRONG_WORLD, every melee hit was dropped for a world mismatch, and the
+            // 15 s pickup resync kept re-sending world 0's pickups.
+            //
+            // The index is looked up by NAME because a portal line carries a world
+            // name, not an index. -1 means the server's list does not contain it
+            // (offline, or a portal pointing at a world the server does not load) and
+            // NetworkRequestWorld then does nothing — so a single-player portal to an
+            // unloaded world still works.
+            {
+                const int want = NetworkWorldIndexByName(portal->targetWorld.c_str());
+                if (g_network_enabled && want < 0)
+                    OZ_WARN("Portal: target world '%s' is not in the server's world list — "
+                            "staying in world %d server-side, so collects there will be "
+                            "rejected", portal->targetWorld.c_str(), g_network_world_index);
+                NetworkRequestWorld(want);
+            }
         }
     }
 
