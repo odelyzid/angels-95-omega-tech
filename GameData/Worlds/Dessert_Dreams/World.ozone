@@ -100,16 +100,16 @@ add box 21.5 9 0.5 3 1 6 0 1
 
 # ==============================================================================
 # Colonnade on the dais. Six columns carrying two roof slabs, so the player
-# walks through real shade. Columns span z 2..8 (cyl z range is [cz-h, cz]).
+# walks through real shade. Columns span z 0..8 (cyl z range is [cz-h, cz]).
 # The old revision ringed the spawn with eight knee-high posts textured with
 # the game's own title-screen logo.
 # ==============================================================================
-add cyl -18 -18 8 0.9 0.9 6 16 0 3
-add cyl 18 -18 8 0.9 0.9 6 16 0 3
-add cyl -18 18 8 0.9 0.9 6 16 0 3
-add cyl 18 18 8 0.9 0.9 6 16 0 3
-add cyl 0 -18 8 0.9 0.9 6 16 0 3
-add cyl 0 18 8 0.9 0.9 6 16 0 3
+add cyl -18 -18 8 0.9 0.9 8 16 0 3
+add cyl 18 -18 8 0.9 0.9 8 16 0 3
+add cyl -18 18 8 0.9 0.9 8 16 0 3
+add cyl 18 18 8 0.9 0.9 8 16 0 3
+add cyl 0 -18 8 0.9 0.9 8 16 0 3
+add cyl 0 18 8 0.9 0.9 8 16 0 3
 # Roof slabs over the west and south colonnades (underside z=8.0)
 add box -9 -18 8.3 20 0.6 6 0 4
 add box -18 0 8.3 6 0.6 20 0 4

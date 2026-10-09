@@ -209,6 +209,7 @@ public:
                 // up by name for whatever program is on the material, so the
                 // vertex stage is fed without any manual plumbing.
                 if (skyReady) model.materials[0].shader = SkyMaterial::Instance().Get();
+                rlDrawRenderBatchActive();
                 DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
             } else {
                 // No texture for this row: fall back to a flat tint. Deliberately
@@ -216,6 +217,7 @@ public:
                 // blend, and running the tint through the fog mix would only
                 // darken the fallback.
                 if (skyReady) model.materials[0].shader = noShader;
+                rlDrawRenderBatchActive();
                 DrawModel(model, {0, 0, 0}, 1.0f, f.fallback);
             }
             rlPopMatrix();

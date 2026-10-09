@@ -288,11 +288,11 @@ void ViewModel::Draw(Camera3D& camera, Shader litShader) {
         }
     }
 
-    // Draw on top of the world (no depth test) but over the 2D HUD passes later.
+    // Depth test stays ON: a wall between the camera and the weapon must occlude
+    // it. Disabling it (the old behaviour) drew the pistol over every wall in the
+    // level, which read as "occlusion missing".
     rlDrawRenderBatchActive();
-    rlDisableDepthTest();
     m_mesh->DrawMatrix(world, litShader);
-    rlEnableDepthTest();
 
     if (s_trace) OZ_INFO("[CHAIN] VM::Draw post-DrawMatrix");
 }

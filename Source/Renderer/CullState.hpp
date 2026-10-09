@@ -19,12 +19,13 @@
 //     with no skybox texture never set it at all and inherited whatever the
 //     previous frame happened to leave behind.
 //
-// Imported models are the casualty. `tools/convert_fbx.ps1` bakes a Z-up ->
-// Y-up rotation into the character/pawn/weapon GLBs, which flips triangle
-// winding on a lot of them; drawn with culling on, such a model is completely
-// invisible. Generated OZONE brushes keep correct winding, so they are fine
-// either way — which is why the bug read as "some models are missing" rather
-// than "the renderer is broken".
+// Imported models were the casualty. An earlier `tools/convert_fbx.ps1` baked a
+// Z-up -> Y-up rotation into the character/pawn/weapon GLBs, which flipped
+// triangle winding on a lot of them; drawn with culling on, such a model was
+// completely invisible. That pipeline has since been replaced: the current
+// GLBs have correct CCW winding (verified against their vertex normals), and
+// culling is safe for every imported asset. Generated OZONE brushes always had
+// correct winding.
 //
 // THE RULE
 // --------
