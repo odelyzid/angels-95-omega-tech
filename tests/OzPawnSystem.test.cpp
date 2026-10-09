@@ -413,21 +413,18 @@ static int test_point_region_primary_matches_type() {
     CHECK(tieViaId != nullptr);
     CHECK(tieViaId->zoneType == tie.primaryZoneType);
 
-    // Entered/exited sets drive the zone on_enter / on_exit LightningScript hooks.
-    // CommitFrame(), the API meant to clear them per frame, has ZERO callers
-    // (ZoneManager.cpp:183) — they are only correct because Rebuild() clears them
-    // itself. Pin that, since the next person to "use CommitFrame properly" would
-    // otherwise change hook firing with nothing to notice.
+    // Entered/exited tracking (enteredZoneIds / exitedZoneIds, PointRegion::
+    // CommitFrame, HasChanged) was DEAD: CommitFrame had zero callers and nothing
+    // ever read either set. The zone on_enter / on_exit hooks are driven from
+    // Main.cpp's lastZoneName, not from PointRegion, so the sets were removed.
+    // The invariant worth keeping is that leaving every volume clears the primary.
     PointRegion flow;
     flow.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
-    CHECK_EQ(flow.enteredZoneIds.size(), (size_t)2);   // first frame: both are new
-    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)0);
+    CHECK(flow.primaryZoneId >= 0);
     flow.Rebuild(zones.GetActiveZones({0, 0, 0}, {{-1, -1, -1}, {1, 1, 1}}));
-    CHECK_EQ(flow.enteredZoneIds.size(), (size_t)0);   // unchanged -> nothing entered
-    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)0);
+    CHECK(flow.primaryZoneId >= 0);   // stable across rebuilds
     flow.Rebuild({});
-    CHECK_EQ(flow.exitedZoneIds.size(), (size_t)2);    // left both volumes
-    CHECK_EQ(flow.primaryZoneId, -1);
+    CHECK_EQ(flow.primaryZoneId, -1); // left both volumes
 
     zones.ClearZones();
     PASS(); return 0; END_TEST();
@@ -677,6 +674,33 @@ static int test_projectile_tracer() {
     PASS(); return 0; END_TEST();
 }
 
+static int test_muzzle_flash_rejects_zero_duration() {
+    TEST("ArmMuzzleFlash rejects a non-positive duration (no 0/0 in Draw3D)");
+    CombatFX::Instance().ClearAll();
+    CHECK_EQ(CombatFX::Instance().FlashCount(), (size_t)0);
+
+    // Zero and negative must be rejected at ARM time, before EnsureInit().
+    // Draw3D computes `f.timer / f.duration`; a zero duration there is 0/0 ->
+    // NaN radius and NaN colour channels fed to DrawSphere. ArmTransientLight
+    // already guarded this; ArmMuzzleFlash did not.
+    CombatFX::Instance().ArmMuzzleFlash({0, 0, 0}, 0.0f);
+    CombatFX::Instance().ArmMuzzleFlash({0, 0, 0}, -1.0f);
+    CHECK_EQ(CombatFX::Instance().FlashCount(), (size_t)0);
+
+    // The positive path needs a GL context (EnsureInit loads a texture), so it
+    // is only asserted when a window exists. The headless CI still covers the
+    // guard, which is the whole point of the fix.
+    if (IsWindowReady()) {
+        CombatFX::Instance().ArmMuzzleFlash({0, 0, 0}, 0.12f);
+        CHECK_EQ(CombatFX::Instance().FlashCount(), (size_t)1);
+        CombatFX::Instance().Update(1.0f);
+        CHECK_EQ(CombatFX::Instance().FlashCount(), (size_t)0);
+    }
+
+    CombatFX::Instance().ClearAll();
+    PASS(); return 0; END_TEST();
+}
+
 static int test_projectile_expiry() {
     TEST("Projectile deactivates after lifetime expires");
     reset_pawn_system();
@@ -815,6 +839,7 @@ int main() {
     failures += test_projectile_spawn();
     failures += test_projectile_movement();
     failures += test_projectile_tracer();
+    failures += test_muzzle_flash_rejects_zero_duration();
     failures += test_projectile_expiry();
     failures += test_projectile_pawn_collision();
     failures += test_projectile_miss();

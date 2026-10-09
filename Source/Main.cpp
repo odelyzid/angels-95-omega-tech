@@ -1000,7 +1000,11 @@ int main(int argc, char** argv){
                         g_playerMovement.onGround = false;
                         break;
                     case ZoneType::ZONE_REVERB:
-                        // Placeholder: reverb DSP will be applied via audio system
+                        // Reverb is handled by SoundManager::UpdateReverb, driven
+                        // from the per-frame zone pass (Core.hpp), not from this
+                        // zone-entry hook. The case is intentionally empty; the
+                        // old "placeholder, will be applied" comment was stale --
+                        // DspReverb exists and is attached.
                         break;
                     default:
                         break;

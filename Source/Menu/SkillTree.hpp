@@ -2,10 +2,12 @@
 // ---------------------------------------------------------------------------
 // SkillTree — "Ethereal Skills" overlay (angelic skill tree).
 //
-// STUB: displays every `skill` entity discovered by the registry as a tiered
+// Displays every `skill` entity discovered by the registry as a tiered
 // node graph, styled with the Gold menu frames. Left-click an available node to
 // unlock it, spending mana or psychic energy. Unlocked nodes persist through
-// LightningEntityManager (TF.sav) and may grant one-time stat bonuses.
+// LightningEntityManager (TF.sav) and apply their one-time stat bonuses
+// (UnlockSkill / RespecSkills). This was labelled "STUB" long after it became a
+// working, wired overlay (drawn from Main.cpp's DrawHomeScreen path).
 //
 // Client-only, header-only (included by Main.cpp).
 // ---------------------------------------------------------------------------

@@ -47,16 +47,6 @@ static void ScanAvailableWorlds() {
 
 // Portal editing state (shared with Main.cpp via accessors)
 // --- Portal data plumbing ---
-int GetPortalCount() {
-    return (int)ZoneManager::Instance().GetPortals().size();
-}
-
-const char* GetPortalTargetWorld(int index) {
-    auto& portals = ZoneManager::Instance().GetPortals();
-    if (index < 0 || index >= (int)portals.size()) return nullptr;
-    return portals[index].targetWorld.c_str();
-}
-
 void RefreshPortalList() {
     // Intentionally inert. This used to rebuild the removed Zone window's portal
     // combo, so its whole body was already a no-op behind a `hEnvPanel` guard.
@@ -64,6 +54,9 @@ void RefreshPortalList() {
     // ZoneManager::GetPortals() directly, so there is no list left to refresh.
     // Kept as a function because three Main.cpp call sites (portal create/delete)
     // treat it as the "portals changed" notification.
+    //
+    // GetPortalCount / GetPortalTargetWorld used to sit here too. They had zero
+    // callers and were deleted.
 }
 
 // Generic image picker. Prefers a repo-relative GameData/ path so saved worlds

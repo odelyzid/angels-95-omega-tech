@@ -2165,7 +2165,19 @@ if (!any) return;
         for (auto& r : m_renderables) {
             if (!r.loaded) continue;
             if (r.surfaceFlags & SURF_COLLISION_PROXY) continue;
-            if (!(r.surfaceFlags & SURF_FAKEBACKDROP)) continue;
+            // Resolve PER FACE. This branch used to read the brush-wide
+            // `surfaceFlags` mirror, which derives from surface.def only -- so a
+            // per-face backdrop was invisible to it. That mirror read is the
+            // exact brush-wide filter the SurfacePass refactor removed; do not
+            // reintroduce it. Without a ready SurfaceMaterial there is no
+            // per-face draw available, so the whole brush is drawn when ANY face
+            // is a backdrop.
+            bool backdrop = false;
+            for (int f = 0; f < FACE_COUNT; f++) {
+                const SurfaceProps& p = r.surface.Resolve((SurfaceFace)f);
+                if (p.Has(SURF_FAKEBACKDROP) && !p.Has(SURF_INVISIBLE)) { backdrop = true; break; }
+            }
+            if (!backdrop) continue;
             DrawModel(r.model, r.position, r.scale, WHITE);
         }
         return;

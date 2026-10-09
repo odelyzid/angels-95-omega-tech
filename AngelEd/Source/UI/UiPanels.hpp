@@ -39,13 +39,11 @@ void ShowDefPropertiesFor(const std::string& defName);
 
 // --- Portals ---
 // Portals are edited in the Entity Properties panel's PORTAL section, which reads
-// and writes ZoneManager::GetPortals() directly. These three helpers survive only
-// because Main.cpp already called them; GetPortalCount/GetPortalTargetWorld have
-// no callers at all and are logged as dead in
-// Wiki/Editor-PropertyPanel-Refactor.md (P4).
+// and writes ZoneManager::GetPortals() directly. RefreshPortalList survives only
+// because Main.cpp already calls it as the "portals changed" notification; it is
+// intentionally inert (see the .cpp). GetPortalCount/GetPortalTargetWorld had no
+// callers at all and were deleted.
 void RefreshPortalList();           // intentionally inert now — see the .cpp
-int  GetPortalCount();
-const char* GetPortalTargetWorld(int index);
 
 // --- Pawn management ---
 void PawnManagerAddPawn(const char* name, const char* meshPath);
@@ -141,8 +139,6 @@ inline void UpdateStatsSidebar(float, float, float, float, float, float, float, 
 inline void LayoutStatsSidebar(int, int, int, int) {}
 inline int GetStatsSidebarWidth() { return 200; }
 inline void RefreshPortalList() {}
-inline int GetPortalCount() { return 0; }
-inline const char* GetPortalTargetWorld(int) { return nullptr; }
 inline void PawnManagerAddPawn(const char*, const char*) {}
 inline int GetPawnCount() { return 0; }
 inline const char* GetPawnName(int) { return nullptr; }

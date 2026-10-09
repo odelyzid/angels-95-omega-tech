@@ -432,6 +432,12 @@ bool SoundManager::PlayScriptSound(const std::string& path) {
         it->second.idle = 0.0f;   // keep alive
     }
 
+    // Reset to unity. The handle is shared with PlayStatSound, which writes a
+    // weapon's authored volume/pitch onto it, so without this a `play_sound`
+    // opcode of a path a weapon also uses would inherit that weapon's volume.
+    SetSoundVolume(it->second.sound, 1.0f);
+    SetSoundPitch(it->second.sound, 1.0f);
+
     PlaySound(it->second.sound);
     return true;
 }
@@ -476,8 +482,18 @@ bool SoundManager::PlayStatSound(const std::string& path, float volume, float pi
     // should get a loud shot, not silence from a rejected load.
     if (volume < 0.0f) volume = 0.0f;
     if (pitch <= 0.0f) pitch = 1.0f;
-    if (volume != 1.0f) SetSoundVolume(it->second.sound, volume);
-    if (pitch  != 1.0f) SetSoundPitch(it->second.sound, pitch);
+    // ALWAYS write both. Volume and pitch are properties of the shared,
+    // path-keyed handle, not of this call, so skipping the write when the value
+    // happens to be the default left whatever the PREVIOUS caller set in place.
+    // Four shipped weapons resolve to machgf3b.wav with different values
+    // (flux_carbine 0.85/1.15, Pistol_01 0.9, Rifle_01 1.0/0.85, automag 0.95):
+    // firing the automag then switching to Rifle_01 skipped the volume write
+    // (its authored value is exactly 1.0) and played the rifle at the automag's
+    // 0.95, with the pitch still wherever the previous weapon left it. The
+    // `!= 1.0f` guard WAS the bug. There is nothing to restore afterwards,
+    // because every play now writes the value it wants.
+    SetSoundVolume(it->second.sound, volume);
+    SetSoundPitch(it->second.sound, pitch);
 
     PlaySound(it->second.sound);
     return true;

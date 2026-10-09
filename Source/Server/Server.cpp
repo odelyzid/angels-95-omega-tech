@@ -642,8 +642,22 @@ static void on_server_message(const net::NetworkMessage& msg,
             net::NpcDamageData ndd;
             memcpy(&ndd, msg.payload, sizeof(ndd));
             ndd.player_id = sender.id;
+
+            // The attacker must exist before anything else: the world match is
+            // checked against where the player actually is, not against the
+            // client-claimed index. NPC_DAMAGE used to validate neither, so any
+            // client could damage a same-numbered NPC in a world it was not in
+            // (all worlds are authored near the origin) with no world check.
+            ServerPlayer* attacker = g_game_state.get_player(sender.id);
+            if (!attacker) break;
+            if (ndd.world_index != attacker->world_index) {
+                OZ_WARN("NPC_DAMAGE from player %u — world %d != %d", sender.id,
+                        ndd.world_index, attacker->world_index);
+                break;
+            }
+
             // Find and damage the NPC
-            WorldState* ws = g_game_state.get_world(ndd.world_index);
+            WorldState* ws = g_game_state.get_world(attacker->world_index);
             if (!ws) break;
             ServerNPC* npc = nullptr;
             if (ndd.partition_index >= 0) {
@@ -656,18 +670,21 @@ static void on_server_message(const net::NetworkMessage& msg,
             }
             if (!npc || !npc->active) break;
             // Validate distance (2x attack range for leeway)
-            ServerPlayer* attacker = g_game_state.get_player(sender.id);
-            if (!attacker) break;
             float dx = attacker->position.x - npc->position.x;
             float dy = attacker->position.y - npc->position.y;
             float dz = attacker->position.z - npc->position.z;
             float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-            if (dist > 20.0f) break; // max weapon range
+            if (dist > net::NPC_MAX_RANGE) break; // max weapon range
             // Rate-limit: max 5 damage ticks/second (2 server ticks at 10fps)
             if (attacker->last_damage_tick > 0 &&
                 g_game_state.tick_count() - attacker->last_damage_tick < 2) break;
             attacker->last_damage_tick = g_game_state.tick_count();
-            g_game_state.damage_npc(*npc, ndd.damage, sender.id);
+            // Cap client-reported damage so a spoofed report cannot one-shot.
+            // There was no cap at all here while MELEE_HIT had one.
+            int dmg = ndd.damage;
+            if (dmg < 0) dmg = 0;
+            if (dmg > net::NPC_MAX_DAMAGE) dmg = net::NPC_MAX_DAMAGE;
+            g_game_state.damage_npc(*npc, dmg, sender.id);
             // Broadcast updated NPC state
             net::NpcStateUpdateData nsud = make_npc_state(*ws, ndd.npc_index, ndd.partition_index, *npc);
             net::NetworkMessage relay;

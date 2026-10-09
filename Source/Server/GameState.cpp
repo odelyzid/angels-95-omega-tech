@@ -438,7 +438,8 @@ static void seed_world_entities(WorldState& ws, const std::string& gamedata_dir)
 uint32_t GameState::add_player(uint32_t id, const char* name, int team, int requested_team)
 {
     if (m_player_count >= (int)m_max_players) {
-        OZ_WARN("Cannot add player, server full (%u/%u)", m_max_players, m_max_players);
+        OZ_WARN("Cannot add player, server full (%u/%u)",
+                (unsigned)m_player_count, (unsigned)m_max_players);
         return 0;
     }
     // Idempotent: re-join / re-auth for an already-connected id just refreshes

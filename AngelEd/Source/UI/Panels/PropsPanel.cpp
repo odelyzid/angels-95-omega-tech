@@ -1893,7 +1893,17 @@ if (!z.name.empty()) FillDefBlock(z.name, "");
         // For brush/zone, derive size from position data if needed
         if (g_editorPanels.propsTargetType == sel::BRUSH) {
             int idx = g_editorPanels.propsTargetIndex;
-            // Prefer reading UV values from the renderable (source of truth)
+            // propsTargetIndex for a BRUSH is a RENDERABLE index (set from
+            // g_sel.index). If it is out of range the selection is stale, and the
+            // honest thing is to leave the previous values alone.
+            //
+            // There used to be an `else` here that read the CSG collision-volume
+            // list with the SAME idx — a renderable index indexing the
+            // collision-volume output. That is the index-space confusion
+            // AGENTS.md records as deleted with RaycastTestBrushes: the two
+            // lists do not correspond once any `sub` is present, so it silently
+            // showed a DIFFERENT brush's size and UVs. PropsPanel must never
+            // touch that list again (tests/Surface.test.cpp asserts the absence).
             if (idx >= 0 && idx < OzoneLoader::Instance().Count()) {
                 OzoneRenderable* r = OzoneLoader::Instance().Get(idx);
                 if (r && r->loaded) {
@@ -1905,17 +1915,6 @@ if (!z.name.empty()) FillDefBlock(z.name, "");
                     g_editorPanels.propTexScaleV = r->texScaleV;
                     g_editorPanels.propTexOffsetU = r->texOffsetU;
                     g_editorPanels.propTexOffsetV = r->texOffsetV;
-                }
-            } else {
-                auto& vols = OzoneLoader::Instance().GetCollisionVolumes();
-                if (idx >= 0 && idx < (int)vols.size()) {
-                    g_editorPanels.propSizeX = vols[idx].aabb.max.x - vols[idx].aabb.min.x;
-                    g_editorPanels.propSizeY = vols[idx].aabb.max.y - vols[idx].aabb.min.y;
-                    g_editorPanels.propSizeZ = vols[idx].aabb.max.z - vols[idx].aabb.min.z;
-                    g_editorPanels.propTexScaleU = vols[idx].texScaleU;
-                    g_editorPanels.propTexScaleV = vols[idx].texScaleV;
-                    g_editorPanels.propTexOffsetU = vols[idx].texOffsetU;
-                    g_editorPanels.propTexOffsetV = vols[idx].texOffsetV;
                 }
             }
         } else if (g_editorPanels.propsTargetType == sel::ZONE) {

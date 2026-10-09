@@ -678,6 +678,14 @@ constexpr float MELEE_MAX_REACH = 5.0f;   // longest shipped reach is 3.5
 constexpr int   MELEE_MAX_DAMAGE = 500;  // above the toughest NPC's health
 constexpr uint32_t MELEE_MIN_TICKS = 1;  // 1 server tick between swings (10/s cap)
 
+// NPC_DAMAGE is also client-originated (the shipped client no longer sends it
+// for weapons -- MELEE_HIT / server projectiles own those -- but any client may).
+// Its damage ceiling is separate from the melee one because the two paths have
+// different legit maxima: melee is a single swing, ranged is a projectile that
+// may be tuned higher. Both are ceilings on a client claim, not gameplay tuning.
+constexpr int   NPC_MAX_DAMAGE = 500;    // above the toughest NPC's health
+constexpr float NPC_MAX_RANGE  = 20.0f;  // max weapon range the server accepts
+
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------

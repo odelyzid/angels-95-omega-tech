@@ -52,7 +52,14 @@ struct LightNode {
     bool flare = false;         // draws a bright additive billboard at the light
     bool corona = false;        // draws a larger, dimmer halo billboard
 
-    int zoneId = -1;            // -1 = affects all zones, 0+ = only affects matching zone
+    // -1 = affects all zones, 0+ = only affects matching zone.
+    //
+    // WRITE-ONLY TODAY. PawnSystem::AssignLightZones() writes this on every world
+    // load / light apply, and NOTHING reads it -- there is no per-zone light
+    // filtering yet. Kept (rather than deleted) as the intended hook for a future
+    // per-zone lighting system; do not treat it as live. The per-apply cost is a
+    // pure write.
+    int zoneId = -1;
     // Remaining lifetime for transient (effect) lights, seconds. World lights
     // leave this at 0 and are never aged out by CombatFX.
     float timer = 0.0f;

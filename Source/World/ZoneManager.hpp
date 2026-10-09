@@ -52,20 +52,15 @@ struct ZonePortal {
 
 // PointRegion — per-entity zone tracking with stacking support
 struct PointRegion {
-    int lastPrimaryZoneId = -1;    // previous frame's primary zone
     int primaryZoneId = -1;        // current frame's primary zone
     ZoneType primaryZoneType = ZoneType::ZONE_WATER; // type of primary zone
     std::unordered_set<int> activeZoneIds;   // all overlapping zones this frame
-    std::unordered_set<int> enteredZoneIds;  // zones entered this frame
-    std::unordered_set<int> exitedZoneIds;   // zones exited this frame
     ZoneEnvOverrides combinedEnv;            // merged from all active zones
 
     // `activeZones` must be sorted highest-priority-first (see GetActiveZones).
     void Rebuild(const std::vector<ZoneVolumeNode*>& activeZones);
     bool HasZoneType(ZoneType type) const { return primaryZoneId >= 0 && primaryZoneType == type; }
     bool HasZoneId(int id) const;
-    bool HasChanged() const { return primaryZoneId != lastPrimaryZoneId; }
-    void CommitFrame();
 };
 
 class ZoneManager {

@@ -324,10 +324,6 @@ inline void Init(){
     WDLModels.LoadModels(OTEditor.Path);
 }
 
-static int ScriptTimer = 0;
-static float X, Y, Z, S, Rotation, W, H, L;
-inline bool NextCollision = false;
-
 class InEditor{
     public:
         bool DrawModel = false;

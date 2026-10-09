@@ -26,11 +26,15 @@ void PlayerPhysics::ClampToGround(Camera3D& cam, Motion& motion, float eyeHeight
 
 void PlayerPhysics::UpdateFlyVertical(Camera3D& cam, float baseSpeed, const PhysicsInfo& phys,
                                       float dt, bool allowUp, bool allowDown) {
-    (void)allowUp;
-    (void)allowDown;
+    // Honour the gates. They were both `(void)`-discarded, so the signature
+    // modelled a vertical-flight restriction that was never wired: any caller
+    // could pass false and still fly. The current caller (noclip / flying) passes
+    // (true, true), so this is behaviour-preserving today and gives a future
+    // restricted-flight caller (spectate, dead, a zone that disables ascent)
+    // something that actually works.
     float vy = 0.0f;
-    if (IsKeyDown(KEY_SPACE)) vy += 1.0f;
-    if (IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
+    if (allowUp && IsKeyDown(KEY_SPACE)) vy += 1.0f;
+    if (allowDown && IsKeyDown(KEY_LEFT_CONTROL)) vy -= 1.0f;
     cam.position.y += vy * baseSpeed * phys.flySpeedMult * dt;
 }
 

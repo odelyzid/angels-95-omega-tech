@@ -1035,6 +1035,112 @@ static int test_pickup_net_state_is_world_scoped() {
     PASS(); return 0; END_TEST();
 }
 
+// ---------------------------------------------------------------------------
+// Source-text lint: no printf-style log call passes the SAME identifier twice
+// in a row. That is the shape of the "server full (%u/%u)" bug, which logged
+// m_max_players twice and therefore read 32/32 at every occupancy. Two hand-
+// maintained artefacts (the format string and the argument list) cannot be
+// checked against each other in one language, so the source is read as text.
+// ---------------------------------------------------------------------------
+static std::string ReadSourceFile(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return std::string();
+    std::string out; char buf[4096]; size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
+    fclose(f);
+    return out;
+}
+
+static int scan_duplicate_log_args(const std::string& src, std::vector<std::string>& outBad) {
+    static const char* macros[] = {"OZ_WARN(", "OZ_INFO(", "OZ_ERROR("};
+    int flagged = 0;
+    for (const char* m : macros) {
+        size_t pos = 0;
+        while ((pos = src.find(m, pos)) != std::string::npos) {
+            size_t open = pos + std::strlen(m) - 1;   // the '('
+            // Balanced scan to the matching ')'.
+            int depth = 0; size_t i = open; bool inStr = false, inChr = false;
+            for (; i < src.size(); i++) {
+                char ch = src[i];
+                if (inStr) { if (ch == '\\') i++; else if (ch == '"') inStr = false; continue; }
+                if (inChr) { if (ch == '\\') i++; else if (ch == '\'') inChr = false; continue; }
+                if (ch == '"') { inStr = true; continue; }
+                if (ch == '\'') { inChr = true; continue; }
+                if (ch == '(') depth++;
+                else if (ch == ')') { depth--; if (depth == 0) break; }
+            }
+            std::string args = src.substr(open + 1, i - open - 1);
+            // Split at top-level commas.
+            std::vector<std::string> parts;
+            int d = 0; bool s2 = false, c2 = false; size_t start = 0;
+            for (size_t k = 0; k <= args.size(); k++) {
+                char ch = (k < args.size()) ? args[k] : ',';
+                if (s2) { if (ch == '\\') k++; else if (ch == '"') s2 = false; continue; }
+                if (c2) { if (ch == '\\') k++; else if (ch == '\'') c2 = false; continue; }
+                if (ch == '"') s2 = true;
+                else if (ch == '\'') c2 = true;
+                else if (ch == '(' || ch == '[' || ch == '{') d++;
+                else if (ch == ')' || ch == ']' || ch == '}') d--;
+                else if (ch == ',' && d == 0) { parts.push_back(args.substr(start, k - start)); start = k + 1; }
+            }
+            auto trim = [](std::string s) {
+                size_t b = s.find_first_not_of(" \t\r\n");
+                size_t e = s.find_last_not_of(" \t\r\n");
+                if (b == std::string::npos) return std::string();
+                return s.substr(b, e - b + 1);
+            };
+            for (size_t p = 1; p < parts.size(); p++) {
+                std::string a = trim(parts[p - 1]), b = trim(parts[p]);
+                if (a.empty() || b.empty() || a != b) continue;
+                // Only flag identifier-like duplicates; a repeated literal is
+                // legitimate (e.g. a format string containing "%d %d").
+                if (a.find_first_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_") != std::string::npos) {
+                    outBad.push_back(a);
+                    flagged++;
+                }
+            }
+            pos = i + 1;
+        }
+    }
+    return flagged;
+}
+
+static int test_log_calls_have_no_duplicate_args() {
+    TEST("No OZ_WARN/INFO/ERROR passes the same identifier twice in a row");
+
+    // Self-check first: the scanner MUST fire on the exact bug it exists to
+    // catch, or a silently-broken lint would pass forever.
+    {
+        std::vector<std::string> bad;
+        int n = scan_duplicate_log_args(
+            "OZ_WARN(\"server full (%u/%u)\", m_max_players, m_max_players);\n", bad);
+        CHECK(n == 1);
+    }
+
+    static const char* files[] = {
+        "Source/Server/GameState.cpp",
+        "Source/Server/Server.cpp",
+        "Source/Server/Master/Master.cpp",
+    };
+    int flagged = 0, missing = 0;
+    for (const char* path : files) {
+        std::string src = ReadSourceFile(path);
+        if (src.empty()) { missing++; continue; }
+        std::vector<std::string> bad;
+        int n = scan_duplicate_log_args(src, bad);
+        for (const auto& ident : bad)
+            fprintf(stdout, "FAIL: %s: log call passes '%s' twice in a row\n",
+                    path, ident.c_str());
+        flagged += n;
+    }
+    if (missing == (int)(sizeof(files) / sizeof(files[0]))) {
+        printf("  SKIP  log-arg lint (source files not found from cwd)\n");
+        return 0;
+    }
+    CHECK(flagged == 0);
+    PASS(); return 0; END_TEST();
+}
+
 int main() {
     fprintf(stdout, "GameState Tests\n");
     fprintf(stdout, "===============\n");
@@ -1066,6 +1172,7 @@ int main() {
     failures += test_pickup_net_state_is_world_scoped();
     failures += test_pickup_loopback_roundtrip();
     failures += test_pickup_state_cleared_on_disconnect();
+    failures += test_log_calls_have_no_duplicate_args();
 
     fprintf(stdout, "===============\n");
     fprintf(stdout, "%d/%d passed, %d failed\n",

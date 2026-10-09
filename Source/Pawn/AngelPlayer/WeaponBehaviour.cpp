@@ -7,7 +7,6 @@
 #include "../../Audio/SoundManager.hpp"
 #include "raymath.h"
 #include "../../Particle/OzParticleSimulationManager.hpp"
-#include "../../Network/NetworkSession.hpp"   // g_network_world_index
 #include <cstdlib>
 #include <cmath>
 
@@ -21,25 +20,6 @@ float WeaponBehaviour::SelectedWeaponStat(const std::string& key, float defVal) 
     if (rit != ent->runtimeStats.end()) return rit->second;
     auto dit = ent->def->stats.floats.find(key);
     return (dit != ent->def->stats.floats.end()) ? dit->second : defVal;
-}
-
-// The world index to stamp on an outgoing NPC damage report.
-//
-// These two calls used to pass a literal 0. That is only correct if the server's
-// active world happens to be index 0 — NPC_DAMAGE looks the NPC up by
-// (world_index, npc_index) and does NOT validate world_index against the attacker
-// (unlike MELEE_HIT, which does), so in any other world the lookup silently no-ops
-// or hits a same-numbered NPC in the wrong world. The pickup path five lines away
-// in Main.cpp already used g_network_world_index correctly, which is exactly why the
-// literal survived: nothing else on this path disagreed with it visibly.
-//
-// -1 means "not yet known" (no handshake, or a parse miss). Sending -1 is better
-// than sending 0: the server's get_world(-1) finds nothing, so the hit is dropped,
-// whereas a hardcoded 0 would damage an unrelated NPC in world 0. Falling back to 0
-// only after a handshake that never arrived would reintroduce the original bug for
-// the frames before the index resolves, so this does NOT fall back.
-static int NetworkWorldIndex() {
-    return g_network_world_index;
 }
 
 // The stats parser stores string values verbatim: no quote handling, and a
@@ -137,59 +117,30 @@ void WeaponBehaviour::FireWeapon(Camera3D& cam) {
 
     bool isMelee = (result == 0);
     float damage = SelectedWeaponStat("damage", 10.0f);
-    float reach = isMelee ? SelectedWeaponStat("reach", 3.0f) : 0.0f;
 
-    // Send to server
+    // Send the trigger to the server. This is the ONLY report the client makes,
+    // and the server is authoritative for both weapon kinds.
+    //
+    // BOTH branches used to run a second client-side NPC raycast here and send
+    // NPC_DAMAGE on top of the server-authoritative path -- so every trigger
+    // dealt damage TWICE:
+    //   * Melee: FireSelectedWeapon already resolved the target and reported it
+    //     through ReportMeleeHit -> MELEE_HIT, which the server re-validates for
+    //     world match, reach cap, stamina and a damage cap.
+    //   * Ranged: the server spawns its own projectile from PLAYER_ACTION and
+    //     damages with tick_projectiles; the client projectile is cosmetic.
+    // The duplicate NPC_DAMAGE leg skipped every check the first leg has: it
+    // validated only distance and rate, never the world, and had no damage cap.
+    //
+    // A melee swing sends nothing at all here (MELEE_HIT already went out).
+    // NPC_DAMAGE is still reachable by any client, so it is hardened server-side
+    // on its own rather than trusted not to arrive.
     if (m_client && m_networkEnabled && *m_networkEnabled && m_client->is_connected()) {
-        if (isMelee) {
-            // Melee: range check against network NPCs
-            int hitIdx = -1, hitPart = -1;
-            float hitDist = 1e9f;
-            const auto& cnpc = m_client->npcs();
-            for (size_t i = 0; i < cnpc.size(); i++) {
-                if (!cnpc[i].active) continue;
-                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
-                Vector3 toNpc = Vector3Subtract(np, origin);
-                float t = Vector3DotProduct(toNpc, forward);
-                if (t < 0 || t > reach) continue;
-                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
-                float d = Vector3Distance(closest, np);
-                if (d < 2.0f && t < hitDist) {
-                    hitDist = t;
-                    hitIdx = static_cast<int>(i);
-                    hitPart = cnpc[i].partition_index;
-                }
-            }
-            if (hitIdx >= 0) {
-                m_client->send_npc_damage(NetworkWorldIndex(), hitIdx, hitPart, (int)damage);
-            }
-        } else {
-            // Ranged: send weapon fire + raycast hit
+        if (!isMelee) {
             m_client->send_weapon_fire(
                 origin.x, origin.y, origin.z,
                 forward.x, forward.y, forward.z,
                 1, (int)damage);
-
-            int hitIdx = -1, hitPart = -1;
-            float hitDist = 1e9f;
-            const auto& cnpc = m_client->npcs();
-            for (size_t i = 0; i < cnpc.size(); i++) {
-                if (!cnpc[i].active) continue;
-                Vector3 np = {cnpc[i].position.x, cnpc[i].position.y, cnpc[i].position.z};
-                Vector3 toNpc = Vector3Subtract(np, origin);
-                float t = Vector3DotProduct(toNpc, forward);
-                if (t < 0) continue;
-                Vector3 closest = Vector3Add(origin, Vector3Scale(forward, t));
-                float d = Vector3Distance(closest, np);
-                if (d < 2.0f && t < hitDist) {
-                    hitDist = t;
-                    hitIdx = static_cast<int>(i);
-                    hitPart = cnpc[i].partition_index;
-                }
-            }
-            if (hitIdx >= 0) {
-                m_client->send_npc_damage(NetworkWorldIndex(), hitIdx, hitPart, (int)damage);
-            }
         }
     }
 }

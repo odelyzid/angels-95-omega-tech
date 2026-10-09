@@ -1151,6 +1151,61 @@ static void test_light_uniform_upload_parity() {
     // deleting a C member the shader happens not to read.
 }
 
+// The !sm.Ready() fallback in DrawZoneGeometry draws the whole brush, but it
+// must decide WHICH brushes from the resolved per-face props, not from the
+// brush-wide `surfaceFlags` mirror. That mirror derives from surface.def only,
+// so a per-face SURF_FAKEBACKDROP is invisible to it — reintroducing it is
+// exactly the brush-wide filter the SurfacePass refactor removed.
+static void test_backdrop_fallback_uses_resolved_faces() {
+    const std::string ldr = ReadFile("Source/World/OzOzoneLoader.cpp");
+    if (ldr.empty()) { printf("  SKIP  backdrop fallback (source not found)\n"); return; }
+
+    const size_t at = ldr.find("if (!sm.Ready()) {");
+    check(at != std::string::npos, "DrawZoneGeometry still has the !sm.Ready() fallback");
+    if (at == std::string::npos) return;
+
+    const size_t end = ldr.find("return;", at);
+    const std::string block = ldr.substr(at, end - at);
+    check(block.find("surfaceFlags & SURF_FAKEBACKDROP") == std::string::npos,
+          "the !sm.Ready() fallback does NOT read the brush-wide surfaceFlags mirror");
+    check(block.find("r.surface.Resolve") != std::string::npos,
+          "the !sm.Ready() fallback resolves faces with r.surface.Resolve");
+}
+
+// propsTargetIndex for a BRUSH is a RENDERABLE index. It must never be used to
+// index the CSG collision-volume list (the two do not correspond once any `sub`
+// is present). The whole panel must be free of that list, so a future edit
+// cannot quietly reintroduce the cross-index read.
+static void test_props_panel_has_no_cross_space_index() {
+    const std::string panel = ReadFile("AngelEd/Source/UI/Panels/PropsPanel.cpp");
+    if (panel.empty()) { printf("  SKIP  props-panel cross-space index (source not found)\n"); return; }
+    check(panel.find("GetCollisionVolumes") == std::string::npos,
+          "PropsPanel never indexes the CSG collision-volume list with a renderable index");
+}
+
+// The startup ambient default and the script `restore_ambient` opcode must
+// agree. They used to be {0.1,0.1,0.1,1} and {1,1,1,1}, the latter claiming in a
+// comment to "match LitLightning default" — which left the scene 10x brighter
+// and pushed the wrong value into OzoneLoader::SetWorldAmbient.
+static void test_restore_ambient_matches_startup() {
+    const std::string core = ReadFile("Source/Core.hpp");
+    if (core.empty()) { printf("  SKIP  restore-ambient parity (source not found)\n"); return; }
+
+    check(core.find("static constexpr float kDefaultAmbient[4] = {0.1f, 0.1f, 0.1f, 1.0f};")
+              != std::string::npos,
+          "Core.hpp defines the world default ambient once, as 0.1/0.1/0.1/1");
+    check(core.find("{1.0f, 1.0f, 1.0f, 1.0f}") == std::string::npos,
+          "Core.hpp has no stray {1,1,1,1} ambient literal");
+
+    const size_t restore = core.find("TakePendingAmbientRestore");
+    check(restore != std::string::npos, "restore_ambient path still present");
+    if (restore == std::string::npos) return;
+    const size_t end = core.find("SetWorldAmbient", restore);
+    const std::string block = core.substr(restore, end - restore);
+    check(block.find("FillDefaultAmbient") != std::string::npos,
+          "restore_ambient uses FillDefaultAmbient, matching the startup default");
+}
+
 int main() {
     printf("Surface tests:\n");
     test_legacy_bits_stable();
@@ -1176,6 +1231,9 @@ int main() {
     test_clear_and_reset();
     test_selection();
     test_apply_to_selection();
+    test_backdrop_fallback_uses_resolved_faces();
+    test_props_panel_has_no_cross_space_index();
+    test_restore_ambient_matches_startup();
     printf("\nResults: %d/%d passed\n", pass_count, test_count);
     return (pass_count == test_count) ? 0 : 1;
 }

@@ -348,15 +348,15 @@ no CI inline-list change, no protocol, no `.ozls` writer, no save format.
   notification. Its old body was already dead behind an `hEnvPanel` guard.
 - **`ID_PP_PORTALBROWSE = 470` was already dead** — declared, never created, never
   handled. Its slot was reused for `ID_PP_PORTALDELETE`.
-- **`GetPortalCount()` / `GetPortalTargetWorld()` still have zero callers** and were
-  already dead before this work. Left in place and logged below rather than mixed
-  into this change.
+- **`GetPortalCount()` / `GetPortalTargetWorld()` had zero callers** and were
+  deleted in the b88 dead-code sweep (their `UiPanels.hpp` declarations, inline
+  fallbacks and `UI/Panels/LevelState.cpp` definitions all went together).
 
 ## Dead code found and NOT removed (P4 backlog)
 
 | Item | Why it is dead |
 |---|---|
-| `GetPortalCount()`, `GetPortalTargetWorld()` | zero callers, predates this work |
+| `GetPortalCount()`, `GetPortalTargetWorld()` | **deleted** — zero callers, predated this work |
 | `ID_PP_PORTALBROWSE` | removed in P3 (slot reused) |
 | `ID_BTN_GT_PREVIEW` | declared and created in the removed window, so now gone |
 | `Editor.hpp` `ShowEnvPanel` flag | nothing reads it; the window is gone |

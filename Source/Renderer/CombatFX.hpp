@@ -122,6 +122,12 @@ public:
     }
 
     void ArmMuzzleFlash(Vector3 pos, float duration = 0.12f) {
+        // Reject a non-positive duration at ARM time, not at draw time. Draw3D
+        // computes `f.timer / f.duration`; a zero duration there is 0/0 -> NaN,
+        // which feeds a NaN radius into DrawSphere and a NaN into the colour
+        // channels. ArmTransientLight, two functions down, already guarded this;
+        // ArmMuzzleFlash did not.
+        if (duration <= 0.0f) return;
         EnsureInit();
         Flash f{pos, duration, duration};
         if (m_flashes.size() >= 8) m_flashes.erase(m_flashes.begin());
@@ -260,6 +266,10 @@ public:
 // Live tracer count. Exposed so the projectile tick's tracer emission can be
     // asserted without reaching into the private vector.
     size_t TracerCount() const { return m_tracers.size(); }
+
+    // Live flash count. Same purpose as TracerCount: lets a headless test assert
+    // that a zero-duration ArmMuzzleFlash is rejected and that Update() reaps.
+    size_t FlashCount() const { return m_flashes.size(); }
 
 private:
     struct Flash { Vector3 pos; float timer; float duration; };

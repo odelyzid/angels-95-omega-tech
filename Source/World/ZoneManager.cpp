@@ -139,20 +139,12 @@ void PointRegion::Rebuild(const std::vector<ZoneVolumeNode*>& activeZones) {
         merged.Merge((*it)->envOverrides);
     }
 
-    enteredZoneIds.clear();
-    exitedZoneIds.clear();
-    for (int id : newIds) {
-        if (activeZoneIds.find(id) == activeZoneIds.end())
-            enteredZoneIds.insert(id);
-    }
-    for (int id : activeZoneIds) {
-        if (newIds.find(id) == newIds.end())
-            exitedZoneIds.insert(id);
-    }
-
+    // enteredZoneIds/exitedZoneIds were computed here and never read by anything
+    // (PointRegion::CommitFrame, which consumed them, had zero callers). The
+    // per-zone enter/exit hooks are driven from the lightning scripts in Main.cpp
+    // via lastZoneName, not from this set. Removed rather than kept as dead state.
     activeZoneIds = std::move(newIds);
     combinedEnv = merged;
-    lastPrimaryZoneId = primaryZoneId;
     if (activeZoneIds.empty()) {
         primaryZoneId = -1;
         primaryZoneType = ZoneType::ZONE_WATER;
@@ -178,9 +170,4 @@ void PointRegion::Rebuild(const std::vector<ZoneVolumeNode*>& activeZones) {
 
 bool PointRegion::HasZoneId(int id) const {
     return activeZoneIds.find(id) != activeZoneIds.end();
-}
-
-void PointRegion::CommitFrame() {
-    enteredZoneIds.clear();
-    exitedZoneIds.clear();
 }

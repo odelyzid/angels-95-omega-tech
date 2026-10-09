@@ -33,7 +33,18 @@
 // How long the damage vignette stays up after a hit, seconds.
 static constexpr float kDamageFlashDuration = 0.45f;
 
-bool FloorCollision = true;
+// The world's default ambient, in ONE place. The startup upload (InitLighting)
+// and the script `restore_ambient` opcode must agree: they used to be
+// {0.1,0.1,0.1,1} and {1,1,1,1}, and the latter carried a comment claiming it
+// "matches LitLightning default". It did not — the restore left the scene 10x
+// brighter than the startup default AND pushed the wrong value into
+// OzoneLoader::SetWorldAmbient, desyncing the surface program from LitFog.
+static constexpr float kDefaultAmbient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+static inline void FillDefaultAmbient(float out[4]) {
+    out[0] = kDefaultAmbient[0]; out[1] = kDefaultAmbient[1];
+    out[2] = kDefaultAmbient[2]; out[3] = kDefaultAmbient[3];
+}
+
 bool ObjectCollision = false;
 bool g_showCollisionDebug = false;
 
@@ -54,8 +65,6 @@ std::string g_portalReturnWorld;
 Vector3 g_portalReturnPos = {0, 0, 0};
 bool g_portalHasReturn = false;
 int g_returnPortalId = -1;
-
-int ScriptTimer = 0;
 
 // Cross-world state that must be reset on each LoadWorld()
 float g_damageCooldown = 0.0f;
@@ -234,7 +243,6 @@ auto LoadWorld()
     // Audio (world music, zone ambience, reverb hook, script sound cache) owns
     // its own per-world reset.
     SoundManager::Instance().ResetWorldAudio();
-    ScriptTimer = 0;
 
     {
         OmegaTechData.DamageFlash = 0.0f;
@@ -429,7 +437,8 @@ void UpdateLightSources()
     // brush disagrees with the room around it. Mirroring here means one place to
     // keep in step instead of one per fog-setting site.
     if (oz::SurfaceMaterial::Instance().Ready()) {
-        float amb[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+        float amb[4];
+        FillDefaultAmbient(amb);
         OzoneLoader::Instance().GetWorldAmbient(amb);
         float fogCol[3] = {0.7f, 0.7f, 0.8f};
         float fogStart = 10.0f, fogEnd = 100.0f, fogDensity = 1.0f, fogIntensity = 1.0f;
@@ -689,7 +698,8 @@ void OmegaTechInit()
 
     OmegaTechData.Lights.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(OmegaTechData.Lights, "viewPos");
     int AmbientLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
-    float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+    float ambient[4];
+    FillDefaultAmbient(ambient);
     SetShaderValue(OmegaTechData.Lights, AmbientLoc, ambient, SHADER_UNIFORM_VEC4);
     OzoneLoader::Instance().SetWorldAmbient(ambient[0], ambient[1], ambient[2], ambient[3]);
 
@@ -923,25 +933,6 @@ void PlayHomeScreen()
 
     OmegaTechData.Deaths = 1;
 }
-
-// ScriptTimer defined above in global section
-float X = 0, Y = 0, Z = 0, S = 0, Rotation = 0, W = 0, H = 0, L = 0;
-bool NextCollision = false;
-
-float GetDistance(float x1, float y1, float x2, float y2)
-{
-    float dx = x2 - x1;
-    float dy = y2 - y1;
-    float distance = std::sqrt(dx * dx + dy * dy);
-    return distance;
-}
-
-int FlipNumber(int num)
-{
-    int i = 100;
-    return i - num;
-}
-
 
 void UpdateEntitiesSim(float dt)
 {
@@ -1652,7 +1643,8 @@ if (inSkyZone)
         // Apply pending Ambient changes from script contexts
         if (lem.TakePendingAmbientRestore()) {
             static int ambLoc = GetShaderLocation(OmegaTechData.Lights, "ambient");
-            float amb[4] = {1.0f, 1.0f, 1.0f, 1.0f};   // matches LitLightning default
+            float amb[4];
+            FillDefaultAmbient(amb);   // the world default, not a hardcoded 1.0
             SetShaderValue(OmegaTechData.Lights, ambLoc, amb, SHADER_UNIFORM_VEC4);
             OzoneLoader::Instance().SetWorldAmbient(amb[0], amb[1], amb[2], amb[3]);
             OZ_INFO("LightningScript: restore_ambient - reverted to level default");
@@ -1827,11 +1819,6 @@ if (inSkyZone)
     {
         OmegaTechData.MainCamera.position = SetCameraPos;
         SetCameraFlag = false;
-    }
-
-    if (ScriptTimer != 0)
-    {
-        ScriptTimer--;
     }
 
     if (OmegaTechData.Ticker != 60)
